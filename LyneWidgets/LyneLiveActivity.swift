@@ -121,5 +121,8 @@ private struct LockScreenView: View {
 
 @main
 struct LyneWidgetBundle: WidgetBundle {
-    var body: some Widget { LyneLiveActivity() }
+    var body: some Widget {
+        LyneStopWidget()        // Home Screen
+        LyneLiveActivity()      // Lock Screen / Dynamic Island
+    }
 }

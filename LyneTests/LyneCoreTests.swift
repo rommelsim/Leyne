@@ -267,6 +267,27 @@ final class LynePinTests: XCTestCase {
         XCTAssertNil(m.liveActivityKey)
     }
 
+    // The Home Screen widget can only see pins through the App Group. Pinning
+    // must publish them there in the shape the widget decodes.
+    func testWidgetPinMirrorViaAppGroup() {
+        AppGroup.defaults?.removeObject(forKey: AppGroup.pinsKey)
+        let m = AppModel()
+        m.togglePin(code: "53009")
+        m.togglePin(code: "83139")
+
+        guard let d = AppGroup.defaults?.data(forKey: AppGroup.pinsKey) else {
+            return XCTFail("App Group not writable — entitlement missing?")
+        }
+        let stops = try! JSONDecoder().decode([SharedPinnedStop].self, from: d)
+        XCTAssertEqual(Set(stops.map(\.id)), ["53009", "83139"])
+        XCTAssertTrue(stops.allSatisfy { !$0.name.isEmpty })   // never blank
+
+        m.togglePin(code: "53009")                              // unpin
+        let d2 = AppGroup.defaults!.data(forKey: AppGroup.pinsKey)!
+        let after = try! JSONDecoder().decode([SharedPinnedStop].self, from: d2)
+        XCTAssertEqual(after.map(\.id), ["83139"])              // mirror updated
+    }
+
     // Nearby "Pin to Home" → must surface in allPinnedCards (Home list).
     func testPinFromNearbySurfacesOnHome() {
         let m = AppModel()

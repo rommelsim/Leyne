@@ -6,7 +6,22 @@ import Combine
 import CoreLocation
 import UIKit
 import ActivityKit
+import WidgetKit
 import os
+
+/// App Group shared between the app and the LyneWidgets extension.
+enum AppGroup {
+    static let id = "group.com.lyne.Lyne"
+    static let pinsKey = "lyne.pins.shared"
+    static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
+}
+
+/// Minimal pinned-stop record the Home Screen widget reads (it can't see the
+/// app's models). One row = one pinnable stop the user can pick in the widget.
+struct SharedPinnedStop: Codable, Identifiable, Hashable {
+    let id: String      // bus stop code
+    let name: String    // nickname or resolved stop name
+}
 
 private let laLog = Logger(subsystem: "com.lyne.Lyne", category: "LiveActivity")
 
@@ -97,6 +112,7 @@ final class AppModel: ObservableObject {
            let initial = AppTab(rawValue: s), initial != .search { tab = initial }
         syncFeedback()
         restoreLiveActivity()
+        mirrorPinsToWidget()
     }
 
     // ─── Persistence ──────────────────────────────────────
@@ -108,6 +124,22 @@ final class AppModel: ObservableObject {
         if let d = try? JSONEncoder().encode(pins) {
             UserDefaults.standard.set(d, forKey: "lyne.pins")
         }
+        mirrorPinsToWidget()
+    }
+
+    /// Publishes the pinned stops to the App Group and asks WidgetKit to
+    /// refresh, so the Home Screen widget always offers the current pins.
+    private func mirrorPinsToWidget() {
+        let stops = pins.map { p -> SharedPinnedStop in
+            let nick = p.nickname.trimmingCharacters(in: .whitespaces)
+            let name = !nick.isEmpty ? nick
+                : { let n = ds.stopName(p.code); return n.isEmpty ? p.code : n }()
+            return SharedPinnedStop(id: p.code, name: name)
+        }
+        if let d = try? JSONEncoder().encode(stops) {
+            AppGroup.defaults?.set(d, forKey: AppGroup.pinsKey)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
     }
     private func loadRecents() {
         recents = UserDefaults.standard.stringArray(forKey: "lyne.recents") ?? []

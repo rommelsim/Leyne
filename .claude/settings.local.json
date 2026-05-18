@@ -23,7 +23,13 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); s=d.get\\('Services',[]\\); print\\('Stop',d.get\\('BusStopCode'\\),'| services:',len\\(s\\)\\); [print\\(' ',x['ServiceNo'],'->',x['NextBus'].get\\('EstimatedArrival'\\),'Load',x['NextBus'].get\\('Load'\\),'Type',x['NextBus'].get\\('Type'\\)\\) for x in s[:5]]\")",
       "Bash(xcodebuild test *)",
       "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build)",
-      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test)"
+      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' clean build)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -target Lyne -showBuildSettings -configuration Debug)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -target LyneWidgetsExtension -showBuildSettings -configuration Debug)",
+      "Bash(plutil -p -)",
+      "Bash(ls MEMORY.md)",
+      "Bash(tail -3 MEMORY.md)"
     ]
   }
 }
