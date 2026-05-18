@@ -179,6 +179,15 @@ struct HomeView: View {
                 visible: collapsed)
         }
         .background(t.bg.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            AdBanner()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .background(t.surface)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(t.line).frame(height: 1)
+                }
+        }
     }
 
     @ViewBuilder private var pullIndicator: some View {

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		3C00000000000000000000C1 /* LyneActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000C0 /* LyneActivityAttributes.swift */; };
 		3C00000000000000000000D1 /* LyneWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000A1 /* LyneWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AD0000000000000000000F01 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000F00 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +71,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AD0000000000000000000F01 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -132,6 +134,9 @@
 				1A0000000000000000000004 /* Lyne */,
 			);
 			name = Lyne;
+			packageProductDependencies = (
+				AD0000000000000000000F00 /* GoogleMobileAds */,
+			);
 			productName = Lyne;
 			productReference = 1A0000000000000000000006 /* Lyne.app */;
 			productType = "com.apple.product-type.application";
@@ -417,6 +422,7 @@
 				DEVELOPMENT_TEAM = JFQKT254NR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LyneInfo.plist;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Lyne uses your location only to find bus stops within walking distance. It stays on your device and is never sold.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -452,6 +458,7 @@
 				DEVELOPMENT_TEAM = JFQKT254NR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LyneInfo.plist;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Lyne uses your location only to find bus stops within walking distance. It stays on your device and is never sold.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -619,6 +626,14 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AD0000000000000000000F00 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0BCB4272FBAF213001A943F /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1A0000000000000000000001 /* Project object */;
 }

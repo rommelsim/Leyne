@@ -6,6 +6,10 @@ struct LyneApp: App {
     @StateObject private var store = DataStore.shared
     @StateObject private var location = LocationManager.shared
 
+    init() {
+        AdConfig.startOnce()      // Google Mobile Ads SDK (test mode)
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
