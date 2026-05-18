@@ -53,6 +53,7 @@ struct RootView: View {
                 }
             }
             .tint(t.accent)
+            .bottomAdBanner(t)          // Home / Nearby / Settings
             .offset(x: shakeOffset)
 
             // ── Detail ──────────────────────────────────────
@@ -74,6 +75,7 @@ struct RootView: View {
                                      onPick: { m.openFromSearch(stopCode: $0) })
                     }
                 }
+                .bottomAdBanner(t)          // Search overlay
                 .transition(.opacity)
                 .zIndex(45)
             }

@@ -18,7 +18,6 @@ final class LyneCoreTests: XCTestCase {
         XCTAssertEqual(fmtETA(-10).big, "Arr")
         XCTAssertEqual(fmtETA(600).big, "10")
     }
-
     // ─── Query-kind detection ─────────────────────────────
     func testDetectQueryKind() {
         XCTAssertEqual(detectQueryKind("88").kind, "bus")

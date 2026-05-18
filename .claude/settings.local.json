@@ -33,7 +33,8 @@
       "Bash(/usr/libexec/PlistBuddy -c \"Print GADApplicationIdentifier\" /Users/rommel/Library/Developer/Xcode/DerivedData/Lyne-axamufihyeagpmgxwudlwdowdgpc/Build/Products/Debug-iphonesimulator/Lyne.app/Info.plist)",
       "Bash(plutil -p /Users/rommel/Library/Developer/Xcode/DerivedData/Lyne-axamufihyeagpmgxwudlwdowdgpc/Build/Products/Debug-iphonesimulator/Lyne.app/Info.plist)",
       "Bash(grep -E \"Executed [0-9]+ tests, with [0-9]+ failures \\\\\\(.*in [0-9].*\\\\\\)$|TEST \\(SUCCEEDED|FAILED\\)|error:\")",
-      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test-without-building)"
+      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test-without-building)",
+      "WebFetch(domain:developers.google.com)"
     ]
   }
 }

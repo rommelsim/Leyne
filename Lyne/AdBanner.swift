@@ -15,29 +15,40 @@ import os
 private let adLog = Logger(subsystem: "com.lyne.Lyne", category: "Ads")
 
 enum AdConfig {
-    /// Google's official iOS *test* adaptive-banner ad unit. Replace only if
-    /// you specifically want to exercise your own (test) ad unit.
+    // Ad unit is gated by build configuration so testing is always safe and
+    // production always earns — no manual swapping:
+    //   • DEBUG  (Xcode Run → Simulator/device): Google's official always-
+    //            test banner unit. Renders a "Test mode" ad anywhere, on any
+    //            device, with zero AdMob policy risk. Use this to test.
+    //   • RELEASE (Archive → TestFlight/App Store): this account's real
+    //            production ad unit → real, revenue-generating ads.
+    #if DEBUG
     static let bannerUnitID = "ca-app-pub-3940256099942544/2435281174"
+    #else
+    static let bannerUnitID = "ca-app-pub-1910837226291536/6928301192"
+    #endif
+
+    /// Extra devices to force into TEST ads even in a RELEASE build (rarely
+    /// needed — DEBUG already serves test ads everywhere). Leave empty.
+    static let testDeviceIdentifiers: [String] = []
 
     private static var started = false
     /// Idempotent SDK start. Safe to call more than once.
     static func startOnce() {
         guard !started else { return }
         started = true
+        MobileAds.shared.requestConfiguration.testDeviceIdentifiers =
+            testDeviceIdentifiers
         MobileAds.shared.start(completionHandler: nil)
     }
 }
 
-/// SwiftUI wrapper around a GoogleMobileAds `BannerView`, sized to an
-/// anchored adaptive banner for the given width.
+/// Standard fixed 320×50 banner — the smallest, least-intrusive size.
 private struct BannerAdView: UIViewRepresentable {
-    let width: CGFloat
-
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> BannerView {
-        let size = largeAnchoredAdaptiveBanner(width: width)
-        let view = BannerView(adSize: size)
+        let view = BannerView(adSize: AdSizeBanner)   // 320 × 50
         view.adUnitID = AdConfig.bannerUnitID
         view.delegate = context.coordinator
         view.rootViewController = Self.rootVC()
@@ -45,13 +56,7 @@ private struct BannerAdView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: BannerView, context: Context) {
-        let size = largeAnchoredAdaptiveBanner(width: width)
-        if uiView.adSize.size.width != size.size.width {
-            uiView.adSize = size
-            uiView.load(Request())
-        }
-    }
+    func updateUIView(_ uiView: BannerView, context: Context) {}
 
     private static func rootVC() -> UIViewController? {
         UIApplication.shared.connectedScenes
@@ -72,18 +77,28 @@ private struct BannerAdView: UIViewRepresentable {
     }
 }
 
-/// Drop-in bottom banner. Reserves exactly the adaptive banner height so it
-/// never overlaps content, and blends with the app surface.
+/// Drop-in compact banner: fixed 320×50, centered. Reserves exactly 50pt
+/// so it never overlaps content.
 struct AdBanner: View {
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = largeAnchoredAdaptiveBanner(width: w).size.height
-            BannerAdView(width: w)
-                .frame(width: w, height: h)
+        BannerAdView()
+            .frame(width: 320, height: 50)
+            .frame(maxWidth: .infinity)
+    }
+}
+
+extension View {
+    /// Pins the compact banner above the bottom safe area (tab bar) with a
+    /// hairline divider on the app surface. One definition, used everywhere.
+    func bottomAdBanner(_ t: Theme) -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            AdBanner()
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .background(t.surface)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(t.line).frame(height: 1)
+                }
         }
-        .frame(height: largeAnchoredAdaptiveBanner(
-            width: UIScreen.main.bounds.width).size.height)
     }
 }
