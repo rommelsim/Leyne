@@ -75,7 +75,7 @@ struct RootView: View {
                                      onPick: { m.openFromSearch(stopCode: $0) })
                     }
                 }
-                .bottomAdBanner(t)          // Search overlay
+                .overlayAdBanner(t)         // Search overlay (above the TabView)
                 .transition(.opacity)
                 .zIndex(45)
             }

@@ -39,7 +39,8 @@
       "Bash(sed -n '240,280p' Lyne/OnboardingView.swift)",
       "Bash(sed -n '30,36p' Lyne/LaunchScreenView.swift)",
       "Bash(plutil -extract CFBundleIdentifier raw __TRACKED_VAR__/Info.plist)",
-      "Bash(plutil -extract CFBundleIdentifier raw __TRACKED_VAR__/PlugIns/LyneWidgetsExtension.appex/Info.plist)"
+      "Bash(plutil -extract CFBundleIdentifier raw __TRACKED_VAR__/PlugIns/LyneWidgetsExtension.appex/Info.plist)",
+      "Bash(gh auth *)"
     ]
   }
 }
