@@ -146,7 +146,7 @@ struct HomeView: View {
                     sectionLabel("TIPS")
                     tipCard.padding(.horizontal, 16).padding(.bottom, 12)
 
-                    Text("LYNE · BETA · v0.4")
+                    Text("LEYNE · BETA · v0.4")
                         .font(t.mono(10)).tracking(1).foregroundStyle(t.dim)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 16).padding(.bottom, 8)

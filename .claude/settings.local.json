@@ -34,7 +34,12 @@
       "Bash(plutil -p /Users/rommel/Library/Developer/Xcode/DerivedData/Lyne-axamufihyeagpmgxwudlwdowdgpc/Build/Products/Debug-iphonesimulator/Lyne.app/Info.plist)",
       "Bash(grep -E \"Executed [0-9]+ tests, with [0-9]+ failures \\\\\\(.*in [0-9].*\\\\\\)$|TEST \\(SUCCEEDED|FAILED\\)|error:\")",
       "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test-without-building)",
-      "WebFetch(domain:developers.google.com)"
+      "WebFetch(domain:developers.google.com)",
+      "Bash(sed -n '18,28p' Lyne/OnboardingView.swift)",
+      "Bash(sed -n '240,280p' Lyne/OnboardingView.swift)",
+      "Bash(sed -n '30,36p' Lyne/LaunchScreenView.swift)",
+      "Bash(plutil -extract CFBundleIdentifier raw __TRACKED_VAR__/Info.plist)",
+      "Bash(plutil -extract CFBundleIdentifier raw __TRACKED_VAR__/PlugIns/LyneWidgetsExtension.appex/Info.plist)"
     ]
   }
 }

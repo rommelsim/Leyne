@@ -137,7 +137,7 @@ struct NearbyView: View {
                 .font(.system(size: 34, weight: .light)).foregroundStyle(t.accent)
             Text("See stops near you")
                 .font(t.sans(16, weight: .semibold)).foregroundStyle(t.fg)
-            Text("Lyne uses your location only to find bus stops within walking distance. It stays on your device.")
+            Text("Leyne uses your location only to find bus stops within walking distance. It stays on your device.")
                 .font(t.sans(12)).foregroundStyle(t.dim).multilineTextAlignment(.center)
             Button { loc.requestPermission() } label: {
                 Text(loc.status == .denied ? "Open Settings" : "Enable location")
@@ -147,7 +147,7 @@ struct NearbyView: View {
             }
             .buttonStyle(.plain)
             if loc.status == .denied {
-                Text("Location is off. Enable it in Settings ▸ Lyne ▸ Location.")
+                Text("Location is off. Enable it in Settings ▸ Leyne ▸ Location.")
                     .font(t.sans(11)).foregroundStyle(t.dim).multilineTextAlignment(.center)
             }
         }
