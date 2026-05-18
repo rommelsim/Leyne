@@ -6,10 +6,6 @@ struct LyneApp: App {
     @StateObject private var store = DataStore.shared
     @StateObject private var location = LocationManager.shared
 
-    init() {
-        AdConfig.startOnce()      // Google Mobile Ads SDK (test mode)
-    }
-
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -19,6 +15,10 @@ struct LyneApp: App {
                 .environmentObject(location)
                 .preferredColorScheme(model.isDark ? .dark : .light)
                 .task { await store.bootstrap() }
+                // Gather UMP + ATT consent, then start the Mobile Ads SDK.
+                // Runs once; deferred to here (scene active) so the ATT
+                // prompt can actually display.
+                .task { await AdConsent.gatherThenStart() }
         }
     }
 }

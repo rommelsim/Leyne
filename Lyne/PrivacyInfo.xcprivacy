@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- This app uses Google AdMob with personalized ads + ATT, so it
+	     engages in tracking. The Google Mobile Ads SDK ships its own
+	     PrivacyInfo.xcprivacy (its tracking domains + required-reason
+	     APIs); Apple aggregates all manifests at build, so this file only
+	     declares the APP's own data collection and API use. -->
+	<key>NSPrivacyTracking</key>
+	<true/>
+
+	<!-- App-level tracking domains intentionally empty: the AdMob network
+	     connections originate from the Google SDK, which declares its own
+	     domains. Listing/guessing them here can break ad serving. -->
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<!-- IDFA / device identifier used for personalized advertising. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeThirdPartyAdvertising</string>
+			</array>
+		</dict>
+		<!-- Advertising data (ad interactions/measurement via AdMob). -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeAdvertisingData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeThirdPartyAdvertising</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- App stores its own settings/pins in UserDefaults, including a
+		     shared App Group suite read by the widget extension.
+		     CA92.1 = app's own defaults; C56D.1 = App Group shared. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+				<string>C56D.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
