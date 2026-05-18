@@ -109,7 +109,7 @@ struct SettingsView: View {
     @ViewBuilder private var aboutSection: some View {
         section("ABOUT") {
             inlineRow("App") {
-                Text("Lyne · v0.4 · beta").font(t.mono(13)).foregroundStyle(t.dim)
+                Text("Leyne · v0.4 · beta").font(t.mono(13)).foregroundStyle(t.dim)
             }
             Divider().overlay(t.line)
             inlineRow("Build") {
@@ -122,7 +122,7 @@ struct SettingsView: View {
         VStack(spacing: 10) {
             LyneMark(dim: t.fg, live: t.live, lineWidth: 6, dimOpacity: 0.4)
                 .frame(width: 36, height: 36)
-            Text("LYNE · BETA").font(t.mono(11)).tracking(1.2).foregroundStyle(t.dim)
+            Text("LEYNE · BETA").font(t.mono(11)).tracking(1.2).foregroundStyle(t.dim)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 40).padding(.bottom, 20)

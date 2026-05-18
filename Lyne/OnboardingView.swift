@@ -19,7 +19,7 @@ struct OnboardingView: View {
     @State private var step = 0
 
     private let steps: [OnbStep] = [
-        OnbStep(eyebrow: "LYNE", title: "Right on cue.",
+        OnbStep(eyebrow: "LEYNE", title: "Right on cue.",
                 subtitle: "A small card on your home screen tells you when your bus is close — so you can stop reaching for your phone.",
                 cta: "Continue", footnote: nil),
         OnbStep(eyebrow: "STEP 1 · PIN", title: "Your bus stops, always on top.",
@@ -239,10 +239,10 @@ private struct OnbVisualLocation: View {
                 RoundedRectangle(cornerRadius: 10).fill(t.accent)
                     .frame(width: 36, height: 36)
                     .overlay(Image(systemName: "location.fill").foregroundStyle(.white).font(.system(size: 16)))
-                Text("Allow “Lyne” to use your location?")
+                Text("Allow “Leyne” to use your location?")
                     .font(t.sans(15, weight: .semibold)).foregroundStyle(t.fg)
                     .multilineTextAlignment(.center)
-                Text("Lyne needs your location to show bus stops within walking distance. You can change this anytime in Settings.")
+                Text("Leyne needs your location to show bus stops within walking distance. You can change this anytime in Settings.")
                     .font(t.sans(12)).foregroundStyle(t.dim)
                     .multilineTextAlignment(.center).lineSpacing(2)
             }
@@ -274,7 +274,7 @@ private struct OnbVisualNotification: View {
                     .frame(width: 38, height: 38)
                     .background(t.live, in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("LYNE · NOW").font(t.mono(10)).tracking(0.6).opacity(0.55)
+                    Text("LEYNE · NOW").font(t.mono(10)).tracking(0.6).opacity(0.55)
                     Text("Bus 88 in 2 min").font(t.sans(14, weight: .medium))
                     Text("Bef Bishan Stn · time to head down").font(t.sans(11)).opacity(0.6)
                 }

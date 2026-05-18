@@ -15,7 +15,7 @@ private let wDim   = Color(red: 0x9a/255, green: 0x94/255, blue: 0x8a/255)
 
 // ─── Shared App Group (pins published by the app) ─────────
 private enum WGroup {
-    static let id = "group.com.lyne.Lyne"
+    static let id = "group.com.leyne"        // must match LyneWidgets.entitlements
     static let pinsKey = "lyne.pins.shared"
 }
 
@@ -219,7 +219,7 @@ private struct StopWidgetView: View {
                 }
             } else {
                 Spacer()
-                Text("Pin a stop in Lyne")
+                Text("Pin a stop in Leyne")
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(wPaper)
                 Text("Long-press to choose it here")
                     .font(.system(size: 10)).foregroundStyle(wDim)
@@ -239,7 +239,7 @@ struct LyneStopWidget: Widget {
             StopWidgetView(entry: entry)
         }
         .configurationDisplayName("Pinned Stop")
-        .description("Live bus arrivals for a stop you pinned in Lyne.")
+        .description("Live bus arrivals for a stop you pinned in Leyne.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

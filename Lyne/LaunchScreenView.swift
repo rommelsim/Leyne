@@ -30,7 +30,7 @@ struct LaunchScreenView: View {
                 }
                 .frame(width: 108, height: 108)
 
-                Text("Lyne")
+                Text("Leyne")
                     .font(.system(size: 34, weight: .medium))
                     .foregroundStyle(Color(hex: "F2EFE8"))
                     .opacity(wordmarkIn ? 1 : 0)

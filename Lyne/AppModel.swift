@@ -11,7 +11,7 @@ import os
 
 /// App Group shared between the app and the LyneWidgets extension.
 enum AppGroup {
-    static let id = "group.com.lyne.Lyne"
+    static let id = "group.com.leyne"        // must match *.entitlements
     static let pinsKey = "lyne.pins.shared"
     static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
 }
