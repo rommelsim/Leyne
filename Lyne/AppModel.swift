@@ -5,6 +5,25 @@ import SwiftUI
 import Combine
 import CoreLocation
 import UIKit
+import ActivityKit
+import WidgetKit
+import os
+
+/// App Group shared between the app and the LyneWidgets extension.
+enum AppGroup {
+    static let id = "group.com.lyne.Lyne"
+    static let pinsKey = "lyne.pins.shared"
+    static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
+}
+
+/// Minimal pinned-stop record the Home Screen widget reads (it can't see the
+/// app's models). One row = one pinnable stop the user can pick in the widget.
+struct SharedPinnedStop: Codable, Identifiable, Hashable {
+    let id: String      // bus stop code
+    let name: String    // nickname or resolved stop name
+}
+
+private let laLog = Logger(subsystem: "com.lyne.Lyne", category: "LiveActivity")
 
 enum AppTab: String { case home, nearby, settings, search }
 
@@ -51,7 +70,22 @@ final class AppModel: ObservableObject {
     @Published var showAdd = false
     @Published var searchOpen = false
     @Published var openCard: CardModel? = nil
-    @Published var liveActivity: ActivityModel? = nil
+    @Published var liveActivityOn = false
+    /// Identifies the bus+stop the running Live Activity belongs to, so the
+    /// button can reflect/toggle its state. nil ⟺ no Live Activity running.
+    @Published private(set) var liveActivityKey: String? = nil
+    private var liveActivity: Activity<LyneActivityAttributes>?
+    private var liveActivityTask: Task<Void, Never>?
+    private var liveActivityEndObserver: Task<Void, Never>?
+
+    static func liveKey(bus: String, stopCode: String) -> String {
+        "\(stopCode)|\(bus)"
+    }
+    /// True when a Live Activity is currently running for *this* bus at *this*
+    /// stop — drives the Start/Stop toggle in Detail.
+    func isLiveActivityActive(_ s: Service, stopCode: String) -> Bool {
+        liveActivityKey == Self.liveKey(bus: s.no, stopCode: stopCode)
+    }
     @Published var recentlyAddedId: String? = nil
 
     // Persisted user pins (start empty — no mock seeds)
@@ -77,6 +111,8 @@ final class AppModel: ObservableObject {
         if let s = UserDefaults.standard.string(forKey: "lyne.startTab"),
            let initial = AppTab(rawValue: s), initial != .search { tab = initial }
         syncFeedback()
+        restoreLiveActivity()
+        mirrorPinsToWidget()
     }
 
     // ─── Persistence ──────────────────────────────────────
@@ -88,6 +124,22 @@ final class AppModel: ObservableObject {
         if let d = try? JSONEncoder().encode(pins) {
             UserDefaults.standard.set(d, forKey: "lyne.pins")
         }
+        mirrorPinsToWidget()
+    }
+
+    /// Publishes the pinned stops to the App Group and asks WidgetKit to
+    /// refresh, so the Home Screen widget always offers the current pins.
+    private func mirrorPinsToWidget() {
+        let stops = pins.map { p -> SharedPinnedStop in
+            let nick = p.nickname.trimmingCharacters(in: .whitespaces)
+            let name = !nick.isEmpty ? nick
+                : { let n = ds.stopName(p.code); return n.isEmpty ? p.code : n }()
+            return SharedPinnedStop(id: p.code, name: name)
+        }
+        if let d = try? JSONEncoder().encode(stops) {
+            AppGroup.defaults?.set(d, forKey: AppGroup.pinsKey)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
     }
     private func loadRecents() {
         recents = UserDefaults.standard.stringArray(forKey: "lyne.recents") ?? []
@@ -304,19 +356,162 @@ final class AppModel: ObservableObject {
     }
     func pinNearby(_ code: String) { togglePin(code: code) }
 
+    // ─── Real iOS Live Activity (ActivityKit) ─────────────
+
+    /// Single entry point for the Start/Stop toggle: ends the Live Activity if
+    /// it's already running for this bus, otherwise starts it.
+    func toggleLiveActivity(_ s: Service, stopName: String, stopCode: String) {
+        if isLiveActivityActive(s, stopCode: stopCode) { stopLiveActivity() }
+        else { startLiveActivity(s, stopName: stopName, stopCode: stopCode) }
+    }
+
     func startLiveActivity(_ s: Service, stopName: String, stopCode: String) {
-        liveActivity = ActivityModel(
-            busNo: s.no, dest: s.dest, stopName: stopName, stopCode: stopCode,
-            etaAtStart: Double(max(20, s.etaSec)), startedAt: Date())
-        openCard = nil
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            // Live Activities disabled in Settings — nothing to show.
+            laLog.error("LA not enabled (Settings → \(s.no))")
+            return
+        }
+        // Only one Live Activity at a time — replace any other bus's.
+        if liveActivity != nil { stopLiveActivity() }
+        let attrs = LyneActivityAttributes(busNo: s.no, dest: s.dest,
+                                           stopName: stopName, stopCode: stopCode)
+        let state = liveState(etaSec: s.etaSec, stopsAway: -1)
+        do {
+            let act = try Activity.request(
+                attributes: attrs,
+                content: ActivityContent(state: state, staleDate: nil),
+                pushType: nil)
+            liveActivity = act
+            liveActivityKey = Self.liveKey(bus: s.no, stopCode: stopCode)
+            liveActivityOn = true
+            laLog.notice("LA STARTED id=\(act.id) bus=\(s.no) → \(s.dest)")
+            Feedback.shared.select()
+            observeLiveActivityEnd(act)
+            startLivePolling(busNo: s.no, stopCode: stopCode)
+        } catch {
+            liveActivity = nil
+            liveActivityKey = nil
+            liveActivityOn = false
+            laLog.error("LA request failed: \(error.localizedDescription)")
+        }
+    }
+
+    func stopLiveActivity() {
+        liveActivityTask?.cancel()
+        liveActivityTask = nil
+        liveActivityEndObserver?.cancel()
+        liveActivityEndObserver = nil
+        let act = liveActivity
+        liveActivity = nil
+        liveActivityKey = nil
+        liveActivityOn = false
+        Task { await act?.end(nil, dismissalPolicy: .immediate) }
+    }
+
+    /// Re-attach to a Live Activity that survived an app relaunch (the OS keeps
+    /// showing it), so the in-app Start/Stop state stays correct.
+    func restoreLiveActivity() {
+        guard liveActivity == nil else { return }
+        guard let act = Activity<LyneActivityAttributes>.activities.first(where: {
+            $0.activityState == .active || $0.activityState == .stale
+        }) else { return }
+        liveActivity = act
+        liveActivityKey = Self.liveKey(bus: act.attributes.busNo,
+                                       stopCode: act.attributes.stopCode)
+        liveActivityOn = true
+        laLog.notice("LA RESTORED id=\(act.id) bus=\(act.attributes.busNo)")
+        observeLiveActivityEnd(act)
+        startLivePolling(busNo: act.attributes.busNo,
+                         stopCode: act.attributes.stopCode)
+    }
+
+    /// Clears in-app state if the activity ends out-of-band (user dismisses it
+    /// from the Lock Screen, OS expiry, etc.).
+    private func observeLiveActivityEnd(_ act: Activity<LyneActivityAttributes>) {
+        liveActivityEndObserver?.cancel()
+        liveActivityEndObserver = Task { [weak self] in
+            for await state in act.activityStateUpdates {
+                if state == .ended || state == .dismissed {
+                    await MainActor.run {
+                        guard let self, self.liveActivity?.id == act.id else { return }
+                        self.liveActivityTask?.cancel()
+                        self.liveActivityTask = nil
+                        self.liveActivity = nil
+                        self.liveActivityKey = nil
+                        self.liveActivityOn = false
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    private func liveState(etaSec: Int, stopsAway: Int)
+        -> LyneActivityAttributes.ContentState {
+        let arrived = etaSec <= 0
+        let mins = max(0, Int(ceil(Double(etaSec) / 60)))
+        let status: String
+        if arrived { status = "Bus is here" }
+        else if etaSec <= 30 { status = "Now" }
+        else if etaSec <= 90 { status = "Arrives in 1 min" }
+        else { status = "Arrives in \(mins) min" }
+        return .init(etaMinutes: arrived ? 0 : mins, status: status,
+                     stopsAway: stopsAway, arrived: arrived)
+    }
+
+    /// Polls real LTA every ~15 s and pushes updates into the Live Activity,
+    /// then ends it shortly after the bus arrives.
+    private func startLivePolling(busNo: String, stopCode: String) {
+        liveActivityTask?.cancel()
+        liveActivityTask = Task { [weak self] in
+            guard let self else { return }
+            var routeYou: Int?
+            var routeStops: [RouteStopLive] = []
+            if let r = await self.ds.route(service: busNo, stopCode: stopCode) {
+                routeYou = r.youIndex; routeStops = r.stops
+            }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                if Task.isCancelled { return }
+                guard let snap = await self.ds.liveServiceSnapshot(
+                    serviceNo: busNo, stopCode: stopCode) else { continue }
+                var stopsAway = -1
+                if let you = routeYou, let c = snap.coord, !routeStops.isEmpty {
+                    let bi = routeStops.enumerated().min(by: {
+                        haversine($0.element.lat, $0.element.lon, c.latitude, c.longitude)
+                            < haversine($1.element.lat, $1.element.lon, c.latitude, c.longitude)
+                    })?.offset ?? 0
+                    stopsAway = max(0, you - bi)
+                }
+                let state = self.liveState(etaSec: snap.etaSec, stopsAway: stopsAway)
+                await self.liveActivity?.update(
+                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(120)))
+                if snap.etaSec <= 0 {
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    await self.liveActivity?.end(
+                        ActivityContent(state: state, staleDate: nil),
+                        dismissalPolicy: .default)
+                    await MainActor.run {
+                        self.liveActivityEndObserver?.cancel()
+                        self.liveActivityEndObserver = nil
+                        self.liveActivity = nil
+                        self.liveActivityKey = nil
+                        self.liveActivityOn = false
+                    }
+                    return
+                }
+            }
+        }
     }
 }
 
-struct ActivityModel: Equatable {
-    var busNo: String
-    var dest: String
-    var stopName: String
-    var stopCode: String
-    var etaAtStart: Double
-    var startedAt: Date
+// Phase helper (used by the status string + tests).
+enum LAPhase { case tracking, arriving, close, arrived, completed, dismissing }
+func phaseFor(eta: Double, postArrivedMs: Double) -> LAPhase {
+    if postArrivedMs > 3500 { return .dismissing }
+    if postArrivedMs > 1800 { return .completed }
+    if eta <= 0 { return .arrived }
+    if eta <= 30 { return .close }
+    if eta <= 60 { return .arriving }
+    return .tracking
 }

@@ -21,7 +21,20 @@
       "Bash(mdls -name kMDItemNumberOfPages /Users/rommel/Downloads/LTA_DataMall_API_User_Guide.pdf)",
       "Bash(curl -s --max-time 20 -H \"AccountKey: +6zJ3XstTqOcDkvczHttWA==\" -H \"accept: application/json\" \"https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival?BusStopCode=53231\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); s=d.get\\('Services',[]\\); print\\('Stop',d.get\\('BusStopCode'\\),'| services:',len\\(s\\)\\); [print\\(' ',x['ServiceNo'],'->',x['NextBus'].get\\('EstimatedArrival'\\),'Load',x['NextBus'].get\\('Load'\\),'Type',x['NextBus'].get\\('Type'\\)\\) for x in s[:5]]\")",
-      "Bash(xcodebuild test *)"
+      "Bash(xcodebuild test *)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' clean build)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -target Lyne -showBuildSettings -configuration Debug)",
+      "Bash(xcodebuild -project Lyne.xcodeproj -target LyneWidgetsExtension -showBuildSettings -configuration Debug)",
+      "Bash(plutil -p -)",
+      "Bash(ls MEMORY.md)",
+      "Bash(tail -3 MEMORY.md)",
+      "Bash(/usr/libexec/PlistBuddy -c \"Print GADApplicationIdentifier\" /Users/rommel/Library/Developer/Xcode/DerivedData/Lyne-axamufihyeagpmgxwudlwdowdgpc/Build/Products/Debug-iphonesimulator/Lyne.app/Info.plist)",
+      "Bash(plutil -p /Users/rommel/Library/Developer/Xcode/DerivedData/Lyne-axamufihyeagpmgxwudlwdowdgpc/Build/Products/Debug-iphonesimulator/Lyne.app/Info.plist)",
+      "Bash(grep -E \"Executed [0-9]+ tests, with [0-9]+ failures \\\\\\(.*in [0-9].*\\\\\\)$|TEST \\(SUCCEEDED|FAILED\\)|error:\")",
+      "Bash(xcodebuild -project Lyne.xcodeproj -scheme Lyne -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test-without-building)",
+      "WebFetch(domain:developers.google.com)"
     ]
   }
 }

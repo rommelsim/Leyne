@@ -246,28 +246,37 @@ struct DetailView: View {
             let eta = fmtETA(s.etaSec)
             heroCard(s: s, eta: eta)
 
+            let liveOn = m.isLiveActivityActive(s, stopCode: card.stopCode)
             Button {
-                m.startLiveActivity(s, stopName: card.stopName, stopCode: card.stopCode)
+                m.toggleLiveActivity(s, stopName: card.stopName, stopCode: card.stopCode)
             } label: {
                 HStack(spacing: 12) {
                     HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 8).fill(t.bg.opacity(0.13))
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill((liveOn ? t.fg : t.bg).opacity(0.13))
                             .frame(width: 28, height: 28)
-                            .overlay(Image(systemName: "lock.rectangle").font(.system(size: 14)))
+                            .overlay(Image(systemName: liveOn ? "stop.fill" : "lock.rectangle")
+                                .font(.system(size: 14)))
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("Start Live Activity").font(t.sans(15, weight: .semibold))
-                            Text("Follow Bus \(s.no) from your lock screen")
+                            Text(liveOn ? "Stop Live Activity" : "Start Live Activity")
+                                .font(t.sans(15, weight: .semibold))
+                            Text(liveOn ? "Bus \(s.no) is on your lock screen"
+                                        : "Follow Bus \(s.no) from your lock screen")
                                 .font(t.sans(11)).opacity(0.65)
                         }
                     }
                     Spacer()
-                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold))
+                    Image(systemName: liveOn ? "checkmark.circle.fill" : "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
                 }
-                .foregroundStyle(t.bg)
+                .foregroundStyle(liveOn ? t.fg : t.bg)
                 .padding(.horizontal, 16).padding(.vertical, 14)
-                .background(t.fg, in: RoundedRectangle(cornerRadius: 16))
+                .background(liveOn ? t.surface : t.fg, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16)
+                    .stroke(t.fg, lineWidth: liveOn ? 1.5 : 0))
             }
             .buttonStyle(.plain)
+            .animation(.easeInOut(duration: 0.2), value: liveOn)
             .padding(.bottom, 18)
 
             DSection(t: t, label: "LIVE MAP", hint: routeInfo?.busCoord == nil

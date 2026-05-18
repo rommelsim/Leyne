@@ -6,6 +6,12 @@
 	objectVersion = 70;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		3C00000000000000000000C1 /* LyneActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000C0 /* LyneActivityAttributes.swift */; };
+		3C00000000000000000000D1 /* LyneWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000A1 /* LyneWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AD0000000000000000000F01 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000F00 /* GoogleMobileAds */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		2B0000000000000000000021 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -14,16 +20,50 @@
 			remoteGlobalIDString = 1A0000000000000000000005;
 			remoteInfo = Lyne;
 		};
+		3C00000000000000000000B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3C00000000000000000000A5;
+			remoteInfo = LyneWidgetsExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		3C00000000000000000000D0 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				3C00000000000000000000D1 /* LyneWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1A0000000000000000000006 /* Lyne.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Lyne.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2B0000000000000000000001 /* LyneTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LyneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3C00000000000000000000A1 /* LyneWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LyneWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		3C00000000000000000000C0 /* LyneActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LyneActivityAttributes.swift; path = Lyne/LyneActivityAttributes.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3C00000000000000000000E0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3C00000000000000000000A5 /* LyneWidgetsExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1A0000000000000000000004 /* Lyne */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Lyne; sourceTree = "<group>"; };
 		2B0000000000000000000004 /* LyneTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = LyneTests; sourceTree = "<group>"; };
+		3C00000000000000000000A4 /* LyneWidgets */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (3C00000000000000000000E0 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = LyneWidgets; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -31,10 +71,18 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AD0000000000000000000F01 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		2B000000000000000000000E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3C00000000000000000000AE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -49,6 +97,8 @@
 			children = (
 				1A0000000000000000000004 /* Lyne */,
 				2B0000000000000000000004 /* LyneTests */,
+				3C00000000000000000000A4 /* LyneWidgets */,
+				3C00000000000000000000C0 /* LyneActivityAttributes.swift */,
 				1A0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -58,6 +108,7 @@
 			children = (
 				1A0000000000000000000006 /* Lyne.app */,
 				2B0000000000000000000001 /* LyneTests.xctest */,
+				3C00000000000000000000A1 /* LyneWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -72,15 +123,20 @@
 				1A000000000000000000000D /* Sources */,
 				1A000000000000000000000E /* Frameworks */,
 				1A000000000000000000000F /* Resources */,
+				3C00000000000000000000D0 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				3C00000000000000000000B0 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1A0000000000000000000004 /* Lyne */,
 			);
 			name = Lyne;
+			packageProductDependencies = (
+				AD0000000000000000000F00 /* GoogleMobileAds */,
+			);
 			productName = Lyne;
 			productReference = 1A0000000000000000000006 /* Lyne.app */;
 			productType = "com.apple.product-type.application";
@@ -106,6 +162,26 @@
 			productReference = 2B0000000000000000000001 /* LyneTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		3C00000000000000000000A5 /* LyneWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3C00000000000000000000A7 /* Build configuration list for PBXNativeTarget "LyneWidgetsExtension" */;
+			buildPhases = (
+				3C00000000000000000000AD /* Sources */,
+				3C00000000000000000000AE /* Frameworks */,
+				3C00000000000000000000AF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3C00000000000000000000A4 /* LyneWidgets */,
+			);
+			name = LyneWidgetsExtension;
+			productName = LyneWidgetsExtension;
+			productReference = 3C00000000000000000000A1 /* LyneWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -122,6 +198,9 @@
 					2B0000000000000000000005 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = 1A0000000000000000000005;
+					};
+					3C00000000000000000000A5 = {
+						CreatedOnToolsVersion = 16.0;
 					};
 				};
 			};
@@ -143,6 +222,7 @@
 			targets = (
 				1A0000000000000000000005 /* Lyne */,
 				2B0000000000000000000005 /* LyneTests */,
+				3C00000000000000000000A5 /* LyneWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -156,6 +236,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		2B000000000000000000000F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3C00000000000000000000AF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -179,6 +266,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		3C00000000000000000000AD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3C00000000000000000000C1 /* LyneActivityAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -186,6 +281,11 @@
 			isa = PBXTargetDependency;
 			target = 1A0000000000000000000005 /* Lyne */;
 			targetProxy = 2B0000000000000000000021 /* PBXContainerItemProxy */;
+		};
+		3C00000000000000000000B0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3C00000000000000000000A5 /* LyneWidgetsExtension */;
+			targetProxy = 3C00000000000000000000B1 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -314,6 +414,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Lyne.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -321,7 +422,9 @@
 				DEVELOPMENT_TEAM = JFQKT254NR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LyneInfo.plist;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Lyne uses your location only to find bus stops within walking distance. It stays on your device and is never sold.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -347,6 +450,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Lyne.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -354,7 +458,9 @@
 				DEVELOPMENT_TEAM = JFQKT254NR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LyneInfo.plist;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Lyne uses your location only to find bus stops within walking distance. It stays on your device and is never sold.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -415,6 +521,60 @@
 			};
 			name = Release;
 		};
+		3C00000000000000000000AB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LyneWidgets.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JFQKT254NR;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LyneWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lyne.Lyne.LyneWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		3C00000000000000000000AC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LyneWidgets.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JFQKT254NR;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LyneWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.4;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lyne.Lyne.LyneWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -445,6 +605,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		3C00000000000000000000A7 /* Build configuration list for PBXNativeTarget "LyneWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3C00000000000000000000AB /* Debug */,
+				3C00000000000000000000AC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -457,6 +626,14 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AD0000000000000000000F00 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0BCB4272FBAF213001A943F /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1A0000000000000000000001 /* Project object */;
 }
