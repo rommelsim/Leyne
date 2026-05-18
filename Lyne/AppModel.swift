@@ -8,24 +8,26 @@ import UIKit
 
 enum AppTab: String { case home, nearby, settings, search }
 
-/// A user-pinned stop. `hidden` = service numbers the user unchecked.
-/// Empty = nothing hidden = all shown (unambiguous: no "all vs none" overload,
-/// and it's correct even before arrivals load).
+/// A user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
+/// "pinned" ⟺ "has buses shown". `tracked == nil` means *all* services
+/// (default; correct even before arrivals load). A non-nil array is an
+/// explicit, non-empty subset. An empty selection is never stored — it
+/// means "unpin" (the Pin is removed).
 struct Pin: Codable, Equatable {
     var code: String
     var nickname: String
-    var hidden: [String] = []
+    var tracked: [String]? = nil          // nil = all
 
-    init(code: String, nickname: String, hidden: [String] = []) {
-        self.code = code; self.nickname = nickname; self.hidden = hidden
+    init(code: String, nickname: String, tracked: [String]? = nil) {
+        self.code = code; self.nickname = nickname; self.tracked = tracked
     }
 
-    enum CodingKeys: String, CodingKey { case code, nickname, hidden }
+    enum CodingKeys: String, CodingKey { case code, nickname, tracked }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         code = try c.decode(String.self, forKey: .code)
         nickname = (try? c.decode(String.self, forKey: .nickname)) ?? ""
-        hidden = (try? c.decode([String].self, forKey: .hidden)) ?? []
+        tracked = try? c.decodeIfPresent([String].self, forKey: .tracked)
     }
 }
 
@@ -171,10 +173,10 @@ final class AppModel: ObservableObject {
     func togglePin(code: String) {
         if let i = pins.firstIndex(where: { $0.code == code }) {
             Feedback.shared.tap()
-            pins.remove(at: i)
+            pins.remove(at: i)                              // unpin
         } else {
             Feedback.shared.success()
-            pins.append(Pin(code: code, nickname: ds.stopName(code)))
+            pins.append(Pin(code: code, nickname: ds.stopName(code), tracked: nil)) // all
             markNew(code)
         }
     }
@@ -182,12 +184,13 @@ final class AppModel: ObservableObject {
 
     /// `shown` = the service nos the user checked in the Add sheet.
     func addPin(code: String, tracked shown: [String]) {
+        guard !shown.isEmpty else { return }               // never an empty pin
         let all = ds.servicesFor(code).map(\.no)
-        let hidden = all.filter { !shown.contains($0) }
+        let tr: [String]? = (Set(shown) == Set(all)) ? nil : shown
         if let i = pins.firstIndex(where: { $0.code == code }) {
-            pins[i].hidden = hidden
+            pins[i].tracked = tr
         } else {
-            pins.append(Pin(code: code, nickname: ds.stopName(code), hidden: hidden))
+            pins.append(Pin(code: code, nickname: ds.stopName(code), tracked: tr))
         }
         showAdd = false
         tab = .home
@@ -208,29 +211,59 @@ final class AppModel: ObservableObject {
     }
     func renameCard(_ id: String, _ newLabel: String) { rename(code: id, to: newLabel) }
 
-    /// True if `busNo` is shown on Home for this stop.
+    /// True if `busNo` is shown on Home. Not pinned → nothing tracked.
     func isTracked(code: String, busNo: String) -> Bool {
-        guard let p = pin(forCode: code) else { return true }
-        return !p.hidden.contains(busNo)
+        guard let p = pin(forCode: code) else { return false }
+        guard let tr = p.tracked else { return true }      // nil = all
+        return tr.contains(busNo)
     }
 
     /// Service numbers hidden from the Home card for this stop.
     func hiddenSet(code: String, allNos: [String] = []) -> Set<String> {
-        Set(pin(forCode: code)?.hidden ?? [])
+        guard let p = pin(forCode: code) else { return Set(allNos) }
+        guard let tr = p.tracked else { return [] }        // all shown
+        return Set(allNos).subtracting(tr)
     }
 
-    /// Toggle a service's visibility. Auto-pins the stop if not yet pinned.
+    /// Toggle a service. Checking on an unpinned stop pins it; unchecking
+    /// the last tracked bus unpins it (pinned ⟺ ≥1 bus).
     func toggleTracked(code: String, busNo: String, allNos: [String] = []) {
-        if let i = pins.firstIndex(where: { $0.code == code }) {
-            if pins[i].hidden.contains(busNo) {
-                pins[i].hidden.removeAll { $0 == busNo }     // re-check
-            } else {
-                pins[i].hidden.append(busNo)                 // uncheck
-            }
-        } else {
-            // Not pinned yet → pin the stop, hiding just this one.
-            pins.append(Pin(code: code, nickname: ds.stopName(code), hidden: [busNo]))
+        guard let i = pins.firstIndex(where: { $0.code == code }) else {
+            // Not pinned → checking a bus pins the stop tracking just it.
+            pins.append(Pin(code: code, nickname: ds.stopName(code), tracked: [busNo]))
             Feedback.shared.success()
+            return
+        }
+        var shown = pins[i].tracked.map(Set.init) ?? Set(allNos)   // nil = all
+        if shown.contains(busNo) { shown.remove(busNo) } else { shown.insert(busNo) }
+        if shown.isEmpty {
+            Feedback.shared.tap()
+            pins.remove(at: i)                              // unchecked last → unpin
+        } else if shown == Set(allNos) {
+            pins[i].tracked = nil                           // back to "all"
+        } else {
+            pins[i].tracked = Array(shown)
+        }
+    }
+
+    /// True iff the stop is pinned and tracking every service.
+    func allTracked(code: String) -> Bool {
+        pin(forCode: code)?.tracked == nil && isPinned(code)
+    }
+
+    /// Master control. Track all → pin tracking everything.
+    /// Untrack all → unpin (a stop with no buses isn't on Home).
+    func setAllTracked(code: String, allNos: [String], tracked on: Bool) {
+        if on {
+            if let i = pins.firstIndex(where: { $0.code == code }) {
+                pins[i].tracked = nil
+            } else {
+                pins.append(Pin(code: code, nickname: ds.stopName(code), tracked: nil))
+                Feedback.shared.success()
+            }
+        } else if let i = pins.firstIndex(where: { $0.code == code }) {
+            Feedback.shared.tap()
+            pins.remove(at: i)
         }
     }
 

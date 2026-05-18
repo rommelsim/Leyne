@@ -23,10 +23,20 @@ final class LTAService: @unchecked Sendable {
 
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
-        c.timeoutIntervalForRequest = 20
+        c.timeoutIntervalForRequest = 15
+        c.timeoutIntervalForResource = 30
         c.waitsForConnectivity = true
+        // Default is 6 → a prefetch wave + a user-tapped fetch would queue.
+        c.httpMaximumConnectionsPerHost = 8
+        // Arrivals are live; don't serve them from the URL cache (we keep our
+        // own disk cache for the bulk reference datasets).
+        c.urlCache = nil
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: c)
     }()
+
+    /// Pages fetched concurrently per wave (matches the connection pool).
+    private let pageWindow = 6
 
     private func request(_ url: URL) -> URLRequest {
         var r = URLRequest(url: url)
@@ -54,19 +64,39 @@ final class LTAService: @unchecked Sendable {
         return try await get(c.url!, as: LTAArrivalResponse.self)
     }
 
-    // ─── Bulk paginated fetch ($skip by 500) ──────────────
+    // ─── Bulk paginated fetch ($skip by 500), concurrent ──
+    // Pages are disjoint slices, so fetch a window of them in parallel
+    // instead of strictly sequentially (BusRoutes is ~53 pages — this turns
+    // ~53 round-trips into ~9 waves).
+    private func pageURL(_ path: String, skip: Int) -> URL {
+        var c = URLComponents(url: LTAConfig.baseURL.appendingPathComponent(path),
+                              resolvingAgainstBaseURL: false)!
+        if skip > 0 { c.queryItems = [URLQueryItem(name: "$skip", value: String(skip))] }
+        return c.url!
+    }
+
     private func fetchAllPaged<T: Codable>(_ path: String, _ type: T.Type) async throws -> [T] {
         var out: [T] = []
-        var skip = 0
+        var base = 0
         while true {
-            var c = URLComponents(url: LTAConfig.baseURL.appendingPathComponent(path),
-                                  resolvingAgainstBaseURL: false)!
-            if skip > 0 { c.queryItems = [URLQueryItem(name: "$skip", value: String(skip))] }
-            let page = try await get(c.url!, as: LTAList<T>.self).value
-            out += page
-            if page.count < LTAConfig.pageSize { break }
-            skip += LTAConfig.pageSize
-            if skip > 60_000 { break }   // safety bound
+            let skips = (0..<pageWindow).map { base + $0 * LTAConfig.pageSize }
+            let pages = try await withThrowingTaskGroup(of: (Int, [T]).self) { group -> [[T]] in
+                for (i, skip) in skips.enumerated() {
+                    let url = self.pageURL(path, skip: skip)
+                    group.addTask { (i, try await self.get(url, as: LTAList<T>.self).value) }
+                }
+                var collected = Array(repeating: [T](), count: skips.count)
+                for try await (i, page) in group { collected[i] = page }
+                return collected
+            }
+            var reachedEnd = false
+            for p in pages {
+                out += p
+                if p.count < LTAConfig.pageSize { reachedEnd = true }
+            }
+            if reachedEnd { break }
+            base += pageWindow * LTAConfig.pageSize
+            if base > 80_000 { break }   // safety bound
         }
         return out
     }

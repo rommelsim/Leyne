@@ -10,12 +10,14 @@ struct NearbyView: View {
     @State private var openId: String?
     @State private var collapsed = false
     @State private var sortMode = "distance"
+    // Frozen row order. Recomputed only on sort change / nearby change /
+    // arrivals load — NOT every 1 s tick — so the list never reshuffles
+    // under the user's finger (which dropped taps on the row buttons).
+    @State private var orderedStops: [NearbyStop] = []
 
     private var t: Theme { m.t }
 
-    // Precompute the sort key once per stop (O(n)) instead of recomputing
-    // inside the comparator (O(n log n) × liveServices).
-    private var sortedStops: [NearbyStop] {
+    private func computeOrder() -> [NearbyStop] {
         let list = store.nearby
         switch sortMode {
         case "arrival":
@@ -36,6 +38,7 @@ struct NearbyView: View {
             return list.sorted { $0.distanceM < $1.distanceM }
         }
     }
+    private func refreshOrder() { orderedStops = computeOrder() }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -60,8 +63,12 @@ struct NearbyView: View {
                 visible: collapsed)
         }
         .background(t.bg.ignoresSafeArea())
-        .onAppear { loc.start(); store.prefetchNearbyArrivals() }
-        .onChange(of: store.nearby.count) { _, _ in store.prefetchNearbyArrivals() }
+        .onAppear { loc.start(); store.prefetchNearbyArrivals(); refreshOrder() }
+        .onChange(of: store.nearby) { _, _ in
+            store.prefetchNearbyArrivals(); refreshOrder()
+        }
+        .onChange(of: sortMode) { _, _ in refreshOrder() }
+        .onChange(of: store.arrivals) { _, _ in refreshOrder() }
     }
 
     @ViewBuilder private var content: some View {
@@ -79,7 +86,7 @@ struct NearbyView: View {
         } else {
             sortRow
             VStack(spacing: 10) {
-                ForEach(sortedStops) { stop in
+                ForEach(orderedStops) { stop in
                     NearbyStopRow(
                         stop: stop, t: t,
                         open: openId == stop.id,
@@ -99,7 +106,7 @@ struct NearbyView: View {
                 }
             }
             .animation(.timingCurve(0.5, 0.05, 0.2, 1, duration: 0.30), value: openId)
-            .animation(.timingCurve(0.5, 0.05, 0.2, 1, duration: 0.45), value: sortMode)
+            .animation(.timingCurve(0.5, 0.05, 0.2, 1, duration: 0.45), value: orderedStops.map(\.stopCode))
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
         }
     }
@@ -248,6 +255,7 @@ struct NearbyStopRow: View {
                             .frame(maxWidth: .infinity).padding(.vertical, 10)
                             .background(isPinned ? t.accent : .clear, in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(isPinned ? t.accent : t.line, lineWidth: 1))
+                            .contentShape(Rectangle())   // whole pill tappable
                         }
                         .buttonStyle(.plain)
                         Button { onOpen(nil) } label: {
@@ -258,12 +266,12 @@ struct NearbyStopRow: View {
                             .font(t.sans(12, weight: .medium)).foregroundStyle(t.fg)
                             .padding(.horizontal, 14).padding(.vertical, 10)
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(t.line, lineWidth: 1))
+                            .contentShape(Rectangle())   // whole pill tappable
                         }
                         .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 12)
                 }
-                .transition(.opacity)
             }
         }
         .background(t.surface)

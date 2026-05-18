@@ -94,7 +94,9 @@ struct DetailView: View {
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(pinned ? t.accent.opacity(0.08) : .clear, in: Capsule())
                 .overlay(Capsule().stroke(pinned ? t.accent.opacity(0.25) : t.line, lineWidth: 1))
+                .contentShape(Capsule())   // whole pill tappable when unfilled
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
     }
@@ -130,6 +132,24 @@ struct DetailView: View {
             arrivalsPlaceholder
         } else {
             VStack(spacing: 0) {
+                let allNos = card.services.map(\.no)
+                let allOn = m.allTracked(code: card.stopCode)
+                Button {
+                    m.setAllTracked(code: card.stopCode, allNos: allNos, tracked: !allOn)
+                } label: {
+                    HStack {
+                        Text(allOn ? "Untrack all" : "Track all")
+                            .font(t.sans(13, weight: .semibold)).foregroundStyle(t.accent)
+                        Spacer()
+                        Text("\(allNos.filter { m.isTracked(code: card.stopCode, busNo: $0) }.count)/\(allNos.count)")
+                            .font(t.mono(11)).foregroundStyle(t.dim)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Divider().overlay(t.line)
+
                 ForEach(Array(card.services.enumerated()), id: \.element.id) { i, s in
                     if i > 0 { Divider().overlay(t.line) }
                     ServiceTapRow(

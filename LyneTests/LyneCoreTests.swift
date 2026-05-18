@@ -159,15 +159,20 @@ final class LyneCoreTests: XCTestCase {
     }
 
     func testPinCodable() throws {
-        let p = Pin(code: "53061", nickname: "Morning", hidden: ["88", "156"])
-        let data = try JSONEncoder().encode([p])
-        let back = try JSONDecoder().decode([Pin].self, from: data)
+        let p = Pin(code: "53061", nickname: "Morning", tracked: ["88", "156"])
+        let back = try JSONDecoder().decode([Pin].self,
+                                            from: JSONEncoder().encode([p]))
         XCTAssertEqual(back, [p])
-        // Missing "hidden" key (e.g. legacy data) must still decode, not throw.
+        // tracked == nil ("all") round-trips.
+        let allP = Pin(code: "1", nickname: "X", tracked: nil)
+        let back2 = try JSONDecoder().decode([Pin].self,
+                                             from: JSONEncoder().encode([allP]))
+        XCTAssertNil(back2.first?.tracked)
+        // Legacy/missing key must still decode (tracked nil), not throw.
         let legacy = #"[{"code":"99999","nickname":"X"}]"#.data(using: .utf8)!
         let migrated = try JSONDecoder().decode([Pin].self, from: legacy)
         XCTAssertEqual(migrated.first?.code, "99999")
-        XCTAssertEqual(migrated.first?.hidden, [])
+        XCTAssertNil(migrated.first?.tracked)
     }
 }
 
@@ -260,6 +265,52 @@ final class LynePinTests: XCTestCase {
         XCTAssertEqual(cards.count, 1)
         XCTAssertEqual(cards.first?.stopCode, "53231")
         XCTAssertEqual(cards.first?.id, "53231")
+    }
+
+    // Search → open stop → top-right "Pin stop" must land on Home.
+    func testPinFromDetailSurfacesOnHome() {
+        let m = AppModel()
+        m.openCard = CardModel(id: "17171", label: "x", stopName: "Clementi Stn Exit B",
+                               stopCode: "17171", walkMin: 0, services: [])
+        guard let live = m.openCardLive() else { return XCTFail("no card") }
+        XCTAssertFalse(m.isCardPinned(live))
+        m.togglePinForCard(live)                          // tap "Pin stop"
+        XCTAssertTrue(m.isCardPinned(live))
+        XCTAssertEqual(m.allPinnedCards.map(\.stopCode), ["17171"])
+    }
+
+    func testTrackAllUntrackAll() {
+        let m = AppModel()
+        let all = ["96", "183", "96B"]
+        m.setAllTracked(code: "17171", allNos: all, tracked: true)   // pin + all
+        XCTAssertTrue(m.isPinned("17171"))
+        XCTAssertTrue(m.allTracked(code: "17171"))
+        for b in all { XCTAssertTrue(m.isTracked(code: "17171", busNo: b)) }
+        m.setAllTracked(code: "17171", allNos: all, tracked: false)  // = unpin
+        XCTAssertFalse(m.isPinned("17171"))               // not on Home
+        XCTAssertFalse(m.allTracked(code: "17171"))
+        for b in all { XCTAssertFalse(m.isTracked(code: "17171", busNo: b)) }
+    }
+
+    // The reported bug: "Pinned stop" lit while nothing tracked. New rule:
+    // pinned ⟺ ≥1 bus tracked; unchecking the last one unpins.
+    func testPinnedIffHasTrackedBus() {
+        let m = AppModel()
+        let all = ["10", "14", "16"]
+        m.togglePin(code: "77009")                        // top-right Pin → all
+        XCTAssertTrue(m.isPinned("77009"))
+        m.toggleTracked(code: "77009", busNo: "10", allNos: all)
+        m.toggleTracked(code: "77009", busNo: "14", allNos: all)
+        XCTAssertTrue(m.isPinned("77009"))                // 1 left → still pinned
+        XCTAssertTrue(m.isTracked(code: "77009", busNo: "16"))
+        m.toggleTracked(code: "77009", busNo: "16", allNos: all)  // uncheck last
+        XCTAssertFalse(m.isPinned("77009"))               // → unpinned, not lit
+        for b in all { XCTAssertFalse(m.isTracked(code: "77009", busNo: b)) }
+        // Checking a bus on the now-unpinned stop re-pins it.
+        m.toggleTracked(code: "77009", busNo: "10", allNos: all)
+        XCTAssertTrue(m.isPinned("77009"))
+        XCTAssertTrue(m.isTracked(code: "77009", busNo: "10"))
+        XCTAssertFalse(m.isTracked(code: "77009", busNo: "14"))
     }
 
     func testReorderPins() {
