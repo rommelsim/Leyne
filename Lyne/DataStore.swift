@@ -158,8 +158,10 @@ final class DataStore: ObservableObject {
     }
 
     /// Warm arrivals for the visible nearby stops so expanding is instant.
+    // Warm only the closest few (nearby is distance-sorted) so a user-tapped
+    // expand isn't queued behind a 12-request prefetch wave.
     func prefetchNearbyArrivals() {
-        for s in nearby { ensureArrivals(stop: s.stopCode, silent: true) }
+        for s in nearby.prefix(5) { ensureArrivals(stop: s.stopCode, silent: true) }
     }
 
     // ─── Search (Buses + Stops, both live) ────────────────
