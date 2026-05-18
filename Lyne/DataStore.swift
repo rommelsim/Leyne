@@ -236,6 +236,22 @@ final class DataStore: ObservableObject {
         else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
+
+    /// Live snapshot for one service at a stop — used by the Live Activity to
+    /// poll the real ETA + bus position (no mock/elapsed-time simulation).
+    func liveServiceSnapshot(serviceNo: String, stopCode: String)
+        async -> (etaSec: Int, coord: CLLocationCoordinate2D?)? {
+        guard let resp = try? await api.busArrival(stopCode: stopCode, serviceNo: serviceNo),
+              let svc = resp.Services.first(where: { $0.ServiceNo == serviceNo }),
+              let arr = svc.NextBus.arrivalDate
+        else { return nil }
+        let eta = max(0, Int(arr.timeIntervalSince(Date())))
+        var coord: CLLocationCoordinate2D? = nil
+        if let lat = svc.NextBus.lat, let lon = svc.NextBus.lon, lat != 0, lon != 0 {
+            coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+        return (eta, coord)
+    }
 }
 
 func haversine(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {

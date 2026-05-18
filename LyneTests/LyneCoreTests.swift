@@ -237,21 +237,34 @@ final class LynePinTests: XCTestCase {
         XCTAssertFalse(m.isTracked(code: "X", busNo: "156"))
     }
 
-    // "Start Live Activity does not generate" — prove the action produces the
-    // state RootView renders the takeover from, and closes Detail so it shows.
-    func testStartLiveActivityGeneratesState() {
+    // The Live Activity button is a per-bus toggle: starting records the
+    // bus+stop so re-entering Detail shows "Stop", and toggling again ends it.
+    // Detail must NOT be force-closed (the toggle has to stay visible).
+    func testLiveActivityToggleContract() {
+        XCTAssertEqual(AppModel.liveKey(bus: "88", stopCode: "53009"), "53009|88")
         let m = AppModel()
-        XCTAssertNil(m.liveActivity)
         m.openCard = CardModel(id: "53009", label: "x", stopName: "Bishan Int",
                                stopCode: "53009", walkMin: 0, services: [])
         let s = Service(no: "88", dest: "Bukit Panjang Int", etaSec: 180,
                         followingSec: 600, load: .sea, wab: true, deck: .DD)
-        m.startLiveActivity(s, stopName: "Bishan Int", stopCode: "53009")
-        XCTAssertNotNil(m.liveActivity)
-        XCTAssertEqual(m.liveActivity?.busNo, "88")
-        XCTAssertEqual(m.liveActivity?.dest, "Bukit Panjang Int")
-        XCTAssertEqual(m.liveActivity?.etaAtStart, 180)   // real ETA, not raced
-        XCTAssertNil(m.openCard)                          // detail closed
+        XCTAssertFalse(m.isLiveActivityActive(s, stopCode: "53009"))
+
+        // Start
+        m.toggleLiveActivity(s, stopName: "Bishan Int", stopCode: "53009")
+        XCTAssertNotNil(m.openCard)                       // Detail not force-closed
+        XCTAssertTrue(m.isLiveActivityActive(s, stopCode: "53009"))
+        XCTAssertEqual(m.liveActivityKey, "53009|88")
+        // A different bus at the same stop is NOT active.
+        let other = Service(no: "99", dest: "X", etaSec: 60, followingSec: 300,
+                            load: .sda, wab: false, deck: .SD)
+        XCTAssertFalse(m.isLiveActivityActive(other, stopCode: "53009"))
+
+        // Toggle again → stop
+        m.toggleLiveActivity(s, stopName: "Bishan Int", stopCode: "53009")
+        XCTAssertFalse(m.isLiveActivityActive(s, stopCode: "53009"))
+        XCTAssertNil(m.liveActivityKey)
+        m.stopLiveActivity()                              // idempotent, no crash
+        XCTAssertNil(m.liveActivityKey)
     }
 
     // Nearby "Pin to Home" → must surface in allPinnedCards (Home list).

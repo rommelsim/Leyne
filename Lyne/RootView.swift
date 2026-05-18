@@ -99,12 +99,8 @@ struct RootView: View {
                 .zIndex(50)
             }
 
-            // ── Live Activity takeover ──────────────────────
-            if let act = m.liveActivity {
-                LiveActivityLockScreen(activity: act) { m.liveActivity = nil }
-                    .transition(.opacity)
-                    .zIndex(90)
-            }
+            // Live Activity is now a real iOS Live Activity (ActivityKit) —
+            // it lives on the Lock Screen / Dynamic Island, not in-app.
 
             // ── Launch splash ───────────────────────────────
             if m.launching {
@@ -115,7 +111,6 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.3), value: m.searchOpen)
         .animation(.easeInOut(duration: 0.3), value: m.showAdd)
         .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
-        .animation(.easeInOut(duration: 0.3), value: m.liveActivity)
         .animation(.easeInOut(duration: 0.36), value: m.openCard)
         .onChange(of: fb.shake?.id) { _, _ in
             guard let kind = fb.shake?.kind, m.motion else { return }
