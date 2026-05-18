@@ -1,0 +1,230 @@
+// Live data repository — replaces the old Mock. Pulls everything from LTA.
+
+import Foundation
+import CoreLocation
+import Combine
+
+enum LoadState: Equatable {
+    case loading, ready, error(String)
+}
+
+enum ArrivalState: Equatable {
+    case loading
+    case loaded([Service])
+    case empty            // no estimates / not in operation
+    case error(String)
+}
+
+struct RouteStopLive: Identifiable, Equatable {
+    let code: String
+    let name: String
+    let lat: Double
+    let lon: Double
+    let seq: Int
+    var id: String { code }
+}
+
+struct RouteInfo: Equatable {
+    var stops: [RouteStopLive]
+    var youIndex: Int
+    var busIndex: Int?           // nearest route stop to the live bus
+    var busCoord: CLLocationCoordinate2D?
+
+    static func == (a: RouteInfo, b: RouteInfo) -> Bool {
+        a.stops == b.stops && a.youIndex == b.youIndex && a.busIndex == b.busIndex
+            && a.busCoord?.latitude == b.busCoord?.latitude
+            && a.busCoord?.longitude == b.busCoord?.longitude
+    }
+}
+
+@MainActor
+final class DataStore: ObservableObject {
+    static let shared = DataStore()
+
+    @Published var referenceState: LoadState = .loading
+    @Published var nearby: [NearbyStop] = []
+    @Published var arrivals: [String: ArrivalState] = [:]
+    @Published var routesLoaded = false
+
+    private(set) var stopByCode: [String: LTABusStop] = [:]
+    private var services: [LTABusServiceDTO] = []
+    private var routesAll: [LTABusRouteDTO]?
+    private var lastFetched: [String: Date] = [:]
+    private var inflight: Set<String> = []
+    private var lastLoc: CLLocation?
+
+    private let api = LTAService.shared
+
+    // ─── Bootstrap reference data ─────────────────────────
+    func bootstrap() async {
+        if case .ready = referenceState { return }
+        referenceState = .loading
+        do {
+            async let stops = api.busStops()
+            async let svcs = api.busServices()
+            let (s, v) = try await (stops, svcs)
+            stopByCode = Dictionary(s.map { ($0.BusStopCode, $0) }) { a, _ in a }
+            services = v
+            referenceState = .ready
+            if let loc = lastLoc { updateNearby(loc) }
+        } catch {
+            referenceState = .error((error as? LTAError)?.errorDescription
+                                    ?? error.localizedDescription)
+        }
+    }
+
+    func stopName(_ code: String) -> String {
+        stopByCode[code].map { $0.Description } ?? code
+    }
+    func roadName(_ code: String) -> String {
+        stopByCode[code]?.RoadName ?? ""
+    }
+
+    // ─── Nearby ───────────────────────────────────────────
+    func updateNearby(_ loc: CLLocation) {
+        lastLoc = loc
+        guard !stopByCode.isEmpty else { return }
+        let here = loc.coordinate
+        let ranked = stopByCode.values.map { s -> (LTABusStop, Double) in
+            (s, haversine(here.latitude, here.longitude, s.Latitude, s.Longitude))
+        }
+        .sorted { $0.1 < $1.1 }
+        .prefix(12)
+
+        nearby = ranked.map { s, d in
+            NearbyStop(
+                id: s.BusStopCode,
+                stopName: s.Description,
+                stopCode: s.BusStopCode,
+                distanceM: Int(d.rounded()),
+                walkMin: max(1, Int((d / 80).rounded())),   // ~5 km/h
+                services: servicesFor(s.BusStopCode)
+            )
+        }
+    }
+
+    // ─── Live arrivals ────────────────────────────────────
+    func servicesFor(_ code: String) -> [Service] {
+        if case .loaded(let s) = arrivals[code] { return s }
+        return []
+    }
+
+    func ensureArrivals(stop code: String, force: Bool = false) {
+        let fresh = lastFetched[code].map {
+            Date().timeIntervalSince($0) < LTAConfig.arrivalRefreshSeconds
+        } ?? false
+        if !force, fresh, case .loaded = arrivals[code] { return }
+        if inflight.contains(code) { return }
+        inflight.insert(code)
+        if arrivals[code] == nil { arrivals[code] = .loading }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let resp = try await self.api.busArrival(stopCode: code)
+                let mapped: [Service] = resp.Services.compactMap { svc in
+                    guard svc.NextBus.hasData else { return nil }
+                    let destCode = svc.NextBus.DestinationCode ?? ""
+                    return svc.toService(destName: self.stopName(destCode))
+                }
+                .sorted { $0.etaSec < $1.etaSec }
+                self.arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
+                self.lastFetched[code] = Date()
+                self.refreshNearbyServices(code, mapped)
+            } catch {
+                if self.arrivals[code] == nil || self.arrivals[code] == .loading {
+                    self.arrivals[code] = .error(
+                        (error as? LTAError)?.errorDescription ?? "Couldn’t reach LTA")
+                }
+            }
+            self.inflight.remove(code)
+        }
+    }
+
+    private func refreshNearbyServices(_ code: String, _ svcs: [Service]) {
+        guard let i = nearby.firstIndex(where: { $0.stopCode == code }) else { return }
+        nearby[i].services = svcs
+    }
+
+    // ─── Search (Buses + Stops, both live) ────────────────
+    func searchServices(_ q: String) -> [LTABusServiceDTO] {
+        let s = q.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !s.isEmpty else { return [] }
+        var seen = Set<String>()
+        return services.filter {
+            $0.ServiceNo.lowercased().contains(s) && seen.insert($0.ServiceNo).inserted
+        }
+    }
+    func searchStops(_ q: String) -> [LTABusStop] {
+        let s = q.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !s.isEmpty else { return [] }
+        return Array(stopByCode.values.filter {
+            $0.Description.lowercased().contains(s)
+                || $0.RoadName.lowercased().contains(s)
+                || $0.BusStopCode.contains(s)
+        }
+        .sorted { $0.Description < $1.Description }
+        .prefix(40))
+    }
+    /// First stop served by a service (its route origin), for bus-result taps.
+    func originStop(ofService no: String) async -> LTABusStop? {
+        guard let routes = await loadRoutes() else { return nil }
+        let first = routes
+            .filter { $0.ServiceNo == no }
+            .sorted { $0.StopSequence < $1.StopSequence }
+            .first
+        return first.flatMap { stopByCode[$0.BusStopCode] }
+    }
+
+    // ─── Routes (lazy, big dataset, disk-cached) ──────────
+    func loadRoutes() async -> [LTABusRouteDTO]? {
+        if let r = routesAll { return r }
+        do {
+            let r = try await api.busRoutes()
+            routesAll = r
+            routesLoaded = true
+            return r
+        } catch { return nil }
+    }
+
+    func route(service no: String, stopCode: String) async -> RouteInfo? {
+        guard let all = await loadRoutes() else { return nil }
+        // Pick the direction whose stop list contains this stop.
+        let forSvc = all.filter { $0.ServiceNo == no }
+        let dirs = Set(forSvc.map { $0.Direction })
+        var chosen: [LTABusRouteDTO] = []
+        for d in dirs.sorted() {
+            let seq = forSvc.filter { $0.Direction == d }
+                .sorted { $0.StopSequence < $1.StopSequence }
+            if seq.contains(where: { $0.BusStopCode == stopCode }) { chosen = seq; break }
+            if chosen.isEmpty { chosen = seq }
+        }
+        guard !chosen.isEmpty else { return nil }
+        let stops: [RouteStopLive] = chosen.compactMap { r in
+            guard let s = stopByCode[r.BusStopCode] else { return nil }
+            return RouteStopLive(code: s.BusStopCode, name: s.Description,
+                                 lat: s.Latitude, lon: s.Longitude, seq: r.StopSequence)
+        }
+        let youIdx = stops.firstIndex { $0.code == stopCode } ?? 0
+        return RouteInfo(stops: stops, youIndex: youIdx, busIndex: nil, busCoord: nil)
+    }
+
+    /// Live position of the next bus of `service` approaching `stopCode`.
+    func liveBus(service no: String, stopCode: String) async -> CLLocationCoordinate2D? {
+        guard let resp = try? await api.busArrival(stopCode: stopCode, serviceNo: no),
+              let svc = resp.Services.first(where: { $0.ServiceNo == no }),
+              let lat = svc.NextBus.lat, let lon = svc.NextBus.lon,
+              lat != 0, lon != 0
+        else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+}
+
+func haversine(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
+    let R = 6_371_000.0
+    let dLat = (lat2 - lat1) * .pi / 180
+    let dLon = (lon2 - lon1) * .pi / 180
+    let a = sin(dLat/2) * sin(dLat/2)
+        + cos(lat1 * .pi/180) * cos(lat2 * .pi/180) * sin(dLon/2) * sin(dLon/2)
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+}
