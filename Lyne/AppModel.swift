@@ -4,14 +4,29 @@
 import SwiftUI
 import Combine
 import CoreLocation
+import UIKit
 
-enum AppTab: String { case home, nearby, settings }
+enum AppTab: String { case home, nearby, settings, search }
 
-/// A user-pinned stop. `tracked` = service numbers to show (empty = all).
+/// A user-pinned stop. `hidden` = service numbers the user unchecked.
+/// Empty = nothing hidden = all shown (unambiguous: no "all vs none" overload,
+/// and it's correct even before arrivals load).
 struct Pin: Codable, Equatable {
     var code: String
     var nickname: String
-    var tracked: [String] = []
+    var hidden: [String] = []
+
+    init(code: String, nickname: String, hidden: [String] = []) {
+        self.code = code; self.nickname = nickname; self.hidden = hidden
+    }
+
+    enum CodingKeys: String, CodingKey { case code, nickname, hidden }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        code = try c.decode(String.self, forKey: .code)
+        nickname = (try? c.decode(String.self, forKey: .nickname)) ?? ""
+        hidden = (try? c.decode([String].self, forKey: .hidden)) ?? []
+    }
 }
 
 @MainActor
@@ -58,7 +73,7 @@ final class AppModel: ObservableObject {
             }
         showOnboarding = !onboarded
         if let s = UserDefaults.standard.string(forKey: "lyne.startTab"),
-           let initial = AppTab(rawValue: s) { tab = initial }
+           let initial = AppTab(rawValue: s), initial != .search { tab = initial }
         syncFeedback()
     }
 
@@ -165,13 +180,14 @@ final class AppModel: ObservableObject {
     }
     func togglePinForCard(_ card: CardModel) { togglePin(code: card.stopCode) }
 
-    func addPin(code: String, tracked: [String]) {
+    /// `shown` = the service nos the user checked in the Add sheet.
+    func addPin(code: String, tracked shown: [String]) {
         let all = ds.servicesFor(code).map(\.no)
-        let norm = (Set(tracked) == Set(all)) ? [] : tracked
+        let hidden = all.filter { !shown.contains($0) }
         if let i = pins.firstIndex(where: { $0.code == code }) {
-            pins[i].tracked = norm
+            pins[i].hidden = hidden
         } else {
-            pins.append(Pin(code: code, nickname: ds.stopName(code), tracked: norm))
+            pins.append(Pin(code: code, nickname: ds.stopName(code), hidden: hidden))
         }
         showAdd = false
         tab = .home
@@ -192,29 +208,28 @@ final class AppModel: ObservableObject {
     }
     func renameCard(_ id: String, _ newLabel: String) { rename(code: id, to: newLabel) }
 
-    func trackedSet(forCode code: String) -> [String] { pin(forCode: code)?.tracked ?? [] }
-
     /// True if `busNo` is shown on Home for this stop.
     func isTracked(code: String, busNo: String) -> Bool {
         guard let p = pin(forCode: code) else { return true }
-        return p.tracked.isEmpty || p.tracked.contains(busNo)
+        return !p.hidden.contains(busNo)
     }
 
     /// Service numbers hidden from the Home card for this stop.
-    func hiddenSet(code: String, allNos: [String]) -> Set<String> {
-        guard let p = pin(forCode: code), !p.tracked.isEmpty else { return [] }
-        return Set(allNos).subtracting(p.tracked)
+    func hiddenSet(code: String, allNos: [String] = []) -> Set<String> {
+        Set(pin(forCode: code)?.hidden ?? [])
     }
 
-    /// Toggle a service for Home. Auto-pins the stop if not yet pinned.
-    func toggleTracked(code: String, busNo: String, allNos: [String]) {
+    /// Toggle a service's visibility. Auto-pins the stop if not yet pinned.
+    func toggleTracked(code: String, busNo: String, allNos: [String] = []) {
         if let i = pins.firstIndex(where: { $0.code == code }) {
-            var shown = pins[i].tracked.isEmpty ? Set(allNos) : Set(pins[i].tracked)
-            if shown.contains(busNo) { shown.remove(busNo) } else { shown.insert(busNo) }
-            pins[i].tracked = (shown == Set(allNos)) ? [] : Array(shown)
+            if pins[i].hidden.contains(busNo) {
+                pins[i].hidden.removeAll { $0 == busNo }     // re-check
+            } else {
+                pins[i].hidden.append(busNo)                 // uncheck
+            }
         } else {
-            // not pinned yet → pin with only this service tracked
-            pins.append(Pin(code: code, nickname: ds.stopName(code), tracked: [busNo]))
+            // Not pinned yet → pin the stop, hiding just this one.
+            pins.append(Pin(code: code, nickname: ds.stopName(code), hidden: [busNo]))
             Feedback.shared.success()
         }
     }
@@ -233,6 +248,11 @@ final class AppModel: ObservableObject {
     }
     func open(stopCode: String, label: String, busNo: String? = nil, feedback: Bool = true) {
         if feedback { Feedback.shared.select() }
+        // Resign any active editor (e.g. an in-progress pin rename) so the
+        // keyboard doesn't linger over the detail view; this also commits
+        // the rename via PinTag's focus-loss handler.
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         ds.ensureArrivals(stop: stopCode, force: true)
         openCard = CardModel(id: stopCode, label: label,
                              stopName: ds.stopName(stopCode), stopCode: stopCode,

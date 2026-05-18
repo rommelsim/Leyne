@@ -13,24 +13,28 @@ struct NearbyView: View {
 
     private var t: Theme { m.t }
 
+    // Precompute the sort key once per stop (O(n)) instead of recomputing
+    // inside the comparator (O(n log n) × liveServices).
     private var sortedStops: [NearbyStop] {
-        var list = store.nearby
+        let list = store.nearby
         switch sortMode {
         case "arrival":
-            func minEta(_ s: NearbyStop) -> Int {
-                m.liveServices(code: s.stopCode, tracked: []).map(\.etaSec).min() ?? 999_999
+            var key: [String: Int] = [:]
+            for s in list {
+                key[s.stopCode] = m.liveServices(code: s.stopCode, tracked: [])
+                    .map(\.etaSec).min() ?? 999_999
             }
-            list.sort { minEta($0) < minEta($1) }
+            return list.sorted { (key[$0.stopCode] ?? 0) < (key[$1.stopCode] ?? 0) }
         case "service":
-            func firstSvc(_ s: NearbyStop) -> Int {
-                store.servicesFor(s.stopCode)
+            var key: [String: Int] = [:]
+            for s in list {
+                key[s.stopCode] = store.servicesFor(s.stopCode)
                     .map { Int($0.no.filter(\.isNumber)) ?? 9999 }.min() ?? 9999
             }
-            list.sort { firstSvc($0) < firstSvc($1) }
+            return list.sorted { (key[$0.stopCode] ?? 0) < (key[$1.stopCode] ?? 0) }
         default:
-            list.sort { $0.distanceM < $1.distanceM }
+            return list.sorted { $0.distanceM < $1.distanceM }
         }
-        return list
     }
 
     var body: some View {
@@ -56,7 +60,8 @@ struct NearbyView: View {
                 visible: collapsed)
         }
         .background(t.bg.ignoresSafeArea())
-        .onAppear { loc.start() }
+        .onAppear { loc.start(); store.prefetchNearbyArrivals() }
+        .onChange(of: store.nearby.count) { _, _ in store.prefetchNearbyArrivals() }
     }
 
     @ViewBuilder private var content: some View {
@@ -81,16 +86,19 @@ struct NearbyView: View {
                         isPinned: m.isPinned(stop.stopCode),
                         state: store.arrivals[stop.stopCode] ?? .loading,
                         onToggle: {
-                            withAnimation(.timingCurve(0.5, 0.05, 0.2, 1, duration: 0.32)) {
-                                openId = openId == stop.id ? nil : stop.id
-                            }
-                            if openId == stop.id { store.ensureArrivals(stop: stop.stopCode) }
+                            // Plain state set — instant, never blocked. The
+                            // geometry change animates via .animation(value:)
+                            // below, decoupled from data publishes.
+                            let willOpen = openId != stop.id
+                            openId = willOpen ? stop.id : nil
+                            if willOpen { store.ensureArrivals(stop: stop.stopCode) }
                         },
                         onPin: { m.togglePin(code: stop.stopCode) },
                         onOpen: { busNo in m.openNearby(stop, busNo: busNo) }
                     )
                 }
             }
+            .animation(.timingCurve(0.5, 0.05, 0.2, 1, duration: 0.30), value: openId)
             .animation(.timingCurve(0.5, 0.05, 0.2, 1, duration: 0.45), value: sortMode)
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
         }
@@ -176,13 +184,11 @@ struct NearbyStopRow: View {
 
     @EnvironmentObject var m: AppModel
 
-    private var liveServices: [Service] {
-        m.liveServices(code: stop.stopCode, tracked: [])
-    }
-    private var anyArriving: Bool { liveServices.contains { $0.etaSec <= 60 } }
-
     var body: some View {
-        VStack(spacing: 0) {
+        // Compute once per render — not 6–8× via computed properties.
+        let services = m.liveServices(code: stop.stopCode, tracked: [])
+        let anyArriving = services.contains { $0.etaSec <= 60 }
+        return VStack(spacing: 0) {
             Button(action: onToggle) {
                 HStack(spacing: 12) {
                     VStack(spacing: 3) {
@@ -201,9 +207,9 @@ struct NearbyStopRow: View {
                             .lineLimit(1)
                         HStack(spacing: 8) {
                             Text("STOP \(stop.stopCode)").font(t.mono(10)).foregroundStyle(t.dim)
-                            if !liveServices.isEmpty {
+                            if !services.isEmpty {
                                 Text("·").font(t.mono(10)).foregroundStyle(t.dim.opacity(0.6))
-                                Text("\(liveServices.count) services").font(t.mono(10)).foregroundStyle(t.dim)
+                                Text("\(services.count) services").font(t.mono(10)).foregroundStyle(t.dim)
                             }
                             if anyArriving {
                                 Text("ARRIVING")
@@ -228,7 +234,7 @@ struct NearbyStopRow: View {
             if open {
                 VStack(spacing: 0) {
                     Divider().overlay(t.line)
-                    expandedBody
+                    expandedBody(services)
                     Divider().overlay(t.line)
                     HStack(spacing: 8) {
                         Button(action: onPin) {
@@ -266,9 +272,9 @@ struct NearbyStopRow: View {
         .shadow(color: anyArriving ? t.live.opacity(0.1) : .clear, radius: 6, y: 4)
     }
 
-    @ViewBuilder private var expandedBody: some View {
-        if !liveServices.isEmpty {
-            ForEach(Array(liveServices.enumerated()), id: \.element.id) { i, s in
+    @ViewBuilder private func expandedBody(_ services: [Service]) -> some View {
+        if !services.isEmpty {
+            ForEach(Array(services.enumerated()), id: \.element.id) { i, s in
                 if i > 0 { Divider().overlay(t.line) }
                 ServiceRow(s: s, t: t) { onOpen($0) }
             }

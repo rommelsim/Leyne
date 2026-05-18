@@ -13,7 +13,8 @@ Tools. Either point at Xcode once:
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 ```
 
-…then open `Lyne.xcodeproj` in Xcode and run on an iOS 17+ simulator or device.
+…then open `Lyne.xcodeproj` in Xcode and run on an iOS 18+ simulator or device
+(iOS 26 for the full Liquid Glass tab bar + detached search pill).
 Or build from the CLI without changing the global setting:
 
 ```sh
@@ -31,7 +32,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 ```
 
 Verified building, testing (15/15 green) & running clean on Xcode 26.4.1 /
-iOS 17 simulator with **live LTA DataMall data**.
+iOS 18 simulator with **live LTA DataMall data**.
 
 ## Live data (LTA DataMall)
 
