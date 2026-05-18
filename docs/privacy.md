@@ -16,8 +16,10 @@ the app.
 - **Location** is used only on your device to find nearby bus stops.
 - Bus data comes from **LM/LTA DataMall**; requests contain only bus stop and
   service codes — never anything about you.
-- The app shows ads via **Google AdMob**, which collects limited device and
-  usage data to serve and measure those ads.
+- The app shows ads via **Google AdMob**. With your permission (the iOS
+  tracking prompt) ads may be personalized; otherwise they are
+  non-personalized. Google collects limited device and usage data to serve
+  and measure ads.
 
 ## Information stored on your device
 
@@ -56,21 +58,31 @@ that API traffic is governed by LTA's own terms and privacy practices.
 Leyne displays banner ads through **Google AdMob**. To deliver and measure
 ads, Google and its partners may collect and process:
 
-- Device identifiers and a coarse IP-based location;
+- Device identifiers — including the advertising identifier (IDFA) when you
+  allow tracking — and a coarse, IP-based location;
 - Ad interactions (views, taps) and app/diagnostic usage related to ads;
 - Apple **SKAdNetwork** signals for privacy-preserving install attribution.
 
-Leyne does **not** present the App Tracking Transparency prompt and does not
-access the IDFA for cross-app tracking, so Google serves ads in a limited
-(non-personalized) mode. Even so, some data is processed by Google as an
-independent controller. See:
+**Your consent controls this.** On first launch Leyne shows Google's
+consent flow (Google User Messaging Platform) where it is required — for
+example a GDPR consent form for users in the EEA/UK — and Apple's
+**App Tracking Transparency** prompt:
+
+- If you **allow** tracking, Google may use the IDFA to show you
+  **personalized** ads.
+- If you **decline**, or where consent is not given, Google serves
+  **non-personalized** ads and does not use the IDFA for cross-app tracking.
+
+In either case some data is processed by Google as an independent
+controller. See:
 
 - Google Privacy Policy — https://policies.google.com/privacy
 - How Google uses information from sites/apps that use its services —
   https://policies.google.com/technologies/partner-sites
 
-You can limit ad measurement on your device in
-**iOS Settings ▸ Privacy & Security ▸ Tracking** and **Apple Advertising**.
+You can change your tracking choice any time in
+**iOS Settings ▸ Privacy & Security ▸ Tracking**, and limit ad measurement
+under **Apple Advertising**.
 
 ## What we do not do
 
@@ -87,7 +99,8 @@ We do not knowingly collect personal information from children.
 ## Your choices
 
 - Revoke location in iOS Settings at any time.
-- Limit ad tracking via iOS Settings.
+- Allow or decline ad tracking when prompted, and change it later in
+  **iOS Settings ▸ Privacy & Security ▸ Tracking**.
 - Delete the app to erase all locally stored data.
 
 ## Changes
