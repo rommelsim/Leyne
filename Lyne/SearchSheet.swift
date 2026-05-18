@@ -2,28 +2,6 @@
 
 import SwiftUI
 
-struct SearchFAB: View {
-    let t: Theme
-    let action: () -> Void
-    @State private var pressed = false
-    var body: some View {
-        Button {
-            pressed = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { pressed = false }
-            action()
-        } label: {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(t.bg)
-                .frame(width: 52, height: 52)
-                .background(t.fg, in: Circle())
-                .shadow(color: .black.opacity(0.22), radius: 12, y: 8)
-                .scaleEffect(pressed ? 0.94 : 1)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // ═══ Variant A — Conservative ═══════════════════════════════
 struct SearchSheetA: View {
     let t: Theme

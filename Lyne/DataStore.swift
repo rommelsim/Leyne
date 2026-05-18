@@ -37,6 +37,21 @@ struct RouteInfo: Equatable {
     }
 }
 
+/// The relevant slice of the route to draw on the map: from the bus's current
+/// position (or an approach window if it's passed/unknown) to just past your
+/// stop. Drawing the *whole* route connects 40–60 stops incl. loops with
+/// straight lines (LTA has no road geometry) → the tangled "weird waypoint".
+func journeySegment(_ r: RouteInfo) -> [RouteStopLive] {
+    guard !r.stops.isEmpty else { return [] }
+    let you = min(max(r.youIndex, 0), r.stops.count - 1)
+    let start: Int
+    if let b = r.busIndex, b >= 0, b <= you { start = b }
+    else { start = max(0, you - 6) }
+    let end = min(r.stops.count - 1, you + 1)
+    guard start <= end else { return [r.stops[you]] }
+    return Array(r.stops[start...end])
+}
+
 @MainActor
 final class DataStore: ObservableObject {
     static let shared = DataStore()
@@ -109,14 +124,16 @@ final class DataStore: ObservableObject {
         return []
     }
 
-    func ensureArrivals(stop code: String, force: Bool = false) {
+    /// `silent` warms data without publishing a `.loading` state (used by
+    /// prefetch so entering Nearby doesn't burst-republish the whole list).
+    func ensureArrivals(stop code: String, force: Bool = false, silent: Bool = false) {
         let fresh = lastFetched[code].map {
             Date().timeIntervalSince($0) < LTAConfig.arrivalRefreshSeconds
         } ?? false
         if !force, fresh, case .loaded = arrivals[code] { return }
         if inflight.contains(code) { return }
         inflight.insert(code)
-        if arrivals[code] == nil { arrivals[code] = .loading }
+        if !silent, arrivals[code] == nil { arrivals[code] = .loading }
 
         Task { [weak self] in
             guard let self else { return }
@@ -130,7 +147,6 @@ final class DataStore: ObservableObject {
                 .sorted { $0.etaSec < $1.etaSec }
                 self.arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
                 self.lastFetched[code] = Date()
-                self.refreshNearbyServices(code, mapped)
             } catch {
                 if self.arrivals[code] == nil || self.arrivals[code] == .loading {
                     self.arrivals[code] = .error(
@@ -141,9 +157,9 @@ final class DataStore: ObservableObject {
         }
     }
 
-    private func refreshNearbyServices(_ code: String, _ svcs: [Service]) {
-        guard let i = nearby.firstIndex(where: { $0.stopCode == code }) else { return }
-        nearby[i].services = svcs
+    /// Warm arrivals for the visible nearby stops so expanding is instant.
+    func prefetchNearbyArrivals() {
+        for s in nearby { ensureArrivals(stop: s.stopCode, silent: true) }
     }
 
     // ─── Search (Buses + Stops, both live) ────────────────

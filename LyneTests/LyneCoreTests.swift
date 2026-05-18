@@ -1,6 +1,7 @@
 // Functional/unit tests — parsing, ETA rules, distance, search, pins.
 
 import XCTest
+import CoreLocation
 @testable import Lyne
 
 final class LyneCoreTests: XCTestCase {
@@ -119,11 +120,54 @@ final class LyneCoreTests: XCTestCase {
         XCTAssertEqual(list.value.first?.BusStopCode, "01219")
     }
 
+    // The reported "weird waypoint" bug: the map drew the whole route
+    // (40–60 stops, loops) → a tangle. The fix slices to the bus→you segment.
+    func testJourneySegmentTrimsFullRoute() {
+        let stops = (0..<40).map {
+            RouteStopLive(code: "\($0)", name: "S\($0)", lat: Double($0), lon: 0, seq: $0)
+        }
+        // bus at 10, you at 15 → segment 10...16 only (not all 40)
+        var seg = journeySegment(RouteInfo(stops: stops, youIndex: 15, busIndex: 10, busCoord: nil))
+        XCTAssertEqual(seg.first?.code, "10")
+        XCTAssertEqual(seg.last?.code, "16")
+        XCTAssertEqual(seg.count, 7)
+
+        // bus GPS unknown → bounded approach window (you-6 … you+1)
+        seg = journeySegment(RouteInfo(stops: stops, youIndex: 15, busIndex: nil, busCoord: nil))
+        XCTAssertEqual(seg.first?.code, "9")
+        XCTAssertEqual(seg.last?.code, "16")
+
+        // bus already past you → still bounded, still includes your stop
+        seg = journeySegment(RouteInfo(stops: stops, youIndex: 5, busIndex: 30, busCoord: nil))
+        XCTAssertLessThanOrEqual(seg.count, 8)
+        XCTAssertTrue(seg.contains { $0.code == "5" })
+
+        // empty route is safe
+        XCTAssertTrue(journeySegment(RouteInfo(stops: [], youIndex: 0,
+                                               busIndex: nil, busCoord: nil)).isEmpty)
+    }
+
+    func testLiveActivityPhases() {
+        // A freshly started activity for a real ETA must be live (tracking),
+        // not racing to dismissal.
+        XCTAssertEqual(phaseFor(eta: 180, postArrivedMs: 0), .tracking)
+        XCTAssertEqual(phaseFor(eta: 55,  postArrivedMs: 0), .arriving)
+        XCTAssertEqual(phaseFor(eta: 20,  postArrivedMs: 0), .close)
+        XCTAssertEqual(phaseFor(eta: 0,   postArrivedMs: 0), .arrived)
+        XCTAssertEqual(phaseFor(eta: 0,   postArrivedMs: 2000), .completed)
+        XCTAssertEqual(phaseFor(eta: 0,   postArrivedMs: 4000), .dismissing)
+    }
+
     func testPinCodable() throws {
-        let p = Pin(code: "53061", nickname: "Morning", tracked: ["88", "156"])
+        let p = Pin(code: "53061", nickname: "Morning", hidden: ["88", "156"])
         let data = try JSONEncoder().encode([p])
         let back = try JSONDecoder().decode([Pin].self, from: data)
         XCTAssertEqual(back, [p])
+        // Missing "hidden" key (e.g. legacy data) must still decode, not throw.
+        let legacy = #"[{"code":"99999","nickname":"X"}]"#.data(using: .utf8)!
+        let migrated = try JSONDecoder().decode([Pin].self, from: legacy)
+        XCTAssertEqual(migrated.first?.code, "99999")
+        XCTAssertEqual(migrated.first?.hidden, [])
     }
 }
 
@@ -163,6 +207,59 @@ final class LynePinTests: XCTestCase {
         XCTAssertNotNil(data)
         let pins = try? JSONDecoder().decode([Pin].self, from: data ?? Data())
         XCTAssertEqual(pins?.first?.code, "53061")
+    }
+
+    // The reported bug: on a single-service stop, unchecking the bus
+    // wrapped back to checked (empty list was overloaded to mean "all").
+    func testUncheckSingleServiceSticks() {
+        let m = AppModel()
+        m.togglePin(code: "53061")
+        XCTAssertTrue(m.isTracked(code: "53061", busNo: "88"))
+        m.toggleTracked(code: "53061", busNo: "88", allNos: ["88"])
+        XCTAssertFalse(m.isTracked(code: "53061", busNo: "88"))   // stays unchecked
+        m.toggleTracked(code: "53061", busNo: "88", allNos: ["88"])
+        XCTAssertTrue(m.isTracked(code: "53061", busNo: "88"))     // re-check works
+    }
+
+    func testUncheckAllDoesNotWrap() {
+        let m = AppModel()
+        m.togglePin(code: "X")
+        let all = ["88", "156", "410"]
+        for b in all { m.toggleTracked(code: "X", busNo: b, allNos: all) }
+        for b in all { XCTAssertFalse(m.isTracked(code: "X", busNo: b)) }  // none re-check
+        m.toggleTracked(code: "X", busNo: "88", allNos: all)
+        XCTAssertTrue(m.isTracked(code: "X", busNo: "88"))
+        XCTAssertFalse(m.isTracked(code: "X", busNo: "156"))
+    }
+
+    // "Start Live Activity does not generate" — prove the action produces the
+    // state RootView renders the takeover from, and closes Detail so it shows.
+    func testStartLiveActivityGeneratesState() {
+        let m = AppModel()
+        XCTAssertNil(m.liveActivity)
+        m.openCard = CardModel(id: "53009", label: "x", stopName: "Bishan Int",
+                               stopCode: "53009", walkMin: 0, services: [])
+        let s = Service(no: "88", dest: "Bukit Panjang Int", etaSec: 180,
+                        followingSec: 600, load: .sea, wab: true, deck: .DD)
+        m.startLiveActivity(s, stopName: "Bishan Int", stopCode: "53009")
+        XCTAssertNotNil(m.liveActivity)
+        XCTAssertEqual(m.liveActivity?.busNo, "88")
+        XCTAssertEqual(m.liveActivity?.dest, "Bukit Panjang Int")
+        XCTAssertEqual(m.liveActivity?.etaAtStart, 180)   // real ETA, not raced
+        XCTAssertNil(m.openCard)                          // detail closed
+    }
+
+    // Nearby "Pin to Home" → must surface in allPinnedCards (Home list).
+    func testPinFromNearbySurfacesOnHome() {
+        let m = AppModel()
+        XCTAssertTrue(m.pins.isEmpty)
+        m.togglePin(code: "53231")                       // tap "Pin to Home"
+        XCTAssertTrue(m.isPinned("53231"))
+        XCTAssertEqual(m.pins.count, 1)
+        let cards = m.allPinnedCards                      // what Home renders
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards.first?.stopCode, "53231")
+        XCTAssertEqual(cards.first?.id, "53231")
     }
 
     func testReorderPins() {

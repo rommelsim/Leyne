@@ -4,7 +4,9 @@
 
 import SwiftUI
 
-private let LA_DEMO_SPEED: Double = 4
+// Real time — the countdown tracks the live LTA ETA, like a real Live
+// Activity (no demo speed-up; it persists until the bus actually arrives).
+private let LA_DEMO_SPEED: Double = 1
 
 enum LAPhase { case tracking, arriving, close, arrived, completed, dismissing }
 
@@ -21,7 +23,6 @@ struct LiveActivityLockScreen: View {
     let activity: ActivityModel
     let onDismiss: () -> Void
 
-    @EnvironmentObject var fb: Feedback
     @State private var now = Date()
     @State private var arrivedAt: Date?
     @State private var postArrivedMs: Double = 0
@@ -29,6 +30,13 @@ struct LiveActivityLockScreen: View {
     @State private var leaving = false
 
     private let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    private static let clockFmt: Date.FormatStyle =
+        .dateTime.hour(.defaultDigits(amPM: .omitted)).minute()
+    private static let dateFmt: Date.FormatStyle =
+        .dateTime.weekday(.wide).day().month(.wide)
+    private var clockText: String { now.formatted(Self.clockFmt) }
+    private var dateText: String { now.formatted(Self.dateFmt) }
 
     private var eta: Double {
         max(0, activity.etaAtStart - now.timeIntervalSince(activity.startedAt) * LA_DEMO_SPEED)
@@ -44,7 +52,7 @@ struct LiveActivityLockScreen: View {
             // status row
             VStack {
                 HStack {
-                    Text("9:41")
+                    Text(clockText)
                     Spacer()
                     HStack(spacing: 4) {
                         Image(systemName: "cellularbars")
@@ -59,8 +67,8 @@ struct LiveActivityLockScreen: View {
 
             // clock
             VStack(spacing: 4) {
-                Text("Monday, 18 May").font(.system(size: 16)).opacity(0.78)
-                Text("9:41").font(.system(size: 86, weight: .ultraLight)).tracking(-3.2)
+                Text(dateText).font(.system(size: 16)).opacity(0.78)
+                Text(clockText).font(.system(size: 86, weight: .ultraLight)).tracking(-3.2)
             }
             .foregroundStyle(Color(hex: "F2EFE8"))
             .frame(maxHeight: .infinity, alignment: .top)
@@ -95,7 +103,7 @@ struct LiveActivityLockScreen: View {
             now = Date()
             if eta <= 0 && arrivedAt == nil {
                 arrivedAt = Date()
-                if !didFireArrival { didFireArrival = true; fb.arrival() }
+                if !didFireArrival { didFireArrival = true; Feedback.shared.arrival() }
             }
             if let a = arrivedAt { postArrivedMs = Date().timeIntervalSince(a) * 1000 }
             if phase == .dismissing { dismiss() }

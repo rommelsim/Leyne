@@ -102,11 +102,17 @@ struct HomeView: View {
     @State private var dragId: String? = nil
     @State private var dragOffset: CGFloat = 0
     @State private var overIndex: Int? = nil
+    @State private var dragSnapshot: [CardModel]? = nil
     @State private var pullY: CGFloat = 0
     @State private var pullArmed = true
 
     private var t: Theme { m.t }
-    private var cards: [CardModel] { m.allPinnedCards }
+    // While reordering, render from a frozen snapshot so pointer-move events
+    // don't rebuild every card (stopName/walkMin/liveServices) per frame.
+    private var cards: [CardModel] {
+        if dragId != nil, let snap = dragSnapshot { return snap }
+        return m.allPinnedCards
+    }
 
     private func refresh() {
         Feedback.shared.tap()
@@ -148,6 +154,9 @@ struct HomeView: View {
                 .padding(.bottom, 20)
             }
             .coordinateSpace(name: "scroll")
+            // Only locked while a card is actually picked up for reorder;
+            // normal touches scroll freely (gesture is simultaneous).
+            .scrollDisabled(dragId != nil)
             .onPreferenceChange(PullKey.self) { y in
                 let p = max(0, y)
                 pullY = p
@@ -295,10 +304,11 @@ struct HomeView: View {
                         radius: isDragging ? 18 : 0, y: 12)
                 .animation(isDragging ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.24),
                            value: overIndex)
-                .gesture(
+                .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0.38)
                         .onEnded { _ in
                             Feedback.shared.select()
+                            dragSnapshot = m.allPinnedCards
                             dragId = card.id
                             overIndex = idx
                         }
@@ -326,7 +336,7 @@ struct HomeView: View {
 
     private func commitReorder(ids: [String]) {
         defer {
-            dragId = nil; dragOffset = 0; overIndex = nil
+            dragId = nil; dragOffset = 0; overIndex = nil; dragSnapshot = nil
         }
         guard let dragId, let over = overIndex,
               let from = ids.firstIndex(of: dragId), from != over else { return }

@@ -363,67 +363,71 @@ struct RouteMapView: View {
     let busNo: String
     let loading: Bool
 
-    private var region: MKCoordinateRegion {
-        guard let r = route, !r.stops.isEmpty else {
-            return MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 1.3521, longitude: 103.8198),
-                span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08))
-        }
-        let you = r.stops[min(r.youIndex, r.stops.count - 1)]
+    @EnvironmentObject private var loc: LocationManager
+
+    // Frame just the three points we show: your stop, the live bus, and you.
+    private func region(_ r: RouteInfo) -> MKCoordinateRegion {
+        let you = r.stops[min(max(r.youIndex, 0), r.stops.count - 1)]
         var lats = [you.lat], lons = [you.lon]
         if let b = r.busCoord { lats.append(b.latitude); lons.append(b.longitude) }
-        if let bi = r.busIndex, bi < r.stops.count {
-            lats.append(r.stops[bi].lat); lons.append(r.stops[bi].lon)
-        }
+        if let me = loc.location?.coordinate { lats.append(me.latitude); lons.append(me.longitude) }
         let minLat = lats.min()!, maxLat = lats.max()!
         let minLon = lons.min()!, maxLon = lons.max()!
         return MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
                                            longitude: (minLon + maxLon) / 2),
             span: MKCoordinateSpan(
-                latitudeDelta: max(0.006, (maxLat - minLat) * 1.6),
-                longitudeDelta: max(0.006, (maxLon - minLon) * 1.6)))
+                latitudeDelta: max(0.004, (maxLat - minLat) * 1.6),
+                longitudeDelta: max(0.004, (maxLon - minLon) * 1.6)))
     }
 
     var body: some View {
         ZStack {
             if let r = route, !r.stops.isEmpty {
-                Map(initialPosition: .region(region)) {
-                    MapPolyline(coordinates: r.stops.map {
-                        CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
-                    })
-                    .stroke(t.accent, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-
-                    ForEach(r.stops) { s in
-                        let isYou = s.code == r.stops[min(r.youIndex, r.stops.count-1)].code
-                        Annotation("", coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lon)) {
-                            Circle()
-                                .fill(isYou ? t.accent : t.surface)
-                                .frame(width: isYou ? 12 : 7, height: isYou ? 12 : 7)
-                                .overlay(Circle().stroke(isYou ? .white : t.fg, lineWidth: isYou ? 2 : 1.2))
+                let youStop = r.stops[min(max(r.youIndex, 0), r.stops.count - 1)]
+                Map(initialPosition: .region(region(r))) {
+                    // Your bus stop
+                    Annotation("", coordinate: .init(latitude: youStop.lat, longitude: youStop.lon)) {
+                        VStack(spacing: 2) {
+                            Image(systemName: "bus.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 26, height: 26)
+                                .background(t.accent, in: Circle())
+                                .overlay(Circle().stroke(.white, lineWidth: 2))
+                                .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+                            Text("STOP").font(t.mono(8, weight: .bold)).tracking(0.5)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(t.accent, in: Capsule())
                         }
                     }
+                    // Live bus position
                     if let b = r.busCoord {
                         Annotation("", coordinate: b) {
                             Text(busNo)
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 6).padding(.vertical, 3)
-                                .background(t.live, in: RoundedRectangle(cornerRadius: 5))
-                                .overlay(RoundedRectangle(cornerRadius: 5).stroke(.white, lineWidth: 1))
-                                .shadow(color: t.live.opacity(0.6), radius: 5)
+                                .padding(.horizontal, 7).padding(.vertical, 4)
+                                .background(t.live, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white, lineWidth: 1.5))
+                                .shadow(color: t.live.opacity(0.7), radius: 6)
                         }
                     }
+                    // Me — real device location (system blue dot)
+                    UserAnnotation()
                 }
                 .mapStyle(.standard(pointsOfInterest: .excludingAll, showsTraffic: false))
                 .overlay(alignment: .topLeading) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         legend(t.live, "BUS \(busNo)")
-                        legend(t.accent, "YOU")
+                        legend(t.accent, "STOP")
+                        legend(Color(hex: "1E7BFF"), "ME")
                     }.padding(12)
                 }
                 .overlay(alignment: .bottomTrailing) {
-                    Text("LIVE · LTA").font(t.mono(9)).tracking(0.6)
+                    Text(r.busCoord == nil ? "LIVE · LTA · NO BUS GPS" : "LIVE · LTA")
+                        .font(t.mono(9)).tracking(0.6)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background(.black.opacity(0.35), in: Capsule())
@@ -440,7 +444,7 @@ struct RouteMapView: View {
                 }
             }
         }
-        .frame(height: 220)
+        .frame(height: 240)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(t.line, lineWidth: 1))
     }
@@ -448,9 +452,9 @@ struct RouteMapView: View {
     private func legend(_ dot: Color, _ text: String) -> some View {
         HStack(spacing: 5) {
             Circle().fill(dot).frame(width: 6, height: 6)
-            Text(text).font(t.mono(10)).foregroundStyle(t.dim).fixedSize()
+            Text(text).font(t.mono(9)).foregroundStyle(t.dim).fixedSize()
         }
-        .padding(.horizontal, 8).padding(.vertical, 4)
+        .padding(.horizontal, 7).padding(.vertical, 4)
         .background(t.surface, in: Capsule())
         .overlay(Capsule().stroke(t.line, lineWidth: 1))
     }

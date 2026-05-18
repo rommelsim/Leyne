@@ -12,9 +12,20 @@ struct RootView: View {
 
     private var t: Theme { m.t }
 
-    /// Routes tab changes through the model so the select haptic still fires.
+    /// Tab changes route through the model (keeps the select haptic). The
+    /// search tab is an action: it opens the search sheet and the content
+    /// selection stays on the current tab.
     private var tabSelection: Binding<AppTab> {
-        Binding(get: { m.tab }, set: { m.setTab($0) })
+        Binding(
+            get: { m.tab },
+            set: { next in
+                if next == .search {
+                    fb.select()
+                    m.searchOpen = true
+                } else {
+                    m.setTab(next)
+                }
+            })
     }
 
     var body: some View {
@@ -22,34 +33,27 @@ struct RootView: View {
             t.bg.ignoresSafeArea()
 
             // ── Native iOS 26 Liquid Glass tab bar ──────────
+            // Home/Nearby/Settings sit in the main glass pill; Search uses the
+            // .search role so iOS 26 renders it as its own detached pill.
             TabView(selection: tabSelection) {
-                HomeView()
-                    .tabItem { Label("Home", systemImage: "house.fill") }
-                    .tag(AppTab.home)
-                NearbyView()
-                    .tabItem { Label("Nearby", systemImage: "smallcircle.filled.circle") }
-                    .tag(AppTab.nearby)
-                SettingsView(
-                    onReplayLaunch: { m.launching = true },
-                    onReplayOnboarding: { m.showOnboarding = true }
-                )
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                .tag(AppTab.settings)
+                Tab("Home", systemImage: "house.fill", value: AppTab.home) {
+                    HomeView()
+                }
+                Tab("Nearby", systemImage: "smallcircle.filled.circle", value: AppTab.nearby) {
+                    NearbyView()
+                }
+                Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
+                    SettingsView(
+                        onReplayLaunch: { m.launching = true },
+                        onReplayOnboarding: { m.showOnboarding = true }
+                    )
+                }
+                Tab(value: AppTab.search, role: .search) {
+                    Color.clear   // never shown — selection is intercepted
+                }
             }
             .tint(t.accent)
             .offset(x: shakeOffset)
-
-            // ── Search FAB (floats above the glass tab bar) ──
-            if !m.launching && !m.showOnboarding && !m.showAdd
-                && m.openCard == nil && !m.searchOpen && m.liveActivity == nil {
-                SearchFAB(t: t) {
-                    fb.select(); m.searchOpen = true
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .padding(.trailing, 16).padding(.bottom, 92)
-                .transition(.scale.combined(with: .opacity))
-                .zIndex(25)
-            }
 
             // ── Detail ──────────────────────────────────────
             if let card = m.openCardLive() {
@@ -84,7 +88,9 @@ struct RootView: View {
             }
 
             // ── Onboarding ──────────────────────────────────
-            if m.showOnboarding && !m.launching {
+            // Mounted under the launch splash (zIndex 50 < 200) so when the
+            // splash fades it reveals onboarding, never a flash of Home.
+            if m.showOnboarding {
                 OnboardingView(t: t, dark: m.isDark,
                                 onRequestLocation: { LocationManager.shared.requestPermission() }) {
                     m.finishOnboarding()

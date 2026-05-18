@@ -227,17 +227,24 @@ struct PinnedCardView: View {
                     ServiceRow(s: s, t: t) { onOpen($0) }
                 }
                 if overflow > 0 {
-                    HStack {
-                        Text("+ \(overflow) more \(overflow == 1 ? "service" : "services")")
-                            .foregroundStyle(t.dim)
-                        Spacer()
-                        HStack(spacing: 4) {
-                            Text("See all")
-                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
-                        }.foregroundStyle(t.fg)
+                    Button { onOpen(nil) } label: {
+                        HStack {
+                            Text("+ \(overflow) more \(overflow == 1 ? "service" : "services")")
+                                .foregroundStyle(t.dim)
+                            Spacer()
+                            HStack(spacing: 4) {
+                                Text("See all")
+                                Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
+                            }.foregroundStyle(t.fg)
+                        }
+                        .font(t.mono(11))
+                        // Extra top room so this hit target clears the bus
+                        // timer (ETA) of the service row directly above it.
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16).padding(.bottom, 14)
+                        .contentShape(Rectangle())
                     }
-                    .font(t.mono(11))
-                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .buttonStyle(.plain)
                     .overlay(alignment: .top) { Divider().overlay(t.line) }
                 }
             }
@@ -250,15 +257,18 @@ struct PinnedCardView: View {
         )
         .shadow(color: isNew ? t.live.opacity(0.1) : (anyArriving ? t.live.opacity(0.12) : .black.opacity(0.02)),
                 radius: anyArriving || isNew ? 14 : 1, y: anyArriving || isNew ? 8 : 1)
+        // Entrance is additive only — the card is always visible. A genuinely
+        // new card gets a subtle intro; it never gates whether it shows
+        // (e.g. when inserted while the Home tab was off-screen).
         .opacity(exiting ? 0 : 1)
-        .scaleEffect(exiting ? 0.97 : (appeared ? 1 : 0.94))
-        .offset(x: exiting ? 36 : 0, y: appeared ? 0 : -16)
+        .scaleEffect(exiting ? 0.97 : ((isNew && !appeared) ? 0.94 : 1))
+        .offset(x: exiting ? 36 : 0, y: (isNew && !appeared) ? -16 : 0)
         .contentShape(Rectangle())
         .onTapGesture { if !exiting { onOpen(nil) } }
         .onAppear {
             if isNew {
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) { appeared = true }
-            } else { appeared = true }
+            }
         }
     }
 }
