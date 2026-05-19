@@ -35,9 +35,13 @@ Stop** widget. Long-press the widget ▸ **Edit Widget** to choose which pinned
 stop it shows. Pin a stop in the app first so it can be selected.
 
 **Why do I see ads, and are they tracking me?**
-Leyne is free and shows banner ads via Google AdMob. The app does not run the
-tracking-permission prompt and serves ads in a limited mode. See the privacy
-policy for details.
+Leyne is free and shows banner ads via Google AdMob. On first launch you're
+asked for consent — a Google consent form where it's required (e.g. the
+EEA/UK), plus Apple's App Tracking Transparency prompt. If you **allow**
+tracking, ads can be personalized using your device's advertising identifier;
+if you **decline**, you still see ads, but non-personalized ones. You can
+change this anytime in **iOS Settings ▸ Privacy & Security ▸ Tracking**. See
+the privacy policy for full details.
 
 ## Privacy
 
@@ -48,4 +52,4 @@ accounts. Full details: see the Privacy Policy linked alongside this page.
 
 - App: Leyne for iOS
 - Support contact: commute668@gmail.com
-- Last updated: 18 May 2026
+- Last updated: 19 May 2026

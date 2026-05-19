@@ -42,7 +42,10 @@
       "Bash(plutil -extract CFBundleIdentifier raw __TRACKED_VAR__/PlugIns/LyneWidgetsExtension.appex/Info.plist)",
       "Bash(gh auth *)",
       "Bash(gh repo *)",
-      "Bash(xcodebuild -list -project Lyne.xcodeproj)"
+      "Bash(xcodebuild -list -project Lyne.xcodeproj)",
+      "WebFetch(domain:rommelsim.github.io)",
+      "Bash(gh api *)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

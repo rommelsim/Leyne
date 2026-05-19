@@ -6,6 +6,8 @@
 	<string>Leyne</string>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-1910837226291536~3240337627</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Leyne uses your device identifier to show ads relevant to you and to keep the app free.</string>
 	<key>SKAdNetworkItems</key>
