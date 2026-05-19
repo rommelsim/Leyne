@@ -1,7 +1,6 @@
 // Lyne — sensory feedback system. Ported from feedback.js.
-// Three modalities: audio (synthesised tones), haptic (Core Haptics / UIKit
-// generators), motion (a published event the device shell subscribes to for a
-// shake). Four intensities: tap / select / success / arrival.
+// Two modalities: audio (synthesised tones) and haptic (UIKit generators).
+// Four intensities: tap / select / success / arrival.
 //
 // The app stays quiet by default — only select/success/arrival fire ambiently.
 
@@ -9,23 +8,17 @@ import SwiftUI
 import AVFoundation
 import UIKit
 
-enum FeedbackKind { case tap, select, success, arrival }
-
 final class Feedback: ObservableObject {
     static let shared = Feedback()
 
     @Published var sound = true
     @Published var haptic = true
-    @Published var motion = false
-
-    /// Emitted on success/arrival so the device shell can shake.
-    @Published var shake: (kind: FeedbackKind, id: UUID)? = nil
 
     private var engine: AVAudioEngine?
     private var mixer: AVAudioMixerNode?
 
-    func config(sound: Bool, haptic: Bool, motion: Bool) {
-        self.sound = sound; self.haptic = haptic; self.motion = motion
+    func config(sound: Bool, haptic: Bool) {
+        self.sound = sound; self.haptic = haptic
     }
 
     // ─── Public intensities ───────────────────────────────────
@@ -44,21 +37,11 @@ final class Feedback: ObservableObject {
         blip(freq: 660, gain: 0.05, decay: 0.09, type: .sine)
         blip(freq: 990, gain: 0.06, decay: 0.13, type: .sine, delay: 0.08)
         notify(.success)
-        emitShake(.success)
     }
 
+    /// Arrival is intentionally minimal: a single gentle vibration.
     func arrival() {
-        blip(freq: 740,  gain: 0.06,  decay: 0.16, type: .sine)
-        blip(freq: 880,  gain: 0.06,  decay: 0.16, type: .sine, delay: 0.11)
-        blip(freq: 1108, gain: 0.055, decay: 0.22, type: .sine, delay: 0.22)
-        notify(.warning)
-        emitShake(.arrival)
-    }
-
-    // ─── Motion ───────────────────────────────────────────────
-    private func emitShake(_ kind: FeedbackKind) {
-        guard motion else { return }
-        shake = (kind, UUID())
+        vibrate(.soft)
     }
 
     // ─── Haptics ──────────────────────────────────────────────

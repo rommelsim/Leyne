@@ -45,7 +45,16 @@
       "Bash(xcodebuild -list -project Lyne.xcodeproj)",
       "WebFetch(domain:rommelsim.github.io)",
       "Bash(gh api *)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(echo \"exit:$?\")",
+      "Bash(sips -g pixelWidth -g pixelHeight -g hasAlpha -g space AppIcon.png)",
+      "Bash(python3 -c \"import PIL; print\\('PIL', PIL.__version__\\)\")",
+      "Bash(xcrun --find swift)",
+      "Bash(cat)",
+      "Bash(python3 /tmp/gen_lyne_light_icon.py)",
+      "Bash(sips -g pixelWidth -g pixelHeight -g hasAlpha -g space \"/Users/rommel/Desktop/Lyne/Lyne/Lyne/Assets.xcassets/AppIcon.appiconset/AppIcon-Light.png\")",
+      "Bash(sips -g pixelWidth -g hasAlpha \"/Users/rommel/Desktop/Lyne/Lyne/Lyne/Assets.xcassets/AppIcon.appiconset/AppIcon.png\")"
     ]
   }
 }

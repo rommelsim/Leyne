@@ -32,17 +32,28 @@ struct AddStopSheet: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.black.opacity(0.4).ignoresSafeArea().onTapGesture(perform: onClose)
-            VStack(spacing: 0) {
-                Capsule().fill(t.line).frame(width: 36, height: 5)
-                    .padding(.top, 8).padding(.bottom, 14)
-                header
-                if selectedCode == nil { step1 } else { step2 }
+            if m.showAdd {
+                Color.black.opacity(0.4).ignoresSafeArea()
+                    .onTapGesture(perform: onClose)
+                    .transition(.opacity)
+                VStack(spacing: 0) {
+                    Capsule().fill(t.line).frame(width: 36, height: 5)
+                        .padding(.top, 8).padding(.bottom, 14)
+                    header
+                    if selectedCode == nil { step1 } else { step2 }
+                }
+                .frame(maxHeight: UIScreen.main.bounds.height * 0.85)
+                .background(t.bg)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .transition(.move(edge: .bottom))
             }
-            .frame(maxHeight: UIScreen.main.bounds.height * 0.85)
-            .background(t.bg)
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .transition(.move(edge: .bottom))
+        }
+        // Dim fades, card springs up from the bottom (and back down on close).
+        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: m.showAdd)
+        // The view now persists, so start each open fresh (matches the old
+        // recreate-on-present behaviour).
+        .onChange(of: m.showAdd) { _, open in
+            if open { q = ""; selectedCode = nil; tracked = [] }
         }
     }
 
@@ -120,7 +131,8 @@ struct AddStopSheet: View {
             Text("Enable location in Nearby to see stops around you, or search above.")
                 .font(t.sans(12)).foregroundStyle(t.dim).padding(.horizontal, 4).padding(.bottom, 8)
         }
-        ForEach(store.nearby) { stop in
+        ForEach(Array(store.nearby.enumerated()), id: \.element.id) { i, stop in
+            if i > 0 { Divider().overlay(t.line) }
             Button { pick(stop.stopCode) } label: { stopRow(name: stop.stopName,
                 code: stop.stopCode, trailing: fmtDistance(stop.distanceM)) }
                 .buttonStyle(.plain)
@@ -130,7 +142,8 @@ struct AddStopSheet: View {
     @ViewBuilder private var resultsList: some View {
         if !buses.isEmpty {
             groupHeader("BUSES", buses.count)
-            ForEach(buses.prefix(8), id: \.ServiceNo) { b in
+            ForEach(Array(buses.prefix(8).enumerated()), id: \.element.ServiceNo) { i, b in
+                if i > 0 { Divider().overlay(t.line) }
                 Button { Task {
                     if let s = await store.originStop(ofService: b.ServiceNo) { pick(s.BusStopCode) }
                 } } label: {
@@ -147,13 +160,13 @@ struct AddStopSheet: View {
                         Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(t.dim)
                     }
                     .padding(.vertical, 10).padding(.horizontal, 8)
-                    .overlay(alignment: .bottom) { Divider().overlay(t.line) }
                 }.buttonStyle(.plain)
             }
         }
         if !stops.isEmpty {
             groupHeader("STOPS", stops.count)
-            ForEach(stops.prefix(30), id: \.BusStopCode) { s in
+            ForEach(Array(stops.prefix(30).enumerated()), id: \.element.BusStopCode) { i, s in
+                if i > 0 { Divider().overlay(t.line) }
                 Button { pick(s.BusStopCode) } label: {
                     stopRow(name: s.Description, code: s.BusStopCode, trailing: s.RoadName)
                 }.buttonStyle(.plain)
@@ -177,7 +190,6 @@ struct AddStopSheet: View {
             Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(t.dim)
         }
         .padding(.vertical, 12).padding(.horizontal, 8)
-        .overlay(alignment: .bottom) { Divider().overlay(t.line) }
     }
 
     // ─── Step 2: pick buses ───────────────────────────────

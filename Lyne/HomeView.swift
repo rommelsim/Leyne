@@ -106,6 +106,28 @@ struct HomeView: View {
     @State private var pullY: CGFloat = 0
     @State private var pullArmed = true
 
+    // Tips: one at a time, random start each launch, cycle on tap,
+    // dismissible (persists once hidden).
+    @AppStorage("lyne.tipsDismissed") private var tipsDismissed = false
+    @State private var tipIndex = 0
+    @State private var didRandomizeTip = false
+    private let tips: [(icon: String, title: String, body: String)] = [
+        ("bell", "Let the phone tell you",
+         "Cards buzz when your bus is 2 minutes away. Stop refreshing."),
+        ("pin", "Pin the stops you actually use",
+         "Tap “Add a bus stop”, pick a stop, then choose which services to track."),
+        ("hand.draw", "Hold to reorder",
+         "Press and hold a pinned card, then drag it to reorder your list."),
+        ("pencil", "Rename a stop",
+         "Tap a card’s label to give it a name that means something to you."),
+        ("location.circle", "Find stops around you",
+         "Open Nearby and allow location to see the closest stops by distance."),
+        ("lock.iphone", "Glance from the Lock Screen",
+         "Start a Live Activity on a bus to watch its countdown without opening the app."),
+        ("square.grid.2x2", "Add the Home Screen widget",
+         "Long-press your Home Screen, add the Leyne widget, pick a pinned stop."),
+    ]
+
     private var t: Theme { m.t }
     // While reordering, render from a frozen snapshot so pointer-move events
     // don't rebuild every card (stopName/walkMin/liveServices) per frame.
@@ -143,10 +165,12 @@ struct HomeView: View {
                     AddPinTile(t: t) { m.showAdd = true }
                         .padding(.horizontal, 16).padding(.top, 12)
 
-                    sectionLabel("TIPS")
-                    tipCard.padding(.horizontal, 16).padding(.bottom, 12)
+                    if !tipsDismissed {
+                        sectionLabel("TIPS")
+                        tipCard.padding(.horizontal, 16).padding(.bottom, 12)
+                    }
 
-                    Text("LEYNE · BETA · v0.4")
+                    Text("LEYNE · BETA · v1.0")
                         .font(t.mono(10)).tracking(1).foregroundStyle(t.dim)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 16).padding(.bottom, 8)
@@ -179,6 +203,12 @@ struct HomeView: View {
                 visible: collapsed)
         }
         .background(t.bg.ignoresSafeArea())
+        .onAppear {
+            // Random tip per app launch (only the first time Home appears).
+            guard !didRandomizeTip else { return }
+            didRandomizeTip = true
+            tipIndex = Int.random(in: 0..<tips.count)
+        }
     }
 
     @ViewBuilder private var pullIndicator: some View {
@@ -212,20 +242,39 @@ struct HomeView: View {
     }
 
     private var tipCard: some View {
-        HStack(spacing: 12) {
+        let tip = tips[tipIndex % tips.count]
+        return HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 8).fill(t.accent.opacity(0.13))
                 .frame(width: 32, height: 32)
-                .overlay(Image(systemName: "bell").font(.system(size: 15, weight: .semibold)).foregroundStyle(t.accent))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Let the phone tell you").font(t.sans(13, weight: .medium)).foregroundStyle(t.fg)
-                Text("Cards will buzz when your bus is 2 minutes away. Stop refreshing.")
+                .overlay(Image(systemName: tip.icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(t.accent))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(tip.title).font(t.sans(13, weight: .medium)).foregroundStyle(t.fg)
+                Text(tip.body)
                     .font(t.sans(11)).foregroundStyle(t.dim).lineSpacing(1)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Tip \(tipIndex % tips.count + 1) of \(tips.count) · tap for another")
+                    .font(t.mono(9)).foregroundStyle(t.dim.opacity(0.7)).padding(.top, 2)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { tipsDismissed = true }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(t.dim)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
         .background(t.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(t.line, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                tipIndex = (tipIndex + 1) % tips.count
+            }
+        }
     }
 
     // ─── Pinned section: empty / error / cards ────────────

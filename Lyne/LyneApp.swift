@@ -13,7 +13,6 @@ struct LyneApp: App {
                 .environmentObject(Feedback.shared)
                 .environmentObject(store)
                 .environmentObject(location)
-                .preferredColorScheme(model.isDark ? .dark : .light)
                 .task { await store.bootstrap() }
         }
     }

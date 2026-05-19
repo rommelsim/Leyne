@@ -53,14 +53,14 @@ struct Pin: Codable, Equatable {
 @MainActor
 final class AppModel: ObservableObject {
     // Tweaks (persisted)
-    @AppStorage("lyne.theme")       var themeRaw = "light"
     @AppStorage("lyne.sound")       var sound = true
     @AppStorage("lyne.haptic")      var haptic = true
-    @AppStorage("lyne.motion")      var motion = false
-    @AppStorage("lyne.searchStyle") var searchStyle = "conservative"
     @AppStorage("lyne.onboarded")   var onboarded = false
 
-    var isDark: Bool { themeRaw == "dark" }
+    /// Mirrors the iOS system appearance. The app no longer overrides the
+    /// color scheme — the theme always follows iOS Settings ▸ Display &
+    /// Brightness. Set from the SwiftUI environment in `RootView`.
+    @Published var isDark: Bool = false
     var t: Theme { isDark ? .dark : .light }
 
     // Navigation / overlays
@@ -154,7 +154,7 @@ final class AppModel: ObservableObject {
     }
 
     func finishOnboarding() { onboarded = true; showOnboarding = false }
-    func syncFeedback() { Feedback.shared.config(sound: sound, haptic: haptic, motion: motion) }
+    func syncFeedback() { Feedback.shared.config(sound: sound, haptic: haptic) }
 
     // ─── Tick: smooth countdown + keep visible stops fresh ─
     private func onTick() {

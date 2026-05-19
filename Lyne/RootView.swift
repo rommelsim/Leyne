@@ -8,7 +8,8 @@ struct RootView: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
 
-    @State private var shakeOffset: CGFloat = 0
+    // The theme follows the iOS system appearance (no in-app toggle).
+    @Environment(\.colorScheme) private var systemScheme
 
     private var t: Theme { m.t }
 
@@ -43,10 +44,7 @@ struct RootView: View {
                     NearbyView()
                 }
                 Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
-                    SettingsView(
-                        onReplayLaunch: { m.launching = true },
-                        onReplayOnboarding: { m.showOnboarding = true }
-                    )
+                    SettingsView()
                 }
                 Tab(value: AppTab.search, role: .search) {
                     Color.clear   // never shown — selection is intercepted
@@ -54,7 +52,6 @@ struct RootView: View {
             }
             .tint(t.accent)
             .bottomAdBanner(t)          // Home / Nearby / Settings
-            .offset(x: shakeOffset)
 
             // ── Detail ──────────────────────────────────────
             if let card = m.openCardLive() {
@@ -64,30 +61,21 @@ struct RootView: View {
 
             // ── Search sheet ────────────────────────────────
             if m.searchOpen {
-                Group {
-                    if m.searchStyle == "ambitious" {
-                        SearchSheetB(t: t, dark: m.isDark,
-                                     onClose: { m.searchOpen = false },
-                                     onPick: { m.openFromSearch(stopCode: $0) })
-                    } else {
-                        SearchSheetA(t: t, dark: m.isDark,
-                                     onClose: { m.searchOpen = false },
-                                     onPick: { m.openFromSearch(stopCode: $0) })
-                    }
-                }
+                SearchSheetA(t: t, dark: m.isDark,
+                             onClose: { m.searchOpen = false },
+                             onPick: { m.openFromSearch(stopCode: $0) })
                 .overlayAdBanner(t)         // Search overlay (above the TabView)
                 .transition(.opacity)
                 .zIndex(45)
             }
 
             // ── Add sheet ───────────────────────────────────
-            if m.showAdd {
-                AddStopSheet(t: t, onClose: { m.showAdd = false }) { code, tracked in
-                    m.addPin(code: code, tracked: tracked)
-                }
-                .transition(.opacity)
-                .zIndex(40)
+            // Always mounted; it animates itself in/out off m.showAdd so the
+            // dim can fade while the card springs up from the bottom.
+            AddStopSheet(t: t, onClose: { m.showAdd = false }) { code, tracked in
+                m.addPin(code: code, tracked: tracked)
             }
+            .zIndex(40)
 
             // ── Onboarding ──────────────────────────────────
             // Mounted under the launch splash (zIndex 50 < 200) so when the
@@ -118,27 +106,18 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: m.searchOpen)
-        .animation(.easeInOut(duration: 0.3), value: m.showAdd)
         .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
         .animation(.easeInOut(duration: 0.36), value: m.openCard)
-        .onChange(of: fb.shake?.id) { _, _ in
-            guard let kind = fb.shake?.kind, m.motion else { return }
-            runShake(big: kind == .arrival)
+        // Mirror the iOS system appearance into the model so the custom
+        // Theme (m.t / m.isDark) follows Light/Dark with no in-app toggle.
+        .onChange(of: systemScheme, initial: true) { _, scheme in
+            m.isDark = (scheme == .dark)
         }
         // First-run users gather ad consent from the onboarding "Ads" step.
         // Returning users (no onboarding) gather it here, once. Skippers fall
         // through to here on their next launch. AdConsent is idempotent.
         .task {
             if !m.showOnboarding { await AdConsent.gatherThenStart() }
-        }
-    }
-
-    private func runShake(big: Bool) {
-        let seq: [CGFloat] = big ? [-3, 3, -2, 2, -1, 0] : [-2, 2, -1, 0]
-        for (i, dx) in seq.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * (big ? 0.09 : 0.08)) {
-                withAnimation(.easeInOut(duration: big ? 0.09 : 0.08)) { shakeOffset = dx }
-            }
         }
     }
 }
