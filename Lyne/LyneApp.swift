@@ -15,10 +15,6 @@ struct LyneApp: App {
                 .environmentObject(location)
                 .preferredColorScheme(model.isDark ? .dark : .light)
                 .task { await store.bootstrap() }
-                // Gather UMP + ATT consent, then start the Mobile Ads SDK.
-                // Runs once; deferred to here (scene active) so the ATT
-                // prompt can actually display.
-                .task { await AdConsent.gatherThenStart() }
         }
     }
 }

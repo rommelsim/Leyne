@@ -14,6 +14,7 @@ struct OnboardingView: View {
     let t: Theme
     let dark: Bool
     var onRequestLocation: () -> Void = {}
+    var onRequestTracking: () -> Void = {}
     let onDone: () -> Void
 
     @State private var step = 0
@@ -28,12 +29,15 @@ struct OnboardingView: View {
         OnbStep(eyebrow: "STEP 2 · NARROW", title: "Pick the buses you ride.",
                 subtitle: "A stop can serve a dozen routes. Track only the ones you actually take — the rest stay out of your way.",
                 cta: "Continue", footnote: nil),
-        OnbStep(eyebrow: "STEP 3 · LOCATION", title: "See stops near you.",
-                subtitle: "We use your location only to find bus stops within walking distance. It stays on your device, is never sold, and you can change this anytime in Settings.",
-                cta: "Continue", footnote: "You will see the standard iOS permission prompt next."),
-        OnbStep(eyebrow: "STEP 4 · STAY PRESENT", title: "We’ll buzz when it’s close.",
+        OnbStep(eyebrow: "STEP 3 · STAY PRESENT", title: "We’ll buzz when it’s close.",
                 subtitle: "Set notify-at-2-min on any stop. Put the phone away. You’ll know in time to walk over.",
-                cta: "Get started", footnote: nil),
+                cta: "Continue", footnote: nil),
+        OnbStep(eyebrow: "STEP 4 · LOCATION", title: "See stops near you.",
+                subtitle: "We use your location only to find bus stops within walking distance. It stays on your device, is never sold, and you can change this anytime in Settings.",
+                cta: "Continue", footnote: "You’ll see the standard iOS location prompt next."),
+        OnbStep(eyebrow: "STEP 5 · ADS", title: "Free, thanks to ads.",
+                subtitle: "Leyne is free because it shows ads. With your permission they can be more relevant to you; decline and you’ll still get ads and every feature — entirely your choice.",
+                cta: "Continue", footnote: "Next, iOS asks whether Leyne can track. The app works either way."),
     ]
 
     var body: some View {
@@ -63,8 +67,9 @@ struct OnboardingView: View {
                 case 0: OnbVisualHero(t: t, dark: dark)
                 case 1: OnbVisualStack(t: t)
                 case 2: OnbVisualNarrow(t: t)
-                case 3: OnbVisualLocation(t: t, dark: dark)
-                default: OnbVisualNotification(t: t, dark: dark)
+                case 3: OnbVisualNotification(t: t, dark: dark)
+                case 4: OnbVisualLocation(t: t, dark: dark)
+                default: OnbVisualTracking(t: t, dark: dark)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,9 +110,17 @@ struct OnboardingView: View {
                     }
                 }
                 Button {
-                    if step == 3 { onRequestLocation() }   // LOCATION step
-                    if step == steps.count - 1 { onDone() }
-                    else { withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 } }
+                    let last = steps.count - 1
+                    if step == last - 1 {            // LOCATION priming (2nd-to-last)
+                        onRequestLocation()
+                        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 }
+                    } else if step == last {         // ADS / ATT priming (last)
+                        // Show Google UMP + Apple ATT, start the SDK, then the
+                        // host dismisses onboarding (see RootView).
+                        onRequestTracking()
+                    } else {
+                        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 }
+                    }
                 } label: {
                     Text(s.cta)
                         .font(t.sans(16, weight: .semibold))
@@ -253,6 +266,43 @@ private struct OnbVisualLocation: View {
                     Text(opt)
                         .font(t.sans(14, weight: opt == "Don’t Allow" ? .regular : .medium))
                         .foregroundStyle(opt == "Don’t Allow" ? t.fg : t.accent)
+                        .frame(maxWidth: .infinity).padding(.vertical, 11)
+                }
+            }
+        }
+        .frame(width: 270)
+        .background(dark ? Color(hex: "32302A") : Color(hex: "FCFAF3"))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.3), radius: 20, y: 18)
+    }
+}
+
+// Mock of Apple's App Tracking Transparency alert (purely illustrative,
+// like OnbVisualLocation). The copy mirrors NSUserTrackingUsageDescription
+// in LyneInfo.plist so the priming screen matches the real system prompt.
+private struct OnbVisualTracking: View {
+    let t: Theme
+    let dark: Bool
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 10).fill(t.accent)
+                    .frame(width: 36, height: 36)
+                    .overlay(Image(systemName: "hand.raised.fill").foregroundStyle(.white).font(.system(size: 16)))
+                Text("Allow “Leyne” to track your activity across other companies’ apps and websites?")
+                    .font(t.sans(15, weight: .semibold)).foregroundStyle(t.fg)
+                    .multilineTextAlignment(.center)
+                Text("Leyne uses your device identifier to show ads relevant to you and to keep the app free.")
+                    .font(t.sans(12)).foregroundStyle(t.dim)
+                    .multilineTextAlignment(.center).lineSpacing(2)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 16)
+            VStack(spacing: 0) {
+                ForEach(["Allow Tracking", "Ask App Not to Track"], id: \.self) { opt in
+                    Divider().overlay(t.line)
+                    Text(opt)
+                        .font(t.sans(14, weight: .medium))
+                        .foregroundStyle(t.accent)
                         .frame(maxWidth: .infinity).padding(.vertical, 11)
                 }
             }

@@ -41,6 +41,14 @@ enum AdConfig {
     /// needed — DEBUG already serves test ads everywhere). Leave empty.
     static let testDeviceIdentifiers: [String] = []
 
+    /// True only when the app is launched with the `-screenshots` argument
+    /// (set via the Xcode scheme or `simctl launch --args -screenshots` when
+    /// capturing App Store marketing shots). End users cannot inject launch
+    /// arguments into a shipped build, so this is safe to ship: it suppresses
+    /// the ad banner so screenshots never contain third-party ad creatives.
+    static let screenshotMode =
+        ProcessInfo.processInfo.arguments.contains("-screenshots")
+
     private static var started = false
     /// Idempotent SDK start. Safe to call more than once. Call only *after*
     /// consent has been gathered — see `AdConsent.gatherThenStart()`.
@@ -77,7 +85,7 @@ enum AdConsent {
         params.isTaggedForUnderAgeOfConsent = false
         #if DEBUG
         if !umpTestDeviceIdentifiers.isEmpty {
-            let debug = ConsentDebugSettings()
+            let debug = DebugSettings()
             debug.geography = .EEA          // force the EEA form in DEBUG
             debug.testDeviceIdentifiers = umpTestDeviceIdentifiers
             params.debugSettings = debug
@@ -223,7 +231,9 @@ extension View {
     /// `safeAreaInset` placement (banner above the bar) is still correct.
     @ViewBuilder
     func bottomAdBanner(_ t: Theme) -> some View {
-        if #available(iOS 26.0, *) {
+        if AdConfig.screenshotMode {
+            self
+        } else if #available(iOS 26.0, *) {
             tabViewBottomAccessory {
                 AdBanner().frame(maxWidth: .infinity)
             }
@@ -236,15 +246,20 @@ extension View {
     /// divider on the app surface. Used for full-screen overlays (e.g. the
     /// search sheet) that sit above the `TabView` and so can't use the
     /// `tabViewBottomAccessory` slot.
+    @ViewBuilder
     func overlayAdBanner(_ t: Theme) -> some View {
-        safeAreaInset(edge: .bottom, spacing: 0) {
-            AdBanner()
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .background(t.surface)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(t.line).frame(height: 1)
-                }
+        if AdConfig.screenshotMode {
+            self
+        } else {
+            safeAreaInset(edge: .bottom, spacing: 0) {
+                AdBanner()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .background(t.surface)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(t.line).frame(height: 1)
+                    }
+            }
         }
     }
 }

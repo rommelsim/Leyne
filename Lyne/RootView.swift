@@ -93,9 +93,16 @@ struct RootView: View {
             // Mounted under the launch splash (zIndex 50 < 200) so when the
             // splash fades it reveals onboarding, never a flash of Home.
             if m.showOnboarding {
-                OnboardingView(t: t, dark: m.isDark,
-                                onRequestLocation: { LocationManager.shared.requestPermission() }) {
-                    m.finishOnboarding()
+                OnboardingView(
+                    t: t, dark: m.isDark,
+                    onRequestLocation: { LocationManager.shared.requestPermission() },
+                    onRequestTracking: {
+                        // Priming screen is up; now run Google UMP + Apple ATT,
+                        // start the Ads SDK, then dismiss onboarding.
+                        Task { await AdConsent.gatherThenStart(); m.finishOnboarding() }
+                    }
+                ) {
+                    m.finishOnboarding()        // Skip — consent deferred to next launch
                 }
                 .transition(.opacity)
                 .zIndex(50)
@@ -117,6 +124,12 @@ struct RootView: View {
         .onChange(of: fb.shake?.id) { _, _ in
             guard let kind = fb.shake?.kind, m.motion else { return }
             runShake(big: kind == .arrival)
+        }
+        // First-run users gather ad consent from the onboarding "Ads" step.
+        // Returning users (no onboarding) gather it here, once. Skippers fall
+        // through to here on their next launch. AdConsent is idempotent.
+        .task {
+            if !m.showOnboarding { await AdConsent.gatherThenStart() }
         }
     }
 
