@@ -2,17 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- This app uses Google AdMob with personalized ads + ATT, so it
-	     engages in tracking. The Google Mobile Ads SDK ships its own
-	     PrivacyInfo.xcprivacy (its tracking domains + required-reason
-	     APIs); Apple aggregates all manifests at build, so this file only
-	     declares the APP's own data collection and API use. -->
-	<key>NSPrivacyTracking</key>
-	<true/>
+	<!-- Tracking is performed by the Google Mobile Ads SDK (personalized
+	     ads + IDFA via ATT), NOT by this app's own first-party code. The
+	     SDK ships its own PrivacyInfo.xcprivacy declaring NSPrivacyTracking
+	     = true together with its tracking domains; Apple aggregates all
+	     manifests, so the app is still correctly reported as tracking and
+	     the App Store privacy label stays accurate.
 
-	<!-- App-level tracking domains intentionally empty: the AdMob network
-	     connections originate from the Google SDK, which declares its own
-	     domains. Listing/guessing them here can break ad serving. -->
+	     This app-level flag is false because the app declares no tracking
+	     domains of its own. Apple's ITMS-91064 rejects NSPrivacyTracking =
+	     true with an empty NSPrivacyTrackingDomains; and adding Google's
+	     ad domains here would block ad serving when ATT is denied (the SDK
+	     manifest must own that). -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
 
