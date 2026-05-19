@@ -1,4 +1,4 @@
-# Lyne — iOS app
+# Leyne — iOS app
 
 Native SwiftUI implementation of the **Lyne** Singapore bus-transit prototype
 (from the Claude Design handoff bundle). Lyne's thesis: *let the phone tell you
