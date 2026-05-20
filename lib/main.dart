@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'screens/root_scaffold.dart';
+import 'services/ad_consent.dart';
 import 'state/app_model.dart';
 import 'theme.dart';
 
@@ -29,6 +30,9 @@ void main() async {
   // while this resolves. Tabs don't await this; data-bound screens read
   // DataStore.referenceState themselves.
   DataStore.shared.bootstrap();
+  // UMP consent → ATT prompt → MobileAds.initialize. Also fire-and-forget;
+  // the AdBanner widget polls AdConsent.started before requesting ads.
+  AdConsent.gatherThenStart();
   runApp(const LyneApp());
 }
 

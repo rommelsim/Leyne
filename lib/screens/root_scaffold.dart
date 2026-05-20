@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../data/data_store.dart';
 import '../theme.dart';
+import '../widgets/ad_banner.dart';
 import 'home_screen.dart';
 import 'nearby_screen.dart';
 import 'search_screen.dart';
@@ -53,6 +54,7 @@ class _RootScaffoldState extends State<RootScaffold> {
         children: [
           const _BootstrapBanner(),
           Expanded(child: IndexedStack(index: _index, children: screens)),
+          const AdBanner(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
