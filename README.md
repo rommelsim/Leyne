@@ -23,9 +23,11 @@ Powered by [LTA DataMall](https://datamall.lta.gov.sg/).
 # ~/.zshrc
 export LYNE_DIR="$HOME/Desktop/Lyne/Lyne"
 export LTA_API_KEY='+6zJ3XstTqOcDkvczHttWA=='     # from LTA DataMall
-export MAPS_API_KEY='AIza…'                       # Google Cloud → Maps SDK for Android (Android-only)
 export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"   # adb on PATH
 ```
+
+> The Detail screen's map uses Apple Maps on iOS and OpenStreetMap (via
+> `flutter_map`) on Android — both free, no key, no billing required.
 
 `flutter doctor` should show ✓ for both iOS and Android. Reload with
 `source ~/.zshrc`.
@@ -56,6 +58,9 @@ flutter run -d "iPhone 17" \
 > unit so dev never accidentally hits the production ad slot. See the
 > [AdMob matrix](#admob-which-unit-id-gets-requested) below for which
 > flag combos to use for TestFlight vs App Store.
+>
+> No `MAPS_API_KEY` is needed — Android uses OpenStreetMap, iOS uses
+> Apple Maps. Both are free with no setup.
 
 ### 3. Optional — shell aliases
 
@@ -315,7 +320,7 @@ persistence round-trip), plus a widget-shell smoke test.
 │   │   ├── eta_pill.dart               "3 min" / "Arr" pill
 │   │   ├── service_row.dart            One service in a card or expanded list
 │   │   ├── pinned_card.dart            Home card with tap-rename + 3+more
-│   │   ├── route_map.dart              Apple Maps iOS / Google Maps Android split
+│   │   ├── route_map.dart              Apple Maps iOS / OpenStreetMap Android split
 │   │   ├── route_progress.dart         Vertical timeline with tap-to-alight
 │   │   └── ad_banner.dart              320×50 banner with consent gating
 │   └── screens/
@@ -346,7 +351,7 @@ persistence round-trip), plus a widget-shell smoke test.
 5. ~~Port LTA data layer to Dart~~ ✅
 6. ~~Skeleton screens + bottom tab bar~~ ✅
 7. ~~Home + Nearby with live data~~ ✅
-8. ~~Detail screen with split map (Apple Maps iOS / Google Maps Android)~~ ✅
+8. ~~Detail screen with split map (Apple Maps iOS / OpenStreetMap Android)~~ ✅
 9. ~~Search + Settings~~ ✅
 10. ~~AdMob + ATT consent~~ ✅
 11. ~~Universal Links / App Links~~ ✅
@@ -362,7 +367,7 @@ persistence round-trip), plus a widget-shell smoke test.
 | `Module 'app_tracking_transparency' not found` in Xcode | You opened `Runner.xcodeproj` instead of `Runner.xcworkspace`. Quit Xcode, `rm -rf ~/Library/Developer/Xcode/DerivedData/Runner-*`, open `Runner.xcworkspace`. |
 | `LTA_API_KEY is empty` warning at app launch | You ran from Xcode's ⌘R button. Xcode doesn't pass `--dart-define`. Use `flutter run` from terminal instead. |
 | `No supported devices found with name or id matching 'Rommel's iPhone'` | The device name uses a curly apostrophe `’`. Use the UDID instead of the name. |
-| Map shows "For development purposes only" watermark on Android | `MAPS_API_KEY` not set. Export it; the gradle wiring picks it up automatically. |
+| Android map tiles grey / not loading | OSM tile server transient outage or no network. The bus stop pin + bus marker + polyline still draw on the empty canvas. Pull data via wifi and rebuild if persistent. |
 | "Account not approved yet" in ad banner logs | AdMob is still verifying your account identity. Takes 1–7 business days. Until then, use `LYNE_ADS_TEST=true` to see the test creative. |
 | App lands but Home shows "Couldn't load live data — LTA returned HTTP 500" | LTA DataMall transient outage (their server). Wait a few seconds and tap Retry. The data layer auto-retries 3× with 2s+4s backoff before surfacing this. |
 | Android disk cache "Couldn't resolve native function 'DOBJC_initializeApi'" | iOS Simulator-only bug in `path_provider`. Doesn't affect real devices. Cosmetic — disk cache silently re-fetches from network. |

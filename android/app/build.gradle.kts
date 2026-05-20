@@ -20,17 +20,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-
-        // Inject the Google Maps API key without committing it. Set via the
-        // MAPS_API_KEY environment variable (CI / shell profile) or in
-        // android/gradle.properties as `MAPS_API_KEY=…` (gitignored). Empty
-        // string keeps debug builds compiling; the map screen will just show
-        // a "For development purposes only" watermark until a real key is
-        // provided.
-        val mapsApiKey = System.getenv("MAPS_API_KEY")
-            ?: project.findProperty("MAPS_API_KEY")?.toString()
-            ?: ""
-        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        // Detail-screen map on Android is OpenStreetMap via flutter_map
+        // (no key needed). The MAPS_API_KEY manifestPlaceholder that used
+        // to be wired here was removed when we switched off
+        // google_maps_flutter.
     }
 
     buildTypes {

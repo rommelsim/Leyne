@@ -18,15 +18,10 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- Google Maps SDK for Android (used by google_maps_flutter on the
-             Detail screen, Task #8). TODO: create a Google Cloud project,
-             enable Maps SDK for Android, generate an API key, restrict it to
-             this applicationId + SHA-1, and set MAPS_API_KEY in your env or
-             gradle.properties. The build.gradle.kts wiring passes it through
-             as a manifestPlaceholder so the key is never committed. -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="${MAPS_API_KEY}"/>
+        <!-- Detail-screen map on Android is OpenStreetMap via flutter_map
+             (no API key, no billing). iOS uses Apple Maps. The Google
+             Maps SDK meta-data that used to live here was removed when
+             we switched off google_maps_flutter. -->
 
         <!-- Google Mobile Ads SDK app ID. The runtime ad unit ID is
              gated by build mode in lib/widgets/ad_banner.dart (test unit

@@ -1,23 +1,32 @@
-// Split route map — Apple Maps on iOS, Google Maps on Android.
+// Split route map — Apple Maps on iOS, OpenStreetMap (via flutter_map)
+// on Android.
 //
 // Both providers render the same three things sourced from `RouteInfo`:
-//   1. Your bus stop (filled pin, accent colour)
-//   2. The live bus position (label-tagged marker, live colour) — if LTA
-//      reports lat/lon for the next bus
+//   1. Your bus stop (filled marker, accent colour)
+//   2. The live bus position (live colour) — if LTA reports lat/lon for
+//      the next bus
 //   3. The route polyline through `journeySegment` (bus → your stop +
-//      small approach window). Drawing the whole route would connect 40–60
-//      stops with straight lines (LTA has no road geometry) → tangled mess.
+//      small approach window). Drawing the whole route would connect
+//      40–60 stops with straight lines (LTA has no road geometry) →
+//      tangled mess. Same fix as legacy.
 //
-// The provider split lives in one file so the Detail screen has a single
-// `RouteMap(...)` to compose with. The data layer never imports either
-// map plugin (GeoPoint is provider-neutral); marker / polyline conversions
-// happen here.
+// Why OSM on Android: avoids the Google Cloud + billing requirement
+// for `google_maps_flutter`. OSM's tiles are free, no key, no card on
+// file. Singapore has excellent OSM coverage. OSM's tile policy
+// requires a real user-agent string + attribution visible to users —
+// both wired below.
+//
+// Provider split lives in one file so the Detail screen has a single
+// `RouteMap(...)` to compose with. Data layer never imports either
+// map package (GeoPoint is provider-neutral); marker / polyline
+// conversions happen here.
 
 import 'dart:io';
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart' as apple;
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart' as gm;
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../data/data_store.dart';
 import '../theme.dart';
@@ -38,7 +47,7 @@ class RouteMap extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.t;
     final r = route;
-    final wrapper = ClipRRect(
+    return ClipRRect(
       borderRadius: BorderRadius.circular(18),
       child: Container(
         height: 240,
@@ -57,11 +66,12 @@ class RouteMap extends StatelessWidget {
               ),
       ),
     );
-    return wrapper;
   }
 
   Widget _platformMap(RouteInfo r, LyneTheme t) {
-    return Platform.isIOS ? _AppleMap(route: r, busNo: busNo) : _GoogleMap(route: r, busNo: busNo);
+    return Platform.isIOS
+        ? _AppleMap(route: r, busNo: busNo)
+        : _OsmMap(route: r, busNo: busNo, t: t);
   }
 
   Widget _placeholder(LyneTheme t, bool loading) {
@@ -163,6 +173,18 @@ class RouteMap extends StatelessWidget {
   );
 }
 
+/// Rough conversion from a latitude span to a zoom level (1=world,
+/// 21=street). 0.005 deg ≈ ~550m at the equator → zoom 16; bigger
+/// spans = smaller zoom.
+double _zoomFromSpan(double spanLat) {
+  if (spanLat < 0.005) return 16;
+  if (spanLat < 0.01) return 15;
+  if (spanLat < 0.02) return 14;
+  if (spanLat < 0.05) return 13;
+  if (spanLat < 0.1) return 12;
+  return 11;
+}
+
 // ─── Apple Maps (iOS) ──────────────────────────────────────────
 
 class _AppleMap extends StatelessWidget {
@@ -216,69 +238,121 @@ class _AppleMap extends StatelessWidget {
   }
 }
 
-// ─── Google Maps (Android) ─────────────────────────────────────
+// ─── OpenStreetMap via flutter_map (Android) ───────────────────
 
-class _GoogleMap extends StatelessWidget {
-  const _GoogleMap({required this.route, required this.busNo});
+class _OsmMap extends StatelessWidget {
+  const _OsmMap({
+    required this.route,
+    required this.busNo,
+    required this.t,
+  });
   final RouteInfo route;
   final String busNo;
+  final LyneTheme t;
 
   @override
   Widget build(BuildContext context) {
     final f = _frame(route);
     final you = route.stops[route.youIndex.clamp(0, route.stops.length - 1)];
     final segment = journeySegment(route);
-
-    final markers = <gm.Marker>{
-      gm.Marker(
-        markerId: const gm.MarkerId('stop'),
-        position: gm.LatLng(you.lat, you.lon),
-        icon: gm.BitmapDescriptor.defaultMarkerWithHue(gm.BitmapDescriptor.hueOrange),
-        infoWindow: gm.InfoWindow(title: 'STOP', snippet: you.name),
-      ),
-    };
     final bus = route.busCoord;
-    if (bus != null) {
-      markers.add(gm.Marker(
-        markerId: const gm.MarkerId('bus'),
-        position: gm.LatLng(bus.lat, bus.lon),
-        icon: gm.BitmapDescriptor.defaultMarkerWithHue(gm.BitmapDescriptor.hueGreen),
-        infoWindow: gm.InfoWindow(title: 'Bus $busNo'),
-      ));
-    }
 
-    final polylines = <gm.Polyline>{
-      if (segment.length >= 2)
-        gm.Polyline(
-          polylineId: const gm.PolylineId('route'),
-          points: [for (final s in segment) gm.LatLng(s.lat, s.lon)],
-          width: 3,
-          color: const Color(0xFF8B5A2B),
+    return FlutterMap(
+      options: MapOptions(
+        initialCenter: LatLng(f.centerLat, f.centerLon),
+        initialZoom: _zoomFromSpan(f.spanLat),
+        // Allow pan + zoom but disable rotation (matches the Apple Maps
+        // side; Singapore transit users don't need rotated maps).
+        interactionOptions: const InteractionOptions(
+          flags: InteractiveFlag.pinchZoom |
+              InteractiveFlag.drag |
+              InteractiveFlag.doubleTapZoom |
+              InteractiveFlag.flingAnimation,
         ),
-    };
-
-    return gm.GoogleMap(
-      initialCameraPosition: gm.CameraPosition(
-        target: gm.LatLng(f.centerLat, f.centerLon),
-        zoom: _zoomFromSpan(f.spanLat),
       ),
-      markers: markers,
-      polylines: polylines,
-      myLocationEnabled: true,
-      myLocationButtonEnabled: false,
-      compassEnabled: false,
-      mapToolbarEnabled: false,
+      children: [
+        // OSM tile layer. The user-agent header is required by OSM's
+        // tile usage policy — see https://operations.osmfoundation.org/policies/tiles/
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.leyne.lyne',
+          maxNativeZoom: 19,
+        ),
+        if (segment.length >= 2)
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: [for (final s in segment) LatLng(s.lat, s.lon)],
+                strokeWidth: 3,
+                color: const Color(0xFF8B5A2B), // LyneTheme.light.accent
+              ),
+            ],
+          ),
+        MarkerLayer(
+          markers: [
+            // Your stop pin.
+            Marker(
+              point: LatLng(you.lat, you.lon),
+              width: 36,
+              height: 36,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5A2B),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.directions_bus,
+                    size: 18, color: Colors.white),
+              ),
+            ),
+            if (bus != null)
+              Marker(
+                point: LatLng(bus.lat, bus.lon),
+                width: 48,
+                height: 28,
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3C8A4E), // LyneTheme.light.live
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.white, width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF3C8A4E).withValues(alpha: 0.7),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    busNo,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        // OSM license attribution — required by the OSM tile policy.
+        // Positioned bottom-left so it doesn't fight the LIVE tag in
+        // the bottom-right.
+        const RichAttributionWidget(
+          alignment: AttributionAlignment.bottomLeft,
+          attributions: [
+            TextSourceAttribution('OpenStreetMap contributors'),
+          ],
+        ),
+      ],
     );
   }
-}
-
-// Rough conversion from a latitude span to a zoom level (1=world, 21=street).
-// 0.005 deg ≈ ~550m at the equator → zoom 16; bigger spans = smaller zoom.
-double _zoomFromSpan(double spanLat) {
-  if (spanLat < 0.005) return 16;
-  if (spanLat < 0.01) return 15;
-  if (spanLat < 0.02) return 14;
-  if (spanLat < 0.05) return 13;
-  if (spanLat < 0.1) return 12;
-  return 11;
 }
