@@ -172,6 +172,73 @@ maxBurstMessageCount=4 spike-arrest policy.
 
 ---
 
+## Privacy / policy disclosures
+
+Each store has two layers of disclosure: declarations bundled inside
+the app binary (covered in code), and forms in the developer console
+(filled outside the repo).
+
+### In the app — already wired
+
+| File | What it declares |
+|---|---|
+| `ios/Runner/Info.plist` → `NSLocationWhenInUseUsageDescription` | "Leyne uses your location to show nearby bus stops and accurate arrival times." |
+| `ios/Runner/Info.plist` → `NSUserTrackingUsageDescription` | The ATT prompt copy: "Leyne uses your device identifier to show ads relevant to you and to keep the app free." |
+| `ios/Runner/Info.plist` → `SKAdNetworkItems` | 50 SKAdNetwork IDs for AdMob attribution (copied verbatim from legacy iOS). |
+| **`ios/Runner/PrivacyInfo.xcprivacy`** | **iOS Privacy Manifest, required since May 2024.** Declares: tracking=false at app level (Google Mobile Ads SDK ships its own manifest declaring tracking=true with its tracking domains, and Apple aggregates); collected data = Device ID + Advertising Data (linked, tracking, for third-party ads) + Precise Location (not linked, not tracking, app-functionality); API access = NSUserDefaults (CA92.1 — shared_preferences). |
+| `android/.../AndroidManifest.xml` → `INTERNET`, `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | Network + GPS permissions. |
+| `android/.../AndroidManifest.xml` → `com.google.android.gms.permission.AD_ID` | Required for AdMob to read the Advertising ID on Android 13+ (API 33+). |
+
+> **iOS one-time setup:** the `PrivacyInfo.xcprivacy` file exists on
+> disk but Xcode needs a file reference. Open
+> `ios/Runner.xcworkspace`, drag `PrivacyInfo.xcprivacy` from Finder
+> into the **Runner** group in Xcode's left sidebar, and tick **Runner**
+> under "Add to targets" when prompted. Done once — survives
+> subsequent `flutter clean` + `pod install`.
+
+### In the developer consoles — needs to be filled before submission
+
+**App Store Connect → Leyne → App Privacy:**
+
+| Data type | Linked to user? | Used for tracking? | Purposes |
+|---|---|---|---|
+| Precise Location | No | No | App Functionality (Nearby ranks stops by walking distance) |
+| Device ID | Yes | **Yes** | Third-Party Advertising (IDFA via AdMob, gated by ATT prompt) |
+| Other Diagnostic Data | Yes | Yes | Third-Party Advertising (ad measurement / fill data via AdMob) |
+
+These must match what `PrivacyInfo.xcprivacy` declares. App Store
+review rejects mismatches.
+
+**Play Console → Leyne → App content → Data Safety:**
+
+| Data type | Collected? | Shared with third parties? | Purpose | Required? |
+|---|---|---|---|---|
+| Location → Approximate | Yes | No | App functionality | Required to opt out (location use is core to Nearby) |
+| Location → Precise | Yes | No | App functionality | Same |
+| Device or other IDs (Advertising ID) | Yes | **Yes (Google AdMob)** | Advertising / marketing | Optional — user can withhold via OS settings |
+| App activity / interactions / search history | No | — | — | — |
+| Personal info / financial info / health / contacts | No | — | — | — |
+
+Also declare:
+- **Data encrypted in transit:** Yes (HTTPS-only — LTA + AdMob)
+- **Users can request data deletion:** Yes (uninstall = delete; no
+  server-side data)
+
+### Privacy policy URL — needs to be hosted
+
+Both stores require a publicly accessible privacy policy URL. The
+text already exists at `docs/privacy.md` + `docs/privacy.html` in this
+repo — needs to be hosted somewhere stable (e.g. `lyne.sg/privacy`,
+GitHub Pages on the repo's docs folder, or any static host) and the
+URL pasted into:
+- App Store Connect → Leyne → App Information → Privacy Policy URL
+- Play Console → Leyne → Store presence → Main store listing → Privacy Policy
+
+If you change the policy after launch, update the hosted page; both
+stores fetch the URL fresh on review.
+
+---
+
 ## Deep links
 
 The app handles three URL shapes:

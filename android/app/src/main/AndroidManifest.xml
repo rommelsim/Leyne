@@ -5,6 +5,13 @@
          both precise and approximate location options surfaced to the user. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Required for AdMob to read the Advertising ID on Android 13+ (API
+         33+). Without it, ads still serve but in degraded-targeting mode.
+         Combined with the consent flow in lib/services/ad_consent.dart so
+         the SDK only reads the ID after UMP consent is granted. The Play
+         Store Data Safety form must disclose "Device or other IDs" → AdMob
+         when this permission is present. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 
     <application
         android:label="Leyne"
