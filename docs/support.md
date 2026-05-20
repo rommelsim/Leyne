@@ -26,16 +26,24 @@ Leyne needs location access to show nearby stops:
 You can still search stops by name or 5-digit code without location.
 
 **How do I pin a stop?**
-Open Nearby or Search, tap a stop, then tap **Pin to Home**. Pinned stops
-appear on the Home tab with live arrivals. To reorder, use the drag handle
-on the right of each card; to rename, tap the pencil icon next to the
-stop label.
+Two paths:
+
+- **From Nearby:** tap a row to expand it, then tap **Pin to Home** in
+  the expanded section.
+- **From Search:** tap a result to open it, then tap the **Pin stop**
+  pill in the top right of the detail screen.
+
+Pinned stops appear on the Home tab with live arrivals. To reorder, use
+the drag handle on the right of each card; to rename, tap the pencil
+icon next to the stop label.
 
 **How do I customise which buses appear on my Home card?**
-Open a pinned stop (tap the card), then use the bookmark/check toggles
-beside each service to add or remove it from your Home view. The card
-shows up to three services at a glance with a "+N more" chip if there
-are more.
+Open a pinned stop (tap the card), then use the **check toggles**
+(filled circle = tracked, hollow circle = hidden) beside each service
+to add or remove it from your Home view. The card shows up to three
+tracked services at a glance with a "+N more" chip if there are more.
+Tap **Track all** at the top of the list to enable every service in
+one go.
 
 **What does the green "ARRIVING" badge mean?**
 Any service whose next bus is one minute or less away triggers the

@@ -269,7 +269,7 @@ lyne://service/15
   intent-filter has `android:autoVerify="true"` already.
 
 Format references:
-[Apple AASA guide](https://help.branch.io/developers-hub/docs/ios-app-site-association-file),
+[Apple — Supporting Associated Domains](https://developer.apple.com/documentation/xcode/supporting-associated-domains),
 [Android App Links guide](https://developer.android.com/training/app-links/verify-android-applinks).
 
 ---
