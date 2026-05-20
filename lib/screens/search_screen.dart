@@ -82,16 +82,20 @@ class _SearchScreenState extends State<SearchScreen> {
     return Scaffold(
       backgroundColor: t.bg,
       appBar: AppBar(title: const Text('Search')),
-      body: ListenableBuilder(
-        listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
-        builder: (context, _) => Column(
-          children: [
-            _searchField(t),
-            if (_q.isNotEmpty) _detectedHint(t),
-            Expanded(
-              child: _q.isEmpty ? _emptyState(t) : _results(t),
-            ),
-          ],
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _focus.unfocus,
+        child: ListenableBuilder(
+          listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
+          builder: (context, _) => Column(
+            children: [
+              _searchField(t),
+              if (_q.isNotEmpty) _detectedHint(t),
+              Expanded(
+                child: _q.isEmpty ? _emptyState(t) : _results(t),
+              ),
+            ],
+          ),
         ),
       ),
     );

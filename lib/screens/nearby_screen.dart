@@ -272,7 +272,17 @@ class _NearbyScreenState extends State<NearbyScreen> {
         children: [
           for (var i = 0; i < svcs.length; i++) ...[
             if (i > 0) Divider(height: 1, color: t.line),
-            ServiceRow(service: svcs[i]),
+            ServiceRow(
+              service: svcs[i],
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => DetailScreen(
+                    stopCode: stop.stopCode,
+                    initialSelectedNo: svcs[i].no,
+                  ),
+                ),
+              ),
+            ),
           ],
         ],
       );

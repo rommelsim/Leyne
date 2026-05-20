@@ -112,45 +112,11 @@ void main() {
   });
 
   group('SettingsScreen', () {
-    testWidgets('renders Feedback section with Sound + Haptics toggles',
-        (tester) async {
+    testWidgets('renders About card with app name', (tester) async {
       await tester.pumpWidget(_host(const SettingsScreen()));
       await tester.pump();
-      expect(find.text('FEEDBACK'), findsOneWidget);
-      expect(find.text('Sound'), findsOneWidget);
-      expect(find.text('Haptics'), findsOneWidget);
-      // Two switches, one per row.
-      expect(find.byType(Switch), findsNWidgets(2));
-    });
-
-    testWidgets('toggling Sound persists the new value', (tester) async {
-      expect(AppModel.shared.sound, isTrue);
-      await tester.pumpWidget(_host(const SettingsScreen()));
-      await tester.pump();
-      // Tap the first switch (Sound is the first row).
-      await tester.tap(find.byType(Switch).first);
-      await tester.pump();
-      expect(AppModel.shared.sound, isFalse);
-    });
-
-    testWidgets('LTA key status row reflects --dart-define state',
-        (tester) async {
-      await tester.pumpWidget(_host(const SettingsScreen()));
-      await tester.pump();
-      expect(find.text('LTA DataMall key'), findsOneWidget);
-      // In test mode the key is empty (no --dart-define).
-      expect(
-          find.textContaining('Not set — pass --dart-define'),
-          findsOneWidget);
-      // Red error icon, not the green check.
-      expect(find.byIcon(Icons.error_outline), findsOneWidget);
-    });
-
-    testWidgets('Theme section documents Follow system', (tester) async {
-      await tester.pumpWidget(_host(const SettingsScreen()));
-      await tester.pump();
-      expect(find.text('Follow system'), findsOneWidget);
-      expect(find.text('Light / Dark switches with the OS'), findsOneWidget);
+      expect(find.text('ABOUT'), findsOneWidget);
+      expect(find.text('Leyne'), findsOneWidget);
     });
   });
 }

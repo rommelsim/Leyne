@@ -11,9 +11,11 @@ import 'package:flutter/material.dart';
 
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/root_scaffold.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
 import 'services/deep_link_service.dart';
+import 'services/location_service.dart';
 import 'state/app_model.dart';
 import 'theme.dart';
 
@@ -42,9 +44,16 @@ void main() async {
   // dev builds already render "Test Ad" creatives. Populate
   // kTestDeviceIdentifiers in ad_consent.dart with physical-device
   // hashes if you also want those to see test ads.
-  AdConsent.gatherThenStart(
-    testDeviceIdentifiers: kTestDeviceIdentifiers,
-  );
+  //
+  // First-run users gather consent from the onboarding "Ads" step instead
+  // — running it here would race the priming screen and the OS prompts
+  // would show before the user sees the explanation. Skippers fall through
+  // to here on their next launch (AdConsent is idempotent).
+  if (AppModel.shared.onboardingDone) {
+    AdConsent.gatherThenStart(
+      testDeviceIdentifiers: kTestDeviceIdentifiers,
+    );
+  }
   // Subscribe to Universal Links / App Links so an external
   // https://lyne.sg/stop/12345 tap routes into DetailScreen.
   DeepLinkService.instance.start(_navigatorKey);
@@ -63,7 +72,42 @@ class LyneApp extends StatelessWidget {
       theme: LyneTheme.light.materialTheme,
       darkTheme: LyneTheme.dark.materialTheme,
       navigatorKey: _navigatorKey,
-      home: const RootScaffold(),
+      home: const _AppRoot(),
+    );
+  }
+}
+
+/// Routes between OnboardingScreen and RootScaffold based on the
+/// persisted onboarding flag. Listens to AppModel so the "Show again"
+/// entry in Settings can re-enter onboarding mid-session.
+class _AppRoot extends StatelessWidget {
+  const _AppRoot();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) {
+        if (AppModel.shared.onboardingDone) {
+          return const RootScaffold();
+        }
+        return OnboardingScreen(
+          onDone: AppModel.shared.finishOnboarding,
+          onRequestLocation: () {
+            // Fire-and-forget: the OS dialog races with the step
+            // transition, matching the legacy iOS behaviour.
+            LocationService.shared.requestAndStart();
+          },
+          onRequestTracking: () async {
+            // UMP → ATT → MobileAds.initialize, then dismiss onboarding
+            // so the user lands on Home. AdConsent is idempotent.
+            await AdConsent.gatherThenStart(
+              testDeviceIdentifiers: kTestDeviceIdentifiers,
+            );
+            AppModel.shared.finishOnboarding();
+          },
+        );
+      },
     );
   }
 }

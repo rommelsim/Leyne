@@ -54,7 +54,11 @@
       "Bash(cat)",
       "Bash(python3 /tmp/gen_lyne_light_icon.py)",
       "Bash(sips -g pixelWidth -g pixelHeight -g hasAlpha -g space \"/Users/rommel/Desktop/Lyne/Lyne/Lyne/Assets.xcassets/AppIcon.appiconset/AppIcon-Light.png\")",
-      "Bash(sips -g pixelWidth -g hasAlpha \"/Users/rommel/Desktop/Lyne/Lyne/Lyne/Assets.xcassets/AppIcon.appiconset/AppIcon.png\")"
+      "Bash(sips -g pixelWidth -g hasAlpha \"/Users/rommel/Desktop/Lyne/Lyne/Lyne/Assets.xcassets/AppIcon.appiconset/AppIcon.png\")",
+      "Bash(flutter analyze *)",
+      "Bash(flutter test *)",
+      "Bash(flutter devices *)",
+      "Bash(flutter run *)"
     ]
   }
 }

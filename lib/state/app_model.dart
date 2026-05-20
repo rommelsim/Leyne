@@ -4,7 +4,6 @@
 // Ports legacy/ios-native/Lyne/AppModel.swift, minus the bits that belong
 // to deferred tasks:
 //   • Live Activity (ActivityKit) — Task #12, via MethodChannel bridge.
-//   • Onboarding flow — Task #9 (Settings).
 //   • App Group / WidgetKit mirror — Task #12.
 //
 // State management is plain ChangeNotifier; persistence is
@@ -25,8 +24,7 @@ import '../services/location_service.dart';
 // data-portability tool needs to reconcile across platforms.
 const _kPinsKey = 'lyne.pins';
 const _kRecentsKey = 'lyne.recents';
-const _kSoundKey = 'lyne.sound';
-const _kHapticKey = 'lyne.haptic';
+const _kOnboardingDoneKey = 'lyne.onboardingDone';
 
 /// One user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
 /// "pinned" ⟺ "has buses shown". `tracked == null` means *all* services
@@ -78,20 +76,26 @@ class AppModel extends ChangeNotifier {
   /// live ETA labels on each tick.
   int tick = 0;
 
-  // ─── Settings (persisted) ─────────────────────────────────
-  bool _sound = true;
-  bool get sound => _sound;
-  set sound(bool v) {
-    _sound = v;
-    _prefs?.setBool(_kSoundKey, v);
+  // ─── Onboarding (persisted) ───────────────────────────────
+  // True once the user has either finished or skipped the intro flow.
+  // Drives the boot routing in main.dart: first-run users see
+  // OnboardingScreen and trigger UMP/ATT from its final step; returning
+  // users skip straight to RootScaffold and AdConsent runs at startup.
+  bool _onboardingDone = false;
+  bool get onboardingDone => _onboardingDone;
+
+  /// Mark onboarding complete (or skipped — same effect for routing).
+  void finishOnboarding() {
+    if (_onboardingDone) return;
+    _onboardingDone = true;
+    _prefs?.setBool(_kOnboardingDoneKey, true);
     notifyListeners();
   }
 
-  bool _haptic = true;
-  bool get haptic => _haptic;
-  set haptic(bool v) {
-    _haptic = v;
-    _prefs?.setBool(_kHapticKey, v);
+  /// Clear the flag so the user can replay onboarding from Settings.
+  void resetOnboarding() {
+    _onboardingDone = false;
+    _prefs?.setBool(_kOnboardingDoneKey, false);
     notifyListeners();
   }
 
@@ -111,8 +115,7 @@ class AppModel extends ChangeNotifier {
   /// Call once at startup (main.dart) before any UI binds.
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
-    _sound = _prefs!.getBool(_kSoundKey) ?? true;
-    _haptic = _prefs!.getBool(_kHapticKey) ?? true;
+    _onboardingDone = _prefs!.getBool(_kOnboardingDoneKey) ?? false;
 
     final raw = _prefs!.getString(_kPinsKey);
     if (raw != null) {

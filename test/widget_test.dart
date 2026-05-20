@@ -7,15 +7,26 @@
 // pumpAndSettle because the bootstrap banner runs a CircularProgressIndicator
 // that never settles in tests (DataStore.referenceState stays "loading"
 // since bootstrap isn't invoked here).
+//
+// Onboarding is pre-completed (lyne.onboardingDone=true) so the app routes
+// straight to RootScaffold; the onboarding flow itself is exercised by
+// test/onboarding_test.dart.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lyne/main.dart';
+import 'package:lyne/state/app_model.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   testWidgets('Root shell shows the four tabs and switches between them',
       (tester) async {
+    SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
+    await AppModel.shared.load();
+
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
 
@@ -34,6 +45,6 @@ void main() {
     await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('LTA DataMall key'), findsOneWidget);
+    expect(find.text('ABOUT'), findsOneWidget);
   });
 }

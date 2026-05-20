@@ -113,6 +113,12 @@ class _DetailScreenState extends State<DetailScreen> {
     _loadRoute();
   }
 
+  Future<void> _refresh() async {
+    DataStore.shared.ensureArrivals(widget.stopCode, force: true);
+    if (_selectedNo != null) await _loadRoute();
+    await Future.delayed(const Duration(milliseconds: 400));
+  }
+
   void _backOrPop() {
     if (_selectedNo != null && !_enteredViaService) {
       setState(() {
@@ -142,15 +148,20 @@ class _DetailScreenState extends State<DetailScreen> {
               children: [
                 _topBar(t, m, pinned, selected, stopName),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
-                    children: [
-                      _heading(t, m, stopName, selected),
-                      if (selected == null)
-                        ..._stopOverview(t, m, services)
-                      else
-                        ..._serviceDetail(t, m, selected),
-                    ],
+                  child: RefreshIndicator(
+                    color: t.accent,
+                    onRefresh: _refresh,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
+                      children: [
+                        _heading(t, m, stopName, selected),
+                        if (selected == null)
+                          ..._stopOverview(t, m, services)
+                        else
+                          ..._serviceDetail(t, m, selected),
+                      ],
+                    ),
                   ),
                 ),
               ],
