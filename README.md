@@ -152,15 +152,15 @@ Claude's project memory. High-level port order:
 2. ~~Move Swift to `legacy/ios-native/`~~ ✅
 3. ~~Scaffold Flutter at repo root~~ ✅
 4. ~~Wire pubspec + platform manifests~~ ✅
-5. Port LTA data layer to Dart.
-6. Skeleton screens + bottom tab bar.
-7. Home + Nearby with live data.
-8. Detail screen with split map (Apple Maps iOS / Google Maps Android).
-9. Search + Settings.
-10. AdMob + ATT consent.
-11. Universal Links / App Links.
-12. *(Post-launch)* Re-add Live Activity + Widget on iOS via MethodChannel,
-    reusing Swift code from `legacy/`.
+5. ~~Port LTA data layer to Dart~~ ✅
+6. ~~Skeleton screens + bottom tab bar~~ ✅
+7. ~~Home + Nearby with live data~~ ✅
+8. ~~Detail screen with split map (Apple Maps iOS / Google Maps Android)~~ ✅
+9. ~~Search + Settings~~ ✅
+10. ~~AdMob + ATT consent~~ ✅
+11. ~~Universal Links / App Links~~ ✅
+12. *(Deferred — post-Android-launch)* Re-add Live Activity + Widget on
+    iOS via MethodChannel, reusing Swift code from `legacy/`.
 
 ## Implementation notes (legacy)
 
