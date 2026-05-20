@@ -42,7 +42,13 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 /// their hash here. That's why the existing simulator screenshots
 /// show "Test Ad" overlays even with the production unit ID.
 const List<String> kTestDeviceIdentifiers = <String>[
-  // 'a1b2c3d4-…',  // paste device hashes from console here
+  // Rommel's iPhone — hash printed to the console on first ad request
+  // (see Xcode log: "To get test ads on this device, set: ...").
+  // With this hash listed, the device serves test creatives against the
+  // production unit ID — useful for validating ad slot rendering on
+  // hardware without earning real impressions / risking AdMob policy
+  // violations from self-clicks.
+  '65e887acf5c73093fbe2212071d84b64',
 ];
 
 class AdConsent {
