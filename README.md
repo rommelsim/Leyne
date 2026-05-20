@@ -80,6 +80,36 @@ No mock data — everything comes from LTA DataMall:
 - Settings: theme follow-system, sound/haptics, search style, replays.
 - Light & dark themes, sensory feedback (audio + Core Haptics).
 
+## Running the Flutter app
+
+The two required secrets — LTA DataMall key and Google Maps Android key —
+are **not committed**. Wire them locally once:
+
+```sh
+# ~/.zshrc (or ~/.bashrc)
+export LTA_API_KEY='+6zJ3XstTqOcDkvczHttWA=='     # from LTA DataMall
+export MAPS_API_KEY='AIza…'                        # Google Cloud → Maps SDK for Android
+```
+
+Then:
+
+```sh
+# iOS Simulator
+open -a Simulator
+flutter run -d "iPhone 17 Pro" --dart-define=LTA_API_KEY=$LTA_API_KEY
+
+# Android
+flutter emulators --launch <your-avd>
+flutter run --dart-define=LTA_API_KEY=$LTA_API_KEY
+```
+
+Maps API key is consumed at build time by `android/app/build.gradle.kts` via
+`System.getenv("MAPS_API_KEY")`; nothing more to pass on the command line.
+Apple Maps on iOS needs no key.
+
+For an IDE run config (VS Code / Android Studio), set the `--dart-define`
+arg in the launch settings so you don't retype it each session.
+
 ## Flutter migration
 
 Migration plan, deferred iOS-only features, and task tracking live in
@@ -87,8 +117,8 @@ Claude's project memory. High-level port order:
 
 1. ~~Install Flutter toolchain~~ ✅
 2. ~~Move Swift to `legacy/ios-native/`~~ ✅
-3. Scaffold Flutter at repo root.
-4. Wire pubspec + platform manifests.
+3. ~~Scaffold Flutter at repo root~~ ✅
+4. ~~Wire pubspec + platform manifests~~ ✅
 5. Port LTA data layer to Dart.
 6. Skeleton screens + bottom tab bar.
 7. Home + Nearby with live data.

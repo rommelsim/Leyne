@@ -1,8 +1,33 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- LTA DataMall requests + AdMob -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Nearby uses device GPS via geolocator (Task #7). Fine + coarse cover
+         both precise and approximate location options surfaced to the user. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
     <application
         android:label="Leyne"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
+        <!-- Google Maps SDK for Android (used by google_maps_flutter on the
+             Detail screen, Task #8). TODO: create a Google Cloud project,
+             enable Maps SDK for Android, generate an API key, restrict it to
+             this applicationId + SHA-1, and set MAPS_API_KEY in your env or
+             gradle.properties. The build.gradle.kts wiring passes it through
+             as a manifestPlaceholder so the key is never committed. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${MAPS_API_KEY}"/>
+
+        <!-- Google Mobile Ads SDK app ID. Currently Google's official test
+             app ID — safe to ship a dev build with; renders test ads only.
+             TODO: replace with this app's production AdMob app ID once
+             registered in the AdMob console for Android. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

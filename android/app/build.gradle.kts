@@ -15,14 +15,22 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.leyne.lyne"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Inject the Google Maps API key without committing it. Set via the
+        // MAPS_API_KEY environment variable (CI / shell profile) or in
+        // android/gradle.properties as `MAPS_API_KEY=…` (gitignored). Empty
+        // string keeps debug builds compiling; the map screen will just show
+        // a "For development purposes only" watermark until a real key is
+        // provided.
+        val mapsApiKey = System.getenv("MAPS_API_KEY")
+            ?: project.findProperty("MAPS_API_KEY")?.toString()
+            ?: ""
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {
