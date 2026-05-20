@@ -21,13 +21,13 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="${MAPS_API_KEY}"/>
 
-        <!-- Google Mobile Ads SDK app ID. Currently Google's official test
-             app ID — safe to ship a dev build with; renders test ads only.
-             TODO: replace with this app's production AdMob app ID once
-             registered in the AdMob console for Android. -->
+        <!-- Google Mobile Ads SDK app ID. The runtime ad unit ID is
+             gated by build mode in lib/widgets/ad_banner.dart (test unit
+             in debug, production unit in release), so this app ID can
+             safely point at the production account in all builds. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
+            android:value="ca-app-pub-5864511655536507~6330743279"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

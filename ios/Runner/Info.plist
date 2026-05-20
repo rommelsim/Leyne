@@ -31,7 +31,7 @@
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Leyne uses your device identifier to show ads relevant to you and to keep the app free.</string>
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-1910837226291536~3240337627</string>
+	<string>ca-app-pub-5864511655536507~6330743279</string>
 	<key>SKAdNetworkItems</key>
 	<array>
 		<dict><key>SKAdNetworkIdentifier</key><string>cstr6suwn9.skadnetwork</string></dict>

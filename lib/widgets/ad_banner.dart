@@ -24,21 +24,18 @@ import '../services/ad_consent.dart';
 import '../theme.dart';
 
 /// Resolve the banner ad unit ID at runtime. Debug builds get Google's
-/// always-test unit; release builds get the production unit.
+/// always-test units (zero AdMob policy risk anywhere); release builds
+/// get the production unit. Same production unit on both platforms per
+/// the current AdMob console setup.
 String _bannerUnitId() {
   if (kDebugMode) {
-    // Google's official test unit — same ID for both platforms.
+    // Google's official test units — different per platform.
     return Platform.isAndroid
         ? 'ca-app-pub-3940256099942544/6300978111'
         : 'ca-app-pub-3940256099942544/2934735716';
   }
-  // Release.
-  if (Platform.isIOS) return 'ca-app-pub-1910837226291536/6928301192';
-  // Android production: TODO — replace with the real unit ID once the
-  // Android app is registered in the AdMob console. Falls back to the
-  // test unit so a release Android build still renders an ad (test
-  // creative) instead of being broken.
-  return 'ca-app-pub-3940256099942544/6300978111';
+  // Production unit on both platforms.
+  return 'ca-app-pub-5864511655536507/8034707188';
 }
 
 class AdBanner extends StatefulWidget {
