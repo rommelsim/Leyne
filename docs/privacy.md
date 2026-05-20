@@ -1,7 +1,7 @@
 # Privacy Policy — Leyne
 
-**Effective date:** 18 May 2026
-**App:** Leyne (iOS) — live Singapore bus arrival times
+**Effective date:** 20 May 2026
+**App:** Leyne (iOS and Android) — live Singapore bus arrival times
 **Contact:** commute668@gmail.com
 
 Leyne is built to be private by default. We do not run accounts, we do not
@@ -14,21 +14,27 @@ the app.
 - **We (the developer) do not collect, store, or sell any personal data.**
 - Your pinned stops and preferences stay **on your device**.
 - **Location** is used only on your device to find nearby bus stops.
-- Bus data comes from **LM/LTA DataMall**; requests contain only bus stop and
+- Bus data comes from **LTA DataMall**; requests contain only bus stop and
   service codes — never anything about you.
-- The app shows ads via **Google AdMob**. With your permission (the iOS
-  tracking prompt) ads may be personalized; otherwise they are
-  non-personalized. Google collects limited device and usage data to serve
-  and measure ads.
+- The app shows ads via **Google AdMob**. With your permission (the tracking
+  prompt on iOS, or your OS-level ads-personalisation setting on Android),
+  ads may be personalized; otherwise they are non-personalized. Google
+  collects limited device and usage data to serve and measure ads.
 
 ## Information stored on your device
 
-The following is saved locally (iOS `UserDefaults` and a shared App Group
-container) and is **never transmitted to us or anyone else**:
+The following is saved locally using each platform's standard settings
+store — `NSUserDefaults` on iOS, `SharedPreferences` on Android — and is
+**never transmitted to us or anyone else**:
 
 - Pinned bus stops, nicknames, and which services you track
 - Recent searches
-- App preferences (theme, sound, haptics, search style, onboarding state)
+- App preferences (sound, haptics, onboarding state)
+
+The app also caches LTA's bus stop / bus services / bus routes datasets to
+your device's standard app cache directory for ~7 days so the app starts
+quickly and works briefly offline. These datasets are public open data and
+contain no personal information.
 
 This data is removed when you delete the app.
 
@@ -41,9 +47,12 @@ find and sort bus stops near you. Your location:
 - Is **not** sent to our servers (we have none) or to LTA;
 - Is **not** stored or shared.
 
-You can deny or revoke location access at any time in
-**iOS Settings ▸ Leyne ▸ Location**; the app remains usable (you can search
-stops manually).
+You can deny or revoke location access at any time:
+
+- **iOS:** Settings ▸ Leyne ▸ Location
+- **Android:** Settings ▸ Apps ▸ Leyne ▸ Permissions ▸ Location
+
+The app remains usable without location (you can search stops manually).
 
 ## Bus data — LTA DataMall
 
@@ -58,20 +67,23 @@ that API traffic is governed by LTA's own terms and privacy practices.
 Leyne displays banner ads through **Google AdMob**. To deliver and measure
 ads, Google and its partners may collect and process:
 
-- Device identifiers — including the advertising identifier (IDFA) when you
-  allow tracking — and a coarse, IP-based location;
+- Device identifiers — including the iOS advertising identifier (IDFA) or
+  the Android Advertising ID, when you allow tracking — and a coarse,
+  IP-based location;
 - Ad interactions (views, taps) and app/diagnostic usage related to ads;
-- Apple **SKAdNetwork** signals for privacy-preserving install attribution.
+- On iOS, Apple **SKAdNetwork** signals for privacy-preserving install
+  attribution.
 
 **Your consent controls this.** On first launch Leyne shows Google's
 consent flow (Google User Messaging Platform) where it is required — for
-example a GDPR consent form for users in the EEA/UK — and Apple's
+example a GDPR consent form for users in the EEA/UK — and, on iOS, Apple's
 **App Tracking Transparency** prompt:
 
-- If you **allow** tracking, Google may use the IDFA to show you
-  **personalized** ads.
+- If you **allow** tracking, Google may use the advertising identifier to
+  show you **personalized** ads.
 - If you **decline**, or where consent is not given, Google serves
-  **non-personalized** ads and does not use the IDFA for cross-app tracking.
+  **non-personalized** ads and does not use the advertising identifier
+  for cross-app tracking.
 
 In either case some data is processed by Google as an independent
 controller. See:
@@ -80,9 +92,14 @@ controller. See:
 - How Google uses information from sites/apps that use its services —
   https://policies.google.com/technologies/partner-sites
 
-You can change your tracking choice any time in
-**iOS Settings ▸ Privacy & Security ▸ Tracking**, and limit ad measurement
-under **Apple Advertising**.
+You can change your tracking / ads-personalisation choice any time:
+
+- **iOS:** Settings ▸ Privacy & Security ▸ Tracking; and limit ad
+  measurement under Apple Advertising.
+- **Android:** Settings ▸ Security & privacy ▸ More privacy & security ▸
+  Ads (path varies slightly by manufacturer — Samsung's One UI nests it
+  under Privacy ▸ Ads). You can opt out of personalized ads and reset
+  your advertising ID from there.
 
 ## What we do not do
 
@@ -93,15 +110,16 @@ under **Apple Advertising**.
 
 ## Children
 
-Leyne is a general-audience utility and is not directed to children under 13.
-We do not knowingly collect personal information from children.
+Leyne is a general-audience utility and is not directed to children under
+13. We do not knowingly collect personal information from children.
 
 ## Your choices
 
-- Revoke location in iOS Settings at any time.
-- Allow or decline ad tracking when prompted, and change it later in
-  **iOS Settings ▸ Privacy & Security ▸ Tracking**.
-- Delete the app to erase all locally stored data.
+- Revoke location in your phone's Settings at any time (paths above).
+- Allow or decline ad tracking (iOS) or change ads personalisation
+  (Android) when prompted, and update it later from system Settings.
+- Delete the app to erase all locally stored data, including pins,
+  recents, preferences, and the LTA data cache.
 
 ## Changes
 
