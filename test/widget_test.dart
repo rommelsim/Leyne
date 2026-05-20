@@ -1,9 +1,12 @@
-// This is a basic Flutter widget test.
+// Smoke test for the app shell. Verifies:
+//   • The four navigation destinations are present and labeled correctly.
+//   • Tapping a tab switches the visible screen.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// Doesn't drive DataStore.bootstrap (which would hit the real LTA API);
+// data layer logic is covered by test/data_layer_test.dart. We avoid
+// pumpAndSettle because the bootstrap banner runs a CircularProgressIndicator
+// that never settles in tests (DataStore.referenceState stays "loading"
+// since bootstrap isn't invoked here).
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,20 +14,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lyne/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('Root shell shows the four tabs and switches between them',
+      (tester) async {
+    await tester.pumpWidget(const LyneApp());
+    await tester.pump(); // initial frame
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // All four destinations are present in the bottom navigation.
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Nearby'), findsOneWidget);
+    expect(find.text('Search'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    // Home is the initial tab — its empty-state copy is visible.
+    expect(find.text('No pinned stops yet'), findsOneWidget);
+
+    // Switch to Settings; pump one frame for the tap, one for the layout.
+    await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('LTA DataMall key'), findsOneWidget);
   });
 }
