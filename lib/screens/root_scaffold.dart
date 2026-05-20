@@ -28,16 +28,22 @@ class RootScaffold extends StatefulWidget {
 class _RootScaffoldState extends State<RootScaffold> {
   int _index = 0;
 
-  static const _screens = <Widget>[
-    HomeScreen(),
-    NearbyScreen(),
-    SearchScreen(),
-    SettingsScreen(),
-  ];
+  static const int _nearbyIndex = 1;
+
+  void _switchTo(int i) {
+    if (i == _index) return;
+    setState(() => _index = i);
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
+    final screens = <Widget>[
+      const HomeScreen(),
+      const NearbyScreen(),
+      SearchScreen(onSwitchToNearby: () => _switchTo(_nearbyIndex)),
+      const SettingsScreen(),
+    ];
     return Scaffold(
       backgroundColor: t.bg,
       // IndexedStack preserves each tab's state across switches (a tapped
@@ -46,12 +52,12 @@ class _RootScaffoldState extends State<RootScaffold> {
       body: Column(
         children: [
           const _BootstrapBanner(),
-          Expanded(child: IndexedStack(index: _index, children: _screens)),
+          Expanded(child: IndexedStack(index: _index, children: screens)),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: _switchTo,
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.home_outlined),
