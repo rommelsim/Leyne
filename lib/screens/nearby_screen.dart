@@ -31,9 +31,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
   @override
   void initState() {
     super.initState();
-    // Prompt permission lazily — the prompt UI shows in build() if needed,
-    // so we just refresh the status here without forcing a dialog.
-    LocationService.shared.refreshStatus();
+    // Only start the position stream if permission is already granted
+    // (common case after the first prompt). When not yet granted, build()
+    // shows the in-app permission prompt and the user explicitly taps
+    // "Enable location" — that path goes through requestAndStart() which
+    // triggers the OS dialog. This matches legacy iOS LocationManager.
+    LocationService.shared.startIfAuthorized();
     DataStore.shared.prefetchNearbyArrivals();
     _recomputeOrder();
   }

@@ -46,8 +46,15 @@ class LtaService {
 
   final http.Client _client;
 
-  /// Pages fetched concurrently per wave (matches the Swift connection pool).
-  static const int _pageWindow = 6;
+  /// Pages fetched concurrently per wave. LTA DataMall enforces a "Spike
+  /// arrest" policy of maxBurstMessageCount=4 — any 5th+ request in the
+  /// burst window comes back as HTTP 500 with body
+  /// `{"fault":{"faultstring":"Spike arrest violation..."}}`. So we cap
+  /// the parallel wave at 4 to stay under the burst limit. The legacy
+  /// Swift code happened to run with maxConnectionsPerHost=8 but didn't
+  /// trip this — likely because URLSession serialised within HTTP/2
+  /// streams differently than Dart's http package.
+  static const int _pageWindow = 4;
 
   /// Per-request timeout. Mirrors the Swift session's
   /// timeoutIntervalForRequest = 15.

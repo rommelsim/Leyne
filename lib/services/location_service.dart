@@ -34,6 +34,14 @@ class LocationService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Start the position stream if (and only if) permission is already
+  /// granted. Never prompts. Safe to call from initState. Matches the
+  /// legacy iOS LocationManager.start() behaviour.
+  Future<void> startIfAuthorized() async {
+    await refreshStatus();
+    if (authorized) await _start();
+  }
+
   /// Prompt the user (if `notDetermined`) and start the stream if granted.
   /// On `deniedForever` the UI should offer to open system settings.
   Future<void> requestAndStart() async {

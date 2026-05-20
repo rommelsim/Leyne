@@ -154,23 +154,43 @@ class DataStore extends ChangeNotifier {
     if (_referenceState.state == LoadState.ready) return;
     _referenceState = const ReferenceState.loading();
     notifyListeners();
-    try {
-      final results = await Future.wait([_api.busStops(), _api.busServices()]);
-      final stops = results[0] as List<LtaBusStop>;
-      final svcs = results[1] as List<LtaBusService>;
-      _stopByCode
-        ..clear()
-        ..addEntries(stops.map((s) => MapEntry(s.busStopCode, s)));
-      _services = svcs;
-      _referenceState = const ReferenceState.ready();
-      if (_lastLoc != null) {
-        _recomputeNearby();
+    // LTA DataMall is occasionally flaky — a fresh request sometimes
+    // returns 500 for a few seconds. Try up to 3 times with 2s + 4s
+    // backoff before surfacing the error to the user. Cheap insurance:
+    // worst case adds 6s on a real outage; usual case is instant.
+    LtaException? lastErr;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final results =
+            await Future.wait([_api.busStops(), _api.busServices()]);
+        final stops = results[0] as List<LtaBusStop>;
+        final svcs = results[1] as List<LtaBusService>;
+        _stopByCode
+          ..clear()
+          ..addEntries(stops.map((s) => MapEntry(s.busStopCode, s)));
+        _services = svcs;
+        _referenceState = const ReferenceState.ready();
+        if (_lastLoc != null) _recomputeNearby();
+        notifyListeners();
+        return;
+      } on LtaException catch (e) {
+        lastErr = e;
+        // Don't retry auth-shaped errors — those won't fix themselves.
+        if (e.statusCode != null &&
+            (e.statusCode! < 500 || e.statusCode! >= 600)) {
+          break;
+        }
+        if (attempt < 2) {
+          await Future.delayed(Duration(seconds: 2 * (1 << attempt)));
+        }
+      } catch (e) {
+        _referenceState = ReferenceState.error(e.toString());
+        notifyListeners();
+        return;
       }
-    } on LtaException catch (e) {
-      _referenceState = ReferenceState.error(e.message);
-    } catch (e) {
-      _referenceState = ReferenceState.error(e.toString());
     }
+    _referenceState =
+        ReferenceState.error(lastErr?.message ?? 'Couldn’t reach LTA');
     notifyListeners();
   }
 
