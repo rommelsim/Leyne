@@ -1,22 +1,30 @@
-// Async LTA DataMall client + on-disk cache for the bulk reference datasets.
+// Async LTA DataMall client for the bulk reference datasets.
 //
-// Port of legacy/ios-native/Lyne/LTAService.swift. Behaviour parity:
+// Port of legacy/ios-native/Lyne/LTAService.swift. Behaviour parity for
+// fetching:
 //   • Bus Arrival v3 — single request, no URLCache.
-//   • Bus Stops / Bus Services / Bus Routes — paginated by $skip=500, fetched
-//     in concurrent windows of 6 pages per wave, disk-cached weekly.
-//   • Same 80,000-row safety bound on paged datasets.
+//   • Bus Stops / Bus Services / Bus Routes — paginated by $skip=500,
+//     fetched in concurrent windows of 4 pages per wave (LTA's
+//     spike-arrest limit). Same 80,000-row safety bound.
 //
-// Dart equivalents:
-//   URLSession            → http.Client with custom timeout
-//   TaskGroup             → Future.wait over a window
-//   FileManager.urls(.caches) → path_provider.getApplicationCacheDirectory()
+// Disk caching is intentionally NOT implemented in the Flutter port —
+// the canonical path_provider plugin transitively pulls in
+// path_provider_foundation → objective_c, whose iOS framework binary
+// ships an arm64e-only architecture slice. That conflicts with Flutter
+// engine's arm64-only Flutter.framework and causes App Store upload
+// rejections (ITMS-91080). Re-fetching ~5500 stops + ~600 services on
+// each cold start (~200KB JSON, ~3-5s on cellular) is the acceptable
+// trade-off vs. the alternative. If a future Flutter / path_provider
+// release publishes objective_c with both arm64 and arm64e slices, this
+// file can be reverted to disk-caching from this file's git history.
+//
+// Dart equivalents for the network bits:
+//   URLSession  → http.Client with custom timeout
+//   TaskGroup   → Future.wait over a window
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 
 import 'lta_config.dart';
 import 'lta_models.dart';
@@ -60,18 +68,6 @@ class LtaService {
   /// timeoutIntervalForRequest = 15.
   static const Duration _timeout = Duration(seconds: 15);
 
-  /// On-disk cache directory. Created lazily; both platforms route this to
-  /// the system cache location (auto-evictable under storage pressure).
-  Directory? _cacheDirCached;
-  Future<Directory> _cacheDir() async {
-    if (_cacheDirCached != null) return _cacheDirCached!;
-    final base = await getApplicationCacheDirectory();
-    final dir = Directory('${base.path}/LTA');
-    if (!await dir.exists()) await dir.create(recursive: true);
-    _cacheDirCached = dir;
-    return dir;
-  }
-
   // ─── Live: Bus Arrival v3 ──────────────────────────────────
 
   Future<LtaArrivalResponse> busArrival(
@@ -90,27 +86,18 @@ class LtaService {
   }
 
   // ─── Bulk reference datasets ───────────────────────────────
+  // No disk cache (see file-header note). Each cold start hits the
+  // network; the DataStore bootstrap pre-fetches once and holds the
+  // result in memory for the rest of the session.
 
-  Future<List<LtaBusStop>> busStops() => _cachedOrFetch(
-        cacheName: 'BusStops',
-        path: 'BusStops',
-        fromJson: LtaBusStop.fromJson,
-        toJson: (e) => e.toJson(),
-      );
+  Future<List<LtaBusStop>> busStops() =>
+      _fetchAllPaged('BusStops', LtaBusStop.fromJson);
 
-  Future<List<LtaBusService>> busServices() => _cachedOrFetch(
-        cacheName: 'BusServices',
-        path: 'BusServices',
-        fromJson: LtaBusService.fromJson,
-        toJson: (e) => e.toJson(),
-      );
+  Future<List<LtaBusService>> busServices() =>
+      _fetchAllPaged('BusServices', LtaBusService.fromJson);
 
-  Future<List<LtaBusRoute>> busRoutes() => _cachedOrFetch(
-        cacheName: 'BusRoutes',
-        path: 'BusRoutes',
-        fromJson: LtaBusRoute.fromJson,
-        toJson: (e) => e.toJson(),
-      );
+  Future<List<LtaBusRoute>> busRoutes() =>
+      _fetchAllPaged('BusRoutes', LtaBusRoute.fromJson);
 
   // ─── Internal helpers ──────────────────────────────────────
 
@@ -171,66 +158,4 @@ class LtaService {
     return out;
   }
 
-  Future<List<T>> _cachedOrFetch<T>({
-    required String cacheName,
-    required String path,
-    required T Function(Map<String, dynamic>) fromJson,
-    required Map<String, dynamic> Function(T) toJson,
-  }) async {
-    final cached = await _loadCache(cacheName, fromJson);
-    if (cached != null) return cached;
-
-    final fresh = await _fetchAllPaged<T>(path, fromJson);
-    await _saveCache(cacheName, fresh, toJson);
-    return fresh;
-  }
-
-  Future<List<T>?> _loadCache<T>(
-    String name,
-    T Function(Map<String, dynamic>) fromJson,
-  ) async {
-    try {
-      final file = File('${(await _cacheDir()).path}/$name.json');
-      if (!await file.exists()) return null;
-      final raw = await file.readAsString();
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      final savedAt = DateTime.tryParse(j['savedAt'] as String? ?? '');
-      if (savedAt == null) return null;
-      if (DateTime.now().difference(savedAt) >= LtaConfig.referenceCacheMaxAge) {
-        return null;
-      }
-      final items = (j['items'] as List?) ?? const [];
-      return items.cast<Map<String, dynamic>>().map(fromJson).toList();
-    } catch (e) {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('LTA cache miss ($name): $e');
-      }
-      return null;
-    }
-  }
-
-  Future<void> _saveCache<T>(
-    String name,
-    List<T> items,
-    Map<String, dynamic> Function(T) toJson,
-  ) async {
-    try {
-      final file = File('${(await _cacheDir()).path}/$name.json');
-      final payload = {
-        'savedAt': DateTime.now().toUtc().toIso8601String(),
-        'items': items.map(toJson).toList(),
-      };
-      // Atomic-ish write: temp file then rename, so a crash mid-write
-      // doesn't leave a corrupt cache.
-      final tmp = File('${file.path}.tmp');
-      await tmp.writeAsString(jsonEncode(payload));
-      await tmp.rename(file.path);
-    } catch (e) {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('LTA cache save failed ($name): $e');
-      }
-    }
-  }
 }

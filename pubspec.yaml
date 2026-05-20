@@ -37,7 +37,6 @@ dependencies:
   http: ^1.6.0
   geolocator: ^14.0.2
   shared_preferences: ^2.5.5
-  path_provider: ^2.1.5
   apple_maps_flutter: ^1.4.0
   google_mobile_ads: ^8.0.0
   app_tracking_transparency: ^2.0.6+1
