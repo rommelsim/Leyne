@@ -41,6 +41,16 @@ import '../theme.dart';
 const bool kLyneAdsTest =
     bool.fromEnvironment('LYNE_ADS_TEST', defaultValue: false);
 
+/// True when this build was compiled with
+/// `--dart-define=LYNE_SCREENSHOT_MODE=true`. Suppresses the ad banner
+/// entirely (no 50pt reservation, no SDK request) so App Store / Play
+/// Store marketing screenshots focus on the app's value, not on the
+/// "Nice job! …" test ad creative. Use this only when capturing
+/// screenshots — every other build path should leave the flag off so
+/// the slot is reserved correctly.
+const bool kLyneScreenshotMode =
+    bool.fromEnvironment('LYNE_SCREENSHOT_MODE', defaultValue: false);
+
 /// Resolve the banner ad unit ID at runtime.
 String _bannerUnitId() {
   if (kLyneAdsTest) {
@@ -58,7 +68,12 @@ class AdBanner extends StatefulWidget {
   const AdBanner({super.key});
 
   @override
-  State<AdBanner> createState() => _AdBannerState();
+  State<AdBanner> createState() {
+    // In screenshot mode the widget returns a zero-size shrink at build
+    // time; we still instantiate the State for type consistency but it
+    // never requests an ad.
+    return _AdBannerState();
+  }
 }
 
 class _AdBannerState extends State<AdBanner> {
@@ -69,6 +84,7 @@ class _AdBannerState extends State<AdBanner> {
   @override
   void initState() {
     super.initState();
+    if (kLyneScreenshotMode) return; // skip ad lifecycle entirely
     _attemptLoad();
   }
 
@@ -119,6 +135,10 @@ class _AdBannerState extends State<AdBanner> {
 
   @override
   Widget build(BuildContext context) {
+    // Screenshot mode — no banner at all, no reservation. Bottom nav
+    // sits flush against the screen edge for a cleaner marketing image.
+    if (kLyneScreenshotMode) return const SizedBox.shrink();
+
     final t = context.t;
     // Reserve the slot even when nothing is loaded so the layout doesn't
     // shift when an ad arrives. Thin hairline above to separate from the

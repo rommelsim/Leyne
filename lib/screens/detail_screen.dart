@@ -3,9 +3,12 @@
 // Two modes:
 //   • Stop overview: header + service list with per-bus track toggles.
 //     Tapping a service row sets `selectedNo` and drills in.
-//   • Service drill-in: hero card, Start Live Activity stub (Task #12),
-//     split RouteMap (Apple iOS / Google Android), RouteProgress with
-//     tap-to-alight.
+//   • Service drill-in: hero card, split RouteMap (Apple iOS / OSM
+//     Android), RouteProgress with tap-to-alight. The Live Activity
+//     start/stop button comes back in Task #12 via a MethodChannel
+//     bridge to ActivityKit; until then no placeholder card is rendered
+//     (the dev-facing stub _liveActivityStub is kept as the visual
+//     spec).
 //
 // Entered with `initialSelectedNo` to land directly in service drill-in
 // (e.g. tapping a specific bus row on a Home card).
@@ -410,9 +413,14 @@ class _DetailScreenState extends State<DetailScreen> {
   List<Widget> _serviceDetail(LyneTheme t, AppModel m, Service s) {
     return [
       _heroCard(t, s),
-      const SizedBox(height: 14),
-      _liveActivityStub(t, s),
       const SizedBox(height: 18),
+      // The Live Activity stub (Task #12 placeholder) is intentionally
+      // not rendered here. Its dev-facing "coming back in Task #12" copy
+      // doesn't belong in any user-facing build (TestFlight, App Store,
+      // Play Store, screenshots). When Task #12 lands with the real
+      // ActivityKit bridge, the actual Start/Stop button replaces this
+      // line. The unused _liveActivityStub method is kept below as the
+      // visual spec to match when implementing Task #12.
       _sectionLabel(t, 'LIVE MAP',
           hint: _routeInfo?.busCoord == null ? 'BUS GPS UNAVAILABLE' : null),
       RouteMap(route: _routeInfo, busNo: s.no, loading: _routeLoading),
@@ -516,6 +524,7 @@ class _DetailScreenState extends State<DetailScreen> {
   /// Placeholder for the iOS Live Activity start/stop button. Re-added in
   /// Task #12 via Flutter MethodChannel → native Swift ActivityKit code
   /// from legacy/ios-native/LyneWidgets/.
+  // ignore: unused_element
   Widget _liveActivityStub(LyneTheme t, Service s) {
     return InkWell(
       onTap: null,

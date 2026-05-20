@@ -1,14 +1,19 @@
 // Split route map — Apple Maps on iOS, OpenStreetMap (via flutter_map)
 // on Android.
 //
-// Both providers render the same three things sourced from `RouteInfo`:
-//   1. Your bus stop (filled marker, accent colour)
-//   2. The live bus position (live colour) — if LTA reports lat/lon for
-//      the next bus
-//   3. The route polyline through `journeySegment` (bus → your stop +
-//      small approach window). Drawing the whole route would connect
-//      40–60 stops with straight lines (LTA has no road geometry) →
-//      tangled mess. Same fix as legacy.
+// Both providers render three points:
+//   1. Your bus stop — accent-coloured pin
+//   2. The live bus position — green badge with the service number,
+//      if LTA reports lat/lon for the next bus
+//   3. The user's current location — iOS shows its native blue dot via
+//      myLocationEnabled; Android draws a small blue dot using the
+//      latest LocationService reading
+//
+// The route polyline was removed (was visually noisy — LTA has no road
+// geometry so straight lines between stops looked like a tangle on
+// turns). The three points alone communicate "where the bus is now,
+// where your stop is, where you are." Route progress as a list of
+// stops lives in the RouteProgress widget below the map.
 //
 // Why OSM on Android: avoids the Google Cloud + billing requirement
 // for `google_maps_flutter`. OSM's tiles are free, no key, no card on
@@ -22,6 +27,8 @@
 // conversions happen here.
 
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart' as apple;
 import 'package:flutter/material.dart';
@@ -29,6 +36,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../data/data_store.dart';
+import '../services/location_service.dart';
 import '../theme.dart';
 
 class RouteMap extends StatelessWidget {
@@ -187,42 +195,70 @@ double _zoomFromSpan(double spanLat) {
 
 // ─── Apple Maps (iOS) ──────────────────────────────────────────
 
-class _AppleMap extends StatelessWidget {
+class _AppleMap extends StatefulWidget {
   const _AppleMap({required this.route, required this.busNo});
   final RouteInfo route;
   final String busNo;
 
   @override
+  State<_AppleMap> createState() => _AppleMapState();
+}
+
+class _AppleMapState extends State<_AppleMap> {
+  // Custom marker bitmaps — generated once in initState as PNG bytes
+  // from the Material icon glyphs, then handed to apple_maps_flutter via
+  // BitmapDescriptor.fromBytes. apple_maps_flutter has no built-in
+  // "use this Flutter widget as a marker" so we render to PNG ourselves.
+  apple.BitmapDescriptor? _stopIcon;
+  apple.BitmapDescriptor? _busIcon;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMarkers();
+  }
+
+  Future<void> _loadMarkers() async {
+    // Stop pin — accent-coloured circle with the location icon.
+    final stopBytes = await _drawIconMarker(
+      icon: Icons.location_on,
+      fillColor: const Color(0xFF8B5A2B), // LyneTheme.light.accent
+    );
+    // Bus marker — green circle with the directions_bus icon.
+    final busBytes = await _drawIconMarker(
+      icon: Icons.directions_bus,
+      fillColor: const Color(0xFF3C8A4E), // LyneTheme.light.live
+    );
+    if (!mounted) return;
+    setState(() {
+      _stopIcon = apple.BitmapDescriptor.fromBytes(stopBytes);
+      _busIcon = apple.BitmapDescriptor.fromBytes(busBytes);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final f = _frame(route);
-    final you = route.stops[route.youIndex.clamp(0, route.stops.length - 1)];
-    final segment = journeySegment(route);
+    final f = _frame(widget.route);
+    final you = widget.route
+        .stops[widget.route.youIndex.clamp(0, widget.route.stops.length - 1)];
 
     final annotations = <apple.Annotation>{
       apple.Annotation(
         annotationId: apple.AnnotationId('stop'),
         position: apple.LatLng(you.lat, you.lon),
+        icon: _stopIcon ?? apple.BitmapDescriptor.defaultAnnotation,
         infoWindow: apple.InfoWindow(title: 'STOP', snippet: you.name),
       ),
     };
-    final bus = route.busCoord;
+    final bus = widget.route.busCoord;
     if (bus != null) {
       annotations.add(apple.Annotation(
         annotationId: apple.AnnotationId('bus'),
         position: apple.LatLng(bus.lat, bus.lon),
-        infoWindow: apple.InfoWindow(title: 'Bus $busNo'),
+        icon: _busIcon ?? apple.BitmapDescriptor.defaultAnnotation,
+        infoWindow: apple.InfoWindow(title: 'Bus ${widget.busNo}'),
       ));
     }
-
-    final polylines = <apple.Polyline>{
-      if (segment.length >= 2)
-        apple.Polyline(
-          polylineId: apple.PolylineId('route'),
-          points: [for (final s in segment) apple.LatLng(s.lat, s.lon)],
-          width: 3,
-          color: const Color(0xFF8B5A2B), // LyneTheme.light.accent
-        ),
-    };
 
     return apple.AppleMap(
       initialCameraPosition: apple.CameraPosition(
@@ -230,12 +266,76 @@ class _AppleMap extends StatelessWidget {
         zoom: _zoomFromSpan(f.spanLat),
       ),
       annotations: annotations,
-      polylines: polylines,
       myLocationEnabled: true,
       compassEnabled: false,
       mapType: apple.MapType.standard,
     );
   }
+}
+
+/// Render a Material icon onto a coloured circle and return the result
+/// as PNG bytes. apple_maps_flutter accepts these via
+/// BitmapDescriptor.fromBytes for a fully custom annotation glyph,
+/// bypassing Apple's default red-pin look.
+///
+/// The drawing happens directly on a Canvas (not via a widget tree),
+/// which avoids the off-screen-rendering rigmarole. Material icons
+/// resolve via the standard 'MaterialIcons' font that Flutter loads at
+/// startup, so the glyph just becomes a single character we paint with
+/// TextPainter.
+Future<Uint8List> _drawIconMarker({
+  required IconData icon,
+  required Color fillColor,
+  Color iconColor = Colors.white,
+  Color borderColor = Colors.white,
+  double size = 88,
+  double borderWidth = 4,
+}) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final centre = Offset(size / 2, size / 2);
+  final radius = size / 2;
+
+  // Soft drop shadow behind the circle for separation from map tiles.
+  final shadow = Paint()
+    ..color = Colors.black.withValues(alpha: 0.28)
+    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+  canvas.drawCircle(centre + const Offset(0, 2), radius - 2, shadow);
+
+  // Filled circle.
+  canvas.drawCircle(centre, radius - borderWidth, Paint()..color = fillColor);
+
+  // White border.
+  canvas.drawCircle(
+    centre,
+    radius - borderWidth / 2,
+    Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth,
+  );
+
+  // Icon glyph — Material icons are font characters indexed by codePoint.
+  final glyph = TextPainter(textDirection: TextDirection.ltr)
+    ..text = TextSpan(
+      text: String.fromCharCode(icon.codePoint),
+      style: TextStyle(
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+        fontSize: size * 0.55,
+        color: iconColor,
+      ),
+    )
+    ..layout();
+  glyph.paint(
+    canvas,
+    Offset((size - glyph.width) / 2, (size - glyph.height) / 2),
+  );
+
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(size.toInt(), size.toInt());
+  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+  return byteData!.buffer.asUint8List();
 }
 
 // ─── OpenStreetMap via flutter_map (Android) ───────────────────
@@ -254,8 +354,8 @@ class _OsmMap extends StatelessWidget {
   Widget build(BuildContext context) {
     final f = _frame(route);
     final you = route.stops[route.youIndex.clamp(0, route.stops.length - 1)];
-    final segment = journeySegment(route);
     final bus = route.busCoord;
+    final user = LocationService.shared.lastLocation; // may be null pre-grant
 
     return FlutterMap(
       options: MapOptions(
@@ -278,50 +378,36 @@ class _OsmMap extends StatelessWidget {
           userAgentPackageName: 'com.leyne.lyne',
           maxNativeZoom: 19,
         ),
-        if (segment.length >= 2)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: [for (final s in segment) LatLng(s.lat, s.lon)],
-                strokeWidth: 3,
-                color: const Color(0xFF8B5A2B), // LyneTheme.light.accent
-              ),
-            ],
-          ),
         MarkerLayer(
           markers: [
-            // Your stop pin.
+            // 1. Your bus stop — accent-coloured pin (Material location
+            //    icon, drop-pin shape via icon choice). Distinct from
+            //    the bus marker so it reads at a glance.
             Marker(
               point: LatLng(you.lat, you.lon),
-              width: 36,
-              height: 36,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF8B5A2B),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.25),
-                      blurRadius: 3,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
-                child: const Icon(Icons.directions_bus,
-                    size: 18, color: Colors.white),
+              width: 40,
+              height: 48,
+              alignment: Alignment.topCenter,
+              child: _PinShadow(
+                color: const Color(0xFF8B5A2B), // accent
+                child: const Icon(Icons.location_on,
+                    size: 44, color: Color(0xFF8B5A2B)),
               ),
             ),
+            // 2. Live bus position — green pill with the service number.
+            //    Pill shape + bus icon makes it instantly distinct from
+            //    the stop pin.
             if (bus != null)
               Marker(
                 point: LatLng(bus.lat, bus.lon),
-                width: 48,
-                height: 28,
+                width: 64,
+                height: 32,
                 child: Container(
                   alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF3C8A4E), // LyneTheme.light.live
-                    borderRadius: BorderRadius.circular(6),
+                    color: const Color(0xFF3C8A4E), // live
+                    borderRadius: BorderRadius.circular(99),
                     border: Border.all(color: Colors.white, width: 1.5),
                     boxShadow: [
                       BoxShadow(
@@ -330,14 +416,43 @@ class _OsmMap extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: Text(
-                    busNo,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.directions_bus,
+                          size: 12, color: Colors.white),
+                      const SizedBox(width: 4),
+                      Text(
+                        busNo,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            // 3. The user — small blue dot with white ring, iOS-style.
+            //    Only drawn once LocationService has produced a reading.
+            if (user != null)
+              Marker(
+                point: LatLng(user.lat, user.lon),
+                width: 20,
+                height: 20,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E7BFF),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF1E7BFF).withValues(alpha: 0.5),
+                        blurRadius: 8,
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -353,6 +468,31 @@ class _OsmMap extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Drop-shadow wrapper for a single icon-style marker. The pin icon
+/// already encodes the shape; this just adds a soft shadow beneath so
+/// it doesn't disappear into the map tiles.
+class _PinShadow extends StatelessWidget {
+  const _PinShadow({required this.color, required this.child});
+  final Color color;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 }
