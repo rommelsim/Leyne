@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal Links — the OS opens https://lyne.sg/stop/* and /service/*
+	     directly in the app instead of Safari. Requires hosting
+	     apple-app-site-association at the apex of lyne.sg; see README.
+
+	     To enable: in Xcode, open Runner → Signing & Capabilities → +
+	     Capability → Associated Domains. The capability picker will
+	     auto-discover applinks:lyne.sg from this file. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:lyne.sg</string>
+	</array>
+</dict>
+</plist>

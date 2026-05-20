@@ -85,6 +85,18 @@
 		<dict><key>SKAdNetworkIdentifier</key><string>97r2b46745.skadnetwork</string></dict>
 		<dict><key>SKAdNetworkIdentifier</key><string>3qcr597p9d.skadnetwork</string></dict>
 	</array>
+	<!-- Custom URL scheme for testing deep links without Universal Links
+	     setup. lyne://stop/12345 opens the app and routes to DetailScreen.
+	     Try in Safari on a simulator: lyne://stop/83139 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>sg.lyne.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>lyne</string></array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -13,8 +13,13 @@ import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'screens/root_scaffold.dart';
 import 'services/ad_consent.dart';
+import 'services/deep_link_service.dart';
 import 'state/app_model.dart';
 import 'theme.dart';
+
+/// Top-level navigator key so non-widget code (DeepLinkService) can
+/// push routes onto the global navigator.
+final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +38,9 @@ void main() async {
   // UMP consent → ATT prompt → MobileAds.initialize. Also fire-and-forget;
   // the AdBanner widget polls AdConsent.started before requesting ads.
   AdConsent.gatherThenStart();
+  // Subscribe to Universal Links / App Links so an external
+  // https://lyne.sg/stop/12345 tap routes into DetailScreen.
+  DeepLinkService.instance.start(_navigatorKey);
   runApp(const LyneApp());
 }
 
@@ -47,6 +55,7 @@ class LyneApp extends StatelessWidget {
       themeMode: ThemeMode.system,
       theme: LyneTheme.light.materialTheme,
       darkTheme: LyneTheme.dark.materialTheme,
+      navigatorKey: _navigatorKey,
       home: const RootScaffold(),
     );
   }

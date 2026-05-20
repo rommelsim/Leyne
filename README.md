@@ -110,6 +110,39 @@ Apple Maps on iOS needs no key.
 For an IDE run config (VS Code / Android Studio), set the `--dart-define`
 arg in the launch settings so you don't retype it each session.
 
+## Deep links
+
+The app handles two URL shapes:
+
+| Path | Action |
+|---|---|
+| `lyne.sg/stop/{code}` | Open Detail for that stop |
+| `lyne.sg/stop/{code}/{busNo}` | Open Detail drilled into a specific service |
+| `lyne.sg/service/{busNo}` | Resolve origin stop, open Detail there |
+
+**Testing without hosting anything** — the custom `lyne://` scheme is
+wired on both platforms, so a Safari/Chrome address-bar tap works:
+
+```
+lyne://stop/83139
+lyne://service/15
+```
+
+**Production Universal Links / App Links** require hosting two files at
+`https://lyne.sg/.well-known/`:
+
+- `apple-app-site-association` (no `.json` extension, served as
+  `application/json`) — for iOS Universal Links. Plus enable
+  "Associated Domains" capability on the Runner target in Xcode; the
+  `ios/Runner/Runner.entitlements` file is already set up with
+  `applinks:lyne.sg`.
+- `assetlinks.json` — for Android App Links. The AndroidManifest
+  intent-filter has `android:autoVerify="true"` already.
+
+Format for both is documented at
+[branch.io's universal links guide](https://help.branch.io/developers-hub/docs/ios-app-site-association-file)
+and [developer.android.com App Links guide](https://developer.android.com/training/app-links/verify-android-applinks).
+
 ## Flutter migration
 
 Migration plan, deferred iOS-only features, and task tracking live in

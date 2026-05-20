@@ -49,6 +49,30 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- App Links: lyne.sg/stop/{code}, /service/{busNo}. autoVerify
+                 makes Play check /.well-known/assetlinks.json on install so
+                 the OS opens these URIs in our app without a chooser dialog.
+                 Until the assetlinks.json file is hosted, this still works
+                 (the OS just shows a chooser the first time). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"/>
+                <data android:host="lyne.sg"/>
+                <data android:pathPrefix="/stop"/>
+                <data android:pathPrefix="/service"/>
+            </intent-filter>
+
+            <!-- Custom URL scheme for testing without hosting assetlinks.json.
+                 lyne://stop/83139 opens the app directly. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="lyne"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
