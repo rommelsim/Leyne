@@ -4,7 +4,7 @@
 stops you use, so the next bus is one tap away.
 
 For help, questions, bug reports, or feedback, email
-**commute668@gmail.com**. We aim to reply within a few business days.
+**leyne0000@gmail.com**. We aim to reply within a few business days.
 Please include your OS version (iOS or Android) and device model, and a
 screenshot if relevant.
 
@@ -77,5 +77,5 @@ accounts. Full details: see the Privacy Policy linked alongside this page.
 ## App info
 
 - App: Leyne for iOS and Android
-- Support contact: commute668@gmail.com
+- Support contact: leyne0000@gmail.com
 - Last updated: 20 May 2026

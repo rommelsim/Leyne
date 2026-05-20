@@ -2,7 +2,7 @@
 
 **Effective date:** 20 May 2026
 **App:** Leyne (iOS and Android) — live Singapore bus arrival times
-**Contact:** commute668@gmail.com
+**Contact:** leyne0000@gmail.com
 
 Leyne is built to be private by default. We do not run accounts, we do not
 ask you to sign in, and we do not operate a server that stores your personal
@@ -128,4 +128,4 @@ the revised policy at this URL before the change takes effect.
 
 ## Contact
 
-Questions or requests: **commute668@gmail.com**
+Questions or requests: **leyne0000@gmail.com**

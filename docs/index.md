@@ -6,4 +6,4 @@ glance. Available on iOS and Android.
 - [Support](support.md)
 - [Privacy Policy](privacy.md)
 
-Contact: commute668@gmail.com
+Contact: leyne0000@gmail.com
