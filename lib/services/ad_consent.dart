@@ -19,6 +19,32 @@ import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+/// Test device hashes — any device listed here is flagged as a test
+/// device by the Mobile Ads SDK regardless of which unit ID we request.
+/// Same binary that ships to App Store / Play Store; only listed devices
+/// see test ads. Use this for:
+///
+///   • Your physical dev iPhone / Android — adds the device hash so
+///     `flutter run` builds in debug or release mode can hit the
+///     production unit without earning real impressions on your own
+///     phone (and without risking AdMob policy violations for self-
+///     clicks).
+///
+/// **How to get a device's hash:** run the app once on the device.
+/// The Mobile Ads SDK prints a log line on the first ad request:
+///   "To get test ads on this device, set:
+///    Mobile.Ads.RequestConfiguration testDeviceIdentifiers = [...]"
+/// Copy the hash into this list, hot-restart, the device now sees
+/// test creatives on every subsequent request.
+///
+/// **Simulator note:** the iOS Simulator and Android Emulator are
+/// auto-detected as test devices by the SDK — you do NOT need to add
+/// their hash here. That's why the existing simulator screenshots
+/// show "Test Ad" overlays even with the production unit ID.
+const List<String> kTestDeviceIdentifiers = <String>[
+  // 'a1b2c3d4-…',  // paste device hashes from console here
+];
+
 class AdConsent {
   AdConsent._();
 

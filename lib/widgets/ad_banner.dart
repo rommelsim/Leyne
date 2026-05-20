@@ -1,12 +1,23 @@
 // 320x50 banner host. Reserves 50pt vertically regardless of fill state
 // so the layout doesn't jump when an ad lands.
 //
-// Ad unit IDs are gated by build configuration (matches legacy AdConfig):
-//   • Debug: Google's official test banner units (always safe to render,
-//     zero AdMob policy risk on any device).
-//   • Release: the production ad unit registered to this AdMob account
-//     (iOS: ca-app-pub-1910837226291536/6928301192; Android: needs to be
-//     created when the Android app is registered).
+// Ad unit ID is gated by an explicit build-time flag, NOT by
+// kDebugMode — TestFlight and Play Internal builds are release-mode
+// builds, so a kDebugMode gate would silently serve real ads to
+// internal testers. Wrong default. Instead:
+//
+//   • App Store / Play Store (public release): build with NO flag.
+//     The production unit ca-app-pub-5864511655536507/8034707188 is
+//     requested. Real ads, real revenue.
+//   • TestFlight / Play Internal (closed beta): build with
+//     --dart-define=LYNE_ADS_TEST=true. Google's universal test unit is
+//     requested instead. Zero risk of testers seeing/tapping real ads.
+//   • Local `flutter run` (debug): also serves the production unit, but
+//     the Mobile Ads SDK auto-treats the iOS Simulator (and Android
+//     Emulator) as a test device, so the sim renders "Test Ad" creatives
+//     anyway. To dev against the production unit on a real device
+//     without earning fake impressions, add the device's AdMob test
+//     hash to kTestDeviceIdentifiers in lib/services/ad_consent.dart.
 //
 // Renders nothing (empty SizedBox of the same height) until both
 // AdConsent.started AND the ad loads — that way:
@@ -23,18 +34,23 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../services/ad_consent.dart';
 import '../theme.dart';
 
-/// Resolve the banner ad unit ID at runtime. Debug builds get Google's
-/// always-test units (zero AdMob policy risk anywhere); release builds
-/// get the production unit. Same production unit on both platforms per
-/// the current AdMob console setup.
+/// True when this build was compiled with `--dart-define=LYNE_ADS_TEST=true`
+/// (TestFlight / Play Internal). Defaults to `false`, so a regular
+/// `flutter build ios --release` for the App Store uses the production
+/// unit. See the file-level comment above for the full matrix.
+const bool kLyneAdsTest =
+    bool.fromEnvironment('LYNE_ADS_TEST', defaultValue: false);
+
+/// Resolve the banner ad unit ID at runtime.
 String _bannerUnitId() {
-  if (kDebugMode) {
-    // Google's official test units — different per platform.
+  if (kLyneAdsTest) {
+    // Google's official test banner units — always serve "Test Ad"
+    // creatives, never count as impressions for any account.
     return Platform.isAndroid
         ? 'ca-app-pub-3940256099942544/6300978111'
         : 'ca-app-pub-3940256099942544/2934735716';
   }
-  // Production unit on both platforms.
+  // Production unit on both platforms (this app's AdMob console setup).
   return 'ca-app-pub-5864511655536507/8034707188';
 }
 

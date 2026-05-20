@@ -12,7 +12,7 @@ import 'package:flutter/material.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'screens/root_scaffold.dart';
-import 'services/ad_consent.dart';
+import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
 import 'services/deep_link_service.dart';
 import 'state/app_model.dart';
 import 'theme.dart';
@@ -37,7 +37,14 @@ void main() async {
   DataStore.shared.bootstrap();
   // UMP consent → ATT prompt → MobileAds.initialize. Also fire-and-forget;
   // the AdBanner widget polls AdConsent.started before requesting ads.
-  AdConsent.gatherThenStart();
+  // The test-device list is empty by default — the iOS Simulator and
+  // Android Emulator are auto-detected as test devices by the SDK, so
+  // dev builds already render "Test Ad" creatives. Populate
+  // kTestDeviceIdentifiers in ad_consent.dart with physical-device
+  // hashes if you also want those to see test ads.
+  AdConsent.gatherThenStart(
+    testDeviceIdentifiers: kTestDeviceIdentifiers,
+  );
   // Subscribe to Universal Links / App Links so an external
   // https://lyne.sg/stop/12345 tap routes into DetailScreen.
   DeepLinkService.instance.start(_navigatorKey);

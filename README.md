@@ -110,6 +110,32 @@ Apple Maps on iOS needs no key.
 For an IDE run config (VS Code / Android Studio), set the `--dart-define`
 arg in the launch settings so you don't retype it each session.
 
+## AdMob: which unit ID gets requested
+
+The banner ad's unit ID flips on an **explicit build-time flag**, not on
+`kDebugMode`, because TestFlight and Play Internal are *release* builds —
+a `kDebugMode` gate would silently serve real ads to internal testers.
+
+| Distribution channel | Build command | Unit ID requested |
+|---|---|---|
+| **Local `flutter run` (debug)** | `flutter run …` | Production unit. iOS Simulator / Android Emulator are auto-detected as test devices by the SDK, so you still see "Test Ad" creatives — never a real impression. |
+| **TestFlight (iOS internal beta)** | `flutter build ios --release --dart-define=LYNE_ADS_TEST=true --dart-define=LTA_API_KEY=$LTA_API_KEY` | Google's universal test unit. Testers always see "Test Ad". Zero AdMob policy risk. |
+| **Play Console Internal / Closed testing** | `flutter build appbundle --release --dart-define=LYNE_ADS_TEST=true --dart-define=LTA_API_KEY=$LTA_API_KEY` | Same — test unit. |
+| **App Store (public release)** | `flutter build ios --release --dart-define=LTA_API_KEY=$LTA_API_KEY` *(no LYNE_ADS_TEST flag)* | Production unit `ca-app-pub-5864511655536507/8034707188`. Real ads, real revenue. |
+| **Play Store (public release)** | `flutter build appbundle --release --dart-define=LTA_API_KEY=$LTA_API_KEY` | Same — production unit. |
+
+The flag is `LYNE_ADS_TEST=true`. Omit it for production. The default
+is **production**, so accidentally forgetting the flag on a public
+release just means real ads — not the safer-but-worse failure mode of
+accidentally shipping test ads to the App Store.
+
+If you want a physical dev iPhone to see test ads against the
+production unit (option 2 — "validate the production unit serves
+without earning real impressions"), paste its hash into
+`kTestDeviceIdentifiers` at the top of `lib/services/ad_consent.dart`.
+The hash gets printed to the Xcode/`flutter run` console on the
+device's first ad request.
+
 ## Deep links
 
 The app handles two URL shapes:
