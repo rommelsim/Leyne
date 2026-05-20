@@ -11,6 +11,7 @@ import '../data/data_store.dart';
 import '../state/app_model.dart';
 import '../theme.dart';
 import '../widgets/pinned_card.dart';
+import 'detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -108,9 +109,14 @@ class _HomeScreenState extends State<HomeScreen> {
               allNos: card.services.map((s) => s.no).toList(),
             ),
             onOpen: (busNo) {
-              // Detail screen lands in Task #8 — for now just request
-              // arrivals to keep the data warm.
-              DataStore.shared.ensureArrivals(card.stopCode, force: true);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => DetailScreen(
+                    stopCode: card.stopCode,
+                    initialSelectedNo: busNo,
+                  ),
+                ),
+              );
             },
             onRename: (newLabel) => m.rename(card.stopCode, newLabel),
           ),

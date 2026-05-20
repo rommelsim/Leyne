@@ -10,6 +10,7 @@ import '../services/location_service.dart';
 import '../state/app_model.dart';
 import '../theme.dart';
 import '../widgets/service_row.dart';
+import 'detail_screen.dart';
 
 enum _Sort { distance, arrival, service }
 
@@ -338,8 +339,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
             icon: const Icon(Icons.north_east, size: 14),
             label: const Text('Open'),
             onPressed: () {
-              // Detail screen lands in Task #8 — placeholder no-op for now.
-              DataStore.shared.ensureArrivals(stop.stopCode, force: true);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => DetailScreen(stopCode: stop.stopCode),
+                ),
+              );
             },
           ),
         ],

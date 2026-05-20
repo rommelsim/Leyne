@@ -330,6 +330,31 @@ class AppModel extends ChangeNotifier {
     return p != null && p.tracked == null;
   }
 
+  /// Master toggle for "track everything at this stop". Untracking all
+  /// equals unpinning (a stop with no buses isn't on Home).
+  void setAllTracked({
+    required String code,
+    required List<String> allNos,
+    required bool tracked,
+  }) {
+    final idx = _pins.indexWhere((p) => p.code == code);
+    if (tracked) {
+      if (idx >= 0) {
+        _pins[idx].tracked = null; // all
+      } else {
+        _pins = [
+          ..._pins,
+          Pin(code: code, nickname: _ds.stopName(code)),
+        ];
+        _markRecentlyAdded(code);
+      }
+    } else if (idx >= 0) {
+      _pins = [..._pins]..removeAt(idx);
+    }
+    _persistPins();
+    notifyListeners();
+  }
+
   void reorderPins(List<String> newCodes) {
     final byCode = {for (final p in _pins) p.code: p};
     final next = <Pin>[];
