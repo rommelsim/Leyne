@@ -1,0 +1,96 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- LTA DataMall requests + AdMob -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Nearby uses device GPS via geolocator (Task #7). Fine + coarse cover
+         both precise and approximate location options surfaced to the user. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Required for AdMob to read the Advertising ID on Android 13+ (API
+         33+). Without it, ads still serve but in degraded-targeting mode.
+         Combined with the consent flow in lib/services/ad_consent.dart so
+         the SDK only reads the ID after UMP consent is granted. The Play
+         Store Data Safety form must disclose "Device or other IDs" → AdMob
+         when this permission is present. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+
+    <application
+        android:label="Leyne"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+
+        <!-- Detail-screen map on Android is OpenStreetMap via flutter_map
+             (no API key, no billing). iOS uses Apple Maps. The Google
+             Maps SDK meta-data that used to live here was removed when
+             we switched off google_maps_flutter. -->
+
+        <!-- Google Mobile Ads SDK app ID. The runtime ad unit ID is
+             gated by build mode in lib/widgets/ad_banner.dart (test unit
+             in debug, production unit in release), so this app ID can
+             safely point at the production account in all builds. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-5864511655536507~6330743279"/>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- App Links: lyne.sg/stop/{code}, /service/{busNo}. autoVerify
+                 makes Play check /.well-known/assetlinks.json on install so
+                 the OS opens these URIs in our app without a chooser dialog.
+                 Until the assetlinks.json file is hosted, this still works
+                 (the OS just shows a chooser the first time). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"/>
+                <data android:host="lyne.sg"/>
+                <data android:pathPrefix="/stop"/>
+                <data android:pathPrefix="/service"/>
+            </intent-filter>
+
+            <!-- Custom URL scheme for testing without hosting assetlinks.json.
+                 lyne://stop/83139 opens the app directly. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="lyne"/>
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>

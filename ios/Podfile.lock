@@ -1,0 +1,28 @@
+PODS:
+  - app_tracking_transparency (0.0.1):
+    - Flutter
+  - apple_maps_flutter (0.0.1):
+    - Flutter
+  - Flutter (1.0.0)
+
+DEPENDENCIES:
+  - app_tracking_transparency (from `.symlinks/plugins/app_tracking_transparency/ios`)
+  - apple_maps_flutter (from `.symlinks/plugins/apple_maps_flutter/ios`)
+  - Flutter (from `Flutter`)
+
+EXTERNAL SOURCES:
+  app_tracking_transparency:
+    :path: ".symlinks/plugins/app_tracking_transparency/ios"
+  apple_maps_flutter:
+    :path: ".symlinks/plugins/apple_maps_flutter/ios"
+  Flutter:
+    :path: Flutter
+
+SPEC CHECKSUMS:
+  app_tracking_transparency: 3d84f147f67ca82d3c15355c36b1fa6b66ca7c92
+  apple_maps_flutter: 2237d66a8e242082a2d88134af372f7b3375d7a6
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+
+PODFILE CHECKSUM: 310ccb7bbeca79043a24fa79ee9fc2047c23fa05
+
+COCOAPODS: 1.16.2
