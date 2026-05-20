@@ -44,6 +44,19 @@ dependencies:
   flutter_map: ^8.3.0
   latlong2: ^0.9.1
 
+# Pin path_provider_foundation BELOW 2.6.0. From 2.6.0 onwards this
+# package depends on Dart's package:objective_c FFI helper, whose iOS
+# binary ships an arm64e-only architecture slice. That conflicts with
+# Flutter stable 3.44's arm64-only Flutter.framework and causes
+# ITMS-91080 App Store upload rejections. flutter_map 8.3.0 transitively
+# pulls path_provider → path_provider_foundation in for its tile cache;
+# pinning ≤ 2.5.x keeps the older platform-channel-based implementation
+# without the arm64e dependency. Revisit when Flutter / objective_c
+# publish matching arm64+arm64e slices.
+dependency_overrides:
+  # 2.6.0 is the version that pulled in objective_c. Pin strictly below.
+  path_provider_foundation: ">=2.4.0 <2.6.0"
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

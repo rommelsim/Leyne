@@ -26,17 +26,6 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- Required arm64e capability: the bundled objective_c.framework
-	     (transitive dep of path_provider) ships only an arm64e slice.
-	     iPhones with A12 or later (iPhone XS, 2018+) all support arm64e,
-	     which matches our iOS 15 deployment target's effective device
-	     range. App Store reviewers won't ding us for this; older devices
-	     just can't install. -->
-	<key>UIRequiredDeviceCapabilities</key>
-	<array>
-		<string>arm64</string>
-		<string>arm64e</string>
-	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Leyne uses your location to show nearby bus stops and accurate arrival times.</string>
 	<key>NSUserTrackingUsageDescription</key>
