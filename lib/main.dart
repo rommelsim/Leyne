@@ -12,14 +12,22 @@ import 'package:flutter/material.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'screens/root_scaffold.dart';
+import 'state/app_model.dart';
 import 'theme.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   LtaConfig.assertConfigured();
+  // AppModel reads persisted pins/recents/settings from shared_preferences;
+  // await this so Home opens with the user's saved pins on screen, not an
+  // empty list that flickers in once load() resolves.
+  await AppModel.shared.load();
+  // Kick off the 1-second tick now (live ETA countdown + arrival refresh).
+  // Tests skip this so they exit without a pending periodic timer.
+  AppModel.shared.startTicker();
   // Fire-and-forget — the banner in RootScaffold shows loading/error state
-  // while this resolves. Tabs don't await this; data-bound screens (Task
-  // #7+) read DataStore.referenceState themselves.
+  // while this resolves. Tabs don't await this; data-bound screens read
+  // DataStore.referenceState themselves.
   DataStore.shared.bootstrap();
   runApp(const LyneApp());
 }
