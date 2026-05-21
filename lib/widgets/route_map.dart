@@ -383,7 +383,7 @@ class _OsmMap extends StatelessWidget {
         // tile usage policy — see https://operations.osmfoundation.org/policies/tiles/
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.leyne.lyne',
+          userAgentPackageName: 'com.leyne.leyne',
           maxNativeZoom: 19,
         ),
         MarkerLayer(
