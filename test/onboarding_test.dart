@@ -95,7 +95,7 @@ void main() {
       // Step 0 → 1 → 2 → 3.
       for (var i = 0; i < 3; i++) {
         await tester.tap(find.text('Continue'));
-        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 500));
       }
       expect(find.text('STEP 3 · STAY PRESENT'), findsOneWidget);
       expect(locationCalls, 0);
@@ -103,12 +103,12 @@ void main() {
 
       // Step 3 → 4 (location-prime).
       await tester.tap(find.text('Continue'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('STEP 4 · LOCATION'), findsOneWidget);
 
       // Step 4 → 5: triggers onRequestLocation AND advances.
       await tester.tap(find.text('Continue'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(locationCalls, 1);
       expect(find.text('STEP 5 · ADS'), findsOneWidget);
 
@@ -128,11 +128,42 @@ void main() {
       )));
       await tester.pump();
       await tester.tap(find.text('Continue'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('STEP 1 · PIN'), findsOneWidget);
       await tester.tap(find.text('Back'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('LEYNE'), findsOneWidget);
+    });
+
+    testWidgets('rapid double-tap on the location step cannot skip the ATT '
+        'step', (tester) async {
+      var locationCalls = 0;
+      var trackingCalls = 0;
+      await tester.pumpWidget(_host(OnboardingScreen(
+        onDone: () {},
+        onRequestLocation: () => locationCalls++,
+        onRequestTracking: () => trackingCalls++,
+      )));
+      await tester.pump();
+
+      // Advance to the location step (step 4).
+      for (var i = 0; i < 4; i++) {
+        await tester.tap(find.text('Continue'));
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+      expect(find.text('STEP 4 · LOCATION'), findsOneWidget);
+
+      // Two taps in quick succession — the second lands while the
+      // multi-tap lock is still engaged and must be ignored, so the ATT
+      // step's onRequestTracking never fires off the back of it.
+      await tester.tap(find.text('Continue'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('Continue'), warnIfMissed: false);
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(locationCalls, 1);
+      expect(trackingCalls, 0);
+      expect(find.text('STEP 5 · ADS'), findsOneWidget);
     });
   });
 }

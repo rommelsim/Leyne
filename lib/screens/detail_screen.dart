@@ -10,6 +10,9 @@
 // Entered with `initialSelectedNo` to land directly in service drill-in
 // (e.g. tapping a specific bus row on a Home card).
 
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../data/data_store.dart';
@@ -41,12 +44,26 @@ class _DetailScreenState extends State<DetailScreen> {
   RouteInfo? _routeInfo;
   bool _routeLoading = false;
 
+  // Drives the live auto-refresh — re-polls arrivals + bus position so the
+  // screen stays current without the user pulling to refresh. LTA publishes
+  // a new bus fix roughly every 20s; 15s polling keeps the marker close to
+  // real time while staying well within DataMall rate limits.
+  Timer? _liveTimer;
+
   @override
   void initState() {
     super.initState();
     _selectedNo = widget.initialSelectedNo;
     DataStore.shared.ensureArrivals(widget.stopCode, force: true);
     if (_selectedNo != null) _loadRoute();
+    _liveTimer = Timer.periodic(
+        const Duration(seconds: 15), (_) => _refreshLive());
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    super.dispose();
   }
 
   bool get _enteredViaService => widget.initialSelectedNo != null;
@@ -108,10 +125,44 @@ class _DetailScreenState extends State<DetailScreen> {
     _loadRoute();
   }
 
-  Future<void> _refresh() async {
-    DataStore.shared.ensureArrivals(widget.stopCode, force: true);
-    if (_selectedNo != null) await _loadRoute();
-    await Future.delayed(const Duration(milliseconds: 400));
+  /// Silent live refresh — keeps arrivals fresh and nudges the bus marker to
+  /// its latest GPS fix without flashing the map's loading state. Called by
+  /// `_liveTimer`; the route stop-list itself is static, so only the bus
+  /// position is re-fetched.
+  Future<void> _refreshLive() async {
+    // ensureArrivals self-throttles to LtaConfig.arrivalRefresh, so calling
+    // it every tick just keeps arrivalDate fresh enough that the countdown
+    // doesn't drift.
+    DataStore.shared.ensureArrivals(widget.stopCode);
+    final no = _selectedNo;
+    if (no == null || _routeInfo == null) return;
+    final bus = await DataStore.shared
+        .liveBus(serviceNo: no, stopCode: widget.stopCode);
+    if (!mounted) return;
+    // Re-read after the await — the user may have switched services or
+    // backed out to the stop overview while the fetch was in flight.
+    final info = _routeInfo;
+    if (info == null || _selectedNo != no) return;
+    int? busIdx;
+    if (bus != null && info.stops.isNotEmpty) {
+      double best = double.infinity;
+      for (var i = 0; i < info.stops.length; i++) {
+        final s = info.stops[i];
+        final d = haversine(s.lat, s.lon, bus.lat, bus.lon);
+        if (d < best) {
+          best = d;
+          busIdx = i;
+        }
+      }
+    }
+    setState(() {
+      _routeInfo = RouteInfo(
+        stops: info.stops,
+        youIndex: info.youIndex,
+        busIndex: busIdx,
+        busCoord: bus,
+      );
+    });
   }
 
   void _backOrPop() {
@@ -144,20 +195,16 @@ class _DetailScreenState extends State<DetailScreen> {
               children: [
                 _topBar(t, m, pinned, selected),
                 Expanded(
-                  child: RefreshIndicator(
-                    color: t.accent,
-                    backgroundColor: t.surface,
-                    onRefresh: _refresh,
-                    child: ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
-                      children: [
-                        if (selected == null)
-                          ..._stopOverview(t, m, stopName, services)
-                        else
-                          ..._serviceDetail(t, m, stopName, selected),
-                      ],
-                    ),
+                  // No pull-to-refresh — the screen is live, auto-refreshing
+                  // arrivals + bus position on `_liveTimer`.
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 40),
+                    children: [
+                      if (selected == null)
+                        ..._stopOverview(t, m, stopName, services)
+                      else
+                        ..._serviceDetail(t, m, stopName, selected),
+                    ],
                   ),
                 ),
               ],
@@ -487,13 +534,26 @@ class _DetailScreenState extends State<DetailScreen> {
       const SizedBox(height: 16),
       _heroCapacityCard(t, s),
       const SizedBox(height: 18),
-      _sectionLabel(t, 'Live map',
-          hint: _routeInfo?.busCoord == null ? 'bus gps unavailable' : null),
-      RouteMap(route: _routeInfo, busNo: s.no, loading: _routeLoading),
-      const SizedBox(height: 18),
+      // Apple Maps fits the design on iOS; the Android OpenStreetMap
+      // fallback doesn't, so the live map is iOS-only.
+      if (Platform.isIOS) ...[
+        _sectionLabel(t, 'Live map',
+            hint: _routeInfo?.busCoord == null ? 'bus gps unavailable' : null),
+        RouteMap(route: _routeInfo, busNo: s.no, loading: _routeLoading),
+        const SizedBox(height: 18),
+      ],
       if (_routeInfo != null) ...[
         _sectionLabel(t, 'Journey',
             hint: _stopsAwayLabel(_routeInfo!)),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Text(
+            'Walk to the BOARD HERE stop to catch this bus. '
+            'Tap any stop ahead to mark where you’ll alight.',
+            style: t.mono(11, color: t.faint)
+                .copyWith(height: 1.5, letterSpacing: 0.3),
+          ),
+        ),
         RouteProgress(
           busNo: s.no,
           route: _routeInfo!,
@@ -539,14 +599,19 @@ class _DetailScreenState extends State<DetailScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(s.dest,
+              // s.dest is this run's terminus — the "To " prefix makes the
+              // "heading towards" relationship explicit so it can't be
+              // misread as the stop you're at.
+              Text('To ${s.dest}',
                   style: t.sans(22, weight: FontWeight.w600)
                       .copyWith(letterSpacing: -0.3),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
+              // Names the stop this screen is tracking — matches the hero
+              // card's "arriving at your stop" line below.
               Text(
-                '${s.deck.word.toUpperCase()} · FROM $stopName'.toUpperCase(),
+                'YOUR STOP · ${stopName.toUpperCase()}',
                 style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.6),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -562,15 +627,24 @@ class _DetailScreenState extends State<DetailScreen> {
     final etaMin = (s.etaSec / 60).floor();
     final big = etaMin <= 0 ? 'Arr' : '$etaMin';
     final unit = etaMin <= 0 ? 'now' : 'min';
-    final bars = switch (s.load) {
-      Load.sea => 5,
-      Load.sda => 3,
-      Load.lsd => 1,
+    // LTA's Load field has exactly 3 levels — SEA (seats), SDA (standing
+    // only), LSD (limited standing / packed). The meter has 3 segments and
+    // fills up as the bus gets MORE crowded, so a full red meter reads as
+    // "this bus is packed", not "lots of room".
+    final crowding = switch (s.load) {
+      Load.sea => 1,
+      Load.sda => 2,
+      Load.lsd => 3,
     };
     final loadColor = switch (s.load) {
       Load.sea => t.accent,
       Load.sda => t.warn,
       Load.lsd => t.crit,
+    };
+    final loadText = switch (s.load) {
+      Load.sea => 'Seats free',
+      Load.sda => 'Standing only',
+      Load.lsd => 'Crowded',
     };
 
     return Container(
@@ -604,34 +678,33 @@ class _DetailScreenState extends State<DetailScreen> {
               ],
             ),
           ),
-          Container(width: 1, height: 36, color: t.line),
+          Container(width: 1, height: 44, color: t.line),
           const SizedBox(width: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              MicroLabel('Capacity'),
-              const SizedBox(height: 6),
+              MicroLabel('Crowding'),
+              const SizedBox(height: 7),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  for (var i = 0; i < 5; i++) ...[
+                  for (var i = 0; i < 3; i++) ...[
                     if (i > 0) const SizedBox(width: 3),
                     Container(
-                      width: 8, height: 16,
+                      width: 11, height: 14,
                       decoration: BoxDecoration(
-                        color: i < bars
+                        color: i < crowding
                             ? loadColor
                             : t.fg.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ],
-                  const SizedBox(width: 8),
-                  Text(s.load.label,
-                      style: t.sans(11, color: t.dim)),
                 ],
               ),
+              const SizedBox(height: 7),
+              Text(loadText,
+                  style: t.sans(11, weight: FontWeight.w600, color: loadColor)),
             ],
           ),
         ],

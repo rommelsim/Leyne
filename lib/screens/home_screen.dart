@@ -186,17 +186,19 @@ class _HomeScreenState extends State<HomeScreen> {
         const Spacer(),
         InkWell(
           onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Long-press a card to rename · drag to reorder',
-                  style: t.sans(13, color: t.fg),
+            ScaffoldMessenger.of(context)
+              ..removeCurrentSnackBar()
+              ..showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Long-press a card to rename · drag to reorder',
+                    style: t.sans(13, color: t.fg),
+                  ),
+                  backgroundColor: t.surfaceHi,
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(milliseconds: 1400),
                 ),
-                backgroundColor: t.surfaceHi,
-                behavior: SnackBarBehavior.floating,
-                duration: const Duration(seconds: 2),
-              ),
-            );
+              );
           },
           borderRadius: BorderRadius.circular(6),
           child: Padding(

@@ -53,7 +53,15 @@ const bool kLyneScreenshotMode =
 
 /// Resolve the banner ad unit ID at runtime.
 String _bannerUnitId() {
-  if (kLyneAdsTest) {
+  // Debug builds (`flutter run`, Xcode ⌘R) always use Google's universal
+  // test units so a "Test Ad" creative shows on any device — including a
+  // physical iPhone, which the SDK does NOT auto-treat as a test device.
+  //
+  // Release builds are unaffected: TestFlight / Play Internal still opt in
+  // via --dart-define=LYNE_ADS_TEST=true, and a store build (release, no
+  // flag) serves the production unit. A debug build can never reach a
+  // store, so this can't leak test creatives into production.
+  if (kLyneAdsTest || kDebugMode) {
     // Google's official test banner units — always serve "Test Ad"
     // creatives, never count as impressions for any account.
     return Platform.isAndroid

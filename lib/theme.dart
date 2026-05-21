@@ -182,9 +182,24 @@ class LyneTheme {
         surfaceTintColor: Colors.transparent,
         indicatorColor: isDark
             ? const Color.fromRGBO(255, 255, 255, 0.06)
-            : accent.withValues(alpha: 0.10),
-        labelTextStyle: WidgetStatePropertyAll(
-          TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: fg),
+            : accent.withValues(alpha: 0.12),
+        // Resolve icon + label colour per state. Without this the bar's
+        // icons fall back to Material's default ColorScheme slots (which
+        // this palette never sets), rendering near-invisible on the light
+        // warm-white background. Selected = full-contrast fg; unselected =
+        // dim but clearly legible — on both light and dark.
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            size: 24,
+            color: states.contains(WidgetState.selected) ? fg : dim,
+          ),
+        ),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: states.contains(WidgetState.selected) ? fg : dim,
+          ),
         ),
       ),
       dividerColor: line,

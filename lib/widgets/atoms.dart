@@ -84,3 +84,47 @@ class MicroLabel extends StatelessWidget {
     );
   }
 }
+
+/// Pill toggle shared by Settings-style rows.
+class LyneToggle extends StatelessWidget {
+  const LyneToggle({super.key, required this.on, required this.onChanged});
+
+  final bool on;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    return GestureDetector(
+      onTap: () => onChanged(!on),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        width: 40,
+        height: 24,
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: on
+              ? t.accent
+              : (t.isDark
+                  ? const Color.fromRGBO(255, 255, 255, 0.12)
+                  : t.line),
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(
+          mainAxisAlignment:
+              on ? MainAxisAlignment.end : MainAxisAlignment.start,
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: on ? t.contrastFg : t.contrast,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

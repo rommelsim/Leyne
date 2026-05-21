@@ -5,6 +5,8 @@
 // service numbers show inline as tiny mono chips so you can see which buses
 // stop here at a glance.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/data_store.dart';
@@ -30,12 +32,46 @@ class _NearbyScreenState extends State<NearbyScreen> {
   // the list under the user's finger.
   List<NearbyStop> _ordered = const [];
 
+  // Paced background loader for nearby-stop arrivals. Arrival / Service sort
+  // is meaningless without ETA + service data for every row, so we walk the
+  // whole nearby list — not just the closest few — in small waves.
+  Timer? _arrivalLoader;
+  final Set<String> _arrivalRequested = {};
+
   @override
   void initState() {
     super.initState();
     LocationService.shared.startIfAuthorized();
-    DataStore.shared.prefetchNearbyArrivals();
+    // Load the BusRoutes dataset so every row can list the services that
+    // serve it — independent of whether live arrivals have come in yet.
+    DataStore.shared.ensureRoutes();
     _recomputeOrder();
+    // Warm arrivals for ALL nearby stops in waves of 3 (~700ms apart) so
+    // they stay under LTA's 4-request spike-arrest limit. The timer also
+    // picks up new stops if the device location shifts.
+    _pumpArrivalLoad();
+    _arrivalLoader = Timer.periodic(
+        const Duration(milliseconds: 700), (_) => _pumpArrivalLoad());
+  }
+
+  @override
+  void dispose() {
+    _arrivalLoader?.cancel();
+    super.dispose();
+  }
+
+  // Fire up to 3 not-yet-requested nearby stops. ensureArrivals dedups
+  // in-flight requests, and the _arrivalRequested set walks the list
+  // forward so each wave hits fresh stops.
+  void _pumpArrivalLoad() {
+    var fired = 0;
+    for (final s in DataStore.shared.nearby) {
+      if (fired >= 3) break;
+      if (_arrivalRequested.add(s.stopCode)) {
+        DataStore.shared.ensureArrivals(s.stopCode, silent: true);
+        fired++;
+      }
+    }
   }
 
   void _recomputeOrder() {
@@ -55,13 +91,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
         break;
       case _Sort.service:
         int firstNum(NearbyStop s) {
-          final svcs = DataStore.shared.servicesFor(s.stopCode);
-          if (svcs.isEmpty) return 9999;
-          final nums = svcs
-              .map((x) =>
-                  int.tryParse(x.no.replaceAll(RegExp(r'[^0-9]'), '')) ?? 9999)
-              .toList();
-          return nums.reduce((a, b) => a < b ? a : b);
+          final svcs = DataStore.shared.servicesAtStop(s.stopCode);
+          if (svcs.isEmpty) return 99999;
+          return svcs
+              .map((no) =>
+                  int.tryParse(no.replaceAll(RegExp(r'[^0-9]'), '')) ?? 99999)
+              .reduce((a, b) => a < b ? a : b);
         }
 
         list.sort((a, b) => firstNum(a).compareTo(firstNum(b)));
@@ -197,6 +232,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
     Widget chip(_Sort s, String label) {
       final active = _sort == s;
       return GestureDetector(
+        // Opaque so the whole pill — padding included — is tappable, not
+        // just the text glyphs (deferToChild would miss the padding).
+        behavior: HitTestBehavior.opaque,
         onTap: () => setState(() => _sort = s),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -233,10 +271,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
 
   Widget _row(LyneTheme t, NearbyStop stop) {
     final svcs = AppModel.shared.liveServices(stop.stopCode);
-    final svcNos = svcs.isNotEmpty
-        ? svcs.map((s) => s.no).toList()
-        : DataStore.shared.servicesFor(stop.stopCode).map((s) => s.no).toList();
     final anyArriving = svcs.any((s) => s.etaSec <= 60);
+    // Service numbers come from the static routes dataset, so every row
+    // lists its buses even before live arrivals load.
+    final svcNos = DataStore.shared.servicesAtStop(stop.stopCode);
 
     return Material(
       color: anyArriving
@@ -371,15 +409,17 @@ class _NearbyScreenState extends State<NearbyScreen> {
       shadowColor: Colors.black.withValues(alpha: 0.4),
       child: InkWell(
         onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Map view coming soon',
-                  style: t.sans(13, color: t.fg)),
-              backgroundColor: t.surfaceHi,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 2),
-            ),
-          );
+          ScaffoldMessenger.of(context)
+            ..removeCurrentSnackBar()
+            ..showSnackBar(
+              SnackBar(
+                content: Text('Map view coming soon',
+                    style: t.sans(13, color: t.fg)),
+                backgroundColor: t.surfaceHi,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(milliseconds: 1400),
+              ),
+            );
         },
         customBorder: const CircleBorder(),
         child: SizedBox(

@@ -31,6 +31,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart' as apple;
+import 'package:flutter/foundation.dart' show Factory;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -269,6 +271,12 @@ class _AppleMapState extends State<_AppleMap> {
       myLocationEnabled: true,
       compassEnabled: false,
       mapType: apple.MapType.standard,
+      // The map is a UIKit platform view embedded in the Detail screen's
+      // scrolling ListView. Without claiming gestures eagerly, the parent
+      // scroll view wins the arena and pan/zoom never reach the map.
+      gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+        Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+      },
     );
   }
 }

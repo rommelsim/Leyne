@@ -60,6 +60,9 @@ class _RootScaffoldState extends State<RootScaffold> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: _switchTo,
+        // Trim the Material-3 default (80) — it leaves a tall empty band
+        // below the labels above the home-indicator safe area.
+        height: 64,
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.home_outlined),

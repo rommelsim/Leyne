@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
+import 'l10n/app_localizations.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/root_scaffold.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
@@ -65,14 +66,25 @@ class LyneApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Leyne',
-      debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.system,
-      theme: LyneTheme.light.materialTheme,
-      darkTheme: LyneTheme.dark.materialTheme,
-      navigatorKey: _navigatorKey,
-      home: const _AppRoot(),
+    // Rebuild MaterialApp when the user changes Appearance / Language so the
+    // themeMode + locale overrides take effect immediately.
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Leyne',
+          debugShowCheckedModeBanner: false,
+          themeMode: AppModel.shared.themeMode,
+          theme: LyneTheme.light.materialTheme,
+          darkTheme: LyneTheme.dark.materialTheme,
+          locale: AppModel.shared.locale,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          navigatorKey: _navigatorKey,
+          scaffoldMessengerKey: lyneMessengerKey,
+          home: const _AppRoot(),
+        );
+      },
     );
   }
 }

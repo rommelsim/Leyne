@@ -46,13 +46,11 @@ class _OnbStep {
     required this.title,
     required this.subtitle,
     required this.cta,
-    this.footnote,
   });
   final String eyebrow;
   final String title;
   final String subtitle;
   final String cta;
-  final String? footnote;
 }
 
 const List<_OnbStep> _steps = [
@@ -105,36 +103,60 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // +1 = forward (slide in from right), -1 = back (slide in from left).
   // Drives the AnimatedSwitcher transition so Back doesn't look like Next.
   int _direction = 1;
+  // Locks Back / Continue against rapid multi-taps. Without it, a fast
+  // double-tap on the location step advances to the ATT step and fires
+  // onRequestTracking() while the iOS location prompt is still on screen —
+  // iOS then silently drops the ATT prompt (it won't stack two permission
+  // dialogs). It also stops a double-tap on the ATT step from running
+  // onRequestTracking() twice and dismissing onboarding before ATT resolves.
+  bool _busy = false;
   static const _anim = Duration(milliseconds: 280);
   static const _curve = Curves.easeOutCubic;
 
+  // Re-enable the nav buttons once the slide transition has settled.
+  void _unlockAfterTransition() {
+    Future.delayed(_anim + const Duration(milliseconds: 140), () {
+      if (mounted) setState(() => _busy = false);
+    });
+  }
+
   void _next() {
+    if (_busy) return;
     final last = _steps.length - 1;
     if (_step == last - 1) {
-      // Location prime: kick the OS prompt and advance.
-      widget.onRequestLocation();
+      // Location prime: advance + kick the OS prompt. Stay locked through
+      // the transition so a second tap can't jump to the ATT step and
+      // race its prompt against the location one.
       setState(() {
+        _busy = true;
         _direction = 1;
         _step += 1;
       });
+      widget.onRequestLocation();
+      _unlockAfterTransition();
     } else if (_step == last) {
-      // ATT/Ads prime: caller dismisses onboarding when consent resolves.
+      // ATT/Ads prime: lock the button for good — the caller dismisses
+      // onboarding once consent + ATT + Mobile Ads init resolve.
+      setState(() => _busy = true);
       widget.onRequestTracking();
     } else {
       setState(() {
+        _busy = true;
         _direction = 1;
         _step += 1;
       });
+      _unlockAfterTransition();
     }
   }
 
   void _back() {
-    if (_step > 0) {
-      setState(() {
-        _direction = -1;
-        _step -= 1;
-      });
-    }
+    if (_busy || _step == 0) return;
+    setState(() {
+      _busy = true;
+      _direction = -1;
+      _step -= 1;
+    });
+    _unlockAfterTransition();
   }
 
   Widget _visualFor(int i, LyneTheme t) {
@@ -174,7 +196,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     Opacity(
                       opacity: _step > 0 ? 1 : 0,
                       child: TextButton.icon(
-                        onPressed: _step > 0 ? _back : null,
+                        onPressed: (_step > 0 && !_busy) ? _back : null,
                         icon: Icon(Icons.chevron_left,
                             size: 18, color: t.accent),
                         label: Text('Back',
@@ -267,25 +289,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       s.subtitle,
                       style: t.sans(15).copyWith(color: t.dim, height: 1.35),
                     ),
-                    if (s.footnote != null) ...[
-                      const SizedBox(height: 12),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.info_outline,
-                              size: 12,
-                              color: t.dim.withValues(alpha: 0.85)),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              s.footnote!,
-                              style: t.mono(11).copyWith(
-                                  color: t.dim.withValues(alpha: 0.85)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -316,10 +319,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton(
-                        onPressed: _next,
+                        onPressed: _busy ? null : _next,
                         style: FilledButton.styleFrom(
                           backgroundColor: t.accent,
                           foregroundColor: Colors.white,
+                          // Keep the button visually identical while the
+                          // multi-tap lock is engaged — the guard should be
+                          // invisible, not a grey flicker between steps.
+                          disabledBackgroundColor: t.accent,
+                          disabledForegroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 15),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),

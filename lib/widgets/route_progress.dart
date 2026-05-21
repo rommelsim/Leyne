@@ -61,7 +61,9 @@ class RouteProgress extends StatelessWidget {
     return InkWell(
       onTap: canAlight ? () => onAlightChanged(isAlight ? null : stop.code) : null,
       child: Container(
-        color: isAlight ? t.accent.withValues(alpha: 0.07) : Colors.transparent,
+        color: (isYou || isAlight)
+            ? t.accent.withValues(alpha: 0.07)
+            : Colors.transparent,
         padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -100,10 +102,7 @@ class RouteProgress extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'STOP ${stop.code}'
-                      '${isYou ? " · YOUR STOP" : ""}'
-                      '${isBus ? " · BUS HERE" : ""}'
-                      '${isAlight ? " · ALIGHT HERE" : ""}',
+                      'STOP ${stop.code}',
                       style: t.mono(10, color: t.faint)
                           .copyWith(letterSpacing: 0.4),
                     ),
@@ -113,8 +112,10 @@ class RouteProgress extends StatelessWidget {
             ),
             if (isBus)
               _trailingBadge(t, 'BUS $busNo', t.accent)
+            else if (isYou)
+              _trailingBadge(t, 'BOARD HERE', t.accent, filled: true)
             else if (isAlight)
-              _trailingBadge(t, 'ALIGHT', t.accent, filled: true)
+              _trailingBadge(t, 'ALIGHT', t.fg, filled: true)
             else if (canAlight)
               Text('tap to alight',
                   style: t.mono(9, color: t.faint)),

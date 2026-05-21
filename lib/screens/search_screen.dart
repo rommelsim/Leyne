@@ -154,15 +154,17 @@ class _SearchScreenState extends State<SearchScreen> {
               visualDensity: VisualDensity.compact,
               icon: Icon(Icons.qr_code_scanner, color: t.fg, size: 18),
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('QR scan coming soon',
-                        style: t.sans(13, color: t.fg)),
-                    backgroundColor: t.surfaceHi,
-                    behavior: SnackBarBehavior.floating,
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
+                ScaffoldMessenger.of(context)
+                  ..removeCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(
+                      content: Text('QR scan coming soon',
+                          style: t.sans(13, color: t.fg)),
+                      backgroundColor: t.surfaceHi,
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(milliseconds: 1400),
+                    ),
+                  );
               },
             ),
           ],

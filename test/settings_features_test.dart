@@ -1,0 +1,127 @@
+// Settings feature tests — the About / Appearance / Language / Notifications
+// work added this cycle, plus AppModel preference persistence.
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:lyne/l10n/app_localizations.dart';
+import 'package:lyne/screens/about_screen.dart';
+import 'package:lyne/screens/notifications_screen.dart';
+import 'package:lyne/screens/settings_screen.dart';
+import 'package:lyne/state/app_model.dart';
+import 'package:lyne/theme.dart';
+
+Widget _host(Widget child) => MaterialApp(
+      theme: LyneTheme.light.materialTheme,
+      darkTheme: LyneTheme.dark.materialTheme,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: child,
+    );
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    await AppModel.shared.load();
+  });
+
+  group('AppModel preferences', () {
+    test('theme mode defaults to system and persists', () async {
+      expect(AppModel.shared.themeMode, ThemeMode.system);
+      AppModel.shared.setThemeMode(ThemeMode.dark);
+      expect(AppModel.shared.themeMode, ThemeMode.dark);
+      await AppModel.shared.load();
+      expect(AppModel.shared.themeMode, ThemeMode.dark);
+    });
+
+    test('locale defaults to null and persists a pick', () async {
+      expect(AppModel.shared.locale, isNull);
+      AppModel.shared.setLocale(const Locale('zh'));
+      expect(AppModel.shared.locale?.languageCode, 'zh');
+      await AppModel.shared.load();
+      expect(AppModel.shared.locale?.languageCode, 'zh');
+    });
+
+    test('notifications toggle defaults off and persists', () async {
+      expect(AppModel.shared.notificationsEnabled, isFalse);
+      AppModel.shared.setNotificationsEnabled(true);
+      expect(AppModel.shared.notificationsEnabled, isTrue);
+      await AppModel.shared.load();
+      expect(AppModel.shared.notificationsEnabled, isTrue);
+    });
+  });
+
+  group('SettingsScreen', () {
+    testWidgets('shows the trimmed Personalize rows, no Data section',
+        (tester) async {
+      await tester.pumpWidget(_host(const SettingsScreen()));
+      await tester.pump();
+      expect(find.text('Notifications'), findsOneWidget);
+      expect(find.text('Appearance'), findsOneWidget);
+      expect(find.text('Language'), findsOneWidget);
+      expect(find.text('24-hour time'), findsOneWidget);
+      // Removed this cycle.
+      expect(find.text('Refresh interval'), findsNothing);
+      expect(find.text('Data saver'), findsNothing);
+    });
+
+    testWidgets('Appearance row opens a picker and applies the choice',
+        (tester) async {
+      await tester.pumpWidget(_host(const SettingsScreen()));
+      await tester.pump();
+      await tester.tap(find.text('Appearance'));
+      await tester.pumpAndSettle();
+      // Picker sheet lists all three modes. ("System" also appears as the
+      // row's current-value label, hence findsWidgets.)
+      expect(find.text('System'), findsWidgets);
+      expect(find.text('Light'), findsOneWidget);
+      expect(find.text('Dark'), findsOneWidget);
+      await tester.tap(find.text('Dark'));
+      await tester.pumpAndSettle();
+      expect(AppModel.shared.themeMode, ThemeMode.dark);
+    });
+
+    testWidgets('Language row opens a picker with the SG languages',
+        (tester) async {
+      await tester.pumpWidget(_host(const SettingsScreen()));
+      await tester.pump();
+      await tester.tap(find.text('Language'));
+      await tester.pumpAndSettle();
+      expect(find.text('中文'), findsOneWidget);
+      expect(find.text('Bahasa Melayu'), findsOneWidget);
+      await tester.tap(find.text('中文'));
+      await tester.pumpAndSettle();
+      expect(AppModel.shared.locale?.languageCode, 'zh');
+    });
+
+    testWidgets('About card navigates to the About screen', (tester) async {
+      await tester.pumpWidget(_host(const SettingsScreen()));
+      await tester.pump();
+      await tester.tap(find.text("What's new"));
+      await tester.pumpAndSettle();
+      expect(find.byType(AboutScreen), findsOneWidget);
+      // MicroLabel renders its label uppercased.
+      expect(find.text('THIS BUILD'), findsOneWidget);
+      // "Coming soon" sits below the fold — scroll it into view.
+      await tester.scrollUntilVisible(find.text('COMING SOON'), 240,
+          scrollable: find.byType(Scrollable).first);
+      expect(find.text('COMING SOON'), findsOneWidget);
+    });
+
+    testWidgets('Notifications row navigates and toggles the preference',
+        (tester) async {
+      await tester.pumpWidget(_host(const SettingsScreen()));
+      await tester.pump();
+      await tester.tap(find.text('Notifications'));
+      await tester.pumpAndSettle();
+      expect(find.byType(NotificationsScreen), findsOneWidget);
+      expect(AppModel.shared.notificationsEnabled, isFalse);
+      await tester.tap(find.text('Arrival alerts'));
+      await tester.pumpAndSettle();
+      expect(AppModel.shared.notificationsEnabled, isTrue);
+    });
+  });
+}

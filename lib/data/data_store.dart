@@ -117,6 +117,15 @@ List<RouteStopLive> journeySegment(RouteInfo r) {
   return r.stops.sublist(start, end + 1);
 }
 
+/// Order service numbers by their leading integer, then lexically — so
+/// '7' < '91' < '107M' < '191', not the raw string order.
+int _compareServiceNo(String a, String b) {
+  int lead(String s) =>
+      int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), '')) ?? 1 << 30;
+  final c = lead(a).compareTo(lead(b));
+  return c != 0 ? c : a.compareTo(b);
+}
+
 class DataStore extends ChangeNotifier {
   DataStore({LtaService? api}) : _api = api ?? LtaService.shared;
 
@@ -143,6 +152,9 @@ class DataStore extends ChangeNotifier {
 
   List<LtaBusService> _services = const [];
   List<LtaBusRoute>? _routesAll;
+  // stopCode → sorted service numbers serving it, derived from the
+  // BusRoutes dataset. Built once when routes load (see _loadRoutes).
+  Map<String, List<String>>? _servicesByStop;
 
   final Map<String, DateTime> _lastFetched = {};
   final Set<String> _inflight = {};
@@ -340,6 +352,7 @@ class DataStore extends ChangeNotifier {
     try {
       final r = await _api.busRoutes();
       _routesAll = r;
+      _buildServicesByStop(r);
       _routesLoaded = true;
       notifyListeners();
       return r;
@@ -347,6 +360,28 @@ class DataStore extends ChangeNotifier {
       return null;
     }
   }
+
+  /// Kick off the routes-dataset load (idempotent, fire-and-forget).
+  /// Callers that only need `servicesAtStop` use this instead of awaiting
+  /// `route()`.
+  void ensureRoutes() => _loadRoutes();
+
+  void _buildServicesByStop(List<LtaBusRoute> routes) {
+    final map = <String, Set<String>>{};
+    for (final r in routes) {
+      (map[r.busStopCode] ??= <String>{}).add(r.serviceNo);
+    }
+    _servicesByStop = {
+      for (final e in map.entries)
+        e.key: e.value.toList()..sort(_compareServiceNo),
+    };
+  }
+
+  /// All service numbers serving `stopCode`, from the static BusRoutes
+  /// dataset — available regardless of whether live arrivals have loaded.
+  /// Empty until `ensureRoutes()` (or any route lookup) has resolved.
+  List<String> servicesAtStop(String stopCode) =>
+      _servicesByStop?[stopCode] ?? const [];
 
   Future<RouteInfo?> route({
     required String serviceNo,

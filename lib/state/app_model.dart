@@ -12,13 +12,20 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/data_store.dart';
 import '../data/geo.dart';
 import '../data/models.dart';
 import '../services/location_service.dart';
+import '../theme.dart';
+
+/// Global ScaffoldMessenger key — lets AppModel surface in-app arrival
+/// alerts as a banner from outside the widget tree. Wired into MaterialApp
+/// in main.dart.
+final GlobalKey<ScaffoldMessengerState> lyneMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 
 // Persistence keys — kept identical to the legacy ones in case a future
 // data-portability tool needs to reconcile across platforms.
@@ -26,7 +33,9 @@ const _kPinsKey = 'lyne.pins';
 const _kRecentsKey = 'lyne.recents';
 const _kOnboardingDoneKey = 'lyne.onboardingDone';
 const _kUse24hKey = 'lyne.use24h';
-const _kDataSaverKey = 'lyne.dataSaver';
+const _kThemeModeKey = 'lyne.themeMode';
+const _kLocaleKey = 'lyne.locale';
+const _kNotifKey = 'lyne.notifications';
 
 /// One user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
 /// "pinned" ⟺ "has buses shown". `tracked == null` means *all* services
@@ -114,18 +123,50 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Data-saver toggle — visible in Settings; full wiring (reduced poll rate,
-  // skip ad-tile loads on cellular) is a follow-up. Persists today so the
-  // toggle state survives a restart.
-  bool _dataSaver = false;
-  bool get dataSaver => _dataSaver;
+  // Appearance override. Defaults to `system` — follow the OS light/dark
+  // setting — but the user can force light or dark from Settings.
+  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode get themeMode => _themeMode;
 
-  void setDataSaver(bool v) {
-    if (_dataSaver == v) return;
-    _dataSaver = v;
-    _prefs?.setBool(_kDataSaverKey, v);
+  void setThemeMode(ThemeMode m) {
+    if (_themeMode == m) return;
+    _themeMode = m;
+    _prefs?.setString(_kThemeModeKey, m.name);
     notifyListeners();
   }
+
+  // Language override. `null` = follow the device locale; a non-null value
+  // is an explicit pick from Settings. Stored as a BCP-47-ish tag.
+  Locale? _locale;
+  Locale? get locale => _locale;
+
+  void setLocale(Locale? l) {
+    if (_locale?.languageCode == l?.languageCode) return;
+    _locale = l;
+    if (l == null) {
+      _prefs?.remove(_kLocaleKey);
+    } else {
+      _prefs?.setString(_kLocaleKey, l.languageCode);
+    }
+    notifyListeners();
+  }
+
+  // Arrival-alert notifications. When on, the 1-second tick fires a local
+  // notification as a tracked pinned bus crosses the near threshold.
+  bool _notificationsEnabled = false;
+  bool get notificationsEnabled => _notificationsEnabled;
+
+  void setNotificationsEnabled(bool v) {
+    if (_notificationsEnabled == v) return;
+    _notificationsEnabled = v;
+    _prefs?.setBool(_kNotifKey, v);
+    notifyListeners();
+  }
+
+  // Keys ('code|no') of services already alerted for their current bus.
+  // Re-armed once the service's ETA climbs back above 5 min — i.e. the
+  // next bus — so each bus alerts at most once.
+  final Set<String> _alerted = {};
 
   // ─── Pins / recents (persisted) ───────────────────────────
   List<Pin> _pins = const [];
@@ -145,7 +186,12 @@ class AppModel extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     _onboardingDone = _prefs!.getBool(_kOnboardingDoneKey) ?? false;
     _use24h = _prefs!.getBool(_kUse24hKey) ?? true;
-    _dataSaver = _prefs!.getBool(_kDataSaverKey) ?? false;
+    final tm = _prefs!.getString(_kThemeModeKey);
+    _themeMode = ThemeMode.values
+        .firstWhere((m) => m.name == tm, orElse: () => ThemeMode.system);
+    final lc = _prefs!.getString(_kLocaleKey);
+    _locale = (lc == null || lc.isEmpty) ? null : Locale(lc);
+    _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? false;
 
     final raw = _prefs!.getString(_kPinsKey);
     if (raw != null) {
@@ -180,7 +226,53 @@ class AppModel extends ChangeNotifier {
     for (final c in codes) {
       _ds.ensureArrivals(c);
     }
+    _checkArrivalAlerts();
     notifyListeners();
+  }
+
+  // Fire an in-app alert as a tracked pinned bus crosses the near
+  // threshold. Foreground-only by design — see NotificationsScreen.
+  void _checkArrivalAlerts() {
+    if (!_notificationsEnabled) return;
+    for (final p in _pins) {
+      final tracked = p.tracked;
+      for (final s in liveServices(p.code)) {
+        if (tracked != null && !tracked.contains(s.no)) continue;
+        final key = '${p.code}|${s.no}';
+        if (s.etaSec > 300) {
+          _alerted.remove(key); // next bus — re-arm
+        } else if (s.etaSec <= 90 && _alerted.add(key)) {
+          _fireArrivalAlert(p.code, s);
+        }
+      }
+    }
+  }
+
+  void _fireArrivalAlert(String code, Service s) {
+    final messenger = lyneMessengerKey.currentState;
+    final ctx = lyneMessengerKey.currentContext;
+    if (messenger == null || ctx == null) return;
+    final t = ctx.t;
+    final stopName = _ds.stopName(code);
+    final mins = s.etaSec ~/ 60;
+    final when = mins <= 0 ? 'arriving now' : 'in $mins min';
+    messenger
+      ..removeCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        backgroundColor: t.surfaceHi,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 5),
+        content: Row(
+          children: [
+            Icon(Icons.directions_bus, size: 18, color: t.accent),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('Bus ${s.no} $when — $stopName',
+                  style: t.sans(13, color: t.fg)),
+            ),
+          ],
+        ),
+      ));
   }
 
   // ─── Live service composition ─────────────────────────────
