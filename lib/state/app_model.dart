@@ -36,6 +36,7 @@ const _kUse24hKey = 'lyne.use24h';
 const _kThemeModeKey = 'lyne.themeMode';
 const _kLocaleKey = 'lyne.locale';
 const _kNotifKey = 'lyne.notifications';
+const _kSearchRadiusKey = 'lyne.searchRadiusM';
 
 /// One user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
 /// "pinned" ⟺ "has buses shown". `tracked == null` means *all* services
@@ -163,6 +164,18 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Postal-code search radius in metres. When the user searches a 6-digit
+  // postal code, bus stops within this distance of that address are listed.
+  int _searchRadiusM = 500;
+  int get searchRadiusM => _searchRadiusM;
+
+  void setSearchRadiusM(int v) {
+    if (_searchRadiusM == v) return;
+    _searchRadiusM = v;
+    _prefs?.setInt(_kSearchRadiusKey, v);
+    notifyListeners();
+  }
+
   // Keys ('code|no') of services already alerted for their current bus.
   // Re-armed once the service's ETA climbs back above 5 min — i.e. the
   // next bus — so each bus alerts at most once.
@@ -192,6 +205,7 @@ class AppModel extends ChangeNotifier {
     final lc = _prefs!.getString(_kLocaleKey);
     _locale = (lc == null || lc.isEmpty) ? null : Locale(lc);
     _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? false;
+    _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
 
     final raw = _prefs!.getString(_kPinsKey);
     if (raw != null) {

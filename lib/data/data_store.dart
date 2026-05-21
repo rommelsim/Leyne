@@ -233,9 +233,37 @@ class DataStore extends ChangeNotifier {
         id: s.busStopCode,
         stopName: s.description,
         stopCode: s.busStopCode,
+        lat: s.latitude,
+        lon: s.longitude,
         distanceM: r.d.round(),
         walkMin: walkMinutesFor(r.d),
         services: servicesFor(s.busStopCode),
+      );
+    }).toList(growable: false);
+  }
+
+  /// Bus stops within [radiusM] metres of (lat, lon), nearest first.
+  /// Independent of the device GPS — used by postal-code search, where the
+  /// centre is a geocoded address rather than the user's location. Capped
+  /// at 50 so a wide radius in a dense area stays manageable.
+  List<NearbyStop> stopsWithin(double lat, double lon, int radiusM) {
+    final within = <({LtaBusStop stop, double d})>[];
+    for (final s in _stopByCode.values) {
+      final d = haversine(lat, lon, s.latitude, s.longitude);
+      if (d <= radiusM) within.add((stop: s, d: d));
+    }
+    within.sort((a, b) => a.d.compareTo(b.d));
+    return within.take(50).map((r) {
+      final s = r.stop;
+      return NearbyStop(
+        id: s.busStopCode,
+        stopName: s.description,
+        stopCode: s.busStopCode,
+        lat: s.latitude,
+        lon: s.longitude,
+        distanceM: r.d.round(),
+        walkMin: walkMinutesFor(r.d),
+        services: const [],
       );
     }).toList(growable: false);
   }

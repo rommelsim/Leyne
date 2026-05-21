@@ -95,12 +95,14 @@ class CardModel {
   final String? initialSelectedNo;
 }
 
-/// One row in the Nearby list.
+/// One row in the Nearby list (also reused by postal-code radius search).
 class NearbyStop {
   NearbyStop({
     required this.id,
     required this.stopName,
     required this.stopCode,
+    required this.lat,
+    required this.lon,
     required this.distanceM,
     required this.walkMin,
     required this.services,
@@ -109,6 +111,8 @@ class NearbyStop {
   final String id;
   final String stopName;
   final String stopCode;
+  final double lat;
+  final double lon;
   final int distanceM;
   final int walkMin;
   final List<Service> services;

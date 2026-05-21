@@ -57,6 +57,11 @@ class SettingsScreen extends StatelessWidget {
                           value: AppLocalizations.labelFor(
                               m.locale?.languageCode ?? 'en'),
                           onTap: () => _showLanguageSheet(context, m)),
+                      _navRow(t,
+                          icon: Icons.adjust,
+                          title: 'Search radius',
+                          value: _radiusLabel(m.searchRadiusM),
+                          onTap: () => _showRadiusSheet(context, m)),
                       _toggleRow(
                         t,
                         icon: Icons.schedule,
@@ -236,6 +241,28 @@ class SettingsScreen extends StatelessWidget {
             label: AppLocalizations.labelFor(code),
             onPick: () =>
                 m.setLocale(code == 'en' ? null : Locale(code)),
+          ),
+      ],
+    );
+  }
+
+  /// '250 m', '1 km', '1.5 km'.
+  String _radiusLabel(int metres) => metres < 1000
+      ? '$metres m'
+      : '${(metres / 1000).toStringAsFixed(metres % 1000 == 0 ? 0 : 1)} km';
+
+  Future<void> _showRadiusSheet(BuildContext context, AppModel m) {
+    return _showOptionSheet(
+      context,
+      title: 'Search radius',
+      footnote: 'When you search a 6-digit postal code, bus stops within '
+          'this distance of that address are shown.',
+      options: [
+        for (final metres in const [250, 500, 1000, 2000])
+          _Option(
+            selected: m.searchRadiusM == metres,
+            label: _radiusLabel(metres),
+            onPick: () => m.setSearchRadiusM(metres),
           ),
       ],
     );

@@ -52,6 +52,14 @@ void main() {
       await AppModel.shared.load();
       expect(AppModel.shared.notificationsEnabled, isTrue);
     });
+
+    test('search radius defaults to 500 m and persists a pick', () async {
+      expect(AppModel.shared.searchRadiusM, 500);
+      AppModel.shared.setSearchRadiusM(1000);
+      expect(AppModel.shared.searchRadiusM, 1000);
+      await AppModel.shared.load();
+      expect(AppModel.shared.searchRadiusM, 1000);
+    });
   });
 
   group('SettingsScreen', () {
@@ -62,6 +70,7 @@ void main() {
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('Appearance'), findsOneWidget);
       expect(find.text('Language'), findsOneWidget);
+      expect(find.text('Search radius'), findsOneWidget);
       expect(find.text('24-hour time'), findsOneWidget);
       // Removed this cycle.
       expect(find.text('Refresh interval'), findsNothing);
@@ -95,6 +104,20 @@ void main() {
       await tester.tap(find.text('中文'));
       await tester.pumpAndSettle();
       expect(AppModel.shared.locale?.languageCode, 'zh');
+    });
+
+    testWidgets('Search radius row opens a picker and applies the choice',
+        (tester) async {
+      await tester.pumpWidget(_host(const SettingsScreen()));
+      await tester.pump();
+      await tester.tap(find.text('Search radius'));
+      await tester.pumpAndSettle();
+      // Picker lists the radius presets.
+      expect(find.text('250 m'), findsOneWidget);
+      expect(find.text('1 km'), findsOneWidget);
+      await tester.tap(find.text('1 km'));
+      await tester.pumpAndSettle();
+      expect(AppModel.shared.searchRadiusM, 1000);
     });
 
     testWidgets('About card navigates to the About screen', (tester) async {

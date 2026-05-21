@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 
 import '../data/data_store.dart';
 import '../data/lta_models.dart';
+import '../data/models.dart';
 import '../data/search_logic.dart';
+import '../services/geocode_service.dart';
 import '../state/app_model.dart';
 import '../theme.dart';
 import '../widgets/atoms.dart';
+import '../widgets/stops_map.dart';
 import 'detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -28,12 +31,25 @@ class _SearchScreenState extends State<SearchScreen> {
   final FocusNode _focus = FocusNode();
   String _q = '';
 
+  // ─── Postal-code geocoding state ──────────────────────────────
+  // `_geoFor` is the postal code `_geo` was resolved for, so each code is
+  // geocoded at most once. `_geo` is null while loading or after a failure.
+  String? _geoFor;
+  GeoPlace? _geo;
+  bool _geoLoading = false;
+  bool _geoFailed = false;
+
   @override
   void initState() {
     super.initState();
+    // Routes power the per-stop service chips in postal-code results.
+    DataStore.shared.ensureRoutes();
     _ctl.addListener(() {
       final v = _ctl.text;
-      if (v != _q) setState(() => _q = v);
+      if (v != _q) {
+        setState(() => _q = v);
+        _maybeGeocode(v);
+      }
     });
   }
 
@@ -70,6 +86,31 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  // ─── Postal-code geocoding ────────────────────────────────────
+
+  /// Geocode `raw` when it's a 6-digit postal code not yet resolved. Pass
+  /// `force` to retry a code that previously failed.
+  void _maybeGeocode(String raw, {bool force = false}) {
+    final q = raw.trim();
+    if (detectQueryKind(q).kind != 'postal') return;
+    if (!force && q == _geoFor) return;
+    setState(() {
+      _geoFor = q;
+      _geo = null;
+      _geoFailed = false;
+      _geoLoading = true;
+    });
+    GeocodeService.shared.postalCode(q).then((place) {
+      // Drop a stale result if the query moved on while we waited.
+      if (!mounted || _geoFor != q) return;
+      setState(() {
+        _geoLoading = false;
+        _geo = place;
+        _geoFailed = place == null;
+      });
+    });
+  }
+
   // ─── Build ────────────────────────────────────────────────────
 
   @override
@@ -90,7 +131,11 @@ class _SearchScreenState extends State<SearchScreen> {
                 _searchField(t),
                 if (_q.isNotEmpty) _detectedHint(t),
                 Expanded(
-                  child: _q.isEmpty ? _emptyState(t) : _results(t),
+                  child: _q.isEmpty
+                      ? _emptyState(t)
+                      : detectQueryKind(_q).kind == 'postal'
+                          ? _postalResults(t)
+                          : _results(t),
                 ),
               ],
             ),
@@ -228,7 +273,8 @@ class _SearchScreenState extends State<SearchScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 16),
             child: Text(
-              'Search a bus number or stop (name / 5-digit code).',
+              'Search a bus number, a stop (name / 5-digit code), or a '
+              '6-digit postal code to find stops near an address.',
               style: t.sans(13, color: t.dim),
             ),
           ),
@@ -453,6 +499,241 @@ class _SearchScreenState extends State<SearchScreen> {
             Icon(Icons.chevron_right, size: 18, color: t.faint),
           ],
         ),
+      ),
+    );
+  }
+
+  // ─── Postal-code results ──────────────────────────────────────
+
+  /// '500 M', '1 KM', '1.5 KM' — upper-cased for the mono summary label.
+  String _radiusLabel(int m) => m < 1000
+      ? '$m M'
+      : '${(m / 1000).toStringAsFixed(m % 1000 == 0 ? 0 : 1)} KM';
+
+  Widget _postalResults(LyneTheme t) {
+    // Reference data must be loaded before stops can be ranked by distance.
+    final refState = DataStore.shared.referenceState;
+    if (refState.state == LoadState.loading) {
+      return _centeredNote(t, 'Loading bus stops…', spinner: true);
+    }
+    if (refState.state == LoadState.error) {
+      return _centeredNote(
+          t, refState.errorMessage ?? 'Couldn’t load bus stops.');
+    }
+
+    if (_geoLoading) {
+      return _centeredNote(t, 'Finding postal code $_geoFor…', spinner: true);
+    }
+    final geo = _geo;
+    if (_geoFailed || geo == null) return _postalNotFound(t);
+
+    final radius = AppModel.shared.searchRadiusM;
+    final stops = DataStore.shared.stopsWithin(geo.lat, geo.lon, radius);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
+      children: [
+        _postalSummary(t, geo, stops.length, radius),
+        const SizedBox(height: 10),
+        StopsMap(
+          center: GeoPoint(geo.lat, geo.lon),
+          stops: stops,
+          radiusM: radius,
+        ),
+        const SizedBox(height: 14),
+        if (stops.isEmpty)
+          _postalEmpty(t, radius)
+        else
+          for (final s in stops) ...[
+            _postalStopRow(t, s),
+            const SizedBox(height: 6),
+          ],
+      ],
+    );
+  }
+
+  Widget _postalSummary(LyneTheme t, GeoPlace geo, int count, int radius) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 4, 6, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(geo.label,
+              style: t.sans(16, weight: FontWeight.w600),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 3),
+          Text(
+            'POSTAL ${geo.postalCode} · $count STOP${count == 1 ? "" : "S"} '
+            'WITHIN ${_radiusLabel(radius)}',
+            style: t.mono(10, color: t.dim).copyWith(letterSpacing: 0.6),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _postalStopRow(LyneTheme t, NearbyStop s) {
+    final svcNos = DataStore.shared.servicesAtStop(s.stopCode);
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: () => _pickStop(s.stopCode),
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: t.line),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 52,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text('${s.distanceM}',
+                            style: t.mono(17, weight: FontWeight.w600)),
+                        const SizedBox(width: 1),
+                        Text('m', style: t.mono(10, color: t.dim)),
+                      ],
+                    ),
+                    Text('${s.walkMin} MIN',
+                        style: t.mono(9, color: t.faint)
+                            .copyWith(letterSpacing: 0.5)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(width: 1, height: 36, color: t.line),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(s.stopName,
+                        style: t.sans(15, weight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(s.stopCode, style: t.mono(10, color: t.faint)),
+                        const SizedBox(width: 6),
+                        Expanded(child: _serviceChips(t, svcNos)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _serviceChips(LyneTheme t, List<String> nos) {
+    if (nos.isEmpty) return const SizedBox.shrink();
+    final shown = nos.take(6).toList();
+    final overflow = nos.length - shown.length;
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        for (final n in shown)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: t.lineHi,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(n,
+                style: t.mono(10, weight: FontWeight.w600, color: t.fg)),
+          ),
+        if (overflow > 0)
+          Text('+$overflow', style: t.mono(10, color: t.faint)),
+      ],
+    );
+  }
+
+  Widget _centeredNote(LyneTheme t, String msg, {bool spinner = false}) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (spinner) ...[
+              CircularProgressIndicator(color: t.dim, strokeWidth: 2),
+              const SizedBox(height: 12),
+            ],
+            Text(msg,
+                style: t.sans(13, color: t.dim),
+                textAlign: TextAlign.center),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _postalNotFound(LyneTheme t) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.wrong_location_outlined, size: 36, color: t.faint),
+            const SizedBox(height: 12),
+            Text('Couldn’t find postal code $_geoFor',
+                style: t.sans(14, weight: FontWeight.w600),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(
+              'Check the 6-digit code, or try again — the address lookup '
+              'may be offline.',
+              style: t.sans(12, color: t.dim),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: t.accent,
+                foregroundColor: t.contrastFg,
+              ),
+              onPressed: () => _maybeGeocode(_q, force: true),
+              child: const Text('Try again'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _postalEmpty(LyneTheme t, int radius) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      child: Column(
+        children: [
+          Icon(Icons.near_me_disabled, size: 32, color: t.faint),
+          const SizedBox(height: 10),
+          Text('No bus stops within ${_radiusLabel(radius).toLowerCase()}',
+              style: t.sans(13, weight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text('Widen the search radius in Settings.',
+              style: t.sans(12, color: t.faint),
+              textAlign: TextAlign.center),
+        ],
       ),
     );
   }

@@ -71,10 +71,7 @@ void main() {
       await tester.pump();
       // Without any recent searches or pinned stops, shows the search-hint
       // copy. The "Stops near me" shortcut was retired with the redesign.
-      expect(
-          find.text(
-              'Search a bus number or stop (name / 5-digit code).'),
-          findsOneWidget);
+      expect(find.textContaining('6-digit postal code'), findsOneWidget);
     });
 
     testWidgets('typing a query shows the DETECTED hint', (tester) async {
