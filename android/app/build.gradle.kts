@@ -61,6 +61,15 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // R8 code shrinking is OFF for release. The Google Mobile Ads
+            // SDK starts WorkManager (androidx.work) at app launch, and R8's
+            // obfuscation renamed the Room-generated WorkDatabase_Impl —
+            // crashing the app on startup with "Failed to create an instance
+            // of androidx.work.impl.WorkDatabase". The Java/Kotlin layer R8
+            // would shrink is small next to the Flutter engine + AOT Dart,
+            // so disabling it is the reliable trade-off.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
