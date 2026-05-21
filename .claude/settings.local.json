@@ -58,7 +58,17 @@
       "Bash(flutter analyze *)",
       "Bash(flutter test *)",
       "Bash(flutter devices *)",
-      "Bash(flutter run *)"
+      "Bash(flutter run *)",
+      "Bash(flutter --version)",
+      "Bash(keytool -printcert)",
+      "Bash(keytool -list -v -keystore /Users/rommel/leyne-upload.jks -storepass oldDog98)",
+      "Bash(flutter build *)",
+      "Bash(vm_stat)",
+      "Bash(sort -nrk4)",
+      "Bash(awk '{print $4\"%\", $11, $12}')",
+      "Bash(kill 29132)",
+      "Bash(unzip -p build/app/outputs/bundle/release/app-release.aab \"META-INF/*.RSA\")",
+      "Bash(unzip -p build/app/outputs/bundle/release/app-release.aab base/manifest/AndroidManifest.xml)"
     ]
   }
 }
