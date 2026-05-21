@@ -8,12 +8,15 @@
 // • Warns at debug time if LTA_API_KEY is missing.
 
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
+import 'data/changelog.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/root_scaffold.dart';
+import 'screens/whats_new_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
 import 'services/deep_link_service.dart';
 import 'services/location_service.dart';
@@ -31,6 +34,13 @@ void main() async {
   // await this so Home opens with the user's saved pins on screen, not an
   // empty list that flickers in once load() resolves.
   await AppModel.shared.load();
+  // Resolve the running app version before the first frame so the What's
+  // New screen's routing decision is stable. Non-fatal if it fails — the
+  // screen simply won't show.
+  try {
+    final info = await PackageInfo.fromPlatform();
+    AppModel.shared.setCurrentVersion(info.version);
+  } catch (_) {/* package_info unavailable — skip What's New */}
   // Kick off the 1-second tick now (live ETA countdown + arrival refresh).
   // Tests skip this so they exit without a pending periodic timer.
   AppModel.shared.startTicker();
@@ -89,9 +99,10 @@ class LyneApp extends StatelessWidget {
   }
 }
 
-/// Routes between OnboardingScreen and RootScaffold based on the
-/// persisted onboarding flag. Listens to AppModel so the "Show again"
-/// entry in Settings can re-enter onboarding mid-session.
+/// Routes between OnboardingScreen, WhatsNewScreen and RootScaffold based on
+/// persisted state. Listens to AppModel so the "Show again" entry in
+/// Settings can re-enter onboarding mid-session, and so dismissing What's
+/// New drops straight through to Home.
 class _AppRoot extends StatelessWidget {
   const _AppRoot();
 
@@ -101,6 +112,16 @@ class _AppRoot extends StatelessWidget {
       listenable: AppModel.shared,
       builder: (context, _) {
         if (AppModel.shared.onboardingDone) {
+          // A returning user who just updated into a build with release
+          // notes sees them once before Home.
+          final wn = AppModel.shared.whatsNewVersion;
+          if (wn != null) {
+            return WhatsNewScreen(
+              version: wn,
+              entry: kChangelog[wn]!,
+              onDismiss: AppModel.shared.markWhatsNewSeen,
+            );
+          }
           return const RootScaffold();
         }
         return OnboardingScreen(

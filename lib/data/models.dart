@@ -39,6 +39,7 @@ class Service {
     required this.load,
     required this.wab,
     required this.deck,
+    this.monitored = true,
     this.arrivalDate,
     this.followingDate,
     this.thirdDate,
@@ -62,6 +63,10 @@ class Service {
   final bool wab;
 
   final Deck deck;
+
+  /// True when the ETA comes from the bus's live GPS fix; false when LTA
+  /// fell back to the static timetable (shown as an "≈ scheduled" estimate).
+  final bool monitored;
 
   /// Absolute arrival instants — UI ticks use these to recompute etaSec
   /// against `DateTime.now()` for a smooth countdown.
@@ -147,3 +152,37 @@ Eta fmtEta(int sec) {
 /// '420m', '1.2km'. Same rounding as legacy fmtDistance.
 String fmtDistance(int metres) =>
     metres < 1000 ? '${metres}m' : '${(metres / 1000).toStringAsFixed(1)}km';
+
+// ─── Bus operating hours (BusRoutes WD/SAT/SUN first & last) ───────────
+
+/// Minutes-since-midnight of an `HHMM` string. '0530' → 330.
+int _minOfDay(String hhmm) =>
+    (int.tryParse(hhmm.substring(0, 2)) ?? 0) * 60 +
+    (int.tryParse(hhmm.substring(2)) ?? 0);
+
+/// Format an `HHMM` bus time for display — '0905' → '09:05' (24h) or
+/// '9:05 AM' (12h). 'use24h' matches the app-wide clock preference.
+String fmtClock(String hhmm, {bool use24h = true}) {
+  if (hhmm.length != 4) return hhmm;
+  final h = (int.tryParse(hhmm.substring(0, 2)) ?? 0) % 24;
+  final m = hhmm.substring(2);
+  if (use24h) return '${h.toString().padLeft(2, '0')}:$m';
+  final period = h < 12 ? 'AM' : 'PM';
+  final h12 = h % 12 == 0 ? 12 : h % 12;
+  return '$h12:$m $period';
+}
+
+/// True when the day's last bus has already departed, given the `first` and
+/// `last` `HHMM` times and the current `now`. Handles routes whose last bus
+/// runs past midnight (a `last` earlier than `first`, e.g. first 0530 /
+/// last 0015).
+bool lastBusGone(String first, String last, DateTime now) {
+  final f = _minOfDay(first);
+  var l = _minOfDay(last);
+  if (l < f) l += 1440; // last bus runs past midnight
+  var nowMin = now.hour * 60 + now.minute;
+  // Small hours of a service that spans midnight: the current clock time
+  // belongs to the previous service day — shift it onto the same scale.
+  if (l >= 1440 && nowMin < f) nowMin += 1440;
+  return nowMin > l;
+}

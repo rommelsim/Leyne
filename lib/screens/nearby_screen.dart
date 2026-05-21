@@ -272,6 +272,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
   Widget _row(LyneTheme t, NearbyStop stop) {
     final svcs = AppModel.shared.liveServices(stop.stopCode);
     final anyArriving = svcs.any((s) => s.etaSec <= 60);
+    // Service numbers of buses arriving now (≤1 min) — their chips light up
+    // green, so the eye lands on the bus to run for, not just the stop.
+    final arrivingNos = <String>{
+      for (final s in svcs)
+        if (s.etaSec <= 60) s.no,
+    };
     // Service numbers come from the static routes dataset, so every row
     // lists its buses even before live arrivals load.
     final svcNos = DataStore.shared.servicesAtStop(stop.stopCode);
@@ -360,7 +366,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                             style: t.mono(10, color: t.faint)),
                         const SizedBox(width: 6),
                         Expanded(
-                          child: _serviceChipsRow(t, svcNos),
+                          child: _serviceChipsRow(t, svcNos, arrivingNos),
                         ),
                       ],
                     ),
@@ -374,7 +380,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
     );
   }
 
-  Widget _serviceChipsRow(LyneTheme t, List<String> nos) {
+  Widget _serviceChipsRow(
+      LyneTheme t, List<String> nos, Set<String> arrivingNos) {
     if (nos.isEmpty) return const SizedBox.shrink();
     final shown = nos.take(6).toList();
     final overflow = nos.length - shown.length;
@@ -382,20 +389,27 @@ class _NearbyScreenState extends State<NearbyScreen> {
       spacing: 4,
       runSpacing: 4,
       children: [
-        for (final n in shown)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: t.lineHi,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(n,
-                style: t.mono(10, weight: FontWeight.w600, color: t.fg)),
-          ),
+        for (final n in shown) _serviceChip(t, n, arrivingNos.contains(n)),
         if (overflow > 0)
           Text('+$overflow',
               style: t.mono(10, color: t.faint)),
       ],
+    );
+  }
+
+  /// One bus-number chip. Arriving buses (≤1 min) get the green accent
+  /// fill; the rest stay neutral.
+  Widget _serviceChip(LyneTheme t, String no, bool arriving) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: arriving ? t.accent : t.lineHi,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(no,
+          style: t.mono(10,
+              weight: FontWeight.w600,
+              color: arriving ? t.contrastFg : t.fg)),
     );
   }
 

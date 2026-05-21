@@ -411,6 +411,34 @@ class DataStore extends ChangeNotifier {
   List<String> servicesAtStop(String stopCode) =>
       _servicesByStop?[stopCode] ?? const [];
 
+  /// When `code`'s live arrivals were last successfully fetched — drives the
+  /// "updated Ns ago" freshness caption. Null until the first fetch lands.
+  DateTime? lastFetchedAt(String code) => _lastFetched[code];
+
+  /// First/last scheduled bus for `serviceNo` at `stopCode`, picked for the
+  /// day-type of `now` (weekday / Saturday / Sunday-or-PH). Times are `HHMM`
+  /// strings. Null until the BusRoutes dataset has loaded (`ensureRoutes()`),
+  /// or when the service simply doesn't run on that day.
+  ({String first, String last})? busTimings({
+    required String serviceNo,
+    required String stopCode,
+    DateTime? now,
+  }) {
+    final routes = _routesAll;
+    if (routes == null) return null;
+    for (final r in routes) {
+      if (r.serviceNo != serviceNo || r.busStopCode != stopCode) continue;
+      final (first, last) = switch ((now ?? DateTime.now()).weekday) {
+        DateTime.saturday => (r.satFirstBus, r.satLastBus),
+        DateTime.sunday => (r.sunFirstBus, r.sunLastBus),
+        _ => (r.wdFirstBus, r.wdLastBus),
+      };
+      if (first == null || last == null) return null;
+      return (first: first, last: last);
+    }
+    return null;
+  }
+
   Future<RouteInfo?> route({
     required String serviceNo,
     required String stopCode,

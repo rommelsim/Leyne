@@ -74,6 +74,11 @@ class LtaArrivalService {
       load: _loadFromLta(nextBus.load),
       wab: (nextBus.feature ?? '').toUpperCase() == 'WAB',
       deck: _deckFromLta(nextBus.vehicleType),
+      // LTA's Monitored flag: 1 = ETA derived from the bus's live GPS fix,
+      // 0 = no GPS, ETA is just the timetable estimate (the root cause of
+      // the "app said 30 min, bus came in 3" complaints). Treat an absent
+      // value as monitored so we never cry wolf on missing data.
+      monitored: (nextBus.monitored ?? 1) != 0,
       arrivalDate: nextBus.arrivalDate,
       followingDate: nextBus2.arrivalDate,
       thirdDate: nextBus3.arrivalDate,
@@ -86,6 +91,7 @@ class LtaNextBus {
     this.originCode,
     this.destinationCode,
     this.estimatedArrival,
+    this.monitored,
     this.latitude,
     this.longitude,
     this.load,
@@ -96,6 +102,10 @@ class LtaNextBus {
   final String? originCode;
   final String? destinationCode;
   final String? estimatedArrival;
+
+  /// LTA's `Monitored` flag — 1 when the ETA is computed from the bus's
+  /// live GPS position, 0 when it falls back to the static timetable.
+  final int? monitored;
   final String? latitude;
   final String? longitude;
   final String? load;
@@ -106,6 +116,7 @@ class LtaNextBus {
         originCode: j['OriginCode'] as String?,
         destinationCode: j['DestinationCode'] as String?,
         estimatedArrival: j['EstimatedArrival'] as String?,
+        monitored: (j['Monitored'] as num?)?.toInt(),
         latitude: j['Latitude'] as String?,
         longitude: j['Longitude'] as String?,
         load: j['Load'] as String?,
@@ -212,6 +223,12 @@ class LtaBusRoute {
     required this.stopSequence,
     required this.busStopCode,
     required this.distance,
+    this.wdFirstBus,
+    this.wdLastBus,
+    this.satFirstBus,
+    this.satLastBus,
+    this.sunFirstBus,
+    this.sunLastBus,
   });
 
   final String serviceNo;
@@ -221,6 +238,16 @@ class LtaBusRoute {
   final String busStopCode;
   final double? distance;
 
+  // First/last bus clock times at this stop, as `HHMM` strings ("0530",
+  // "0015"). LTA emits "-" or an empty string when the service doesn't run
+  // on that day-type; `_busTime` normalises both to null.
+  final String? wdFirstBus;
+  final String? wdLastBus;
+  final String? satFirstBus;
+  final String? satLastBus;
+  final String? sunFirstBus;
+  final String? sunLastBus;
+
   factory LtaBusRoute.fromJson(Map<String, dynamic> j) => LtaBusRoute(
         serviceNo: j['ServiceNo'] as String? ?? '',
         operator_: j['Operator'] as String?,
@@ -228,6 +255,12 @@ class LtaBusRoute {
         stopSequence: (j['StopSequence'] as num?)?.toInt() ?? 0,
         busStopCode: j['BusStopCode'] as String? ?? '',
         distance: (j['Distance'] as num?)?.toDouble(),
+        wdFirstBus: _busTime(j['WD_FirstBus']),
+        wdLastBus: _busTime(j['WD_LastBus']),
+        satFirstBus: _busTime(j['SAT_FirstBus']),
+        satLastBus: _busTime(j['SAT_LastBus']),
+        sunFirstBus: _busTime(j['SUN_FirstBus']),
+        sunLastBus: _busTime(j['SUN_LastBus']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -237,7 +270,21 @@ class LtaBusRoute {
         'StopSequence': stopSequence,
         'BusStopCode': busStopCode,
         'Distance': distance,
+        'WD_FirstBus': wdFirstBus,
+        'WD_LastBus': wdLastBus,
+        'SAT_FirstBus': satFirstBus,
+        'SAT_LastBus': satLastBus,
+        'SUN_FirstBus': sunFirstBus,
+        'SUN_LastBus': sunLastBus,
       };
+}
+
+/// Normalise an LTA bus-time cell: a 4-digit `HHMM` string, or null when the
+/// field is missing, blank, or the literal "-" that means "no service".
+String? _busTime(Object? raw) {
+  final s = (raw as String?)?.trim() ?? '';
+  if (s.isEmpty || s == '-' || s.length != 4) return null;
+  return s;
 }
 
 // ─── ISO-8601 (+08:00) date parsing ───────────────────────────

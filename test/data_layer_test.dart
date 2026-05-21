@@ -242,4 +242,85 @@ void main() {
       expect(fmtDistance(1234), '1.2km');
     });
   });
+
+  // ─── Monitored flag → live-GPS vs timetable estimate ──────
+  group('Service.monitored', () {
+    Service mapWith(Object? monitored) {
+      final svc = LtaArrivalService.fromJson({
+        'ServiceNo': '88',
+        'NextBus': {
+          'EstimatedArrival': '2099-01-01T00:00:00+08:00',
+          'Load': 'SEA',
+          'Type': 'SD',
+          'Monitored': ?monitored,
+        },
+        'NextBus2': {'EstimatedArrival': ''},
+        'NextBus3': {'EstimatedArrival': ''},
+      });
+      return svc.toService(destName: 'X');
+    }
+
+    test('Monitored 1 → live (monitored true)', () {
+      expect(mapWith(1).monitored, isTrue);
+    });
+    test('Monitored 0 → timetable estimate (monitored false)', () {
+      expect(mapWith(0).monitored, isFalse);
+    });
+    test('absent Monitored defaults to true — never cry wolf', () {
+      expect(mapWith(null).monitored, isTrue);
+    });
+  });
+
+  // ─── Bus operating hours (first / last bus) ───────────────
+  group('LtaBusRoute first/last bus', () {
+    test('parses WD/SAT/SUN times and normalises "-" to null', () {
+      final j = jsonDecode('''
+      {"ServiceNo":"88","Operator":"SBST","Direction":1,"StopSequence":3,
+       "BusStopCode":"01219","Distance":1.2,
+       "WD_FirstBus":"0530","WD_LastBus":"0015",
+       "SAT_FirstBus":"0600","SAT_LastBus":"0000",
+       "SUN_FirstBus":"-","SUN_LastBus":""}
+      ''') as Map<String, dynamic>;
+      final r = LtaBusRoute.fromJson(j);
+      expect(r.wdFirstBus, '0530');
+      expect(r.wdLastBus, '0015');
+      expect(r.satFirstBus, '0600');
+      expect(r.satLastBus, '0000');
+      expect(r.sunFirstBus, isNull); // "-" → no service
+      expect(r.sunLastBus, isNull); // "" → no service
+    });
+  });
+
+  group('fmtClock', () {
+    test('24h formatting', () {
+      expect(fmtClock('0530'), '05:30');
+      expect(fmtClock('0015'), '00:15');
+      expect(fmtClock('2345'), '23:45');
+    });
+    test('12h formatting', () {
+      expect(fmtClock('0530', use24h: false), '5:30 AM');
+      expect(fmtClock('0015', use24h: false), '12:15 AM');
+      expect(fmtClock('1305', use24h: false), '1:05 PM');
+      expect(fmtClock('1200', use24h: false), '12:00 PM');
+    });
+  });
+
+  group('lastBusGone', () {
+    test('before last bus → not gone', () {
+      final now = DateTime(2026, 5, 21, 22, 0); // 22:00
+      expect(lastBusGone('0530', '2330', now), isFalse);
+    });
+    test('after last bus → gone', () {
+      final now = DateTime(2026, 5, 21, 23, 45); // 23:45
+      expect(lastBusGone('0530', '2330', now), isTrue);
+    });
+    test('past-midnight last bus: 00:30 is still within service', () {
+      final now = DateTime(2026, 5, 21, 0, 30); // 00:30
+      expect(lastBusGone('0530', '0100', now), isFalse);
+    });
+    test('past-midnight last bus: 02:00 is after a 01:00 last bus', () {
+      final now = DateTime(2026, 5, 21, 2, 0); // 02:00
+      expect(lastBusGone('0530', '0100', now), isTrue);
+    });
+  });
 }

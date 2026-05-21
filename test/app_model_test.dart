@@ -175,6 +175,64 @@ void main() {
     });
   });
 
+  // ─── What's New (changelog after an update) ─────────────────
+  group('whatsNewVersion', () {
+    test('fresh install (still onboarding) never shows What’s New',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final m = AppModel.forTesting();
+      await m.load();
+      m.setCurrentVersion('2.0.0'); // a version with a changelog entry
+      expect(m.onboardingDone, isFalse);
+      expect(m.whatsNewVersion, isNull);
+    });
+
+    test('returning user on a version with release notes sees it once',
+        () async {
+      // Onboarded before, no version ever recorded — the bootstrap case.
+      SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
+      final m = AppModel.forTesting();
+      await m.load();
+      m.setCurrentVersion('2.0.0');
+      expect(m.whatsNewVersion, '2.0.0');
+
+      m.markWhatsNewSeen();
+      expect(m.whatsNewVersion, isNull); // acknowledged — won't show again
+    });
+
+    test('a version with no changelog entry shows nothing', () async {
+      SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
+      final m = AppModel.forTesting();
+      await m.load();
+      m.setCurrentVersion('0.0.1-no-such-entry');
+      expect(m.whatsNewVersion, isNull);
+    });
+
+    test('finishOnboarding pins the version so it never back-fires',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final m = AppModel.forTesting();
+      await m.load();
+      m.setCurrentVersion('2.0.0');
+      m.finishOnboarding(); // fresh user completes onboarding
+      expect(m.onboardingDone, isTrue);
+      expect(m.whatsNewVersion, isNull);
+    });
+
+    test('acknowledgement persists across a reload', () async {
+      SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
+      final m = AppModel.forTesting();
+      await m.load();
+      m.setCurrentVersion('2.0.0');
+      m.markWhatsNewSeen();
+
+      final m2 = AppModel.forTesting();
+      await m2.load();
+      m2.setCurrentVersion('2.0.0');
+      expect(m2.whatsNewVersion, isNull);
+    });
+  });
+
   test('debug print suppressed', () {
     debugDefaultTargetPlatformOverride = null;
   });

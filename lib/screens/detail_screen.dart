@@ -55,6 +55,9 @@ class _DetailScreenState extends State<DetailScreen> {
     super.initState();
     _selectedNo = widget.initialSelectedNo;
     DataStore.shared.ensureArrivals(widget.stopCode, force: true);
+    // Warm the BusRoutes dataset so first/last bus timings can render even
+    // before the user drills into a service's live map.
+    DataStore.shared.ensureRoutes();
     if (_selectedNo != null) _loadRoute();
     _liveTimer = Timer.periodic(
         const Duration(seconds: 15), (_) => _refreshLive());
@@ -272,8 +275,28 @@ class _DetailScreenState extends State<DetailScreen> {
 
   List<Widget> _stopOverview(
       LyneTheme t, AppModel m, String stopName, List<Service> services) {
+    final freshness = _freshnessText();
     return [
       _stopHeading(t, m, stopName),
+      if (freshness != null) ...[
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.only(left: 4),
+          child: Row(
+            children: [
+              Container(
+                width: 5, height: 5,
+                decoration:
+                    BoxDecoration(color: t.accent, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(freshness,
+                  style: t.mono(10, color: t.faint)
+                      .copyWith(letterSpacing: 0.4)),
+            ],
+          ),
+        ),
+      ],
       const SizedBox(height: 18),
       if (services.isEmpty)
         _arrivalsPlaceholder(t, DataStore.shared.arrivals[widget.stopCode])
@@ -393,7 +416,9 @@ class _DetailScreenState extends State<DetailScreen> {
     final tracked = m.isTracked(code: widget.stopCode, busNo: s.no);
     final arriving = s.etaSec <= 60;
     final etaMin = (s.etaSec / 60).floor();
-    final big = etaMin <= 0 ? 'Arr' : '$etaMin';
+    final estimate = !s.monitored;
+    final etaPrefix = estimate && etaMin > 0 ? '~' : '';
+    final big = etaMin <= 0 ? 'Arr' : '$etaPrefix$etaMin';
     final unit = etaMin <= 0 ? 'now' : 'min';
     final etaColor = arriving ? t.accent : t.fg;
     final loadColor = switch (s.load) {
@@ -454,6 +479,12 @@ class _DetailScreenState extends State<DetailScreen> {
                           Text('WAB',
                               style: t.mono(10, color: t.dim)
                                   .copyWith(letterSpacing: 0.4)),
+                        ],
+                        if (estimate) ...[
+                          const SizedBox(width: 8),
+                          Text('~ scheduled',
+                              style: t.mono(10, color: t.warn)
+                                  .copyWith(letterSpacing: 0.3)),
                         ],
                       ],
                     ),
@@ -529,11 +560,16 @@ class _DetailScreenState extends State<DetailScreen> {
 
   List<Widget> _serviceDetail(
       LyneTheme t, AppModel m, String stopName, Service s) {
+    final hours = _operatingHoursCard(t, m, s);
     return [
       _serviceHeading(t, s, stopName),
       const SizedBox(height: 16),
       _heroCapacityCard(t, s),
       const SizedBox(height: 18),
+      if (hours != null) ...[
+        hours,
+        const SizedBox(height: 18),
+      ],
       // Apple Maps fits the design on iOS; the Android OpenStreetMap
       // fallback doesn't, so the live map is iOS-only.
       if (Platform.isIOS) ...[
@@ -625,7 +661,10 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Widget _heroCapacityCard(LyneTheme t, Service s) {
     final etaMin = (s.etaSec / 60).floor();
-    final big = etaMin <= 0 ? 'Arr' : '$etaMin';
+    final estimate = !s.monitored;
+    final big = etaMin <= 0
+        ? 'Arr'
+        : '${estimate ? '~' : ''}$etaMin';
     final unit = etaMin <= 0 ? 'now' : 'min';
     // LTA's Load field has exactly 3 levels — SEA (seats), SDA (standing
     // only), LSD (limited standing / packed). The meter has 3 segments and
@@ -675,6 +714,12 @@ class _DetailScreenState extends State<DetailScreen> {
                     Text(unit, style: t.mono(13, color: t.accent)),
                   ],
                 ),
+                if (estimate) ...[
+                  const SizedBox(height: 4),
+                  Text('~ timetable estimate · no live GPS',
+                      style: t.mono(10, color: t.warn)
+                          .copyWith(letterSpacing: 0.3)),
+                ],
               ],
             ),
           ),
@@ -711,6 +756,84 @@ class _DetailScreenState extends State<DetailScreen> {
       ),
     );
   }
+
+  /// "live · updated Ns ago" — recomputed every AppModel tick (1s) so the
+  /// commuter can see at a glance how stale the arrivals are. Directly
+  /// answers the most common gripe with SG bus apps: not knowing whether a
+  /// shown time is fresh or a frozen reading.
+  String? _freshnessText() {
+    final at = DataStore.shared.lastFetchedAt(widget.stopCode);
+    if (at == null) return null;
+    final secs = DateTime.now().difference(at).inSeconds;
+    if (secs < 8) return 'live · updated just now';
+    if (secs < 60) return 'live · updated ${secs}s ago';
+    return 'updated ${secs ~/ 60} min ago';
+  }
+
+  /// First/last scheduled bus for the drilled-in service at this stop.
+  /// Returns null until the BusRoutes dataset loads, or when the service
+  /// doesn't run on today's day-type.
+  Widget? _operatingHoursCard(LyneTheme t, AppModel m, Service s) {
+    final timings = DataStore.shared
+        .busTimings(serviceNo: s.no, stopCode: widget.stopCode);
+    if (timings == null) return null;
+    final first = fmtClock(timings.first, use24h: m.use24h);
+    final last = fmtClock(timings.last, use24h: m.use24h);
+    final gone = lastBusGone(timings.first, timings.last, DateTime.now());
+
+    return Container(
+      decoration: BoxDecoration(
+        color: t.surfaceHi,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: gone ? t.crit.withValues(alpha: 0.4) : t.lineHi),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: _hoursCol(t, 'First bus today', first)),
+              const SizedBox(width: 16),
+              Container(width: 1, height: 38, color: t.line),
+              const SizedBox(width: 16),
+              Expanded(child: _hoursCol(t, 'Last bus today', last)),
+            ],
+          ),
+          if (gone) ...[
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.nightlight_round, size: 13, color: t.crit),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Last bus has departed for today — plan another way home.',
+                    style: t.mono(10, color: t.crit)
+                        .copyWith(height: 1.5, letterSpacing: 0.3),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _hoursCol(LyneTheme t, String label, String value) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MicroLabel(label),
+          const SizedBox(height: 7),
+          Text(value,
+              style: t.mono(18, weight: FontWeight.w600)
+                  .copyWith(letterSpacing: -0.3)),
+        ],
+      );
 
   Widget _sectionLabel(LyneTheme t, String label, {String? hint}) {
     return Padding(

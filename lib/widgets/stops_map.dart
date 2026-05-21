@@ -93,13 +93,25 @@ class _AppleStopsMap extends StatefulWidget {
 class _AppleStopsMapState extends State<_AppleStopsMap> {
   // apple_maps_flutter has no "Flutter widget as marker" — render the
   // glyphs to PNG bytes ourselves and hand them over as BitmapDescriptors.
-  apple.BitmapDescriptor? _anchorIcon;
-  apple.BitmapDescriptor? _stopIcon;
+  //
+  // The descriptors are cached *statically*. Rendering them is async, and
+  // until they resolve there's no custom icon to show. Without this cache,
+  // every time the map scrolled out of the Search list and back its State
+  // was recreated, the icons re-rendered from scratch, and the map briefly
+  // showed Apple's default red pin before swapping to the custom green bus
+  // marker — the reported red→green flash. Caching across State instances
+  // lets the second-and-later builds pick the icons up synchronously, so
+  // the flash never recurs.
+  static apple.BitmapDescriptor? _cachedAnchorIcon;
+  static apple.BitmapDescriptor? _cachedStopIcon;
+
+  apple.BitmapDescriptor? _anchorIcon = _cachedAnchorIcon;
+  apple.BitmapDescriptor? _stopIcon = _cachedStopIcon;
 
   @override
   void initState() {
     super.initState();
-    _loadMarkers();
+    if (_anchorIcon == null || _stopIcon == null) _loadMarkers();
   }
 
   Future<void> _loadMarkers() async {
@@ -113,32 +125,42 @@ class _AppleStopsMapState extends State<_AppleStopsMap> {
       fillColor: _kStopColor,
       size: 64,
     );
+    _cachedAnchorIcon = apple.BitmapDescriptor.fromBytes(anchor);
+    _cachedStopIcon = apple.BitmapDescriptor.fromBytes(stop);
     if (!mounted) return;
     setState(() {
-      _anchorIcon = apple.BitmapDescriptor.fromBytes(anchor);
-      _stopIcon = apple.BitmapDescriptor.fromBytes(stop);
+      _anchorIcon = _cachedAnchorIcon;
+      _stopIcon = _cachedStopIcon;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final anchorIcon = _anchorIcon;
+    final stopIcon = _stopIcon;
+    // Only place annotations once the custom icons exist — never fall back
+    // to BitmapDescriptor.defaultAnnotation, whose red pin was the wrong
+    // marker the user saw flash in. A pinless half-second on the very first
+    // render is preferable to showing the wrong icon.
     final annotations = <apple.Annotation>{
-      apple.Annotation(
-        annotationId: apple.AnnotationId('center'),
-        position: apple.LatLng(widget.center.lat, widget.center.lon),
-        icon: _anchorIcon ?? apple.BitmapDescriptor.defaultAnnotation,
-        infoWindow: const apple.InfoWindow(title: 'Search centre'),
-      ),
-      for (final s in widget.stops)
+      if (anchorIcon != null)
         apple.Annotation(
-          annotationId: apple.AnnotationId(s.stopCode),
-          position: apple.LatLng(s.lat, s.lon),
-          icon: _stopIcon ?? apple.BitmapDescriptor.defaultAnnotation,
-          infoWindow: apple.InfoWindow(
-            title: s.stopName,
-            snippet: 'Stop ${s.stopCode} · ${s.distanceM} m away',
-          ),
+          annotationId: apple.AnnotationId('center'),
+          position: apple.LatLng(widget.center.lat, widget.center.lon),
+          icon: anchorIcon,
+          infoWindow: const apple.InfoWindow(title: 'Search centre'),
         ),
+      if (stopIcon != null)
+        for (final s in widget.stops)
+          apple.Annotation(
+            annotationId: apple.AnnotationId(s.stopCode),
+            position: apple.LatLng(s.lat, s.lon),
+            icon: stopIcon,
+            infoWindow: apple.InfoWindow(
+              title: s.stopName,
+              snippet: 'Stop ${s.stopCode} · ${s.distanceM} m away',
+            ),
+          ),
     };
 
     return apple.AppleMap(
