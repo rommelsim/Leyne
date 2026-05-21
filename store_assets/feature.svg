@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="41%" r="42%">
+      <stop offset="0%" stop-color="#5EE597" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#5EE597" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- full-canvas background so a centre crop has clean edges -->
+  <rect width="1024" height="1024" fill="#0E0E0A"/>
+  <rect width="1024" height="1024" fill="url(#glow)"/>
+
+  <!-- === feature graphic content lives in the y 262..762 band === -->
+
+  <!-- decorative route line -->
+  <line x1="312" y1="354" x2="712" y2="354" stroke="#5EE597" stroke-opacity="0.28" stroke-width="3"/>
+  <circle cx="312" cy="354" r="9" fill="#0E0E0A" stroke="#5EE597" stroke-opacity="0.5" stroke-width="3"/>
+  <circle cx="445" cy="354" r="9" fill="#0E0E0A" stroke="#5EE597" stroke-opacity="0.5" stroke-width="3"/>
+  <circle cx="578" cy="354" r="9" fill="#0E0E0A" stroke="#5EE597" stroke-opacity="0.5" stroke-width="3"/>
+  <circle cx="712" cy="354" r="13" fill="#5EE597"/>
+
+  <!-- wordmark -->
+  <text x="512" y="524" text-anchor="middle"
+        font-family="-apple-system,'Helvetica Neue',Arial,sans-serif"
+        font-size="150" font-weight="700" letter-spacing="-3" fill="#5EE597">Leyne</text>
+
+  <!-- tagline -->
+  <text x="512" y="582" text-anchor="middle"
+        font-family="-apple-system,'Helvetica Neue',Arial,sans-serif"
+        font-size="38" font-weight="500" fill="#ECE9E0">Live Singapore bus arrivals</text>
+
+  <!-- ETA pills -->
+  <g font-family="-apple-system,'Helvetica Neue',Arial,sans-serif" font-size="30" font-weight="700">
+    <rect x="301" y="618" width="120" height="56" rx="28" fill="#5EE597"/>
+    <text x="361" y="655" text-anchor="middle" fill="#0E0E0A">Arr</text>
+
+    <rect x="437" y="618" width="130" height="56" rx="28" fill="none" stroke="#5EE597" stroke-width="2.5"/>
+    <text x="502" y="655" text-anchor="middle" fill="#5EE597">5 min</text>
+
+    <rect x="583" y="618" width="140" height="56" rx="28" fill="none" stroke="#5EE597" stroke-width="2.5"/>
+    <text x="653" y="655" text-anchor="middle" fill="#5EE597">12 min</text>
+  </g>
+</svg>
