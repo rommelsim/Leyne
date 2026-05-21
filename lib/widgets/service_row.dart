@@ -1,10 +1,10 @@
-// One bus service inside a card — service no, destination, load badge,
+// One bus service inside a card — BusChip + destination + load badge,
 // next ETA + the "after that" small ETA.
 
 import 'package:flutter/material.dart';
 import '../data/models.dart';
 import '../theme.dart';
-import 'eta_pill.dart';
+import 'atoms.dart';
 
 class ServiceRow extends StatelessWidget {
   const ServiceRow({super.key, required this.service, this.onTap});
@@ -14,46 +14,51 @@ class ServiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
+    final etaMin = (service.etaSec / 60).floor();
+    final followingMin = (service.followingSec / 60).floor();
+    final big = etaMin <= 0 ? 'Arr' : '$etaMin';
+    final unit = etaMin <= 0 ? 'now' : 'min';
+    final arriving = service.etaSec <= 60;
+    final etaColor = arriving ? t.accent : t.fg;
+    final loadColor = switch (service.load) {
+      Load.sea => t.accent,
+      Load.sda => t.warn,
+      Load.lsd => t.crit,
+    };
     return InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            // Service no — bold mono pill.
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: t.bg,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: t.line),
-              ),
-              child: Text(service.no,
-                  style: t.mono(14, weight: FontWeight.w700)),
-            ),
+            BusChip(no: service.no, size: ChipSize.sm),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    service.dest,
-                    style: t.sans(13, weight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  Text(service.dest,
+                      style: t.sans(14, weight: FontWeight.w500),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      _LoadDot(load: service.load),
+                      Container(
+                        width: 5, height: 5,
+                        decoration: BoxDecoration(
+                          color: loadColor, shape: BoxShape.circle,
+                        ),
+                      ),
                       const SizedBox(width: 6),
-                      Text(service.load.label,
-                          style: t.mono(10).copyWith(color: t.dim)),
+                      Text(service.load.label.toLowerCase(),
+                          style: t.mono(10, color: t.dim)),
                       if (service.wab) ...[
                         const SizedBox(width: 8),
                         Text('WAB',
-                            style: t.mono(9, weight: FontWeight.w600)
-                                .copyWith(color: t.dim)),
+                            style: t.mono(10, color: t.dim)
+                                .copyWith(letterSpacing: 0.4)),
                       ],
                     ],
                   ),
@@ -64,46 +69,27 @@ class ServiceRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                EtaPill(etaSec: service.etaSec),
-                if (service.followingSec > service.etaSec + 30) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(big,
+                        style: t.mono(22, weight: FontWeight.w600, color: etaColor)),
+                    const SizedBox(width: 3),
+                    Text(unit, style: t.mono(11, color: t.dim)),
+                  ],
+                ),
+                if (followingMin > etaMin + 1) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    'then ${fmtEta(service.followingSec).big} ${fmtEta(service.followingSec).small}',
-                    style: t.mono(10).copyWith(color: t.dim),
-                  ),
+                  Text('then $followingMin',
+                      style: t.mono(10, color: t.faint)),
                 ],
               ],
             ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _LoadDot extends StatelessWidget {
-  const _LoadDot({required this.load});
-  final Load load;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.t;
-    Color c;
-    switch (load) {
-      case Load.sea:
-        c = t.live;
-        break;
-      case Load.sda:
-        c = t.warn;
-        break;
-      case Load.lsd:
-        c = t.crit;
-        break;
-    }
-    return Container(
-      width: 6,
-      height: 6,
-      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
     );
   }
 }

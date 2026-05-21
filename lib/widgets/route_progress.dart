@@ -1,9 +1,6 @@
-// Vertical route progress — a window of stops centred on the bus and
-// your stop, with a tap-to-alight column and live status badges.
-//
-// Same focus-window logic as legacy DetailView.swift RouteProgress:
-//   lo = min(busIndex ?? youIndex, youIndex) - 1
-//   hi = max(busIndex ?? youIndex, youIndex) + 5
+// Vertical route progress — a focused window of stops centred on the bus
+// and your stop. Tap-to-alight column on the right; mint dot with halo
+// marks the bus's current position, dim dots mark stops it's passed.
 
 import 'package:flutter/material.dart';
 
@@ -45,127 +42,178 @@ class RouteProgress extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           for (var i = start; i <= end; i++)
-            _row(context, t, i, route.stops[i], busIdx),
+            _row(t, i, route.stops[i], busIdx,
+                isFirst: i == start, isLast: i == end),
         ],
       ),
     );
   }
 
-  Widget _row(BuildContext context, LyneTheme t, int i, RouteStopLive stop,
-      int busIdx) {
+  Widget _row(LyneTheme t, int i, RouteStopLive stop, int busIdx,
+      {required bool isFirst, required bool isLast}) {
     final isYou = i == route.youIndex;
     final isBus = i == busIdx;
     final isAlight = alightCode == stop.code;
     final passed = busIdx >= 0 && i < busIdx;
     final canAlight = i > (busIdx >= 0 ? busIdx : 0) && !isYou;
-
-    final dotSize = (isYou || isAlight) ? 12.0 : 8.0;
-    final dotColor = isAlight
-        ? t.accent
-        : isYou
-            ? t.accent
-            : passed
-                ? t.dim
-                : t.surface;
+    final isEnd = i == route.stops.length - 1;
 
     return InkWell(
-      onTap: canAlight
-          ? () => onAlightChanged(isAlight ? null : stop.code)
-          : null,
+      onTap: canAlight ? () => onAlightChanged(isAlight ? null : stop.code) : null,
       child: Container(
         color: isAlight ? t.accent.withValues(alpha: 0.07) : Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-        child: Opacity(
-          opacity: passed ? 0.45 : 1,
-          child: Row(
-            children: [
-              SizedBox(
-                width: 18,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Column(
-                      children: [
-                        Container(
-                            width: 2,
-                            height: 12,
-                            color: passed ? t.dim : t.line),
-                        Container(
-                            width: 2,
-                            height: 12,
-                            color: i < busIdx ? t.dim : t.line),
-                      ],
-                    ),
-                    Container(
-                      width: dotSize,
-                      height: dotSize,
-                      decoration: BoxDecoration(
-                        color: dotColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: t.fg,
-                          width: (!isYou && !isAlight && !passed) ? 2 : 0,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _trailIndicator(t, isFirst: isFirst, isLast: isLast,
+                isBus: isBus, isYou: isYou, isAlight: isAlight, passed: passed),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Opacity(
+                opacity: passed ? 0.45 : 1,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      stop.name,
-                      style: t.sans(
-                        14,
-                        weight: (isYou || isBus || isAlight)
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            stop.name,
+                            style: t.sans(14,
+                                weight: (isYou || isBus || isAlight)
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                                color: (isBus || isYou) ? t.accent : t.fg),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (isEnd) ...[
+                          const SizedBox(width: 6),
+                          Text('END',
+                              style: t.mono(10, color: t.dim)
+                                  .copyWith(letterSpacing: 0.6)),
+                        ],
+                      ],
                     ),
+                    const SizedBox(height: 2),
                     Text(
-                      stop.code +
-                          (isYou ? ' · YOUR STOP' : '') +
-                          (isBus ? ' · BUS HERE NOW' : '') +
-                          (isAlight ? ' · ALIGHT HERE' : ''),
-                      style: t.mono(10).copyWith(color: t.dim),
+                      'STOP ${stop.code}'
+                      '${isYou ? " · YOUR STOP" : ""}'
+                      '${isBus ? " · BUS HERE" : ""}'
+                      '${isAlight ? " · ALIGHT HERE" : ""}',
+                      style: t.mono(10, color: t.faint)
+                          .copyWith(letterSpacing: 0.4),
                     ),
                   ],
                 ),
               ),
-              if (isBus)
-                _badge(t, 'BUS $busNo', t.live, t.liveBg,
-                    borderColor: t.live)
-              else if (isAlight)
-                _badge(t, 'ALIGHT', Colors.white, t.accent)
-              else if (canAlight)
-                Text('tap to alight',
-                    style:
-                        t.mono(9).copyWith(color: t.dim.withValues(alpha: 0.6))),
-            ],
-          ),
+            ),
+            if (isBus)
+              _trailingBadge(t, 'BUS $busNo', t.accent)
+            else if (isAlight)
+              _trailingBadge(t, 'ALIGHT', t.accent, filled: true)
+            else if (canAlight)
+              Text('tap to alight',
+                  style: t.mono(9, color: t.faint)),
+          ],
         ),
       ),
     );
   }
 
-  Widget _badge(LyneTheme t, String label, Color fg, Color bg,
-      {Color? borderColor}) {
+  Widget _trailIndicator(LyneTheme t,
+      {required bool isFirst,
+      required bool isLast,
+      required bool isBus,
+      required bool isYou,
+      required bool isAlight,
+      required bool passed}) {
+    final lineColor = passed ? t.accent.withValues(alpha: 0.5) : t.line;
+    return SizedBox(
+      width: 20,
+      height: 30,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          if (!isFirst)
+            Positioned(
+              top: 0, bottom: 15,
+              child: Container(width: 2, color: lineColor),
+            ),
+          if (!isLast)
+            Positioned(
+              top: 15, bottom: 0,
+              child: Container(
+                  width: 2,
+                  color: passed && !isBus
+                      ? t.accent.withValues(alpha: 0.5)
+                      : t.line),
+            ),
+          _dot(t, isBus: isBus, isYou: isYou, isAlight: isAlight, passed: passed),
+        ],
+      ),
+    );
+  }
+
+  Widget _dot(LyneTheme t,
+      {required bool isBus,
+      required bool isYou,
+      required bool isAlight,
+      required bool passed}) {
+    if (isBus) {
+      return Container(
+        width: 18, height: 18,
+        decoration: BoxDecoration(
+          color: t.accent,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: t.accent.withValues(alpha: 0.35),
+              blurRadius: 0, spreadRadius: 4,
+            ),
+          ],
+        ),
+        alignment: Alignment.center,
+        child: Container(
+          width: 6, height: 6,
+          decoration: BoxDecoration(
+            color: t.contrastFg, shape: BoxShape.circle,
+          ),
+        ),
+      );
+    }
+    final outline = isYou || isAlight ? t.accent : (passed ? t.accent.withValues(alpha: 0.5) : t.line);
+    final fill = isYou || isAlight
+        ? t.accent
+        : (passed ? t.accent.withValues(alpha: 0.5) : t.bg);
+    return Container(
+      width: 14, height: 14,
+      decoration: BoxDecoration(
+        color: fill,
+        shape: BoxShape.circle,
+        border: Border.all(color: outline, width: 2),
+      ),
+    );
+  }
+
+  Widget _trailingBadge(LyneTheme t, String label, Color color,
+      {bool filled = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: bg,
+        color: filled ? color : color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(99),
-        border: borderColor != null ? Border.all(color: borderColor) : null,
+        border: filled ? null : Border.all(color: color),
       ),
-      child: Text(label,
-          style: t.mono(10, weight: FontWeight.w600)
-              .copyWith(color: fg, letterSpacing: 0.5)),
+      child: Text(
+        label,
+        style: t.mono(10, weight: FontWeight.w600,
+                color: filled ? t.contrastFg : color)
+            .copyWith(letterSpacing: 0.5),
+      ),
     );
   }
 }

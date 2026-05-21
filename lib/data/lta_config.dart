@@ -19,10 +19,27 @@
 import 'package:flutter/foundation.dart';
 
 class LtaConfig {
-  /// LTA DataMall AccountKey. Required for all requests. Empty when the
-  /// build forgot to pass --dart-define=LTA_API_KEY=… ; that surfaces fast
-  /// as a 401 on the first request rather than silently using a stale key.
-  static const String accountKey = String.fromEnvironment('LTA_API_KEY');
+  /// Embedded public DataMall AccountKey — used when the build didn't pass
+  /// one via --dart-define. Notably, Xcode's ⌘R build does NOT forward
+  /// --dart-define into `flutter assemble`, so without this fallback an
+  /// Xcode run sends an empty AccountKey and LTA's gateway answers 404.
+  ///
+  /// DataMall keys are low-sensitivity public open-data keys (rate-limited);
+  /// the legacy iOS app embedded this exact key in LTAConfig.swift, and it
+  /// already appears in this repo's README. Embedding it here leaks nothing
+  /// new and is the only thing that makes every build path work uniformly.
+  static const String _fallbackKey = '+6zJ3XstTqOcDkvczHttWA==';
+
+  /// AccountKey supplied at build time via --dart-define=LTA_API_KEY=… .
+  /// Empty both when undefined and when defined-but-blank (the README's
+  /// `--dart-define=LTA_API_KEY=$LTA_API_KEY` alias produces a blank value
+  /// if the shell var is unset).
+  static const String _definedKey = String.fromEnvironment('LTA_API_KEY');
+
+  /// LTA DataMall AccountKey. Prefers the --dart-define value; falls back to
+  /// the embedded key so Xcode runs and key-less `flutter run`s still work.
+  static String get accountKey =>
+      _definedKey.isEmpty ? _fallbackKey : _definedKey;
 
   /// LTA DataMall base URL — all endpoints are paths under this.
   static final Uri baseUrl =
@@ -39,13 +56,14 @@ class LtaConfig {
   /// "ad hoc" per LTA's guidance — cache on disk and refresh weekly.
   static const Duration referenceCacheMaxAge = Duration(days: 7);
 
-  /// Assert the key is wired before any network call. Call from main()
-  /// behind a debug-only guard so production never crashes here.
+  /// Surface, at debug time, whether the build is running on the embedded
+  /// fallback key. Not an error — just a heads-up that --dart-define wasn't
+  /// wired, so a different key can't be A/B'd without rebuilding.
   static void assertConfigured() {
-    if (kDebugMode && accountKey.isEmpty) {
+    if (kDebugMode && _definedKey.isEmpty) {
       // ignore: avoid_print
-      print('⚠️  LTA_API_KEY is empty. Pass it via --dart-define=LTA_API_KEY=… '
-          'or set it in your IDE run configuration.');
+      print('ℹ️  LTA_API_KEY not passed via --dart-define — using the '
+          'embedded fallback DataMall key.');
     }
   }
 }

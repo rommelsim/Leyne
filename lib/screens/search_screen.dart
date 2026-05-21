@@ -1,10 +1,5 @@
-// Search tab — live LTA Buses + Stops, detected-kind hint, persisted
-// recent searches.
-//
-// Conservative variant of legacy SearchSheet.swift (variant A). The
-// Ambitious variant was a full-screen modal sheet with oversized type;
-// using a normal-sized tab fits the cross-platform NavigationBar shell
-// better.
+// Search — live search across LTA stops + services. Empty state shows
+// recents + pinned stops so the screen is never blank.
 
 import 'package:flutter/material.dart';
 
@@ -13,14 +8,15 @@ import '../data/lta_models.dart';
 import '../data/search_logic.dart';
 import '../state/app_model.dart';
 import '../theme.dart';
+import '../widgets/atoms.dart';
 import 'detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key, this.onSwitchToNearby});
 
-  /// Callback supplied by RootScaffold so the "Stops near me" shortcut
-  /// can switch to the Nearby tab. Optional so the widget can be hosted
-  /// outside the tab shell (e.g. in tests) without crashing.
+  /// Kept for source-compatibility with RootScaffold even though the empty
+  /// state no longer surfaces "Stops near me" — the Nearby tab is one tap
+  /// away in the bottom bar.
   final VoidCallback? onSwitchToNearby;
 
   @override
@@ -48,7 +44,7 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
-  // ─── Picks ────────────────────────────────────────────────
+  // ─── Picks ────────────────────────────────────────────────────
 
   void _pickStop(String code) {
     final m = AppModel.shared;
@@ -74,68 +70,102 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  // ─── Build ────────────────────────────────────────────────
+  // ─── Build ────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      appBar: AppBar(title: const Text('Search')),
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _focus.unfocus,
-        child: ListenableBuilder(
-          listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
-          builder: (context, _) => Column(
-            children: [
-              _searchField(t),
-              if (_q.isNotEmpty) _detectedHint(t),
-              Expanded(
-                child: _q.isEmpty ? _emptyState(t) : _results(t),
-              ),
-            ],
+      body: SafeArea(
+        bottom: false,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _focus.unfocus,
+          child: ListenableBuilder(
+            listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
+            builder: (context, _) => Column(
+              children: [
+                _header(t),
+                _searchField(t),
+                if (_q.isNotEmpty) _detectedHint(t),
+                Expanded(
+                  child: _q.isEmpty ? _emptyState(t) : _results(t),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  Widget _header(LyneTheme t) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+      child: Text('Search',
+          style: t.sans(28, weight: FontWeight.w600).copyWith(letterSpacing: -0.4)),
+    );
+  }
+
   Widget _searchField(LyneTheme t) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: TextField(
-        controller: _ctl,
-        focusNode: _focus,
-        autocorrect: false,
-        textInputAction: TextInputAction.search,
-        style: t.sans(15),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: 'Bus or stop (name / code)',
-          hintStyle: TextStyle(color: t.dim),
-          prefixIcon: Icon(Icons.search, color: t.dim, size: 18),
-          suffixIcon: _q.isEmpty
-              ? null
-              : IconButton(
-                  icon: Icon(Icons.close, color: t.dim, size: 16),
-                  onPressed: () {
-                    _ctl.clear();
-                    setState(() => _q = '');
-                  },
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.surface,
+          border: Border.all(color: t.line),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: Row(
+          children: [
+            Icon(Icons.search, color: t.dim, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _ctl,
+                focusNode: _focus,
+                autocorrect: false,
+                textInputAction: TextInputAction.search,
+                style: t.mono(15),
+                cursorColor: t.accent,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Bus, stop or place',
+                  hintStyle: t.mono(15, color: t.faint),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-          filled: true,
-          fillColor: t.surface,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: t.line),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: t.accent),
-          ),
+              ),
+            ),
+            if (_q.isNotEmpty) ...[
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.close, color: t.dim, size: 16),
+                onPressed: () {
+                  _ctl.clear();
+                  setState(() => _q = '');
+                },
+              ),
+              Container(width: 1, height: 18, color: t.line),
+            ],
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.qr_code_scanner, color: t.fg, size: 18),
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('QR scan coming soon',
+                        style: t.sans(13, color: t.fg)),
+                    backgroundColor: t.surfaceHi,
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
         ),
       ),
     );
@@ -147,118 +177,145 @@ class _SearchScreenState extends State<SearchScreen> {
     final buses = DataStore.shared.searchServices(_q);
     final total = stops.length + buses.length;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
       child: Row(
         children: [
           Text(
             'DETECTED · ${kind.label.isEmpty ? "ANY" : kind.label.toUpperCase()}'
             '${total > 0 ? " · $total match${total == 1 ? "" : "es"}" : ""}',
-            style:
-                t.mono(10).copyWith(color: t.dim, letterSpacing: 0.8),
+            style: t.mono(10, color: t.dim).copyWith(letterSpacing: 0.8),
           ),
         ],
       ),
     );
   }
 
-  // ─── Empty state ──────────────────────────────────────────
+  // ─── Empty state ──────────────────────────────────────────────
 
   Widget _emptyState(LyneTheme t) {
-    final recents = AppModel.shared.recents;
+    final recents = AppModel.shared.recents.take(6).toList();
+    final pins = AppModel.shared.pins;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
       children: [
-        // "Stops near me" shortcut → Nearby tab.
-        _nearbyShortcut(t),
-        const SizedBox(height: 24),
         if (recents.isNotEmpty) ...[
           Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 10),
-            child: Text(
-              'RECENT',
-              style: t.mono(10, weight: FontWeight.w600)
-                  .copyWith(color: t.dim, letterSpacing: 1.2),
-            ),
+            padding: const EdgeInsets.fromLTRB(6, 6, 6, 10),
+            child: MicroLabel('Recent'),
           ),
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              for (final r in recents)
-                ActionChip(
-                  label: Text(r, style: t.sans(12)),
-                  backgroundColor: t.surface,
-                  side: BorderSide(color: t.line),
-                  shape: const StadiumBorder(),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () {
-                    _ctl.text = r;
-                    _ctl.selection =
-                        TextSelection.collapsed(offset: r.length);
-                    setState(() => _q = r);
-                    _focus.requestFocus();
-                  },
-                ),
+              for (final r in recents) _recentPill(t, r),
             ],
           ),
-        ] else
+          const SizedBox(height: 24),
+        ],
+        if (pins.isNotEmpty) ...[
           Padding(
-            padding: const EdgeInsets.only(left: 4, top: 8),
+            padding: const EdgeInsets.fromLTRB(6, 0, 6, 10),
+            child: MicroLabel('Pinned'),
+          ),
+          for (final p in pins) ...[
+            _pinnedRow(t, p.code),
+            const SizedBox(height: 8),
+          ],
+        ],
+        if (recents.isEmpty && pins.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 16),
             child: Text(
-              'Search a bus number or a stop name / 5-digit code.',
-              style: t.sans(12).copyWith(color: t.dim),
+              'Search a bus number or stop (name / 5-digit code).',
+              style: t.sans(13, color: t.dim),
             ),
           ),
       ],
     );
   }
 
-  Widget _nearbyShortcut(LyneTheme t) {
+  Widget _recentPill(LyneTheme t, String label) {
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(99),
       onTap: () {
-        _focus.unfocus();
-        widget.onSwitchToNearby?.call();
+        _ctl.text = label;
+        _ctl.selection = TextSelection.collapsed(offset: label.length);
+        setState(() => _q = label);
+        _focus.requestFocus();
       },
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
           color: t.surface,
-          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: t.line),
+          borderRadius: BorderRadius.circular(99),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: t.accent.withValues(alpha: 0.09),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Icon(Icons.location_on, color: t.accent, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Stops near me',
-                      style: t.sans(14, weight: FontWeight.w500)),
-                  Text('Open the Nearby tab',
-                      style: t.sans(11).copyWith(color: t.dim)),
-                ],
-              ),
-            ),
-            Icon(Icons.arrow_forward, size: 14, color: t.dim),
+            Icon(Icons.history, size: 12, color: t.faint),
+            const SizedBox(width: 6),
+            Text(label, style: t.mono(13, color: t.fg)),
           ],
         ),
       ),
     );
   }
 
-  // ─── Results ──────────────────────────────────────────────
+  Widget _pinnedRow(LyneTheme t, String stopCode) {
+    final name = DataStore.shared.stopName(stopCode);
+    final svcs = DataStore.shared.servicesFor(stopCode);
+    final firstNo = svcs.isNotEmpty ? svcs.first.no : null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _openDetail(stopCode),
+      child: Ink(
+        decoration: BoxDecoration(
+          color: t.surface,
+          border: Border.all(color: t.line),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            if (firstNo != null)
+              BusChip(no: firstNo, size: ChipSize.sm)
+            else
+              Container(
+                width: 42, height: 28,
+                decoration: BoxDecoration(
+                  color: t.lineHi,
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(Icons.location_on, size: 14, color: t.dim),
+              ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(name,
+                      style: t.sans(14, weight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 1),
+                  Text(
+                    'STOP $stopCode${svcs.isNotEmpty ? " · ${svcs.length} services" : ""}',
+                    style: t.mono(10, color: t.dim)
+                        .copyWith(letterSpacing: 0.5),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.star_rounded, color: t.accent, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Results ──────────────────────────────────────────────────
 
   Widget _results(LyneTheme t) {
     final ds = DataStore.shared;
@@ -274,11 +331,11 @@ class _SearchScreenState extends State<SearchScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('Nothing matches "$_q"',
-                  style: t.sans(13).copyWith(color: t.dim)),
+                  style: t.sans(13, color: t.dim)),
               const SizedBox(height: 4),
               Text(
                 'Try a bus number or a stop name / 5-digit code.',
-                style: t.sans(11).copyWith(color: t.dim),
+                style: t.sans(11, color: t.faint),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -291,11 +348,11 @@ class _SearchScreenState extends State<SearchScreen> {
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 24),
       children: [
         if (buses.isNotEmpty) ...[
-          _sectionHeader(t, 'BUSES', buses.length),
+          _sectionHeader(t, 'Buses', buses.length),
           for (final b in buses.take(20)) _busRow(t, b),
         ],
         if (stops.isNotEmpty) ...[
-          _sectionHeader(t, 'STOPS', stops.length),
+          _sectionHeader(t, 'Stops', stops.length),
           for (final s in stops.take(30)) _stopRow(t, s),
         ],
       ],
@@ -304,15 +361,12 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _sectionHeader(LyneTheme t, String label, int count) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Row(
         children: [
-          Text(label,
-              style: t.mono(10, weight: FontWeight.w600)
-                  .copyWith(color: t.dim, letterSpacing: 1.2)),
+          MicroLabel(label),
           const Spacer(),
-          Text('$count',
-              style: t.mono(10).copyWith(color: t.dim)),
+          Text('$count', style: t.mono(10, color: t.faint)),
         ],
       ),
     );
@@ -334,18 +388,7 @@ class _SearchScreenState extends State<SearchScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         child: Row(
           children: [
-            Container(
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(
-                color: t.live,
-                borderRadius: BorderRadius.circular(7),
-              ),
-              alignment: Alignment.center,
-              child: Text(b.serviceNo,
-                  style: t.mono(13, weight: FontWeight.w700)
-                      .copyWith(color: Colors.white)),
-            ),
+            BusChip(no: b.serviceNo, size: ChipSize.sm),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -358,13 +401,14 @@ class _SearchScreenState extends State<SearchScreen> {
                       maxLines: 1),
                   if (sub.isNotEmpty)
                     Text(sub,
-                        style: t.mono(11).copyWith(color: t.dim),
+                        style: t.mono(11, color: t.dim)
+                            .copyWith(letterSpacing: 0.5),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1),
                 ],
               ),
             ),
-            Icon(Icons.arrow_forward, size: 14, color: t.dim),
+            Icon(Icons.chevron_right, size: 18, color: t.faint),
           ],
         ),
       ),
@@ -379,10 +423,9 @@ class _SearchScreenState extends State<SearchScreen> {
         child: Row(
           children: [
             Container(
-              width: 36,
-              height: 36,
+              width: 36, height: 36,
               decoration: BoxDecoration(
-                color: t.accent.withValues(alpha: 0.09),
+                color: t.accent.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(Icons.adjust, color: t.accent, size: 18),
@@ -398,13 +441,14 @@ class _SearchScreenState extends State<SearchScreen> {
                       overflow: TextOverflow.ellipsis,
                       maxLines: 1),
                   Text('STOP ${s.busStopCode} · ${s.roadName}',
-                      style: t.mono(11).copyWith(color: t.dim),
+                      style: t.mono(11, color: t.dim)
+                          .copyWith(letterSpacing: 0.5),
                       overflow: TextOverflow.ellipsis,
                       maxLines: 1),
                 ],
               ),
             ),
-            Icon(Icons.arrow_forward, size: 14, color: t.dim),
+            Icon(Icons.chevron_right, size: 18, color: t.faint),
           ],
         ),
       ),

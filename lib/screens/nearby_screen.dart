@@ -1,6 +1,9 @@
-// Nearby — live nearest stops (device GPS + LTA BusStops dataset),
-// sortable by Distance / Arrival / Service, expandable to show live
-// arrivals, Pin-to-Home from each row.
+// Nearby — live nearest stops sorted by distance / arrival / service number.
+//
+// Rows are flat (no inline expand): tap a row to drill into DetailScreen.
+// "ARRIVING" pill sits next to the stop name when any service is ≤ 60s out;
+// service numbers show inline as tiny mono chips so you can see which buses
+// stop here at a glance.
 
 import 'package:flutter/material.dart';
 
@@ -9,7 +12,7 @@ import '../data/models.dart';
 import '../services/location_service.dart';
 import '../state/app_model.dart';
 import '../theme.dart';
-import '../widgets/service_row.dart';
+import '../widgets/atoms.dart';
 import 'detail_screen.dart';
 
 enum _Sort { distance, arrival, service }
@@ -23,19 +26,13 @@ class NearbyScreen extends StatefulWidget {
 
 class _NearbyScreenState extends State<NearbyScreen> {
   _Sort _sort = _Sort.distance;
-  String? _expandedId;
-  // Snapshot of ordered stops, frozen so the 1-second tick doesn't
-  // reshuffle the list under the user's finger (matches legacy iOS).
+  // Snapshot of ordered stops, frozen so the 1-second tick doesn't reshuffle
+  // the list under the user's finger.
   List<NearbyStop> _ordered = const [];
 
   @override
   void initState() {
     super.initState();
-    // Only start the position stream if permission is already granted
-    // (common case after the first prompt). When not yet granted, build()
-    // shows the in-app permission prompt and the user explicitly taps
-    // "Enable location" — that path goes through requestAndStart() which
-    // triggers the OS dialog. This matches legacy iOS LocationManager.
     LocationService.shared.startIfAuthorized();
     DataStore.shared.prefetchNearbyArrivals();
     _recomputeOrder();
@@ -78,331 +75,323 @@ class _NearbyScreenState extends State<NearbyScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      appBar: AppBar(title: const Text('Nearby')),
-      body: ListenableBuilder(
-        listenable: Listenable.merge([
-          LocationService.shared,
-          DataStore.shared,
-          AppModel.shared,
-        ]),
-        builder: (context, _) {
-          // Resort when the nearby list itself or arrivals changed; never
-          // on the 1s tick.
-          _recomputeOrder();
-          return _content(t);
-        },
+      body: SafeArea(
+        bottom: false,
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            LocationService.shared,
+            DataStore.shared,
+            AppModel.shared,
+          ]),
+          builder: (context, _) {
+            _recomputeOrder();
+            return _content(t);
+          },
+        ),
       ),
     );
   }
 
   Widget _content(LyneTheme t) {
     final loc = LocationService.shared;
-    if (!loc.authorized) return _permissionPrompt(t, loc);
-    if (DataStore.shared.referenceState.state == LoadState.error) {
-      return _errorState(t, DataStore.shared.referenceState.errorMessage ?? '');
-    }
-    if (_ordered.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: t.dim),
-            const SizedBox(height: 12),
-            Text('Finding stops near you…',
-                style: t.sans(13).copyWith(color: t.dim)),
-          ],
-        ),
+    if (!loc.authorized) {
+      return Column(
+        children: [
+          _header(t),
+          Expanded(child: _permissionPrompt(t, loc)),
+        ],
       );
     }
-    return Column(
-      children: [
-        _sortRow(t),
-        Expanded(
-          child: RefreshIndicator(
-            color: t.accent,
-            onRefresh: () async {
-              await LocationService.shared.requestAndStart();
-            },
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              itemCount: _ordered.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, i) => _row(t, _ordered[i]),
+    if (DataStore.shared.referenceState.state == LoadState.error) {
+      return Column(
+        children: [
+          _header(t),
+          Expanded(
+              child: _errorState(
+                  t, DataStore.shared.referenceState.errorMessage ?? '')),
+        ],
+      );
+    }
+    if (_ordered.isEmpty) {
+      return Column(
+        children: [
+          _header(t),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: t.dim),
+                  const SizedBox(height: 12),
+                  Text('Finding stops near you…',
+                      style: t.sans(13, color: t.dim)),
+                ],
+              ),
             ),
           ),
+        ],
+      );
+    }
+    return Stack(
+      children: [
+        Column(
+          children: [
+            _header(t),
+            _sortRow(t),
+            Expanded(
+              child: RefreshIndicator(
+                color: t.accent,
+                backgroundColor: t.surface,
+                onRefresh: () async {
+                  await LocationService.shared.requestAndStart();
+                },
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 96),
+                  itemCount: _ordered.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
+                  itemBuilder: (context, i) => _row(t, _ordered[i]),
+                ),
+              ),
+            ),
+          ],
+        ),
+        Positioned(
+          right: 18,
+          bottom: 18,
+          child: _mapFab(t),
         ),
       ],
     );
   }
 
-  Widget _row(LyneTheme t, NearbyStop stop) {
-    final svcs = AppModel.shared.liveServices(stop.stopCode);
-    final anyArriving = svcs.any((s) => s.etaSec <= 60);
-    final state = DataStore.shared.arrivals[stop.stopCode];
-    final open = _expandedId == stop.id;
-    final pinned = AppModel.shared.isPinned(stop.stopCode);
+  // ─── Header ─────────────────────────────────────────────────────────
 
-    return Container(
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: anyArriving ? t.live : t.line),
-        boxShadow: anyArriving
-            ? [
-                BoxShadow(
-                  color: t.live.withValues(alpha: 0.08),
-                  blurRadius: 6,
-                  offset: const Offset(0, 4),
-                )
-              ]
-            : null,
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () {
-              final next = open ? null : stop.id;
-              setState(() => _expandedId = next);
-              if (next != null) {
-                DataStore.shared.ensureArrivals(stop.stopCode);
-              }
-            },
-            borderRadius: BorderRadius.vertical(
-              top: const Radius.circular(16),
-              bottom: open ? Radius.zero : const Radius.circular(16),
-            ),
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  // Distance / walk minutes column
-                  SizedBox(
-                    width: 56,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(fmtDistance(stop.distanceM),
-                            style: t.mono(14, weight: FontWeight.w700)),
-                        const SizedBox(height: 2),
-                        Text('${stop.walkMin} MIN',
-                            style: t.mono(9).copyWith(color: t.dim)),
-                      ],
-                    ),
-                  ),
-                  Container(width: 1, height: 32, color: t.line),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(stop.stopName,
-                            style: t.sans(15, weight: FontWeight.w600),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Text('STOP ${stop.stopCode}',
-                                style: t.mono(10).copyWith(color: t.dim)),
-                            if (svcs.isNotEmpty) ...[
-                              const SizedBox(width: 8),
-                              Text('·',
-                                  style: t.mono(10).copyWith(
-                                      color: t.dim.withValues(alpha: 0.5))),
-                              const SizedBox(width: 8),
-                              Text('${svcs.length} services',
-                                  style: t.mono(10).copyWith(color: t.dim)),
-                            ],
-                            if (anyArriving) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: t.liveBg,
-                                  borderRadius: BorderRadius.circular(99),
-                                ),
-                                child: Text('ARRIVING',
-                                    style: t.mono(8, weight: FontWeight.w700)
-                                        .copyWith(
-                                            color: t.live,
-                                            letterSpacing: 0.5)),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: open ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(Icons.expand_more, color: t.dim),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOutCubic,
-            child: open
-                ? Column(
-                    children: [
-                      Divider(height: 1, color: t.line),
-                      _expanded(t, svcs, state, stop),
-                      Divider(height: 1, color: t.line),
-                      _actions(t, stop, pinned),
-                    ],
-                  )
-                : const SizedBox.shrink(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _expanded(LyneTheme t, List<Service> svcs, ArrivalState? state,
-      NearbyStop stop) {
-    if (svcs.isNotEmpty) {
-      return Column(
-        children: [
-          for (var i = 0; i < svcs.length; i++) ...[
-            if (i > 0) Divider(height: 1, color: t.line),
-            ServiceRow(
-              service: svcs[i],
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => DetailScreen(
-                    stopCode: stop.stopCode,
-                    initialSelectedNo: svcs[i].no,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      );
-    }
-    final kind = state?.kind;
-    if (kind == ArrivalStateKind.loading) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-                width: 14,
-                height: 14,
-                child:
-                    CircularProgressIndicator(strokeWidth: 2, color: t.dim)),
-            const SizedBox(width: 8),
-            Text('Loading arrivals…',
-                style: t.sans(12).copyWith(color: t.dim)),
-          ],
-        ),
-      );
-    }
-    if (kind == ArrivalStateKind.error) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 18),
-        child: Text(state?.errorMessage ?? 'Couldn’t reach LTA',
-            style: t.sans(11).copyWith(color: t.crit)),
-      );
-    }
+  Widget _header(LyneTheme t) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 18),
-      child: Text('No buses running here right now',
-          style: t.sans(12).copyWith(color: t.dim)),
-    );
-  }
-
-  Widget _actions(LyneTheme t, NearbyStop stop, bool pinned) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: pinned ? Colors.white : t.fg,
-                backgroundColor: pinned ? t.accent : Colors.transparent,
-                side: BorderSide(color: pinned ? t.accent : t.line),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              icon: Icon(
-                  pinned ? Icons.bookmark : Icons.bookmark_outline,
-                  size: 16),
-              label: Text(pinned ? 'Pinned to Home' : 'Pin to Home'),
-              onPressed: () => AppModel.shared.togglePin(stop.stopCode),
-            ),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: t.fg,
-              side: BorderSide(color: t.line),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-            icon: const Icon(Icons.north_east, size: 14),
-            label: const Text('Open'),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => DetailScreen(stopCode: stop.stopCode),
-                ),
-              );
-            },
+          Text('Nearby',
+              style:
+                  t.sans(28, weight: FontWeight.w600).copyWith(letterSpacing: -0.4)),
+          const Spacer(),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.adjust, size: 14, color: t.dim),
+              const SizedBox(width: 6),
+              Text('500M',
+                  style: t.mono(11, weight: FontWeight.w600, color: t.dim)
+                      .copyWith(letterSpacing: 1)),
+            ],
           ),
         ],
       ),
     );
   }
+
+  // ─── Sort pills ─────────────────────────────────────────────────────
 
   Widget _sortRow(LyneTheme t) {
     Widget chip(_Sort s, String label) {
       final active = _sort == s;
-      return Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: GestureDetector(
-          onTap: () => setState(() => _sort = s),
-          child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: active ? t.fg : Colors.transparent,
-              borderRadius: BorderRadius.circular(99),
-              border: Border.all(color: active ? t.fg : t.line),
-            ),
-            child: Text(label,
-                style: t.sans(11, weight: FontWeight.w500).copyWith(
-                  color: active ? t.bg : t.dim,
-                )),
+      return GestureDetector(
+        onTap: () => setState(() => _sort = s),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? t.fg : Colors.transparent,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: active ? t.fg : t.line),
           ),
+          child: Text(label,
+              style: t.sans(13, weight: FontWeight.w500).copyWith(
+                color: active ? t.bg : t.dim,
+              )),
         ),
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
       child: Row(
         children: [
-          Text('SORT',
-              style: t.mono(10, weight: FontWeight.w600)
-                  .copyWith(color: t.dim, letterSpacing: 1)),
+          MicroLabel('Sort'),
           const SizedBox(width: 10),
           chip(_Sort.distance, 'Distance'),
+          const SizedBox(width: 8),
           chip(_Sort.arrival, 'Arrival'),
+          const SizedBox(width: 8),
           chip(_Sort.service, 'Service'),
         ],
       ),
     );
   }
+
+  // ─── Row ────────────────────────────────────────────────────────────
+
+  Widget _row(LyneTheme t, NearbyStop stop) {
+    final svcs = AppModel.shared.liveServices(stop.stopCode);
+    final svcNos = svcs.isNotEmpty
+        ? svcs.map((s) => s.no).toList()
+        : DataStore.shared.servicesFor(stop.stopCode).map((s) => s.no).toList();
+    final anyArriving = svcs.any((s) => s.etaSec <= 60);
+
+    return Material(
+      color: anyArriving
+          ? t.accent.withValues(alpha: 0.05)
+          : t.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => DetailScreen(stopCode: stop.stopCode),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: anyArriving
+                  ? t.accent.withValues(alpha: 0.35)
+                  : t.line,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 52,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          '${stop.distanceM}',
+                          style: t.mono(17, weight: FontWeight.w600),
+                        ),
+                        const SizedBox(width: 1),
+                        Text('m',
+                            style: t.mono(10, color: t.dim)),
+                      ],
+                    ),
+                    Text('${stop.walkMin} MIN',
+                        style: t.mono(9, color: t.faint)
+                            .copyWith(letterSpacing: 0.5)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(width: 1, height: 36, color: t.line),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            stop.stopName,
+                            style: t.sans(15, weight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (anyArriving) ...[
+                          const SizedBox(width: 6),
+                          Pill('ARRIVING', color: t.accent),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(stop.stopCode,
+                            style: t.mono(10, color: t.faint)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: _serviceChipsRow(t, svcNos),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _serviceChipsRow(LyneTheme t, List<String> nos) {
+    if (nos.isEmpty) return const SizedBox.shrink();
+    final shown = nos.take(6).toList();
+    final overflow = nos.length - shown.length;
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        for (final n in shown)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: t.lineHi,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(n,
+                style: t.mono(10, weight: FontWeight.w600, color: t.fg)),
+          ),
+        if (overflow > 0)
+          Text('+$overflow',
+              style: t.mono(10, color: t.faint)),
+      ],
+    );
+  }
+
+  // ─── Map FAB ────────────────────────────────────────────────────────
+
+  Widget _mapFab(LyneTheme t) {
+    return Material(
+      color: t.contrast,
+      shape: const CircleBorder(),
+      elevation: 6,
+      shadowColor: Colors.black.withValues(alpha: 0.4),
+      child: InkWell(
+        onTap: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Map view coming soon',
+                  style: t.sans(13, color: t.fg)),
+              backgroundColor: t.surfaceHi,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        },
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: Icon(Icons.map_outlined, color: t.contrastFg, size: 22),
+        ),
+      ),
+    );
+  }
+
+  // ─── States ─────────────────────────────────────────────────────────
 
   Widget _permissionPrompt(LyneTheme t, LocationService loc) {
     final blocked = loc.auth == LocAuth.deniedForever;
@@ -412,7 +401,16 @@ class _NearbyScreenState extends State<NearbyScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.location_on_outlined, size: 56, color: t.accent),
+            Container(
+              width: 56, height: 56,
+              decoration: BoxDecoration(
+                color: t.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: t.line),
+              ),
+              child: Icon(Icons.location_on_outlined,
+                  size: 26, color: t.accent),
+            ),
             const SizedBox(height: 16),
             Text('See stops near you',
                 style: t.sans(17, weight: FontWeight.w600)),
@@ -420,11 +418,14 @@ class _NearbyScreenState extends State<NearbyScreen> {
             Text(
               'Leyne uses your location only to find bus stops within walking distance. It stays on your device.',
               textAlign: TextAlign.center,
-              style: t.sans(13).copyWith(color: t.dim),
+              style: t.sans(13, color: t.dim),
             ),
             const SizedBox(height: 16),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: t.accent),
+              style: FilledButton.styleFrom(
+                backgroundColor: t.accent,
+                foregroundColor: t.contrastFg,
+              ),
               onPressed: () {
                 if (blocked) {
                   loc.openAppSettings();
@@ -439,7 +440,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
               Text(
                 'Location is off. Enable it in system settings.',
                 textAlign: TextAlign.center,
-                style: t.sans(11).copyWith(color: t.dim),
+                style: t.sans(11, color: t.dim),
               ),
             ],
           ],
@@ -461,11 +462,14 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 style: t.sans(15, weight: FontWeight.w600)),
             const SizedBox(height: 6),
             Text(msg,
-                style: t.sans(12).copyWith(color: t.dim),
+                style: t.sans(12, color: t.dim),
                 textAlign: TextAlign.center),
             const SizedBox(height: 16),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: t.accent),
+              style: FilledButton.styleFrom(
+                backgroundColor: t.accent,
+                foregroundColor: t.contrastFg,
+              ),
               onPressed: () => DataStore.shared.bootstrap(),
               child: const Text('Retry'),
             ),

@@ -1,16 +1,11 @@
-// One pinned-stop card on the Home list.
-//
-// Behavioural parity with legacy PinnedCardView.swift:
-//   • Header: editable label (tap to rename), stop name, code, walk-min.
-//   • Body: up to 3 service rows, then a "+N more" overflow chip.
-//   • Arriving-bus highlight: a green hairline border + soft shadow when
-//     any tracked service is ≤ 60s out.
-//   • Recently-added: brief accent-tinted border pulse via isNew.
+// Compact pinned-stop card on the Home list — two-line rows that fit ~3×
+// more info than the legacy chunky card. Each row taps through to the
+// service detail; the whole-card tap opens the stop overview.
 
 import 'package:flutter/material.dart';
 import '../data/models.dart';
 import '../theme.dart';
-import 'service_row.dart';
+import 'atoms.dart';
 
 class PinnedCard extends StatefulWidget {
   const PinnedCard({
@@ -33,34 +28,23 @@ class PinnedCard extends StatefulWidget {
 }
 
 class _PinnedCardState extends State<PinnedCard> {
-  bool _editing = false;
-  late final TextEditingController _ctl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctl = TextEditingController(text: widget.card.label);
-  }
-
-  @override
-  void didUpdateWidget(covariant PinnedCard old) {
-    super.didUpdateWidget(old);
-    if (!_editing && old.card.label != widget.card.label) {
-      _ctl.text = widget.card.label;
+  Future<void> _showRenameSheet() async {
+    final t = context.t;
+    final v = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => _RenameSheet(
+        initial: widget.card.label,
+        hint: widget.card.stopName,
+      ),
+    );
+    if (v != null && v.isNotEmpty && v != widget.card.label) {
+      widget.onRename(v);
     }
-  }
-
-  @override
-  void dispose() {
-    _ctl.dispose();
-    super.dispose();
-  }
-
-  void _commit() {
-    setState(() => _editing = false);
-    final v = _ctl.text.trim();
-    if (v.isEmpty || v == widget.card.label) return;
-    widget.onRename(v);
   }
 
   @override
@@ -69,160 +53,273 @@ class _PinnedCardState extends State<PinnedCard> {
     final visible = widget.card.services
         .where((s) => !widget.hiddenServices.contains(s.no))
         .toList();
-    final shown = visible.take(3).toList();
-    final overflow = visible.length - shown.length;
     final anyArriving = visible.any((s) => s.etaSec <= 60);
 
-    final highlight = widget.isNew
+    final borderColor = widget.isNew
         ? t.accent
-        : (anyArriving ? t.live : t.line);
+        : (anyArriving ? t.accent.withValues(alpha: 0.4) : t.line);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => widget.onOpen(null),
+        onLongPress: _showRenameSheet,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: t.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _header(t),
+              if (visible.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Loading arrivals…',
+                    style: t.sans(12, color: t.dim),
+                  ),
+                )
+              else
+                for (var i = 0; i < visible.length; i++) ...[
+                  if (i == 0)
+                    const SizedBox(height: 12)
+                  else
+                    _rowDivider(t),
+                  _serviceRow(t, visible[i]),
+                ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _header(LyneTheme t) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.card.label,
+                style: t.sans(16, weight: FontWeight.w600),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _meta(),
+                style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.4),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        Icon(Icons.chevron_right, size: 18, color: t.faint),
+      ],
+    );
+  }
+
+  String _meta() {
+    final id = 'STOP ${widget.card.stopCode}';
+    if (widget.card.walkMin <= 0) return id;
+    return '$id · ${widget.card.walkMin} MIN WALK';
+  }
+
+  Widget _rowDivider(LyneTheme t) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Divider(height: 1, color: t.line),
+    );
+  }
+
+  Widget _serviceRow(LyneTheme t, Service s) {
+    final etaMin = (s.etaSec / 60).floor();
+    final followingMin = (s.followingSec / 60).floor();
+    final big = etaMin <= 0 ? 'Arr' : '$etaMin';
+    final unit = etaMin <= 0 ? 'now' : 'min';
+    final loadColor = switch (s.load) {
+      Load.sea => t.accent,
+      Load.sda => t.warn,
+      Load.lsd => t.crit,
+    };
+    final arriving = s.etaSec <= 60;
+    final etaColor = arriving ? t.accent : t.fg;
 
     return InkWell(
-      onTap: () => widget.onOpen(null),
-      borderRadius: BorderRadius.circular(16),
-      child: Ink(
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: highlight, width: 1),
-          boxShadow: anyArriving
-              ? [
-                  BoxShadow(
-                    color: t.live.withValues(alpha: 0.10),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      onTap: () => widget.onOpen(s.no),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _header(t, anyArriving),
-            if (shown.isNotEmpty) ...[
-              for (var i = 0; i < shown.length; i++) ...[
-                if (i > 0) Divider(height: 1, color: t.line),
-                ServiceRow(
-                  service: shown[i],
-                  onTap: () => widget.onOpen(shown[i].no),
+            BusChip(no: s.no, size: ChipSize.sm),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    s.dest,
+                    style: t.sans(14, weight: FontWeight.w500),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Container(
+                        width: 5, height: 5,
+                        decoration: BoxDecoration(
+                          color: loadColor, shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        s.load.label.toLowerCase(),
+                        style: t.mono(10, color: t.dim),
+                      ),
+                      if (s.wab) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          'WAB',
+                          style: t.mono(10, color: t.dim)
+                              .copyWith(letterSpacing: 0.4),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      big,
+                      style: t.mono(22, weight: FontWeight.w600, color: etaColor),
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      unit,
+                      style: t.mono(11, color: t.dim),
+                    ),
+                  ],
                 ),
+                if (followingMin > etaMin + 1) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'then $followingMin',
+                    style: t.mono(10, color: t.faint),
+                  ),
+                ],
               ],
-              if (overflow > 0) _moreChip(t, overflow),
-            ] else
-              _emptyBody(t),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _header(LyneTheme t, bool arriving) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () {
-                    setState(() => _editing = true);
-                  },
-                  child: _editing
-                      ? TextField(
-                          controller: _ctl,
-                          autofocus: true,
-                          maxLines: 1,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _commit(),
-                          onEditingComplete: _commit,
-                          style: t.sans(17, weight: FontWeight.w600),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            contentPadding: EdgeInsets.zero,
-                            border: InputBorder.none,
-                            hintText: widget.card.stopName,
-                            hintStyle: TextStyle(color: t.dim),
-                          ),
-                        )
-                      : Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                widget.card.label,
-                                style: t.sans(17, weight: FontWeight.w600),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Icon(Icons.edit_outlined,
-                                size: 14, color: t.dim.withValues(alpha: 0.6)),
-                          ],
-                        ),
+class _RenameSheet extends StatefulWidget {
+  const _RenameSheet({required this.initial, required this.hint});
+  final String initial;
+  final String hint;
+
+  @override
+  State<_RenameSheet> createState() => _RenameSheetState();
+}
+
+class _RenameSheetState extends State<_RenameSheet> {
+  late final TextEditingController _ctl =
+      TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 120),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Rename stop',
+                style: t.sans(15, weight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _ctl,
+              autofocus: true,
+              style: t.sans(15),
+              decoration: InputDecoration(
+                hintText: widget.hint,
+                hintStyle: TextStyle(color: t.dim),
+                isDense: true,
+                filled: true,
+                fillColor: t.bg,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: t.line),
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Text('STOP ${widget.card.stopCode}',
-                        style: t.mono(10).copyWith(color: t.dim)),
-                    if (widget.card.walkMin > 0) ...[
-                      const SizedBox(width: 8),
-                      Text('·',
-                          style: t.mono(10)
-                              .copyWith(color: t.dim.withValues(alpha: 0.5))),
-                      const SizedBox(width: 8),
-                      Text('${widget.card.walkMin} MIN WALK',
-                          style: t.mono(10).copyWith(color: t.dim)),
-                    ],
-                  ],
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: t.accent),
+                ),
+              ),
+              onSubmitted: (s) => Navigator.of(context).pop(s.trim()),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(null),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: t.accent,
+                      foregroundColor: t.contrastFg,
+                    ),
+                    onPressed: () =>
+                        Navigator.of(context).pop(_ctl.text.trim()),
+                    child: const Text('Save'),
+                  ),
                 ),
               ],
             ),
-          ),
-          if (arriving)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: t.liveBg,
-                borderRadius: BorderRadius.circular(99),
-              ),
-              child: Text('ARRIVING',
-                  style: t.mono(9, weight: FontWeight.w700)
-                      .copyWith(color: t.live, letterSpacing: 0.5)),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _moreChip(LyneTheme t, int n) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: t.bg,
-            borderRadius: BorderRadius.circular(99),
-            border: Border.all(color: t.line),
-          ),
-          child: Text('+$n more',
-              style: t.mono(10).copyWith(color: t.dim)),
+          ],
         ),
-      ),
-    );
-  }
-
-  Widget _emptyBody(LyneTheme t) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      child: Text(
-        'Loading arrivals…',
-        style: t.sans(12).copyWith(color: t.dim),
       ),
     );
   }

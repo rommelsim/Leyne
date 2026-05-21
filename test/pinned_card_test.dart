@@ -1,9 +1,5 @@
-// PinnedCard widget tests — header rendering, ARRIVING badge gating,
-// 3-service cap + "+N more" overflow, hidden-services filter, edit
-// mode toggle on label tap.
-//
-// Constructs CardModel directly so the test doesn't depend on
-// DataStore / AppModel state.
+// PinnedCard widget tests — header rendering, hidden-services filter,
+// loading state, rename via long-press bottom sheet, and service-row tap.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,15 +48,12 @@ void main() {
         onRename: (_) {},
       )));
       expect(find.text('Opp Bishan Stn'), findsOneWidget);
-      expect(find.text('STOP 53239'), findsOneWidget);
-      expect(find.text('4 MIN WALK'), findsOneWidget);
+      // Stop code + walk-min are concatenated into one mono meta line.
+      expect(find.text('STOP 53239 · 4 MIN WALK'), findsOneWidget);
     });
 
-    testWidgets('caps at 3 services and shows "+N more" overflow chip',
+    testWidgets('renders all visible services (no 3-service cap)',
         (tester) async {
-      // Use 3-digit service numbers so they don't collide with EtaPill
-      // minute counts (e.g. fmtEta(240) renders "4", which would match
-      // single-digit service nos).
       final services = [
         for (var i = 100; i <= 104; i++) _svc('$i', 60 * (i - 99) + 60),
       ];
@@ -70,36 +63,10 @@ void main() {
         onOpen: (_) {},
         onRename: (_) {},
       )));
-      // Three service rows visible.
-      expect(find.text('100'), findsOneWidget);
-      expect(find.text('101'), findsOneWidget);
-      expect(find.text('102'), findsOneWidget);
-      // The fourth + fifth are absorbed by the overflow chip.
-      expect(find.text('103'), findsNothing);
-      expect(find.text('104'), findsNothing);
-      expect(find.text('+2 more'), findsOneWidget);
-    });
-
-    testWidgets('shows ARRIVING badge when any service is ≤ 60s out',
-        (tester) async {
-      await tester.pumpWidget(_wrap(PinnedCard(
-        card: _card(services: [_svc('156', 30), _svc('88', 400)]),
-        isNew: false,
-        onOpen: (_) {},
-        onRename: (_) {},
-      )));
-      expect(find.text('ARRIVING'), findsOneWidget);
-    });
-
-    testWidgets('no ARRIVING badge when all services > 60s out',
-        (tester) async {
-      await tester.pumpWidget(_wrap(PinnedCard(
-        card: _card(services: [_svc('156', 240), _svc('88', 540)]),
-        isNew: false,
-        onOpen: (_) {},
-        onRename: (_) {},
-      )));
-      expect(find.text('ARRIVING'), findsNothing);
+      for (var i = 100; i <= 104; i++) {
+        expect(find.text('$i'), findsOneWidget);
+      }
+      expect(find.textContaining('+'), findsNothing);
     });
 
     testWidgets('hiddenServices filter excludes those rows', (tester) async {
@@ -127,7 +94,7 @@ void main() {
   });
 
   group('PinnedCard interactions', () {
-    testWidgets('tapping label switches to an editing TextField',
+    testWidgets('long-press opens a rename bottom sheet with a TextField',
         (tester) async {
       await tester.pumpWidget(_wrap(PinnedCard(
         card: _card(services: [_svc('156', 240)]),
@@ -137,10 +104,12 @@ void main() {
       )));
       // No TextField initially.
       expect(find.byType(TextField), findsNothing);
-      // Tap the label.
-      await tester.tap(find.text('Opp Bishan Stn'));
-      await tester.pump();
+      // Long-press the card.
+      await tester.longPress(find.text('Opp Bishan Stn'));
+      await tester.pumpAndSettle();
+      // Sheet now has a TextField + Save button.
       expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Save'), findsOneWidget);
     });
 
     testWidgets('committing a new label calls onRename', (tester) async {
@@ -151,11 +120,11 @@ void main() {
         onOpen: (_) {},
         onRename: (v) => renamedTo = v,
       )));
-      await tester.tap(find.text('Opp Bishan Stn'));
-      await tester.pump();
+      await tester.longPress(find.text('Opp Bishan Stn'));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Home stop');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pump();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
       expect(renamedTo, 'Home stop');
     });
 
@@ -168,8 +137,6 @@ void main() {
         onOpen: (no) => openedBus = no,
         onRename: (_) {},
       )));
-      // Find the "156" pill in the service row and tap it.
-      // (The card label / stop code don't contain "156".)
       await tester.tap(find.text('156'));
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(openedBus, '156');

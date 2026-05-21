@@ -39,11 +39,11 @@ void main() {
       await tester.pump();
       expect(find.text('No pinned stops yet'), findsOneWidget);
       expect(find.byIcon(Icons.bookmark_outline), findsOneWidget);
-      // The LIVE indicator chip is in the AppBar action area.
-      expect(find.text('LIVE'), findsOneWidget);
+      // LIVE · HH:MM indicator is rendered inline in the header.
+      expect(find.textContaining('LIVE'), findsOneWidget);
     });
 
-    testWidgets('has "Home" title in AppBar', (tester) async {
+    testWidgets('has "Home" inline title', (tester) async {
       await tester.pumpWidget(_host(const HomeScreen()));
       await tester.pump();
       expect(find.text('Home'), findsOneWidget);
@@ -66,14 +66,14 @@ void main() {
   });
 
   group('SearchScreen', () {
-    testWidgets('empty state shows "Stops near me" shortcut + hint',
-        (tester) async {
+    testWidgets('empty state shows search-hint copy', (tester) async {
       await tester.pumpWidget(_host(const SearchScreen()));
       await tester.pump();
-      expect(find.text('Stops near me'), findsOneWidget);
-      // Without any recent searches yet, shows the search-hint copy.
+      // Without any recent searches or pinned stops, shows the search-hint
+      // copy. The "Stops near me" shortcut was retired with the redesign.
       expect(
-          find.text('Search a bus number or a stop name / 5-digit code.'),
+          find.text(
+              'Search a bus number or stop (name / 5-digit code).'),
           findsOneWidget);
     });
 

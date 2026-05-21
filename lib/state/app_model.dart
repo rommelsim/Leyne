@@ -25,6 +25,8 @@ import '../services/location_service.dart';
 const _kPinsKey = 'lyne.pins';
 const _kRecentsKey = 'lyne.recents';
 const _kOnboardingDoneKey = 'lyne.onboardingDone';
+const _kUse24hKey = 'lyne.use24h';
+const _kDataSaverKey = 'lyne.dataSaver';
 
 /// One user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
 /// "pinned" ⟺ "has buses shown". `tracked == null` means *all* services
@@ -99,6 +101,32 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Preferences (persisted) ──────────────────────────────
+  // Display preference for 24-hour vs 12-hour clock in the LIVE header.
+  // Defaults to true to match the SG locale convention.
+  bool _use24h = true;
+  bool get use24h => _use24h;
+
+  void setUse24h(bool v) {
+    if (_use24h == v) return;
+    _use24h = v;
+    _prefs?.setBool(_kUse24hKey, v);
+    notifyListeners();
+  }
+
+  // Data-saver toggle — visible in Settings; full wiring (reduced poll rate,
+  // skip ad-tile loads on cellular) is a follow-up. Persists today so the
+  // toggle state survives a restart.
+  bool _dataSaver = false;
+  bool get dataSaver => _dataSaver;
+
+  void setDataSaver(bool v) {
+    if (_dataSaver == v) return;
+    _dataSaver = v;
+    _prefs?.setBool(_kDataSaverKey, v);
+    notifyListeners();
+  }
+
   // ─── Pins / recents (persisted) ───────────────────────────
   List<Pin> _pins = const [];
   List<Pin> get pins => List.unmodifiable(_pins);
@@ -116,6 +144,8 @@ class AppModel extends ChangeNotifier {
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
     _onboardingDone = _prefs!.getBool(_kOnboardingDoneKey) ?? false;
+    _use24h = _prefs!.getBool(_kUse24hKey) ?? true;
+    _dataSaver = _prefs!.getBool(_kDataSaverKey) ?? false;
 
     final raw = _prefs!.getString(_kPinsKey);
     if (raw != null) {
