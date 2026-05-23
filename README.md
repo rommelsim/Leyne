@@ -131,16 +131,18 @@ The banner ad unit flips on an **explicit build-time flag**, not on
 
 - `LYNE_ADS_TEST=true` → Google's universal test unit. "Test Ad"
   creative, zero policy risk.
-- (no flag) → production unit
-  `ca-app-pub-5864511655536507/8034707188`. Real ads, real revenue.
+- (no flag) → platform's production banner unit (iOS
+  `ca-app-pub-2677376990895470/7777422398`, Android
+  `ca-app-pub-2677376990895470/2788819591`). Real ads, real revenue.
 
 The default is **production**, so accidentally forgetting the flag on
 a public release just means real ads — not the worse failure mode of
 accidentally shipping test ads.
 
-**App ID** (used by the SDK at init time, set in `Info.plist` +
-`AndroidManifest.xml`): `ca-app-pub-5864511655536507~6330743279`. Same
-on both platforms.
+**App IDs** (used by the SDK at init time, set in `Info.plist` and
+`AndroidManifest.xml` respectively): iOS
+`ca-app-pub-2677376990895470~1126356354`, Android
+`ca-app-pub-2677376990895470~7308621321`.
 
 **To validate the production unit without earning real impressions** —
 add the device's AdMob test hash to `kTestDeviceIdentifiers` at the

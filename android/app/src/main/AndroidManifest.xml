@@ -29,7 +29,7 @@
              safely point at the production account in all builds. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-5864511655536507~6330743279"/>
+            android:value="ca-app-pub-2677376990895470~7308621321"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -7,8 +7,8 @@
 // internal testers. Wrong default. Instead:
 //
 //   • App Store / Play Store (public release): build with NO flag.
-//     The production unit ca-app-pub-5864511655536507/8034707188 is
-//     requested. Real ads, real revenue.
+//     The platform's production banner unit (see _bannerUnitId below)
+//     is requested. Real ads, real revenue.
 //   • TestFlight / Play Internal (closed beta): build with
 //     --dart-define=LYNE_ADS_TEST=true. Google's universal test unit is
 //     requested instead. Zero risk of testers seeing/tapping real ads.
@@ -68,8 +68,11 @@ String _bannerUnitId() {
         ? 'ca-app-pub-3940256099942544/6300978111'
         : 'ca-app-pub-3940256099942544/2934735716';
   }
-  // Production unit on both platforms (this app's AdMob console setup).
-  return 'ca-app-pub-5864511655536507/8034707188';
+  // Production units — separate AdMob app entries per platform, each
+  // with its own banner unit ID.
+  return Platform.isAndroid
+      ? 'ca-app-pub-2677376990895470/2788819591'
+      : 'ca-app-pub-2677376990895470/7777422398';
 }
 
 class AdBanner extends StatefulWidget {

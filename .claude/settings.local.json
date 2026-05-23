@@ -68,7 +68,18 @@
       "Bash(awk '{print $4\"%\", $11, $12}')",
       "Bash(kill 29132)",
       "Bash(unzip -p build/app/outputs/bundle/release/app-release.aab \"META-INF/*.RSA\")",
-      "Bash(unzip -p build/app/outputs/bundle/release/app-release.aab base/manifest/AndroidManifest.xml)"
+      "Bash(unzip -p build/app/outputs/bundle/release/app-release.aab base/manifest/AndroidManifest.xml)",
+      "Bash(mkdir -p store_assets)",
+      "Bash(sips -z 512 512 assets/app_icon.png --out store_assets/play_icon_512.png)",
+      "Bash(sips -g pixelWidth -g pixelHeight store_assets/play_icon_512.png)",
+      "Bash(qlmanage -t -s 1024 -o . feature.svg)",
+      "Bash(sips -g pixelWidth -g pixelHeight feature.svg.png)",
+      "Bash(sips -c 500 1024 feature.svg.png --out feature_graphic_1024x500.png)",
+      "Bash(sips -g pixelWidth -g pixelHeight feature_graphic_1024x500.png)",
+      "Bash(git add *)",
+      "Bash(git check-ignore *)",
+      "Bash(git commit -m ' *)",
+      "Bash(awk '{print $5, $6, $7, $8, $9}')"
     ]
   }
 }
