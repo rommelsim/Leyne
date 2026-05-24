@@ -124,25 +124,30 @@ Then just `leyne-iphone`, `leyne-android`, or `leyne-sim`.
 
 ## AdMob: which unit ID gets requested
 
-The banner ad unit flips on an **explicit build-time flag**, not on
-`kDebugMode`. TestFlight and Play Internal are *release* builds — a
-`kDebugMode` gate would silently serve real ads to internal testers.
-**Wrong default.**
+The banner ad unit is gated by platform + build flag. TestFlight is a
+*release* build — a `kDebugMode`-only gate would silently serve real
+ads to internal testers. **Wrong default.** The matrix:
 
-- `LYNE_ADS_TEST=true` → Google's universal test unit. "Test Ad"
-  creative, zero policy risk.
-- (no flag) → platform's production banner unit (iOS
-  `ca-app-pub-2677376990895470/7777422398`, Android
-  `ca-app-pub-2677376990895470/2788819591`). Real ads, real revenue.
+- **Any Android build** → Google's universal test unit
+  `ca-app-pub-3940256099942544/6300978111`. Android distribution is
+  paused, so a real unit isn't configured.
+- **iOS with `LYNE_ADS_TEST=true`** → Google's iOS test unit
+  `ca-app-pub-3940256099942544/2934735716`. Use for TestFlight.
+- **iOS with no flag** → production unit
+  `ca-app-pub-6816620800052795/8532706109`. Real ads, real revenue.
 
-The default is **production**, so accidentally forgetting the flag on
-a public release just means real ads — not the worse failure mode of
-accidentally shipping test ads.
+The iOS default is **production**, so accidentally forgetting the flag
+on a public release just means real ads — not the worse failure mode
+of accidentally shipping test ads.
 
-**App IDs** (used by the SDK at init time, set in `Info.plist` and
-`AndroidManifest.xml` respectively): iOS
-`ca-app-pub-2677376990895470~1126356354`, Android
-`ca-app-pub-2677376990895470~7308621321`.
+**App IDs** (used by the SDK at init time):
+
+- iOS (`Info.plist`): `ca-app-pub-6816620800052795~4249846169` —
+  rommelsim@gmail.com's AdMob property.
+- Android (`AndroidManifest.xml`):
+  `ca-app-pub-3940256099942544~3347511713` — Google's sample app ID,
+  used only so dev builds can initialize the SDK. Replace before
+  re-shipping Android.
 
 **To validate the production unit without earning real impressions** —
 add the device's AdMob test hash to `kTestDeviceIdentifiers` at the

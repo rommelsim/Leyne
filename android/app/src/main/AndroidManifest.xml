@@ -23,13 +23,13 @@
              Maps SDK meta-data that used to live here was removed when
              we switched off google_maps_flutter. -->
 
-        <!-- Google Mobile Ads SDK app ID. The runtime ad unit ID is
-             gated by build mode in lib/widgets/ad_banner.dart (test unit
-             in debug, production unit in release), so this app ID can
-             safely point at the production account in all builds. -->
+        <!-- Google Mobile Ads SDK app ID. Android distribution is
+             paused; this points at Google's sample app ID so dev
+             builds initialize the SDK without pinging a real publisher.
+             Configure a real AdMob app ID before re-shipping Android. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-2677376990895470~7308621321"/>
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

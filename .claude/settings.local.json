@@ -79,7 +79,10 @@
       "Bash(git add *)",
       "Bash(git check-ignore *)",
       "Bash(git commit -m ' *)",
-      "Bash(awk '{print $5, $6, $7, $8, $9}')"
+      "Bash(awk '{print $5, $6, $7, $8, $9}')",
+      "Bash(flutter pub *)",
+      "Bash(pod install *)",
+      "Bash(xcodebuild -resolvePackageDependencies -workspace Runner.xcworkspace -scheme Runner)"
     ]
   }
 }

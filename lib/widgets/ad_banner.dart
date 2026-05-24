@@ -1,23 +1,24 @@
 // 320x50 banner host. Reserves 50pt vertically regardless of fill state
 // so the layout doesn't jump when an ad lands.
 //
-// Ad unit ID is gated by an explicit build-time flag, NOT by
-// kDebugMode — TestFlight and Play Internal builds are release-mode
-// builds, so a kDebugMode gate would silently serve real ads to
-// internal testers. Wrong default. Instead:
+// Ad unit ID is gated by platform + explicit build flag, NOT by
+// kDebugMode alone — TestFlight builds are release-mode, so a
+// kDebugMode gate would silently serve real ads to internal testers.
+// The matrix:
 //
-//   • App Store / Play Store (public release): build with NO flag.
-//     The platform's production banner unit (see _bannerUnitId below)
-//     is requested. Real ads, real revenue.
-//   • TestFlight / Play Internal (closed beta): build with
-//     --dart-define=LYNE_ADS_TEST=true. Google's universal test unit is
-//     requested instead. Zero risk of testers seeing/tapping real ads.
-//   • Local `flutter run` (debug): also serves the production unit, but
-//     the Mobile Ads SDK auto-treats the iOS Simulator (and Android
-//     Emulator) as a test device, so the sim renders "Test Ad" creatives
-//     anyway. To dev against the production unit on a real device
-//     without earning fake impressions, add the device's AdMob test
-//     hash to kTestDeviceIdentifiers in lib/services/ad_consent.dart.
+//   • iOS App Store (public release): build with NO flag. The iOS
+//     production banner unit is requested. Real ads, real revenue.
+//   • iOS TestFlight (closed beta): build with
+//     --dart-define=LYNE_ADS_TEST=true. Google's universal test unit
+//     is requested. Zero risk of testers tapping real ads.
+//   • iOS debug (`flutter run`): test unit via the kDebugMode branch.
+//   • Any Android build: ALWAYS test unit. Android distribution is
+//     paused; configure a real AdMob unit and remove the platform
+//     short-circuit in _bannerUnitId before re-shipping Android.
+//
+// To dev against the iOS production unit on a real device without
+// earning fake impressions, add the device's AdMob test hash to
+// kTestDeviceIdentifiers in lib/services/ad_consent.dart.
 //
 // Renders nothing (empty SizedBox of the same height) until both
 // AdConsent.started AND the ad loads — that way:
@@ -53,26 +54,19 @@ const bool kLyneScreenshotMode =
 
 /// Resolve the banner ad unit ID at runtime.
 String _bannerUnitId() {
-  // Debug builds (`flutter run`, Xcode ⌘R) always use Google's universal
-  // test units so a "Test Ad" creative shows on any device — including a
-  // physical iPhone, which the SDK does NOT auto-treat as a test device.
-  //
-  // Release builds are unaffected: TestFlight / Play Internal still opt in
-  // via --dart-define=LYNE_ADS_TEST=true, and a store build (release, no
-  // flag) serves the production unit. A debug build can never reach a
-  // store, so this can't leak test creatives into production.
-  if (kLyneAdsTest || kDebugMode) {
-    // Google's official test banner units — always serve "Test Ad"
-    // creatives, never count as impressions for any account.
-    return Platform.isAndroid
-        ? 'ca-app-pub-3940256099942544/6300978111'
-        : 'ca-app-pub-3940256099942544/2934735716';
+  // Android: always serve Google's universal test unit. Distribution
+  // is paused, so a real unit would be dead code at best and a flagged
+  // publisher ID at worst.
+  if (Platform.isAndroid) {
+    return 'ca-app-pub-3940256099942544/6300978111';
   }
-  // Production units — separate AdMob app entries per platform, each
-  // with its own banner unit ID.
-  return Platform.isAndroid
-      ? 'ca-app-pub-2677376990895470/2788819591'
-      : 'ca-app-pub-2677376990895470/7777422398';
+  // iOS: test unit in debug / explicit test-flag builds; production
+  // unit otherwise. A debug build can never reach the App Store, so
+  // this can't leak test creatives into production.
+  if (kLyneAdsTest || kDebugMode) {
+    return 'ca-app-pub-3940256099942544/2934735716';
+  }
+  return 'ca-app-pub-6816620800052795/8532706109';
 }
 
 class AdBanner extends StatefulWidget {

@@ -3,9 +3,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../theme.dart';
 import '../widgets/atoms.dart';
+
+const String _privacyUrl = 'https://rommelsim.github.io/Leyne/privacy.html';
+const String _supportUrl = 'https://rommelsim.github.io/Leyne/support.html';
 
 // What shipped in the current build — surfaced so users know what changed.
 const List<String> _thisBuild = [
@@ -55,6 +59,8 @@ class AboutScreen extends StatelessWidget {
                   const SizedBox(height: 20),
                   _list(t, 'Coming soon', _comingSoon,
                       Icons.arrow_forward_rounded, t.dim),
+                  const SizedBox(height: 20),
+                  _linksCard(t),
                   const SizedBox(height: 20),
                   Text(
                     'Data from LTA DataMall.\nNot affiliated with any operator.',
@@ -125,6 +131,56 @@ class AboutScreen extends StatelessWidget {
         ),
         Text('Made in SG', style: t.sans(12, color: t.dim)),
       ],
+    );
+  }
+
+  Widget _linksCard(LyneTheme t) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 4, bottom: 10),
+          child: MicroLabel('Legal & support'),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: t.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: t.line),
+          ),
+          child: Column(
+            children: [
+              _linkRow(t, 'Privacy Policy', _privacyUrl, isFirst: true),
+              Divider(height: 1, color: t.line, indent: 14, endIndent: 14),
+              _linkRow(t, 'Support', _supportUrl, isLast: true),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _linkRow(LyneTheme t, String label, String url,
+      {bool isFirst = false, bool isLast = false}) {
+    return InkWell(
+      onTap: () =>
+          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+      borderRadius: BorderRadius.vertical(
+        top: isFirst ? const Radius.circular(14) : Radius.zero,
+        bottom: isLast ? const Radius.circular(14) : Radius.zero,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(label,
+                  style: t.sans(13, color: t.fg).copyWith(height: 1.4)),
+            ),
+            Icon(Icons.open_in_new_rounded, size: 14, color: t.dim),
+          ],
+        ),
+      ),
     );
   }
 
