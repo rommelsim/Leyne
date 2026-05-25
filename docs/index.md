@@ -6,4 +6,4 @@ glance. Available on iOS and Android.
 - [Support](support.html)
 - [Privacy Policy](privacy.html)
 
-Contact: rommelsim@gmail.com
+Contact: leyne0000@gmail.com
