@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Tracking is performed by the Google Mobile Ads SDK (personalized
+	     ads + IDFA via ATT), NOT by this app's own first-party code. The
+	     SDK ships its own PrivacyInfo.xcprivacy declaring NSPrivacyTracking
+	     = true together with its tracking domains; Apple aggregates all
+	     manifests, so the app is still correctly reported as tracking and
+	     the App Store privacy label stays accurate.
+
+	     This app-level flag is false because the app declares no tracking
+	     domains of its own. Apple's ITMS-91064 rejects NSPrivacyTracking =
+	     true with an empty NSPrivacyTrackingDomains; and adding Google's
+	     ad domains here would block ad serving when ATT is denied (the SDK
+	     manifest must own that). -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<!-- IDFA / device identifier used for personalized advertising. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeThirdPartyAdvertising</string>
+			</array>
+		</dict>
+		<!-- Advertising data (ad interactions/measurement via AdMob). -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeAdvertisingData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeThirdPartyAdvertising</string>
+			</array>
+		</dict>
+		<!-- Precise device location — used at runtime by Nearby and the
+		     postal-code search to rank bus stops by walking distance. Not
+		     linked to a user account (no accounts) and not used for
+		     tracking; never leaves the device. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypePreciseLocation</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- App stores its own settings/pins in UserDefaults, including a
+		     shared App Group suite read by the widget extension.
+		     CA92.1 = app's own defaults; C56D.1 = App Group shared. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+				<string>C56D.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
