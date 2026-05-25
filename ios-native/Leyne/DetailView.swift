@@ -149,27 +149,44 @@ struct DetailView: View {
     }
 
     private var heading: some View {
-        // The PinTag only adds information when the user has *renamed* the
-        // stop — then it's a meaningful breadcrumb ("MORNING · STOP 18029"
-        // above "Bef Bishan Stn"). When label == stopName (the default for
-        // an un-renamed stop), the PinTag just duplicates the title in
-        // mono caps, so we drop it and leave only the STOP code.
+        // Title-as-label design: the big bold title IS the user's editable
+        // label (defaults to the official stop name). When they rename it,
+        // the official stop name surfaces as a secondary subtitle —
+        // progressive disclosure, one name in one place. The pencil glyph
+        // beside the title is the rename affordance. Walk-minutes move
+        // here from the micro meta row since they belong with location
+        // context, not buried in the breadcrumb.
         let hasNickname = card.label != card.stopName
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                if hasNickname {
-                    if m.isPinned(card.stopCode) {
-                        PinTag(label: card.label, t: t,
-                               onRename: { m.rename(code: card.stopCode, to: $0) })
-                    } else {
-                        PinTag(label: card.label, t: t)
-                    }
-                    Text("·").font(t.mono(10)).foregroundStyle(t.dim.opacity(0.5))
-                }
-                Text("STOP \(card.stopCode)")
-                    .font(t.mono(10)).tracking(1).foregroundStyle(t.dim)
+        let canRename = m.isPinned(card.stopCode)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("STOP \(card.stopCode)")
+                .font(t.mono(10)).tracking(1).foregroundStyle(t.dim)
+                .padding(.bottom, 2)
+
+            EditableTitle(
+                label: card.label,
+                canEdit: canRename,
+                t: t,
+                onRename: { m.rename(code: card.stopCode, to: $0) }
+            )
+
+            if hasNickname {
+                Text(card.stopName)
+                    .font(t.sans(13))
+                    .foregroundStyle(t.dim)
+                    .padding(.top, 1)
             }
-            Text(card.stopName).font(t.sans(26, weight: .semibold)).foregroundStyle(t.fg)
+
+            if card.walkMin > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("\(card.walkMin) min walk").font(t.mono(11))
+                }
+                .foregroundStyle(t.dim)
+                .padding(.top, 4)
+            }
+
             if let s = selected {
                 Text("VIEWING BUS \(s.no) → \(s.dest)")
                     .font(t.mono(12)).foregroundStyle(t.dim).padding(.top, 6)
@@ -937,6 +954,62 @@ struct DetailPager: View {
         var c = card
         c.initialSelectedNo = (card.stopCode == initialStopCode) ? initialBusNo : nil
         return c
+    }
+}
+
+/// Big editable title for the DetailView heading. Tapping the title (or
+/// the pencil glyph beside it) swaps into a TextField bound to the same
+/// label. Submit / blur commits via `onRename`. Pencil shows only when
+/// the stop is pinned — non-pinned stops can't be renamed because there's
+/// no Pin to store the nickname on.
+struct EditableTitle: View {
+    let label: String
+    let canEdit: Bool
+    let t: Theme
+    let onRename: (String) -> Void
+
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if editing {
+                TextField("", text: $draft)
+                    .focused($focused)
+                    .font(t.sans(26, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .onSubmit(commit)
+                    .onChange(of: focused) { _, f in if !f { commit() } }
+                    .fixedSize()
+            } else {
+                Text(label)
+                    .font(t.sans(26, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(2)
+                if canEdit {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(t.dim.opacity(0.65))
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard canEdit, !editing else { return }
+            draft = label
+            editing = true
+            focused = true
+        }
+    }
+
+    private func commit() {
+        let v = draft.trimmingCharacters(in: .whitespaces)
+        if !v.isEmpty, v != label { onRename(v) }
+        editing = false
     }
 }
 

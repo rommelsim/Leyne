@@ -7,6 +7,7 @@
 //   in-app toggle for now (legacy followed the system too).
 // • Warns at debug time if LTA_API_KEY is missing.
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -78,21 +79,34 @@ class LyneApp extends StatelessWidget {
   Widget build(BuildContext context) {
     // Rebuild MaterialApp when the user changes Appearance / Language so the
     // themeMode + locale overrides take effect immediately.
-    return ListenableBuilder(
-      listenable: AppModel.shared,
-      builder: (context, _) {
-        return MaterialApp(
-          title: 'Leyne',
-          debugShowCheckedModeBanner: false,
-          themeMode: AppModel.shared.themeMode,
-          theme: LyneTheme.light.materialTheme,
-          darkTheme: LyneTheme.dark.materialTheme,
-          locale: AppModel.shared.locale,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          navigatorKey: _navigatorKey,
-          scaffoldMessengerKey: lyneMessengerKey,
-          home: const _AppRoot(),
+    //
+    // DynamicColorBuilder pulls the system's Material You palette on
+    // Android 12+ (API 31+). On older Android the builder receives
+    // `null` for both schemes, and we fall back to LyneTheme's static
+    // warm-parchment / mint palette. The dynamic palette is overlaid
+    // onto the static one — Leyne brand colours (the live mint, warn
+    // amber, crit red) are preserved while the user's wallpaper tints
+    // surfaces and tonal containers.
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        return ListenableBuilder(
+          listenable: AppModel.shared,
+          builder: (context, _) {
+            return MaterialApp(
+              title: 'Leyne',
+              debugShowCheckedModeBanner: false,
+              themeMode: AppModel.shared.themeMode,
+              theme: LyneTheme.light.materialTheme(dynamicScheme: lightDynamic),
+              darkTheme:
+                  LyneTheme.dark.materialTheme(dynamicScheme: darkDynamic),
+              locale: AppModel.shared.locale,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              navigatorKey: _navigatorKey,
+              scaffoldMessengerKey: lyneMessengerKey,
+              home: const _AppRoot(),
+            );
+          },
         );
       },
     );

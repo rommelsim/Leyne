@@ -12,24 +12,19 @@
 			<key>CFBundleURLName</key>
 			<string>sg.lyne.app</string>
 			<key>CFBundleURLSchemes</key>
-			<array><string>lyne</string></array>
+			<array>
+				<string>lyne</string>
+			</array>
 		</dict>
 	</array>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-6816620800052795~4249846169</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Leyne uses your location to show nearby bus stops and accurate arrival times.</string>
-	<!-- The always purpose string is here only to silence ITMS-90683:
-	     some SDK in the binary (CoreLocation / AdMob) references the
-	     CLLocationManager always-authorization API even though we never
-	     call it. Apple requires the string to be present whenever the
-	     symbol is referenced, regardless of runtime behaviour. -->
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Leyne uses your location to show nearby bus stops and accurate arrival times.</string>
-	<key>NSUserTrackingUsageDescription</key>
-	<string>Leyne uses your device identifier to show ads relevant to you and to keep the app free.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Leyne uses your location to show nearby bus stops and accurate arrival times.</string>
 	<key>SKAdNetworkItems</key>
 	<array>
 		<dict>

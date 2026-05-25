@@ -8,6 +8,7 @@
 // factory so stock widgets (AppBar, NavigationBar, ListTile, etc.) inherit
 // the look without per-widget styling.
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
 @immutable
@@ -149,8 +150,16 @@ class LyneTheme {
   /// into the Material 3 colour scheme so stock widgets (AppBar,
   /// NavigationBar, ListTile, etc.) inherit the look without per-widget
   /// styling.
-  ThemeData get materialTheme {
-    final scheme = ColorScheme(
+  ///
+  /// When [dynamicScheme] is non-null (Material You is available on the
+  /// device — Android 12+), the user's wallpaper-derived palette is
+  /// harmonised against Leyne's brand colours: surfaces and tonal
+  /// containers take on the wallpaper tint, while `live` (mint), `warn`
+  /// (amber), and `crit` (red) keep their semantic identity. On older
+  /// Android, [dynamicScheme] is null and we use the static palette
+  /// verbatim.
+  ThemeData materialTheme({ColorScheme? dynamicScheme}) {
+    final base = ColorScheme(
       brightness: isDark ? Brightness.dark : Brightness.light,
       primary: accent,
       onPrimary: contrastFg,
@@ -163,13 +172,30 @@ class LyneTheme {
       error: crit,
       onError: contrastFg,
     );
+    // Material You overlay: take the wallpaper-derived scheme as the
+    // base (so surfaces tint with the user's wallpaper) and re-paint
+    // Leyne's brand slots on top. `harmonized()` shifts the accent
+    // hue toward the dynamic primary so mint reads as part of the
+    // wallpaper family without losing its mint identity.
+    final scheme = dynamicScheme == null
+        ? base
+        : dynamicScheme.copyWith(
+            primary: accent.harmonizeWith(dynamicScheme.primary),
+            onPrimary: contrastFg,
+            secondary: live.harmonizeWith(dynamicScheme.primary),
+            onSecondary: contrastFg,
+            error: crit.harmonizeWith(dynamicScheme.primary),
+            onError: contrastFg,
+          );
+    final scaffoldBg = dynamicScheme == null ? bg : scheme.surface;
+    final surfaceTint = dynamicScheme == null ? Colors.transparent : scheme.surfaceTint;
     return ThemeData(
       useMaterial3: true,
       brightness: scheme.brightness,
       colorScheme: scheme,
-      scaffoldBackgroundColor: bg,
+      scaffoldBackgroundColor: scaffoldBg,
       appBarTheme: AppBarTheme(
-        backgroundColor: bg,
+        backgroundColor: scaffoldBg,
         foregroundColor: fg,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -178,8 +204,8 @@ class LyneTheme {
             fontSize: 28, fontWeight: FontWeight.w600, color: fg, letterSpacing: -0.3),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: bg,
-        surfaceTintColor: Colors.transparent,
+        backgroundColor: scaffoldBg,
+        surfaceTintColor: surfaceTint,
         indicatorColor: isDark
             ? const Color.fromRGBO(255, 255, 255, 0.06)
             : accent.withValues(alpha: 0.12),

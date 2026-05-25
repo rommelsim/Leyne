@@ -76,9 +76,8 @@ class RouteStopLive {
   final int seq;
 }
 
-/// 2D point — provider-neutral so callers can convert to apple_maps_flutter
-/// LatLng on iOS or google_maps_flutter LatLng on Android without leaking
-/// either dependency into the data layer.
+/// 2D point — provider-neutral so callers can convert to flutter_map /
+/// latlong2 LatLng without leaking that dependency into the data layer.
 class GeoPoint {
   const GeoPoint(this.lat, this.lon);
   final double lat;

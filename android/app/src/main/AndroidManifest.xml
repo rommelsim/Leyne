@@ -10,8 +10,14 @@
          Combined with the consent flow in lib/services/ad_consent.dart so
          the SDK only reads the ID after UMP consent is granted. The Play
          Store Data Safety form must disclose "Device or other IDs" → AdMob
-         when this permission is present. -->
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+         when this permission is present.
+
+         DISABLED while AdMob account is under suspension review (see
+         kLyneAdsEnabled in lib/widgets/ad_banner.dart). Restore both the
+         permission below and the kLyneAdsEnabled flag together — they
+         must move in lock-step so the Data Safety disclosure stays
+         consistent with runtime behaviour. -->
+    <!-- <uses-permission android:name="com.google.android.gms.permission.AD_ID"/> -->
 
     <application
         android:label="Leyne"

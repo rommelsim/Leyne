@@ -1,13 +1,11 @@
-// Split route map — Apple Maps on iOS, OpenStreetMap (via flutter_map)
-// on Android.
+// Route map — OpenStreetMap via flutter_map.
 //
-// Both providers render three points:
+// Renders three points:
 //   1. Your bus stop — accent-coloured pin
 //   2. The live bus position — green badge with the service number,
 //      if LTA reports lat/lon for the next bus
-//   3. The user's current location — iOS shows its native blue dot via
-//      myLocationEnabled; Android draws a small blue dot using the
-//      latest LocationService reading
+//   3. The user's current location — a small blue dot using the latest
+//      LocationService reading
 //
 // The route polyline was removed (was visually noisy — LTA has no road
 // geometry so straight lines between stops looked like a tangle on
@@ -15,24 +13,15 @@
 // where your stop is, where you are." Route progress as a list of
 // stops lives in the RouteProgress widget below the map.
 //
-// Why OSM on Android: avoids the Google Cloud + billing requirement
-// for `google_maps_flutter`. OSM's tiles are free, no key, no card on
-// file. Singapore has excellent OSM coverage. OSM's tile policy
-// requires a real user-agent string + attribution visible to users —
-// both wired below.
+// Why OSM: avoids the Google Cloud + billing requirement for
+// `google_maps_flutter`. OSM's tiles are free, no key, no card on file.
+// Singapore has excellent OSM coverage. OSM's tile policy requires a
+// real user-agent string + attribution visible to users — both wired
+// below.
 //
-// Provider split lives in one file so the Detail screen has a single
-// `RouteMap(...)` to compose with. Data layer never imports either
-// map package (GeoPoint is provider-neutral); marker / polyline
-// conversions happen here.
+// This widget is Android-only — iOS shipping now ships via the SwiftUI
+// app at `ios-native/` which renders the equivalent view with MapKit.
 
-import 'dart:io';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
-
-import 'package:apple_maps_flutter/apple_maps_flutter.dart' as apple;
-import 'package:flutter/foundation.dart' show Factory;
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -69,19 +58,13 @@ class RouteMap extends StatelessWidget {
             ? _placeholder(t, loading)
             : Stack(
                 children: [
-                  _platformMap(r, t),
+                  _OsmMap(route: r, busNo: busNo, t: t),
                   _legend(t),
                   _liveTag(t, r),
                 ],
               ),
       ),
     );
-  }
-
-  Widget _platformMap(RouteInfo r, LyneTheme t) {
-    return Platform.isIOS
-        ? _AppleMap(route: r, busNo: busNo)
-        : _OsmMap(route: r, busNo: busNo, t: t);
   }
 
   Widget _placeholder(LyneTheme t, bool loading) {
@@ -195,159 +178,6 @@ double _zoomFromSpan(double spanLat) {
   return 11;
 }
 
-// ─── Apple Maps (iOS) ──────────────────────────────────────────
-
-class _AppleMap extends StatefulWidget {
-  const _AppleMap({required this.route, required this.busNo});
-  final RouteInfo route;
-  final String busNo;
-
-  @override
-  State<_AppleMap> createState() => _AppleMapState();
-}
-
-class _AppleMapState extends State<_AppleMap> {
-  // Custom marker bitmaps — generated once in initState as PNG bytes
-  // from the Material icon glyphs, then handed to apple_maps_flutter via
-  // BitmapDescriptor.fromBytes. apple_maps_flutter has no built-in
-  // "use this Flutter widget as a marker" so we render to PNG ourselves.
-  apple.BitmapDescriptor? _stopIcon;
-  apple.BitmapDescriptor? _busIcon;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadMarkers();
-  }
-
-  Future<void> _loadMarkers() async {
-    // Stop pin — accent-coloured circle with the location icon.
-    final stopBytes = await _drawIconMarker(
-      icon: Icons.location_on,
-      fillColor: const Color(0xFF8B5A2B), // LyneTheme.light.accent
-    );
-    // Bus marker — green circle with the directions_bus icon.
-    final busBytes = await _drawIconMarker(
-      icon: Icons.directions_bus,
-      fillColor: const Color(0xFF3C8A4E), // LyneTheme.light.live
-    );
-    if (!mounted) return;
-    setState(() {
-      _stopIcon = apple.BitmapDescriptor.fromBytes(stopBytes);
-      _busIcon = apple.BitmapDescriptor.fromBytes(busBytes);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final f = _frame(widget.route);
-    final you = widget.route
-        .stops[widget.route.youIndex.clamp(0, widget.route.stops.length - 1)];
-
-    final annotations = <apple.Annotation>{
-      apple.Annotation(
-        annotationId: apple.AnnotationId('stop'),
-        position: apple.LatLng(you.lat, you.lon),
-        icon: _stopIcon ?? apple.BitmapDescriptor.defaultAnnotation,
-        infoWindow: apple.InfoWindow(title: 'STOP', snippet: you.name),
-      ),
-    };
-    final bus = widget.route.busCoord;
-    if (bus != null) {
-      annotations.add(apple.Annotation(
-        annotationId: apple.AnnotationId('bus'),
-        position: apple.LatLng(bus.lat, bus.lon),
-        icon: _busIcon ?? apple.BitmapDescriptor.defaultAnnotation,
-        infoWindow: apple.InfoWindow(title: 'Bus ${widget.busNo}'),
-      ));
-    }
-
-    return apple.AppleMap(
-      initialCameraPosition: apple.CameraPosition(
-        target: apple.LatLng(f.centerLat, f.centerLon),
-        zoom: _zoomFromSpan(f.spanLat),
-      ),
-      annotations: annotations,
-      myLocationEnabled: true,
-      compassEnabled: false,
-      mapType: apple.MapType.standard,
-      // The map is a UIKit platform view embedded in the Detail screen's
-      // scrolling ListView. Without claiming gestures eagerly, the parent
-      // scroll view wins the arena and pan/zoom never reach the map.
-      gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-        Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-      },
-    );
-  }
-}
-
-/// Render a Material icon onto a coloured circle and return the result
-/// as PNG bytes. apple_maps_flutter accepts these via
-/// BitmapDescriptor.fromBytes for a fully custom annotation glyph,
-/// bypassing Apple's default red-pin look.
-///
-/// The drawing happens directly on a Canvas (not via a widget tree),
-/// which avoids the off-screen-rendering rigmarole. Material icons
-/// resolve via the standard 'MaterialIcons' font that Flutter loads at
-/// startup, so the glyph just becomes a single character we paint with
-/// TextPainter.
-Future<Uint8List> _drawIconMarker({
-  required IconData icon,
-  required Color fillColor,
-  Color iconColor = Colors.white,
-  Color borderColor = Colors.white,
-  double size = 88,
-  double borderWidth = 4,
-}) async {
-  final recorder = ui.PictureRecorder();
-  final canvas = Canvas(recorder);
-  final centre = Offset(size / 2, size / 2);
-  final radius = size / 2;
-
-  // Soft drop shadow behind the circle for separation from map tiles.
-  final shadow = Paint()
-    ..color = Colors.black.withValues(alpha: 0.28)
-    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
-  canvas.drawCircle(centre + const Offset(0, 2), radius - 2, shadow);
-
-  // Filled circle.
-  canvas.drawCircle(centre, radius - borderWidth, Paint()..color = fillColor);
-
-  // White border.
-  canvas.drawCircle(
-    centre,
-    radius - borderWidth / 2,
-    Paint()
-      ..color = borderColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = borderWidth,
-  );
-
-  // Icon glyph — Material icons are font characters indexed by codePoint.
-  final glyph = TextPainter(textDirection: TextDirection.ltr)
-    ..text = TextSpan(
-      text: String.fromCharCode(icon.codePoint),
-      style: TextStyle(
-        fontFamily: icon.fontFamily,
-        package: icon.fontPackage,
-        fontSize: size * 0.55,
-        color: iconColor,
-      ),
-    )
-    ..layout();
-  glyph.paint(
-    canvas,
-    Offset((size - glyph.width) / 2, (size - glyph.height) / 2),
-  );
-
-  final picture = recorder.endRecording();
-  final image = await picture.toImage(size.toInt(), size.toInt());
-  final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-  return byteData!.buffer.asUint8List();
-}
-
-// ─── OpenStreetMap via flutter_map (Android) ───────────────────
-
 class _OsmMap extends StatelessWidget {
   const _OsmMap({
     required this.route,
@@ -369,8 +199,8 @@ class _OsmMap extends StatelessWidget {
       options: MapOptions(
         initialCenter: LatLng(f.centerLat, f.centerLon),
         initialZoom: _zoomFromSpan(f.spanLat),
-        // Allow pan + zoom but disable rotation (matches the Apple Maps
-        // side; Singapore transit users don't need rotated maps).
+        // Allow pan + zoom but disable rotation — Singapore transit users
+        // don't need rotated maps.
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.pinchZoom |
               InteractiveFlag.drag |
@@ -443,7 +273,7 @@ class _OsmMap extends StatelessWidget {
                   ),
                 ),
               ),
-            // 3. The user — small blue dot with white ring, iOS-style.
+            // 3. The user — small blue dot with white ring.
             //    Only drawn once LocationService has produced a reading.
             if (user != null)
               Marker(

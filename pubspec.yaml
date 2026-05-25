@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.0.1+7
+version: 2.1.0+8
 
 environment:
   sdk: ^3.12.0
@@ -33,33 +33,19 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
   http: ^1.6.0
   geolocator: ^14.0.2
   shared_preferences: ^2.5.5
-  apple_maps_flutter: ^1.4.0
   google_mobile_ads: ^8.0.0
-  app_tracking_transparency: ^2.0.6+1
   app_links: ^7.0.0
   flutter_map: ^8.3.0
   latlong2: ^0.9.1
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.0
-
-# Pin path_provider_foundation BELOW 2.6.0. From 2.6.0 onwards this
-# package depends on Dart's package:objective_c FFI helper, whose iOS
-# binary ships an arm64e-only architecture slice. That conflicts with
-# Flutter stable 3.44's arm64-only Flutter.framework and causes
-# ITMS-91080 App Store upload rejections. flutter_map 8.3.0 transitively
-# pulls path_provider → path_provider_foundation in for its tile cache;
-# pinning ≤ 2.5.x keeps the older platform-channel-based implementation
-# without the arm64e dependency. Revisit when Flutter / objective_c
-# publish matching arm64+arm64e slices.
-dependency_overrides:
-  # 2.6.0 is the version that pulled in objective_c. Pin strictly below.
-  path_provider_foundation: ">=2.4.0 <2.6.0"
+  # Material You wallpaper-derived palette on Android 12+ (API 31+).
+  # On older Android, returns null and we fall back to the static
+  # LyneTheme palette. See lib/main.dart.
+  dynamic_color: ^1.7.0
 
 dev_dependencies:
   flutter_test:

@@ -13,11 +13,11 @@
 // request an ad before consent + IDFA state is settled.
 
 import 'dart:async';
-import 'dart:io';
 
-import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+
+import '../widgets/ad_banner.dart' show kLyneAdsEnabled;
 
 /// Test device hashes — any device listed here is flagged as a test
 /// device by the Mobile Ads SDK regardless of which unit ID we request.
@@ -66,6 +66,9 @@ class AdConsent {
   static Future<void> gatherThenStart({
     List<String> testDeviceIdentifiers = const [],
   }) async {
+    // Master ad switch — bail before any UMP / ATT prompt or SDK init
+    // call so no traffic is generated on a suspended AdMob account.
+    if (!kLyneAdsEnabled) return;
     if (_ran) return;
     _ran = true;
 
@@ -79,22 +82,9 @@ class AdConsent {
       }
     }
 
-    // 2. ATT — iOS only. requestTrackingAuthorization is a no-op on
-    //    Android and on iOS versions < 14.5. The OS only presents the
-    //    prompt once per install; subsequent calls return the stored
-    //    status.
-    try {
-      if (Platform.isIOS) {
-        await AppTrackingTransparency.requestTrackingAuthorization();
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('[ads] ATT step skipped: $e');
-      }
-    }
-
-    // 3. Initialise Mobile Ads SDK.
+    // 2. Initialise Mobile Ads SDK. ATT (App Tracking Transparency) is
+    //    handled natively by the SwiftUI iOS build — the Flutter app
+    //    is Android-only, where ATT is a no-op anyway.
     try {
       await MobileAds.instance.initialize();
       if (testDeviceIdentifiers.isNotEmpty) {

@@ -15,8 +15,8 @@ import 'package:lyne/state/app_model.dart';
 import 'package:lyne/theme.dart';
 
 Widget _host(Widget child) => MaterialApp(
-      theme: LyneTheme.light.materialTheme,
-      darkTheme: LyneTheme.dark.materialTheme,
+      theme: LyneTheme.light.materialTheme(),
+      darkTheme: LyneTheme.dark.materialTheme(),
       home: child,
     );
 

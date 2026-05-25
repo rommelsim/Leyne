@@ -24,6 +24,16 @@ import os
 private let adLog = Logger(subsystem: "com.leyne.Leyne", category: "Ads")
 
 enum AdConfig {
+    /// MASTER SWITCH. Set to `false` to ship a no-ads build (current state
+    /// while the AdMob account is suspended). When the suspension lifts,
+    /// flip this back to `true` — no other code change needed:
+    ///   • `bottomAdBanner` / `overlayAdBanner` extensions become no-ops
+    ///   • `AdConsent.gatherThenStart()` returns immediately
+    ///   • `MobileAds.shared.start()` is never called → no traffic on
+    ///     the suspended unit → no risk of escalating the suspension
+    ///   • Onboarding's "Ads" step is skipped (see OnboardingView)
+    static let adsEnabled = false
+
     // Ad unit is gated by build configuration so testing is always safe and
     // production always earns — no manual swapping:
     //   • DEBUG  (Xcode Run → Simulator/device): Google's official always-
@@ -93,6 +103,10 @@ enum AdConsent {
 
     @MainActor
     static func gatherThenStart() async {
+        // Hard-stop when ads are disabled. Don't request consent, don't
+        // start the Mobile Ads SDK, don't generate any traffic that could
+        // hit a suspended AdMob account.
+        guard AdConfig.adsEnabled else { return }
         guard !ran else { return }
         ran = true
 
@@ -339,7 +353,7 @@ extension View {
     @ViewBuilder
     func bottomAdBanner(_ t: Theme) -> some View {
         let _ = BottomAdBannerProbe.logOnce()
-        if AdConfig.screenshotMode {
+        if !AdConfig.adsEnabled || AdConfig.screenshotMode {
             self
         } else if #available(iOS 26.0, *) {
             tabViewBottomAccessory {
@@ -356,7 +370,7 @@ extension View {
     /// `tabViewBottomAccessory` slot.
     @ViewBuilder
     func overlayAdBanner(_ t: Theme) -> some View {
-        if AdConfig.screenshotMode {
+        if !AdConfig.adsEnabled || AdConfig.screenshotMode {
             self
         } else {
             safeAreaInset(edge: .bottom, spacing: 0) {

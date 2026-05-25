@@ -26,7 +26,6 @@
 //   2. We never fill the space with a half-loaded ad placeholder.
 
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -52,21 +51,20 @@ const bool kLyneAdsTest =
 const bool kLyneScreenshotMode =
     bool.fromEnvironment('LYNE_SCREENSHOT_MODE', defaultValue: false);
 
-/// Resolve the banner ad unit ID at runtime.
+/// MASTER SWITCH for ads. Set to `false` while the AdMob account is
+/// under suspension review — the banner widget short-circuits to an
+/// empty SizedBox, no SDK request is ever made, and AdConsent stays a
+/// no-op. Flip back to `true` once the account is reinstated to re-
+/// enable ads with no other code change.
+const bool kLyneAdsEnabled = false;
+
+/// Resolve the banner ad unit ID at runtime. Flutter is Android-only —
+/// iOS ships via the SwiftUI app at `ios-native/`. Distribution is
+/// currently paused while AdMob is under suspension review, so we serve
+/// Google's universal Android test unit; configure a real unit and gate
+/// it on `!kLyneAdsTest && !kDebugMode` before re-shipping Android.
 String _bannerUnitId() {
-  // Android: always serve Google's universal test unit. Distribution
-  // is paused, so a real unit would be dead code at best and a flagged
-  // publisher ID at worst.
-  if (Platform.isAndroid) {
-    return 'ca-app-pub-3940256099942544/6300978111';
-  }
-  // iOS: test unit in debug / explicit test-flag builds; production
-  // unit otherwise. A debug build can never reach the App Store, so
-  // this can't leak test creatives into production.
-  if (kLyneAdsTest || kDebugMode) {
-    return 'ca-app-pub-3940256099942544/2934735716';
-  }
-  return 'ca-app-pub-6816620800052795/8532706109';
+  return 'ca-app-pub-3940256099942544/6300978111';
 }
 
 class AdBanner extends StatefulWidget {
@@ -89,7 +87,9 @@ class _AdBannerState extends State<AdBanner> {
   @override
   void initState() {
     super.initState();
-    if (kLyneScreenshotMode) return; // skip ad lifecycle entirely
+    // Hard short-circuit when ads are disabled at the master switch OR
+    // we're in screenshot-capture mode. No SDK call, no retries.
+    if (!kLyneAdsEnabled || kLyneScreenshotMode) return;
     _attemptLoad();
   }
 
@@ -140,9 +140,11 @@ class _AdBannerState extends State<AdBanner> {
 
   @override
   Widget build(BuildContext context) {
-    // Screenshot mode — no banner at all, no reservation. Bottom nav
-    // sits flush against the screen edge for a cleaner marketing image.
-    if (kLyneScreenshotMode) return const SizedBox.shrink();
+    // Master ad switch OR screenshot mode — no banner at all, no
+    // reservation. Bottom nav sits flush against the screen edge.
+    if (!kLyneAdsEnabled || kLyneScreenshotMode) {
+      return const SizedBox.shrink();
+    }
 
     final t = context.t;
     // Reserve the slot even when nothing is loaded so the layout doesn't
