@@ -10,14 +10,9 @@
          Combined with the consent flow in lib/services/ad_consent.dart so
          the SDK only reads the ID after UMP consent is granted. The Play
          Store Data Safety form must disclose "Device or other IDs" → AdMob
-         when this permission is present.
-
-         DISABLED while AdMob account is under suspension review (see
-         kLyneAdsEnabled in lib/widgets/ad_banner.dart). Restore both the
-         permission below and the kLyneAdsEnabled flag together — they
-         must move in lock-step so the Data Safety disclosure stays
-         consistent with runtime behaviour. -->
-    <!-- <uses-permission android:name="com.google.android.gms.permission.AD_ID"/> -->
+         when this permission is present. Moves in lock-step with
+         kLyneAdsEnabled in lib/widgets/ad_banner.dart. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 
     <application
         android:label="Leyne"
@@ -29,13 +24,12 @@
              Maps SDK meta-data that used to live here was removed when
              we switched off google_maps_flutter. -->
 
-        <!-- Google Mobile Ads SDK app ID. Android distribution is
-             paused; this points at Google's sample app ID so dev
-             builds initialize the SDK without pinging a real publisher.
-             Configure a real AdMob app ID before re-shipping Android. -->
+        <!-- Google Mobile Ads SDK app ID — leyne0000 AdMob publisher.
+             The Android ad UNIT is gated by build mode in
+             lib/widgets/ad_banner.dart (test in DEBUG, real in RELEASE). -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
+            android:value="ca-app-pub-5864511655536507~5685985257"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

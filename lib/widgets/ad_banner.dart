@@ -1,20 +1,19 @@
 // 320x50 banner host. Reserves 50pt vertically regardless of fill state
 // so the layout doesn't jump when an ad lands.
 //
-// Ad unit ID is gated by platform + explicit build flag, NOT by
-// kDebugMode alone — TestFlight builds are release-mode, so a
-// kDebugMode gate would silently serve real ads to internal testers.
-// The matrix:
+// Ad unit ID is gated by an explicit build flag, NOT by kDebugMode alone —
+// TestFlight / Play Internal builds are release-mode, so a kDebugMode gate
+// would silently serve real ads to internal testers. The matrix:
 //
-//   • iOS App Store (public release): build with NO flag. The iOS
+//   • Public release (Play / App Store): build with NO flag. The real
 //     production banner unit is requested. Real ads, real revenue.
-//   • iOS TestFlight (closed beta): build with
+//   • Closed beta (TestFlight / Play Internal): build with
 //     --dart-define=LYNE_ADS_TEST=true. Google's universal test unit
 //     is requested. Zero risk of testers tapping real ads.
-//   • iOS debug (`flutter run`): test unit via the kDebugMode branch.
-//   • Any Android build: ALWAYS test unit. Android distribution is
-//     paused; configure a real AdMob unit and remove the platform
-//     short-circuit in _bannerUnitId before re-shipping Android.
+//   • `flutter run` (debug): test unit via the kDebugMode branch.
+//
+// iOS ships from the SwiftUI app at `ios-native/`; this widget powers
+// the Android build only.
 //
 // To dev against the iOS production unit on a real device without
 // earning fake impressions, add the device's AdMob test hash to
@@ -51,20 +50,21 @@ const bool kLyneAdsTest =
 const bool kLyneScreenshotMode =
     bool.fromEnvironment('LYNE_SCREENSHOT_MODE', defaultValue: false);
 
-/// MASTER SWITCH for ads. Set to `false` while the AdMob account is
-/// under suspension review — the banner widget short-circuits to an
-/// empty SizedBox, no SDK request is ever made, and AdConsent stays a
-/// no-op. Flip back to `true` once the account is reinstated to re-
-/// enable ads with no other code change.
-const bool kLyneAdsEnabled = false;
+/// MASTER SWITCH for ads. Set to `false` to ship a no-ads build (e.g.
+/// during an AdMob account suspension) — the banner widget short-circuits
+/// to an empty SizedBox, no SDK request is ever made, and AdConsent stays
+/// a no-op.
+const bool kLyneAdsEnabled = true;
 
-/// Resolve the banner ad unit ID at runtime. Flutter is Android-only —
-/// iOS ships via the SwiftUI app at `ios-native/`. Distribution is
-/// currently paused while AdMob is under suspension review, so we serve
-/// Google's universal Android test unit; configure a real unit and gate
-/// it on `!kLyneAdsTest && !kDebugMode` before re-shipping Android.
+/// Resolve the banner ad unit ID at runtime. Flutter powers the Android
+/// build only — iOS ships via the SwiftUI app at `ios-native/`.
+///   • DEBUG or LYNE_ADS_TEST=true: Google's universal Android test unit
+///   • RELEASE (public Play Store): leyne0000 production banner unit
 String _bannerUnitId() {
-  return 'ca-app-pub-3940256099942544/6300978111';
+  if (kDebugMode || kLyneAdsTest) {
+    return 'ca-app-pub-3940256099942544/6300978111';
+  }
+  return 'ca-app-pub-5864511655536507/6513878972';
 }
 
 class AdBanner extends StatefulWidget {

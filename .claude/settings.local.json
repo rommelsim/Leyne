@@ -82,7 +82,12 @@
       "Bash(awk '{print $5, $6, $7, $8, $9}')",
       "Bash(flutter pub *)",
       "Bash(pod install *)",
-      "Bash(xcodebuild -resolvePackageDependencies -workspace Runner.xcworkspace -scheme Runner)"
+      "Bash(xcodebuild -resolvePackageDependencies -workspace Runner.xcworkspace -scheme Runner)",
+      "Bash(xcodebuild -project ios-native/Leyne.xcodeproj -scheme Leyne -destination 'generic/platform=iOS Simulator' build)",
+      "Bash(adb *)",
+      "Read(//Users/rommel/Library/Android/sdk/platform-tools/**)",
+      "Read(//opt/homebrew/**)",
+      "Bash(~/Library/Android/sdk/platform-tools/adb *)"
     ]
   }
 }

@@ -26,10 +26,6 @@ struct OnboardingView: View {
     // the in-flight ATT prompt, which silently fails to present.
     @State private var trackingTapped = false
 
-    // The "STEP 5 · ADS" step was removed for this no-ads build. When
-    // ads come back (AdMob account reinstated, AdConfig.adsEnabled = true)
-    // restore the step here AND re-wire the `onRequestTracking` branch
-    // in the Continue button below.
     private let steps: [OnbStep] = [
         OnbStep(eyebrow: "LEYNE", title: "Right on cue.",
                 subtitle: "A small card on your home screen tells you when your bus is close — so you can stop reaching for your phone.",
@@ -46,6 +42,9 @@ struct OnboardingView: View {
         OnbStep(eyebrow: "STEP 4 · LOCATION", title: "See stops near you.",
                 subtitle: "We use your location only to find bus stops within walking distance. It stays on your device, is never sold, and you can change this anytime in Settings.",
                 cta: "Continue", footnote: "You’ll see the standard iOS location prompt next."),
+        OnbStep(eyebrow: "STEP 5 · ADS", title: "Free, thanks to ads.",
+                subtitle: "Leyne is free because it shows ads. With your permission they can be more relevant to you; decline and you’ll still get ads and every feature — entirely your choice.",
+                cta: "Continue", footnote: "Next, iOS asks whether Leyne can track. The app works either way."),
     ]
 
     var body: some View {
@@ -119,18 +118,18 @@ struct OnboardingView: View {
                 }
                 Button {
                     let last = steps.count - 1
-                    if step == last {
-                        // LOCATION is now the final step (ADS step removed
-                        // for no-ads build). Tapping Continue fires the
-                        // iOS location prompt and then closes onboarding.
+                    if step == last - 1 {            // LOCATION priming (2nd-to-last)
+                        onRequestLocation()
+                        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 }
+                    } else if step == last {         // ADS / ATT priming (last)
+                        // Single-shot guard prevents rapid taps from spawning
+                        // multiple consent flows — the 2nd would no-op the await
+                        // and dismiss onboarding mid-prompt, killing the ATT sheet.
                         guard !trackingTapped else { return }
                         trackingTapped = true
-                        onRequestLocation()
-                        // Brief delay so the location prompt has time to
-                        // appear before the onboarding sheet animates away.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                            onDone()
-                        }
+                        // Show Google UMP + Apple ATT, start the SDK, then the
+                        // host dismisses onboarding (see RootView).
+                        onRequestTracking()
                     } else {
                         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 }
                     }
@@ -299,7 +298,7 @@ private struct OnbVisualLocation: View {
 
 // Mock of Apple's App Tracking Transparency alert (purely illustrative,
 // like OnbVisualLocation). The copy mirrors NSUserTrackingUsageDescription
-// in LyneInfo.plist so the priming screen matches the real system prompt.
+// in LeyneInfo.plist so the priming screen matches the real system prompt.
 private struct OnbVisualTracking: View {
     let t: Theme
     let dark: Bool

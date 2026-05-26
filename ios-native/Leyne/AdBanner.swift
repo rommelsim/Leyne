@@ -1,8 +1,8 @@
 // Google AdMob banner + consent.
 //
 // CONFIG:
-//  • App ID lives in `LyneInfo.plist` as `GADApplicationIdentifier`
-//    (the real AdMob App ID — ca-app-pub-1910837226291536~3240337627).
+//  • App ID lives in `LeyneInfo.plist` as `GADApplicationIdentifier`
+//    (the real AdMob App ID — ca-app-pub-5864511655536507~6330743279).
 //  • The ad UNIT is gated by build configuration (see `AdConfig`): DEBUG
 //    uses Google's always-test banner unit (zero policy risk anywhere);
 //    RELEASE uses the real production unit.
@@ -24,15 +24,13 @@ import os
 private let adLog = Logger(subsystem: "com.leyne.Leyne", category: "Ads")
 
 enum AdConfig {
-    /// MASTER SWITCH. Set to `false` to ship a no-ads build (current state
-    /// while the AdMob account is suspended). When the suspension lifts,
-    /// flip this back to `true` — no other code change needed:
-    ///   • `bottomAdBanner` / `overlayAdBanner` extensions become no-ops
-    ///   • `AdConsent.gatherThenStart()` returns immediately
-    ///   • `MobileAds.shared.start()` is never called → no traffic on
-    ///     the suspended unit → no risk of escalating the suspension
-    ///   • Onboarding's "Ads" step is skipped (see OnboardingView)
-    static let adsEnabled = false
+    /// MASTER SWITCH. Set to `false` to ship a no-ads build (e.g. during an
+    /// AdMob account suspension). When `true`:
+    ///   • `bottomAdBanner` / `overlayAdBanner` mount the banner
+    ///   • `AdConsent.gatherThenStart()` runs UMP + ATT
+    ///   • `MobileAds.shared.start()` initializes the SDK
+    ///   • Onboarding's "Ads" step is shown (see OnboardingView)
+    static let adsEnabled = true
 
     // Ad unit is gated by build configuration so testing is always safe and
     // production always earns — no manual swapping:
@@ -41,15 +39,13 @@ enum AdConfig {
     //            device, with zero AdMob policy risk. Use this to test.
     //   • RELEASE (Archive → TestFlight/App Store): this account's real
     //            production ad unit → real, revenue-generating ads.
-    // Production unit lives in the rommelsim AdMob account, matching the
-    // GADApplicationIdentifier in LyneInfo.plist
-    // (ca-app-pub-6816620800052795~4249846169). The previous release unit
-    // was from a retired publisher, which is why no ads loaded on the
-    // store build — the SDK rejects cross-account requests silently.
+    // Production unit lives in the leyne0000 AdMob account, matching the
+    // GADApplicationIdentifier in LeyneInfo.plist
+    // (ca-app-pub-5864511655536507~6330743279).
     #if DEBUG
     static let bannerUnitID = "ca-app-pub-3940256099942544/2934735716"
     #else
-    static let bannerUnitID = "ca-app-pub-6816620800052795/8532706109"
+    static let bannerUnitID = "ca-app-pub-5864511655536507/9782205994"
     #endif
 
     /// Extra devices to force into TEST ads even in a RELEASE build (rarely
