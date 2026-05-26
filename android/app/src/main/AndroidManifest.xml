@@ -13,6 +13,23 @@
          when this permission is present. Moves in lock-step with
          kLyneAdsEnabled in lib/widgets/ad_banner.dart. -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+    <!-- Arrival- and alight-alert notifications (lib/services/notifications.dart).
+         POST_NOTIFICATIONS is the Android 13+ runtime permission; we
+         request it at the moment the user toggles "Arrival alerts" on.
+         SCHEDULE_EXACT_ALARM lets zonedSchedule fire alarms at the
+         intended moment (not batched in the system's Doze maintenance
+         window). Auto-granted on Android 12–13; on Android 14+ the
+         user grants it once via system Settings (we surface the prompt
+         via permission_handler). Note: this is the un-restricted
+         permission; we do NOT declare USE_EXACT_ALARM, which Play
+         restricts to alarm/calendar apps. Without exact alarms our
+         "1 minute before arrival" heads-up would drift by minutes in
+         Doze — unacceptable for a bus alert.
+         RECEIVE_BOOT_COMPLETED lets flutter_local_notifications re-arm
+         pending schedules after a reboot. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <application
         android:label="Leyne"
@@ -81,6 +98,21 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- flutter_local_notifications receivers — fire the broadcast that
+             becomes a system notification at the scheduled time, and re-
+             register pending schedules after a device reboot. -->
+        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
+        <receiver android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

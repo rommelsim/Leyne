@@ -157,6 +157,36 @@ final class AppModel: ObservableObject {
     /// in NotificationsView when the system permission is denied.
     @Published var notificationAuth: UNAuthorizationStatus = .notDetermined
 
+    // ─── Active alight ride (persisted) ───────────────────
+    // One ride at a time. Setting this schedules a one-shot local
+    // notification at `fireAt`, persisted across app restarts so the
+    // user sees "your alight is set" when they reopen DetailView.
+    // Cleared when the user untaps the alight stop or the bus passes.
+    @AppStorage("lyne.alight.busNo") private var alightBusNoStore = ""
+    @AppStorage("lyne.alight.stopCode") private var alightStopCodeStore = ""
+    @AppStorage("lyne.alight.stopName") private var alightStopNameStore = ""
+    @AppStorage("lyne.alight.fireAt") private var alightFireAtStore: Double = 0
+
+    /// The currently-armed alight alert, or nil. Reads from @AppStorage
+    /// so a fresh DetailView open recognizes a previously-set ride.
+    var activeAlight: (busNo: String, stopCode: String,
+                       stopName: String, fireAt: Date)? {
+        guard !alightBusNoStore.isEmpty, !alightStopCodeStore.isEmpty,
+              alightFireAtStore > 0 else { return nil }
+        return (busNo: alightBusNoStore,
+                stopCode: alightStopCodeStore,
+                stopName: alightStopNameStore,
+                fireAt: Date(timeIntervalSince1970: alightFireAtStore))
+    }
+
+    /// True when an active alight ride matches this specific bus/stop
+    /// combo — DetailView uses this to highlight the picked stop and
+    /// render the "alert is on" state on the on-bus alert card.
+    func isActiveAlight(busNo: String, stopCode: String) -> Bool {
+        activeAlight?.busNo == busNo
+            && activeAlight?.stopCode == stopCode
+    }
+
     // Postal-code search radius in metres. Used by the Search screen when
     // the query is a 6-digit postal code.
     @AppStorage("leyne.searchRadiusM") var searchRadiusM = 500
@@ -383,6 +413,33 @@ final class AppModel: ObservableObject {
             notificationsEnabled = false
             NotificationsManager.shared.clearAll()
         }
+    }
+
+    /// Arm the alight alert for `busNo` heading to `stopName`/`stopCode`.
+    /// `fireAt` is the absolute moment the notification should appear —
+    /// DetailView computes it from RouteInfo: 90 s × (stopsToAlight − 2)
+    /// from now, so the user gets a heads-up two stops out. Replaces any
+    /// previous active alight; one ride at a time.
+    func setActiveAlight(busNo: String, stopCode: String,
+                         stopName: String, fireAt: Date) {
+        NotificationsManager.shared.cancelAlightAlerts()
+        alightBusNoStore = busNo
+        alightStopCodeStore = stopCode
+        alightStopNameStore = stopName
+        alightFireAtStore = fireAt.timeIntervalSince1970
+        NotificationsManager.shared.scheduleAlightAlert(
+            busNo: busNo, alightStopName: stopName, fireAt: fireAt)
+        objectWillChange.send()
+    }
+
+    /// Disarm the current alight ride and cancel its pending alert.
+    func clearActiveAlight() {
+        alightBusNoStore = ""
+        alightStopCodeStore = ""
+        alightStopNameStore = ""
+        alightFireAtStore = 0
+        NotificationsManager.shared.cancelAlightAlerts()
+        objectWillChange.send()
     }
 
     // ─── Live service composition ─────────────────────────
@@ -815,6 +872,74 @@ final class NotificationsManager {
         center.getPendingNotificationRequests { reqs in
             let ids = reqs.map(\.identifier).filter { $0.hasPrefix(self.idPrefix) }
             self.center.removePendingNotificationRequests(withIdentifiers: ids)
+        }
+    }
+
+    // ─── Alight (on-bus) alerts ───────────────────────────
+    //
+    // A separate category from arrival alerts: arrival alerts fire BEFORE
+    // boarding (bus is approaching the user's stop); alight alerts fire
+    // DURING the ride (user is on the bus, approaching their drop-off).
+    // Single active ride at a time — the bus-stop combo would only matter
+    // if we supported overlapping rides, which the UX doesn't.
+
+    private let alightIdPrefix = "alight."
+
+    /// One-shot notification scheduled at an absolute fire time. Replaces
+    /// any prior alight alert (only one active ride at a time).
+    func scheduleAlightAlert(busNo: String, alightStopName: String, fireAt: Date) {
+        cancelAlightAlerts()
+        let interval = fireAt.timeIntervalSinceNow
+        // Must be at least 1 s in the future — UNTimeIntervalNotificationTrigger
+        // rejects zero/negative intervals.
+        guard interval > 1 else {
+            // Fire immediately as a heads-up (the user picked a stop the
+            // bus is already at or past the 2-stop threshold).
+            let content = alightContent(busNo: busNo, stopName: alightStopName)
+            let req = UNNotificationRequest(
+                identifier: "\(alightIdPrefix)\(busNo).\(alightStopName)",
+                content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
+            center.add(req) { err in
+                if let err {
+                    notifLog.error("alight schedule (immediate) failed: \(err.localizedDescription)")
+                }
+            }
+            return
+        }
+        let content = alightContent(busNo: busNo, stopName: alightStopName)
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: interval, repeats: false)
+        let req = UNNotificationRequest(
+            identifier: "\(alightIdPrefix)\(busNo).\(alightStopName)",
+            content: content, trigger: trigger)
+        center.add(req) { err in
+            if let err {
+                notifLog.error("alight schedule failed: \(err.localizedDescription)")
+            }
+        }
+    }
+
+    private func alightContent(busNo: String, stopName: String) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = "Alight at \(stopName)"
+        content.body = "Bus \(busNo) is approaching your stop — get ready."
+        content.threadIdentifier = "alight"
+        content.sound = .default
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+        return content
+    }
+
+    func cancelAlightAlerts() {
+        center.getPendingNotificationRequests { reqs in
+            let ids = reqs.map(\.identifier).filter {
+                $0.hasPrefix(self.alightIdPrefix)
+            }
+            if !ids.isEmpty {
+                self.center.removePendingNotificationRequests(withIdentifiers: ids)
+            }
         }
     }
 

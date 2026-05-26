@@ -21,6 +21,7 @@ import 'screens/whats_new_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
 import 'services/deep_link_service.dart';
 import 'services/location_service.dart';
+import 'services/notifications.dart';
 import 'state/app_model.dart';
 import 'theme.dart';
 
@@ -42,6 +43,12 @@ void main() async {
     final info = await PackageInfo.fromPlatform();
     AppModel.shared.setCurrentVersion(info.version);
   } catch (_) {/* package_info unavailable — skip What's New */}
+  // Initialize the local-notifications plugin (tz database + Android
+  // channel) so AppModel can schedule arrival alerts as soon as a pinned
+  // bus's ETA crosses the lead window. Fire-and-forget — the only failure
+  // mode is no-notifications, which the toggle already gracefully
+  // handles via the auth state.
+  NotificationsService.shared.init();
   // Kick off the 1-second tick now (live ETA countdown + arrival refresh).
   // Tests skip this so they exit without a pending periodic timer.
   AppModel.shared.startTicker();

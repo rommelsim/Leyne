@@ -14,9 +14,52 @@ struct DetailView: View {
     let onClose: () -> Void
 
     @State private var selectedNo: String?
-    @State private var alightCode: String?
     @State private var routeInfo: RouteInfo?
     @State private var routeLoading = false
+
+    /// Active alight code FOR THE CURRENTLY SELECTED SERVICE. nil unless
+    /// the user has armed an alight alert on this exact bus. Reads from
+    /// `AppModel.activeAlight` — one ride at a time, app-wide — and
+    /// filters to this bus so a different DetailView doesn't accidentally
+    /// show the picker as selected.
+    private var alightCode: String? {
+        guard let a = m.activeAlight, a.busNo == selectedNo else { return nil }
+        return a.stopCode
+    }
+
+    /// Two-way binding for `RouteProgress`. Setter computes the predicted
+    /// "2 stops before alight" fire time from the live RouteInfo (`busIndex`
+    /// or `youIndex` as the starting reference, 90 s per route segment as
+    /// the cruder-but-acceptable MVP estimate) and arms the alert via
+    /// `AppModel.setActiveAlight`. Untap clears the ride and cancels the
+    /// pending notification.
+    private var alightBinding: Binding<String?> {
+        Binding(
+            get: { self.alightCode },
+            set: { newValue in
+                guard let busNo = self.selectedNo else { return }
+                guard let route = self.routeInfo else { return }
+                if let code = newValue,
+                   let alightIdx = route.stops.firstIndex(where: { $0.code == code }) {
+                    let stop = route.stops[alightIdx]
+                    let base = route.busIndex ?? route.youIndex
+                    let stopsToAlight = max(0, alightIdx - base)
+                    // Want the heads-up at 2 stops out → wait for the bus
+                    // to cross `stopsToAlight - 2` more stops. 90 s avg
+                    // per stop is the MVP estimate; refines naturally
+                    // when the bus's live position updates and the user
+                    // re-opens DetailView (we re-arm on re-set).
+                    let stopsToWait = max(0, stopsToAlight - 2)
+                    let fireAt = Date().addingTimeInterval(
+                        TimeInterval(stopsToWait) * 90)
+                    m.setActiveAlight(busNo: busNo, stopCode: code,
+                                      stopName: stop.name, fireAt: fireAt)
+                } else {
+                    m.clearActiveAlight()
+                }
+            }
+        )
+    }
 
     init(card: CardModel, t: Theme, dark: Bool, onClose: @escaping () -> Void) {
         self.card = card; self.t = t; self.dark = dark; self.onClose = onClose
@@ -370,7 +413,7 @@ struct DetailView: View {
                 DSection(t: t, label: "ROUTE PROGRESS",
                          hint: away.map { AnyView(Text("\($0) STOPS AWAY")
                             .font(t.mono(10)).foregroundStyle(t.dim)) })
-                RouteProgress(t: t, busNo: s.no, route: ri, alightCode: $alightCode)
+                RouteProgress(t: t, busNo: s.no, route: ri, alightCode: alightBinding)
                     .padding(.bottom, 18)
                 onBusAlertCard(ri)
             } else if routeLoading {

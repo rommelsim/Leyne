@@ -20,7 +20,7 @@ import '../data/data_store.dart';
 import '../data/geo.dart';
 import '../data/models.dart';
 import '../services/location_service.dart';
-import '../theme.dart';
+import '../services/notifications.dart';
 
 /// Global ScaffoldMessenger key — lets AppModel surface in-app arrival
 /// alerts as a banner from outside the widget tree. Wired into MaterialApp
@@ -39,6 +39,36 @@ const _kLocaleKey = 'lyne.locale';
 const _kNotifKey = 'lyne.notifications';
 const _kSearchRadiusKey = 'lyne.searchRadiusM';
 const _kLastSeenVersionKey = 'lyne.lastSeenVersion';
+const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
+
+/// The currently-armed on-bus alert: which bus, where to alight, when
+/// the heads-up notification fires. Single ride at a time — see
+/// AppModel.setActiveAlight.
+class ActiveAlight {
+  ActiveAlight({
+    required this.busNo,
+    required this.stopCode,
+    required this.stopName,
+    required this.fireAt,
+  });
+  final String busNo;
+  final String stopCode;
+  final String stopName;
+  final DateTime fireAt;
+
+  Map<String, dynamic> toJson() => {
+        'busNo': busNo,
+        'stopCode': stopCode,
+        'stopName': stopName,
+        'fireAt': fireAt.millisecondsSinceEpoch,
+      };
+  factory ActiveAlight.fromJson(Map<String, dynamic> j) => ActiveAlight(
+        busNo: j['busNo'] as String,
+        stopCode: j['stopCode'] as String,
+        stopName: j['stopName'] as String,
+        fireAt: DateTime.fromMillisecondsSinceEpoch(j['fireAt'] as int),
+      );
+}
 
 /// One user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
 /// "pinned" ⟺ "has buses shown". `tracked == null` means *all* services
@@ -201,15 +231,97 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Arrival-alert notifications. When on, the 1-second tick fires a local
-  // notification as a tracked pinned bus crosses the near threshold.
+  // Arrival-alert notifications. Real native Android system notifications
+  // scheduled via flutter_local_notifications — they fire on the lock
+  // screen / as a heads-up even when Leyne is backgrounded. Toggle the
+  // intent through `setNotificationsEnabled(...)` so permission is
+  // requested at the right moment; the raw storage flag below is the
+  // persisted result of that flow.
   bool _notificationsEnabled = false;
   bool get notificationsEnabled => _notificationsEnabled;
 
-  void setNotificationsEnabled(bool v) {
-    if (_notificationsEnabled == v) return;
-    _notificationsEnabled = v;
-    _prefs?.setBool(_kNotifKey, v);
+  /// Last observed system permission state, refreshed on launch and
+  /// whenever the user opens NotificationsScreen.
+  NotifPermStatus _notificationAuth = NotifPermStatus.notDetermined;
+  NotifPermStatus get notificationAuth => _notificationAuth;
+
+  /// Toggle the user's intent. Turning on triggers the runtime POST_-
+  /// NOTIFICATIONS prompt on Android 13+; if denied, the toggle snaps
+  /// back to off. Turning off cancels any pending scheduled alerts.
+  Future<void> setNotificationsEnabled(bool v) async {
+    if (v) {
+      final granted = await NotificationsService.shared.requestAuthorization();
+      _notificationAuth = await NotificationsService.shared.currentStatus();
+      if (granted) {
+        // Best effort: ask for exact alarm permission too, so on
+        // Android 14+ the heads-up fires at the intended second rather
+        // than within Doze's batching window. Denial is fine — we fall
+        // back to inexact in NotificationsService._scheduleMode().
+        await NotificationsService.shared.requestExactAlarmAuthorization();
+        _notificationsEnabled = true;
+        _prefs?.setBool(_kNotifKey, true);
+        await NotificationsService.shared.scheduleArrivalAlerts(
+          pins: _pins, cards: allPinnedCards);
+      } else {
+        _notificationsEnabled = false;
+        _prefs?.setBool(_kNotifKey, false);
+      }
+    } else {
+      _notificationsEnabled = false;
+      _prefs?.setBool(_kNotifKey, false);
+      await NotificationsService.shared.clearAll();
+    }
+    notifyListeners();
+  }
+
+  /// Refreshes `_notificationAuth` from the system — call on
+  /// NotificationsScreen `initState`. If the user revoked permission
+  /// via system Settings while the app was alive, drops the in-app
+  /// toggle so it reads honest.
+  Future<void> refreshNotificationAuth() async {
+    _notificationAuth = await NotificationsService.shared.currentStatus();
+    if (_notificationsEnabled && _notificationAuth != NotifPermStatus.granted) {
+      _notificationsEnabled = false;
+      _prefs?.setBool(_kNotifKey, false);
+      await NotificationsService.shared.clearAll();
+    }
+    notifyListeners();
+  }
+
+  // ─── Active alight ride (persisted) ─────────────────────
+  ActiveAlight? _activeAlight;
+  ActiveAlight? get activeAlight => _activeAlight;
+
+  /// True iff there's an armed alight matching this exact bus + stop —
+  /// DetailScreen uses it to drive the picker highlight and the
+  /// "Buzz me" card's active state.
+  bool isActiveAlight({required String busNo, required String stopCode}) =>
+      _activeAlight != null &&
+      _activeAlight!.busNo == busNo &&
+      _activeAlight!.stopCode == stopCode;
+
+  /// Arm the alight alert. Replaces any prior ride (one at a time).
+  /// `fireAt` is computed by DetailScreen from RouteInfo as the moment
+  /// the bus should be ~2 stops out — see _computeAlightFireAt there.
+  Future<void> setActiveAlight({
+    required String busNo,
+    required String stopCode,
+    required String stopName,
+    required DateTime fireAt,
+  }) async {
+    _activeAlight = ActiveAlight(
+        busNo: busNo, stopCode: stopCode, stopName: stopName, fireAt: fireAt);
+    _prefs?.setString(_kAlightKey, jsonEncode(_activeAlight!.toJson()));
+    await NotificationsService.shared.scheduleAlightAlert(
+      busNo: busNo, alightStopName: stopName, fireAt: fireAt);
+    notifyListeners();
+  }
+
+  /// Disarm the active alight ride + cancel its pending notification.
+  Future<void> clearActiveAlight() async {
+    _activeAlight = null;
+    _prefs?.remove(_kAlightKey);
+    await NotificationsService.shared.cancelAlightAlerts();
     notifyListeners();
   }
 
@@ -224,11 +336,6 @@ class AppModel extends ChangeNotifier {
     _prefs?.setInt(_kSearchRadiusKey, v);
     notifyListeners();
   }
-
-  // Keys ('code|no') of services already alerted for their current bus.
-  // Re-armed once the service's ETA climbs back above 5 min — i.e. the
-  // next bus — so each bus alerts at most once.
-  final Set<String> _alerted = {};
 
   // ─── Pins / recents (persisted) ───────────────────────────
   List<Pin> _pins = const [];
@@ -265,6 +372,17 @@ class AppModel extends ChangeNotifier {
       } catch (_) {/* corrupt — start empty */}
     }
     _recents = _prefs!.getStringList(_kRecentsKey) ?? const [];
+    // Restore any in-flight alight ride so the picker still shows the
+    // armed stop on reopen. We don't re-schedule the notification — the
+    // system already holds the AlarmManager registration from when we
+    // first armed it; re-adding would just create a duplicate.
+    final alightRaw = _prefs!.getString(_kAlightKey);
+    if (alightRaw != null) {
+      try {
+        _activeAlight = ActiveAlight.fromJson(
+            jsonDecode(alightRaw) as Map<String, dynamic>);
+      } catch (_) {/* corrupt — start empty */}
+    }
     notifyListeners();
   }
 
@@ -290,59 +408,15 @@ class AppModel extends ChangeNotifier {
     for (final c in codes) {
       _ds.ensureArrivals(c);
     }
-    _checkArrivalAlerts();
-    notifyListeners();
-  }
-
-  /// True only when the main app (RootScaffold) is the visible surface —
-  /// i.e. the user is past onboarding and not on the What's New screen.
-  /// Arrival-alert SnackBars use the global messenger, so without this
-  /// gate they'd pop over the onboarding / What's New screens.
-  bool get _onMainSurface => _onboardingDone && whatsNewVersion == null;
-
-  // Fire an in-app alert as a tracked pinned bus crosses the near
-  // threshold. Foreground-only by design — see NotificationsScreen.
-  void _checkArrivalAlerts() {
-    if (!_notificationsEnabled || !_onMainSurface) return;
-    for (final p in _pins) {
-      final tracked = p.tracked;
-      for (final s in liveServices(p.code)) {
-        if (tracked != null && !tracked.contains(s.no)) continue;
-        final key = '${p.code}|${s.no}';
-        if (s.etaSec > 300) {
-          _alerted.remove(key); // next bus — re-arm
-        } else if (s.etaSec <= 90 && _alerted.add(key)) {
-          _fireArrivalAlert(p.code, s);
-        }
-      }
+    // Re-arm scheduled arrival alerts every ~10 s — LTA's arrivalDate
+    // values drift, and a coarse cadence is enough because notification
+    // fire times are absolute (zonedSchedule registers an exact alarm
+    // with the system, which keeps firing regardless of app lifecycle).
+    if (_notificationsEnabled && tick % 10 == 0) {
+      NotificationsService.shared.scheduleArrivalAlerts(
+        pins: _pins, cards: allPinnedCards);
     }
-  }
-
-  void _fireArrivalAlert(String code, Service s) {
-    final messenger = lyneMessengerKey.currentState;
-    final ctx = lyneMessengerKey.currentContext;
-    if (messenger == null || ctx == null) return;
-    final t = ctx.t;
-    final stopName = _ds.stopName(code);
-    final mins = s.etaSec ~/ 60;
-    final when = mins <= 0 ? 'arriving now' : 'in $mins min';
-    messenger
-      ..removeCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        backgroundColor: t.surfaceHi,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 5),
-        content: Row(
-          children: [
-            Icon(Icons.directions_bus, size: 18, color: t.accent),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text('Bus ${s.no} $when — $stopName',
-                  style: t.sans(13, color: t.fg)),
-            ),
-          ],
-        ),
-      ));
+    notifyListeners();
   }
 
   // ─── Live service composition ─────────────────────────────

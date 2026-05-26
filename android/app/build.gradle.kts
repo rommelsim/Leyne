@@ -26,6 +26,12 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Core library desugaring — required by flutter_local_notifications
+        // so its java.time usage compiles down to Android's pre-API-26
+        // Joda-backed equivalents. Without this the bundleRelease task
+        // fails with "Dependency ':flutter_local_notifications' requires
+        // core library desugaring to be enabled for :app."
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -82,4 +88,12 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Core library desugaring dependency — pairs with
+// `isCoreLibraryDesugaringEnabled = true` above. Version chosen to match
+// what flutter_local_notifications' setup docs recommend; bumping this is
+// safe within the major (2.x).
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

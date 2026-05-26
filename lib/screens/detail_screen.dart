@@ -40,9 +40,44 @@ class DetailScreen extends StatefulWidget {
 
 class _DetailScreenState extends State<DetailScreen> {
   String? _selectedNo;
-  String? _alightCode;
   RouteInfo? _routeInfo;
   bool _routeLoading = false;
+
+  /// Picked alight stop for the currently selected service. Reads from
+  /// `AppModel.activeAlight` (single ride at a time, persisted) and
+  /// filters to this bus so the picker doesn't light up for a different
+  /// DetailScreen.
+  String? get _alightCode {
+    final a = AppModel.shared.activeAlight;
+    if (a == null || a.busNo != _selectedNo) return null;
+    return a.stopCode;
+  }
+
+  /// Handles a tap on a stop in `RouteProgress`. If the user picked a
+  /// stop, computes the predicted "2 stops before alight" fire time
+  /// from RouteInfo (90 s × (stopsToAlight − 2), with `busIndex` →
+  /// `youIndex` as the starting reference) and arms the alert via
+  /// `AppModel.setActiveAlight`. Untap clears the ride.
+  Future<void> _onAlightChanged(String? code) async {
+    final busNo = _selectedNo;
+    final route = _routeInfo;
+    if (busNo == null || route == null) return;
+    if (code == null) {
+      await AppModel.shared.clearActiveAlight();
+      if (mounted) setState(() {});
+      return;
+    }
+    final alightIdx = route.stops.indexWhere((s) => s.code == code);
+    if (alightIdx < 0) return;
+    final stop = route.stops[alightIdx];
+    final base = route.busIndex ?? route.youIndex;
+    final stopsToAlight = (alightIdx - base).clamp(0, 1 << 30);
+    final stopsToWait = (stopsToAlight - 2).clamp(0, 1 << 30);
+    final fireAt = DateTime.now().add(Duration(seconds: stopsToWait * 90));
+    await AppModel.shared.setActiveAlight(
+      busNo: busNo, stopCode: code, stopName: stop.name, fireAt: fireAt);
+    if (mounted) setState(() {});
+  }
 
   // Drives the live auto-refresh — re-polls arrivals + bus position so the
   // screen stays current without the user pulling to refresh. LTA publishes
@@ -594,8 +629,10 @@ class _DetailScreenState extends State<DetailScreen> {
           busNo: s.no,
           route: _routeInfo!,
           alightCode: _alightCode,
-          onAlightChanged: (code) => setState(() => _alightCode = code),
+          onAlightChanged: _onAlightChanged,
         ),
+        const SizedBox(height: 12),
+        _onBusAlertCard(t, _routeInfo!, s),
       ] else if (_routeLoading) ...[
         _sectionLabel(t, 'Journey'),
         Padding(
@@ -622,6 +659,95 @@ class _DetailScreenState extends State<DetailScreen> {
     final b = r.busIndex;
     if (b == null) return null;
     return '${(r.youIndex - b).abs()} STOPS AWAY';
+  }
+
+  /// "Buzz me 2 stops before X" card — mirrors the iOS native onBusAlertCard.
+  /// Inactive state prompts the user to pick a stop in RouteProgress;
+  /// active state shows the alight name + how many stops remain. Tapping
+  /// the active card disarms the alert (parallel to tapping the stop
+  /// again in RouteProgress).
+  Widget _onBusAlertCard(LyneTheme t, RouteInfo ri, Service s) {
+    final alightIdx = _alightCode == null
+        ? -1
+        : ri.stops.indexWhere((x) => x.code == _alightCode);
+    final enabled = alightIdx >= 0;
+    final alightName = enabled ? ri.stops[alightIdx].name : null;
+    final base = ri.busIndex ?? ri.youIndex;
+    final stopsToAlight = enabled ? (alightIdx - base).clamp(0, 1 << 30) : 0;
+
+    return InkWell(
+      onTap: enabled ? () => _onAlightChanged(null) : null,
+      borderRadius: BorderRadius.circular(14),
+      child: Ink(
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.line),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        child: Opacity(
+          opacity: enabled ? 1 : 0.65,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.directions_walk,
+                    size: 16, color: t.accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      enabled
+                          ? 'Buzz me 2 stops before $alightName'
+                          : 'Riding this bus? Pick where to alight',
+                      style: t.sans(13, weight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      enabled
+                          ? '$stopsToAlight stop${stopsToAlight == 1 ? "" : "s"} until arrival · tap to cancel'
+                          : 'Tap a stop in the journey below to set as your destination',
+                      style: t.sans(11, color: t.dim),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 36, height: 22,
+                decoration: BoxDecoration(
+                  color: enabled ? t.accent : t.line,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: AnimatedAlign(
+                  duration: const Duration(milliseconds: 150),
+                  alignment:
+                      enabled ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    width: 18, height: 18,
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _serviceHeading(LyneTheme t, Service s, String stopName) {
