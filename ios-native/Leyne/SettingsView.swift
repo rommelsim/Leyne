@@ -370,6 +370,10 @@ struct NotificationsView: View {
     @EnvironmentObject var m: AppModel
     private var t: Theme { m.t }
 
+    /// Local mirror of `m.notificationsEnabled` so the Toggle can flip
+    /// instantly and we control the snap-back when permission is denied.
+    @State private var toggle = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -378,11 +382,20 @@ struct NotificationsView: View {
                     .foregroundStyle(t.fg)
                     .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 16)
 
-                Toggle(isOn: Binding(get: { m.notificationsEnabled },
-                                     set: { m.notificationsEnabled = $0 })) {
+                Toggle(isOn: Binding(get: { toggle },
+                                     set: { newValue in
+                                         toggle = newValue
+                                         Task {
+                                             await m.setNotificationsEnabled(newValue)
+                                             // Sync the local toggle back if
+                                             // permission was denied or the
+                                             // model otherwise refused.
+                                             toggle = m.notificationsEnabled
+                                         }
+                                     })) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Arrival alerts").font(t.sans(14, weight: .medium))
-                        Text("Banner shown when a tracked bus is ~1 minute away.")
+                        Text("A notification fires ~1 minute before a tracked bus arrives — on the Lock Screen, even when Leyne is closed.")
                             .font(t.mono(11)).foregroundStyle(t.dim)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -394,15 +407,60 @@ struct NotificationsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(t.line, lineWidth: 1))
                 .padding(.horizontal, 20)
 
-                Text("Alerts only appear while Leyne is open. Background delivery is on the roadmap.")
+                // Denied-permission warning + Open Settings shortcut. Shown
+                // only when iOS has explicitly denied — `.notDetermined`
+                // means the user hasn't been asked yet, which the toggle
+                // handles inline.
+                if m.notificationAuth == .denied {
+                    deniedBanner.padding(.horizontal, 20).padding(.top, 14)
+                }
+
+                Text("Times-sensitive alerts pierce Focus modes by default on iOS 15+ — adjust per-app under iOS Settings ▸ Notifications ▸ Leyne.")
                     .font(t.mono(11)).foregroundStyle(t.faint)
                     .tracking(0.3).lineSpacing(3)
-                    .padding(.horizontal, 26).padding(.top, 12)
+                    .padding(.horizontal, 26).padding(.top, 14)
             }
             .padding(.bottom, 24)
         }
         .background(t.bg.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await m.refreshNotificationAuth()
+            toggle = m.notificationsEnabled
+        }
+    }
+
+    private var deniedBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(t.warn)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Notifications blocked in iOS Settings")
+                    .font(t.sans(13, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                Text("Leyne needs notification permission to alert you when a bus is nearly here. Re-enable it from the iOS Settings app.")
+                    .font(t.mono(11)).foregroundStyle(t.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("Open iOS Settings")
+                        .font(t.sans(12, weight: .semibold))
+                        .foregroundStyle(t.bg)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(t.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(t.warnBg)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(t.warn.opacity(0.4), lineWidth: 1))
     }
 }
 
@@ -428,7 +486,6 @@ struct AboutView: View {
         "Refresh interval control — trade battery for freshness.",
         "Data saver — lighter polling and map tiles on cellular.",
         "QR scan — point at a stop pole to jump straight to it.",
-        "Background arrival alerts — get buzzed even with the app closed.",
         "More languages across every screen.",
     ]
 

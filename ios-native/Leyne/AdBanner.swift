@@ -32,20 +32,42 @@ enum AdConfig {
     ///   • Onboarding's "Ads" step is shown (see OnboardingView)
     static let adsEnabled = true
 
-    // Ad unit is gated by build configuration so testing is always safe and
-    // production always earns — no manual swapping:
-    //   • DEBUG  (Xcode Run → Simulator/device): Google's official always-
-    //            test banner unit. Renders a "Test mode" ad anywhere, on any
-    //            device, with zero AdMob policy risk. Use this to test.
-    //   • RELEASE (Archive → TestFlight/App Store): this account's real
-    //            production ad unit → real, revenue-generating ads.
+    // ╔══════════════════════════════════════════════════════════════╗
+    // ║ TESTFLIGHT TOGGLE — Force test ad unit in a Release Archive. ║
+    // ║                                                              ║
+    // ║ Apple gives TestFlight and App Store the SAME Archive (both  ║
+    // ║ Release config), so #if DEBUG can't tell them apart. To ship ║
+    // ║ a pre-review build to TestFlight without serving the real    ║
+    // ║ AdMob unit, flip BOTH lines below together:                  ║
+    // ║                                                              ║
+    // ║   • Archiving for TestFlight (safe test ads):                ║
+    // ║       1. Set `forceTestUnitForRelease = true`                ║
+    // ║       2. UNCOMMENT the `#warning(…)` line directly below it  ║
+    // ║                                                              ║
+    // ║   • Archiving for App Store (real ads, real revenue):        ║
+    // ║       1. Set `forceTestUnitForRelease = false`               ║
+    // ║       2. RE-COMMENT the `#warning(…)` line                   ║
+    // ║                                                              ║
+    // ║ The #warning surfaces a yellow build warning every compile   ║
+    // ║ so the toggle's state is impossible to miss when archiving.  ║
+    // ║ Forgetting to comment it back out is fine — App Store builds ║
+    // ║ tolerate warnings; forgetting to flip the bool is what hurts.║
+    // ╚══════════════════════════════════════════════════════════════╝
+    static let forceTestUnitForRelease = false
+    //#warning("forceTestUnitForRelease is ON — DO NOT submit this Archive to App Store")
+
+    // Ad unit selection. DEBUG always serves the test unit (Xcode Run).
+    // RELEASE serves either the test unit or the real leyne0000 unit
+    // depending on `forceTestUnitForRelease` (the toggle above).
     // Production unit lives in the leyne0000 AdMob account, matching the
     // GADApplicationIdentifier in LeyneInfo.plist
     // (ca-app-pub-5864511655536507~6330743279).
     #if DEBUG
     static let bannerUnitID = "ca-app-pub-3940256099942544/2934735716"
     #else
-    static let bannerUnitID = "ca-app-pub-5864511655536507/9782205994"
+    static let bannerUnitID = forceTestUnitForRelease
+        ? "ca-app-pub-3940256099942544/2934735716"  // Google test unit
+        : "ca-app-pub-5864511655536507/9782205994"  // leyne0000 prod
     #endif
 
     /// Extra devices to force into TEST ads even in a RELEASE build (rarely

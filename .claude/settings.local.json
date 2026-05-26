@@ -87,7 +87,14 @@
       "Bash(adb *)",
       "Read(//Users/rommel/Library/Android/sdk/platform-tools/**)",
       "Read(//opt/homebrew/**)",
-      "Bash(~/Library/Android/sdk/platform-tools/adb *)"
+      "Bash(~/Library/Android/sdk/platform-tools/adb *)",
+      "Bash(chmod +x *)",
+      "Bash(./scripts/build-android-closed-test.sh)",
+      "Bash(pkill -f \"flutter build appbundle\")",
+      "Bash(pkill -f \"gradle\")",
+      "Bash(unzip -p /Users/rommel/Documents/Leyne/build/app/outputs/bundle/release/app-release.aab BundleConfig.pb)",
+      "Bash(aapt2 dump *)",
+      "Bash(/Users/rommel/Library/Android/sdk/build-tools/*/aapt2 dump *)"
     ]
   }
 }

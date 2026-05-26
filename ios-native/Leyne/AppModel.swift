@@ -7,6 +7,7 @@ import CoreLocation
 import UIKit
 import ActivityKit
 import WidgetKit
+import UserNotifications
 import os
 
 /// App Group shared between the app and the LyneWidgets extension.
@@ -144,9 +145,17 @@ final class AppModel: ObservableObject {
     /// Non-empty when the user has picked a language override; nil otherwise.
     var localeIdentifier: String? { localeCode.isEmpty ? nil : localeCode }
 
-    // Arrival-alert notifications. When on, the 1-second tick fires an
-    // in-app banner as a tracked pinned bus crosses the near threshold.
+    // Arrival-alert notifications. Real device notifications scheduled via
+    // UNUserNotificationCenter — fire on the Lock Screen / banner even when
+    // the app is backgrounded. Toggle the user-facing intent through
+    // `setNotificationsEnabled(_:)` so permission is requested at the right
+    // moment; this raw storage flag is the persisted result of that flow.
     @AppStorage("leyne.notifications") var notificationsEnabled = false
+
+    /// Last observed UNAuthorizationStatus, refreshed on launch and whenever
+    /// the user toggles the Notifications setting. Drives the warning row
+    /// in NotificationsView when the system permission is denied.
+    @Published var notificationAuth: UNAuthorizationStatus = .notDetermined
 
     // Postal-code search radius in metres. Used by the Search screen when
     // the query is a 6-digit postal code.
@@ -333,6 +342,47 @@ final class AppModel: ObservableObject {
         var codes = Set(pins.map(\.code))
         if let c = openCard?.stopCode { codes.insert(c) }
         for c in codes { ds.ensureArrivals(stop: c) }
+
+        // Reschedule arrival-alert notifications every ~10 s — LTA's
+        // arrivalDate values drift, and a coarse cadence is enough since
+        // notification fire times are absolute (set via UNCalendarTrigger).
+        if notificationsEnabled, tick % 10 == 0 {
+            NotificationsManager.shared.scheduleArrivalAlerts(
+                pins: pins, cards: allPinnedCards)
+        }
+    }
+
+    // ─── Arrival-alert notifications (public surface) ─────
+
+    /// Toggle the user's intent. Turning on requests system authorization;
+    /// if denied, the toggle snaps back to off. Turning off clears any
+    /// pending scheduled notifications.
+    func setNotificationsEnabled(_ on: Bool) async {
+        if on {
+            let granted = await NotificationsManager.shared.requestAuthorization()
+            notificationAuth = await NotificationsManager.shared.currentStatus()
+            if granted {
+                notificationsEnabled = true
+                NotificationsManager.shared.scheduleArrivalAlerts(
+                    pins: pins, cards: allPinnedCards)
+            } else {
+                notificationsEnabled = false
+            }
+        } else {
+            notificationsEnabled = false
+            NotificationsManager.shared.clearAll()
+        }
+    }
+
+    /// Refreshes `notificationAuth` from the system — call on view appear.
+    func refreshNotificationAuth() async {
+        notificationAuth = await NotificationsManager.shared.currentStatus()
+        // If the user revoked permission via system Settings while the
+        // app was alive, drop the in-app flag so the toggle reads honest.
+        if notificationsEnabled, notificationAuth == .denied {
+            notificationsEnabled = false
+            NotificationsManager.shared.clearAll()
+        }
     }
 
     // ─── Live service composition ─────────────────────────
@@ -699,6 +749,134 @@ final class AppModel: ObservableObject {
                         self.liveActivityOn = false
                     }
                     return
+                }
+            }
+        }
+    }
+}
+
+// MARK: - NotificationsManager
+//
+// Schedules one-shot local notifications that fire ~60 s before each
+// tracked bus's `arrivalDate`. The system delivers them on the Lock Screen
+// / as a banner regardless of whether the app is foreground, backgrounded,
+// or fully suspended — that's the contract a local UNTimeIntervalTrigger
+// provides. Re-arming happens on the AppModel tick: each call re-computes
+// the schedule against the latest live data, replaces requests with the
+// same identifier (UN's documented behaviour), and cancels orphans whose
+// underlying service is no longer tracked.
+
+private let notifLog = Logger(subsystem: "com.leyne.Leyne", category: "Notifications")
+
+@MainActor
+final class NotificationsManager {
+    static let shared = NotificationsManager()
+    private init() {}
+
+    private let center = UNUserNotificationCenter.current()
+
+    /// Fire offset before arrival — matches the design's "1 min" framing.
+    private let leadSec: TimeInterval = 60
+
+    /// Notifications with an identifier prefixed this way belong to us; lets
+    /// the orphan-sweep ignore unrelated requests that may live in the
+    /// system's pending queue.
+    private let idPrefix = "arrival."
+
+    private func id(stopCode: String, busNo: String) -> String {
+        "\(idPrefix)\(stopCode).\(busNo)"
+    }
+
+    func currentStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { cont in
+            center.getNotificationSettings { settings in
+                cont.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
+    /// Requests `.alert`, `.sound`, and `.timeSensitive` if available — the
+    /// commute use-case is exactly what time-sensitive was meant for.
+    func requestAuthorization() async -> Bool {
+        var opts: UNAuthorizationOptions = [.alert, .sound, .badge]
+        if #available(iOS 15.0, *) { opts.insert(.timeSensitive) }
+        do {
+            let ok = try await center.requestAuthorization(options: opts)
+            notifLog.notice("auth requested: granted=\(ok)")
+            return ok
+        } catch {
+            notifLog.error("auth request failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Cancels every pending arrival alert we own.
+    func clearAll() {
+        center.getPendingNotificationRequests { reqs in
+            let ids = reqs.map(\.identifier).filter { $0.hasPrefix(self.idPrefix) }
+            self.center.removePendingNotificationRequests(withIdentifiers: ids)
+        }
+    }
+
+    /// Recomputes the desired schedule given the live cards and tracked
+    /// services. Idempotent: replaces requests with the same id and cancels
+    /// any pending arrival alerts that no longer have a tracked service.
+    func scheduleArrivalAlerts(pins: [Pin], cards: [CardModel]) {
+        var desired: [(id: String, content: UNNotificationContent, trigger: UNNotificationTrigger)] = []
+        let now = Date()
+
+        for card in cards {
+            guard let pin = pins.first(where: { $0.code == card.stopCode }) else { continue }
+            let tracked: Set<String>? = pin.tracked.map(Set.init)
+
+            for s in card.services {
+                // Only tracked services are eligible.
+                if let tr = tracked, !tr.contains(s.no) { continue }
+                guard let arrives = s.arrivalDate else { continue }
+
+                // Fire 60 s before arrival. If we're already inside the
+                // 60 s window or past it, skip — too late to warn ahead.
+                let fireAt = arrives.addingTimeInterval(-leadSec)
+                let interval = fireAt.timeIntervalSince(now)
+                guard interval > 1 else { continue }
+
+                let content = UNMutableNotificationContent()
+                content.title = "Bus \(s.no) arriving in 1 min"
+                content.body = card.walkMin > 0
+                    ? "\(card.label) · \(card.walkMin) min walk"
+                    : "\(card.label) · head down to the stop"
+                content.threadIdentifier = card.stopCode
+                content.sound = .default
+                if #available(iOS 15.0, *) {
+                    content.interruptionLevel = .timeSensitive
+                }
+
+                let trigger = UNTimeIntervalNotificationTrigger(
+                    timeInterval: interval, repeats: false)
+                desired.append((id: id(stopCode: card.stopCode, busNo: s.no),
+                                content: content, trigger: trigger))
+            }
+        }
+
+        // Cancel orphans first so the system's pending list stays clean,
+        // then (re)add the desired set. UN replaces requests with the same
+        // identifier, so add-after-add is safe.
+        let desiredIds = Set(desired.map(\.id))
+        center.getPendingNotificationRequests { reqs in
+            let toCancel = reqs.map(\.identifier).filter {
+                $0.hasPrefix(self.idPrefix) && !desiredIds.contains($0)
+            }
+            if !toCancel.isEmpty {
+                self.center.removePendingNotificationRequests(withIdentifiers: toCancel)
+            }
+            for d in desired {
+                let req = UNNotificationRequest(identifier: d.id,
+                                                content: d.content,
+                                                trigger: d.trigger)
+                self.center.add(req) { err in
+                    if let err {
+                        notifLog.error("add \(d.id) failed: \(err.localizedDescription)")
+                    }
                 }
             }
         }

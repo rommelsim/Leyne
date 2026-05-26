@@ -60,18 +60,23 @@ struct RootView: View {
             // non-pinned stops (e.g. opened from search) bypass the pager.
             if let card = m.openCardLive() {
                 let isPinned = m.pins.contains { $0.code == card.stopCode }
-                if isPinned && m.pins.count > 1 {
-                    DetailPager(
-                        initialStopCode: card.stopCode,
-                        initialBusNo: card.initialSelectedNo,
-                        t: t, dark: m.isDark,
-                        onClose: { m.openCard = nil }
-                    )
-                    .zIndex(30)
-                } else {
-                    DetailView(card: card, t: t, dark: m.isDark) { m.openCard = nil }
-                        .zIndex(30)
+                Group {
+                    if isPinned && m.pins.count > 1 {
+                        DetailPager(
+                            initialStopCode: card.stopCode,
+                            initialBusNo: card.initialSelectedNo,
+                            t: t, dark: m.isDark,
+                            onClose: { m.openCard = nil }
+                        )
+                    } else {
+                        DetailView(card: card, t: t, dark: m.isDark) { m.openCard = nil }
+                    }
                 }
+                // iOS-native leading-edge swipe-back. Activates only within
+                // the first 24 pt from the left, so DetailPager's TabView
+                // keeps the rest of the screen for paging between stops.
+                .modifier(EdgeSwipeBack { m.openCard = nil })
+                .zIndex(30)
             }
 
             // ── Search sheet ────────────────────────────────
@@ -139,7 +144,12 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.3), value: m.searchOpen)
         .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
         .animation(.easeInOut(duration: 0.3), value: m.whatsNewVersion)
-        .animation(.easeInOut(duration: 0.36), value: m.openCard)
+        // Spring matches UIKit's UINavigationController push/pop curve more
+        // closely than a flat ease — the snap on the way in and gentle
+        // settle on the way out is what makes the detail screen read as a
+        // native hierarchical drill-down rather than a fade.
+        .animation(.spring(response: 0.42, dampingFraction: 0.86),
+                   value: m.openCard)
         // Mirror the iOS appearance — system, or overridden by the user's
         // Settings ▸ Appearance pick — into the model so the custom Theme
         // (m.t / m.isDark) follows the resolved palette.
@@ -163,5 +173,83 @@ struct RootView: View {
         .task {
             if !m.showOnboarding { await AdConsent.gatherThenStart() }
         }
+    }
+}
+
+// MARK: - EdgeSwipeBack
+//
+// iOS-style leading-edge swipe-back. Mirrors UIKit's
+// `UIScreenEdgePanGestureRecognizer`: only claims gestures that start
+// within the first ~24 pt from the left edge of the screen, then drags the
+// content along with the finger and calls `onClose()` once the user has
+// committed (by distance or velocity). This lets us reproduce the system
+// pop gesture inside a SwiftUI overlay (DetailView / DetailPager) without
+// refactoring the whole drill-down into a NavigationStack.
+//
+// Coexists with DetailPager's `.tabViewStyle(.page)`: page swipes start in
+// the middle of the screen and don't match the edge predicate, so they
+// still hand off to the TabView's own horizontal pager.
+struct EdgeSwipeBack: ViewModifier {
+    let onClose: () -> Void
+
+    /// Width of the leading edge zone that captures the gesture, in points.
+    /// 24 pt mirrors UIKit's default screen-edge recognizer trigger area.
+    private let edgeWidth: CGFloat = 24
+
+    /// How far the user must drag (rightward) before the screen pops on
+    /// release. Anything below this snaps back into place.
+    private let commitDistance: CGFloat = 80
+
+    @State private var offset: CGFloat = 0
+    @State private var trackingEdge = false
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: offset)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6, coordinateSpace: .global)
+                    .onChanged { g in
+                        if !trackingEdge {
+                            // Claim the gesture only if it starts at the
+                            // leading edge AND is moving rightward — guards
+                            // against vertical scrolls and TabView page
+                            // swipes that begin further inboard.
+                            if g.startLocation.x < edgeWidth,
+                               g.translation.width > 0 {
+                                trackingEdge = true
+                            }
+                        }
+                        if trackingEdge {
+                            // Light resistance past the screen edge keeps
+                            // the drag feeling tactile if the user pulls
+                            // hard, but otherwise the content tracks 1:1.
+                            offset = max(0, g.translation.width)
+                        }
+                    }
+                    .onEnded { g in
+                        defer { trackingEdge = false }
+                        guard trackingEdge else { return }
+                        let velocity = g.predictedEndTranslation.width
+                            - g.translation.width
+                        let pastThreshold = g.translation.width > commitDistance
+                        let flickedOut = velocity > 120
+                            && g.translation.width > 30
+                        if pastThreshold || flickedOut {
+                            // Reset offset before the parent transition
+                            // tears the view down so the outgoing
+                            // `move(edge: .trailing)` starts from the
+                            // resting position, not from the dragged
+                            // offset (which would otherwise be added on
+                            // top of the transition's own translation).
+                            offset = 0
+                            onClose()
+                        } else {
+                            withAnimation(.spring(response: 0.30,
+                                                  dampingFraction: 0.86)) {
+                                offset = 0
+                            }
+                        }
+                    }
+            )
     }
 }

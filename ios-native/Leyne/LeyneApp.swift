@@ -1,11 +1,13 @@
 import SwiftUI
 import CoreSpotlight
+import UserNotifications
 
 @main
 struct LeyneApp: App {
     @StateObject private var model = AppModel()
     @StateObject private var store = DataStore.shared
     @StateObject private var location = LocationManager.shared
+    @UIApplicationDelegateAdaptor(LeyneAppDelegate.self) private var delegate
 
     init() {
         // Pin the running marketing version into the model before the first
@@ -40,5 +42,38 @@ struct LeyneApp: App {
                     }
                 }
         }
+    }
+}
+
+// MARK: - App delegate
+//
+// Owns the UNUserNotificationCenter delegate so arrival alerts present as a
+// banner + sound when the app is in the foreground (otherwise iOS silences
+// them by default). Background / locked delivery uses the system's normal
+// notification chrome and needs no delegate wiring.
+final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
+                              UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions:
+                     [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler:
+                                @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound, .list])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler:
+                                @escaping () -> Void) {
+        // Tapping the notification raises the app; no deep-link routing yet
+        // (the future tap → open stop hook can read response.notification
+        // .request.content.threadIdentifier, which we set to stopCode).
+        completionHandler()
     }
 }

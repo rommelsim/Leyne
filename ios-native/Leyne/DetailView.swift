@@ -67,8 +67,10 @@ struct DetailView: View {
         }
         // Push-from-right reads as hierarchical drill-down (the iOS-native
         // vocabulary for "you're now one level deeper"), not as a modal
-        // sheet rising. Reverses cleanly on dismiss.
-        .transition(.move(edge: .trailing).combined(with: .opacity))
+        // sheet rising. Pure slide (no opacity fade) — UIKit's
+        // UINavigationController push doesn't fade either, and the
+        // combined opacity made the dismiss feel mushy rather than crisp.
+        .transition(.move(edge: .trailing))
         .task(id: selectedNo) { await loadRoute() }
     }
 
@@ -913,7 +915,7 @@ struct DetailPager: View {
         }
         // Match the standalone DetailView transition so the pager and a
         // single page enter/exit identically.
-        .transition(.move(edge: .trailing).combined(with: .opacity))
+        .transition(.move(edge: .trailing))
         // If the user unpins the currently-visible stop (via DetailView's
         // pin toggle), the page disappears from the underlying ForEach.
         // Close the pager rather than letting TabView strand the selection.
