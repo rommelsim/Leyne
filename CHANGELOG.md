@@ -8,6 +8,87 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## 2.2.3+12 — iOS (next archive) · 2026-05-26
+## 2.2.8+20 — Android (closed testing) · 2026-05-26
+
+Two QoL fixes, both platforms:
+
+- **iOS DetailView top bar no longer paints a stray material band.**
+  Removed `.background(t.glassSurface())` from `DetailView.topBar`
+  (`DetailView.swift:187`). At scroll-zero with nothing scrolled
+  beneath, the static glass material was visible as a rectangle band
+  between the safe area and the page below — uncharacteristic of
+  iOS-native chrome (system nav bars only paint material when content
+  scrolls under them). Buttons now sit cleanly on `t.bg`.
+- **Route Progress auto-extends to include the alight stop + adds a
+  "Show all N stops" expander.** Previously the focused window was
+  capped at `youIndex + 5`, so picking an alight 10 stops past the
+  boarding stop was impossible (the picker couldn't reach the stop).
+  Now: window auto-extends to `alightIdx + 1` when the user has set
+  an alight, AND a bottom expander toggles between focused view and
+  full route. Both platforms — `DetailView.swift` `RouteProgress`,
+  `lib/widgets/route_progress.dart` (converted to StatefulWidget).
+
+(Previous 2.2.2+11 iOS block content folded into this entry.)
+
+## ~~2.2.2+11 — iOS (next archive) · 2026-05-26~~ (superseded by 2.2.3+12)
+
+Project: `ios-native/Leyne.xcodeproj` — `MARKETING_VERSION = 2.2.2`,
+`CURRENT_PROJECT_VERSION = 11` across all 3 targets (Leyne,
+LeyneWidgets, LeyneTests).
+
+The iOS-side companion to Android 2.2.7+17. Adds the same two
+improvements landed in the Flutter codebase this turn:
+
+- Default-on notifications + onboarding step 3 fires the system
+  permission prompt (matches Location's pattern). Boot-time fallback
+  in `RootView.task` covers existing users past onboarding so a fresh
+  upgrade still gets prompted.
+- Tap-to-open deep link: `LeyneAppDelegate.didReceive` broadcasts a
+  `leyneOpenStopFromNotification` event with the notification's
+  `userInfo`; `RootView.onReceive` reads `stopCode` + `busNo` and
+  drills into the bus's DetailView. Alight notifications carry only
+  `busNo`; the stopCode is sourced from the persisted `ActiveAlight`
+  ride.
+
+## 2.2.7+19 — Android (closed testing) · 2026-05-26
+
+Build: `scripts/build-android-closed-test.sh` →
+`build/app/outputs/bundle/release/app-release.aab`
+
+versionCode-only rebumps after Play rejected +17 then +18 with
+"Version code N has already been used" — both numbers were already
+claimed by prior closed-testing uploads. Source identical to +17/+18.
+
+## 2.2.7+17 — Android (closed testing) · 2026-05-26
+
+Build: `scripts/build-android-closed-test.sh` →
+`build/app/outputs/bundle/release/app-release.aab`
+
+- **Notifications now opt-in at first launch.** Default switched to ON
+  on both platforms; the onboarding "STAY PRESENT" step (3) now fires
+  the system permission prompt directly, same pattern as the
+  Location step. No more digging into Settings → Notifications to
+  discover the feature.
+- **Boot-time fallback** for existing users past onboarding: if the
+  system has never asked for `POST_NOTIFICATIONS` and the intent flag
+  is ON, the prompt fires once at next app launch. iOS uses the same
+  flow via `RootView.task`. Idempotent — the OS only ever shows the
+  dialog once.
+- **Tap-to-open deep link.** Tapping an arrival or alight notification
+  now opens the bus's detail view directly (previously, tapping just
+  raised the app to whatever screen was last visible).
+  - iOS: `LeyneAppDelegate.userNotificationCenter(didReceive:)` posts
+    a `leyneOpenStopFromNotification` event with the userInfo
+    (`kind`, `stopCode`, `busNo`); RootView's `.onReceive` calls
+    `AppModel.open` to drill in.
+  - Flutter: `NotificationsService.onNotificationTapped` parses the
+    payload string (`arrival.<stopCode>.<busNo>` or
+    `alight.<busNo>.<stopName>`) and pushes `DetailScreen` via the
+    global navigator. `getNotificationAppLaunchDetails` replays the
+    initial cold-start tap so a launch-from-notification lands too.
+- iOS still pending an Archive; Android AAB ready to upload.
+
 ## 2.2.6+16 — Android (closed testing) · 2026-05-26
 
 Build: `scripts/build-android-closed-test.sh` →

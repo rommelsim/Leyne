@@ -107,6 +107,12 @@ struct RootView: View {
                 OnboardingView(
                     t: t, dark: m.isDark,
                     onRequestLocation: { LocationManager.shared.requestPermission() },
+                    onRequestNotifications: {
+                        // Step 3's Continue button: fire the iOS notification
+                        // permission prompt, then advance. setNotificationsEnabled
+                        // handles request + schedule + denial snap-back.
+                        Task { await m.setNotificationsEnabled(true) }
+                    },
                     onRequestTracking: {
                         // Priming screen is up; now run Google UMP + Apple ATT,
                         // start the Ads SDK, then dismiss onboarding.
@@ -170,8 +176,46 @@ struct RootView: View {
         // First-run users gather ad consent from the onboarding "Ads" step.
         // Returning users (no onboarding) gather it here, once. Skippers fall
         // through to here on their next launch. AdConsent is idempotent.
+        //
+        // Also fire the notification permission prompt for users past
+        // onboarding who have never been asked — covers the upgrade path
+        // from a build that didn't have onboarding step 3 as a permission
+        // ask. iOS shows the system dialog only once across the install,
+        // so calling requestAuthorization on every launch is safe.
         .task {
-            if !m.showOnboarding { await AdConsent.gatherThenStart() }
+            if !m.showOnboarding {
+                await AdConsent.gatherThenStart()
+                let status = await NotificationsManager.shared.currentStatus()
+                if status == .notDetermined && m.notificationsEnabled {
+                    await m.setNotificationsEnabled(true)
+                }
+            }
+        }
+        // Tap on an arrival / alight notification → drill into the bus.
+        // LeyneAppDelegate posts the userInfo dictionary; we resolve
+        // stopCode (directly for arrival, via activeAlight for alight)
+        // and call AppModel.open which opens the relevant DetailView
+        // with the bus pre-selected.
+        .onReceive(NotificationCenter.default.publisher(
+                    for: .leyneOpenStopFromNotification)) { notif in
+            let info = notif.userInfo ?? [:]
+            let kind = info["kind"] as? String ?? "arrival"
+            let busNo = info["busNo"] as? String
+            let stopCode: String?
+            if kind == "alight" {
+                stopCode = m.activeAlight?.stopCode
+            } else {
+                stopCode = info["stopCode"] as? String
+            }
+            guard let code = stopCode else { return }
+            // Close any sheet that might be over the home, otherwise
+            // open() lands behind it.
+            m.searchOpen = false
+            m.showAdd = false
+            m.open(stopCode: code,
+                   label: DataStore.shared.stopName(code),
+                   busNo: busNo,
+                   feedback: false)
         }
     }
 }

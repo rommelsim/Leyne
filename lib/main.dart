@@ -15,6 +15,7 @@ import 'data/changelog.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'l10n/app_localizations.dart';
+import 'screens/detail_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/root_scaffold.dart';
 import 'screens/whats_new_screen.dart';
@@ -43,12 +44,62 @@ void main() async {
     final info = await PackageInfo.fromPlatform();
     AppModel.shared.setCurrentVersion(info.version);
   } catch (_) {/* package_info unavailable — skip What's New */}
+  // Notification-tap handler: parses the payload that we set during
+  // scheduling (`arrival.<stopCode>.<busNo>` or
+  // `alight.<busNo>.<stopName>`) and drills into DetailScreen for that
+  // bus. Set BEFORE init() so the initial cold-start launch tap (replayed
+  // by the plugin via getNotificationAppLaunchDetails) lands.
+  NotificationsService.shared.onNotificationTapped = (payload) {
+    final parts = payload.split('.');
+    if (parts.length < 3) return;
+    final kind = parts[0];
+    String? stopCode;
+    String? busNo;
+    if (kind == 'arrival') {
+      // arrival.<stopCode>.<busNo>
+      stopCode = parts[1];
+      busNo = parts[2];
+    } else if (kind == 'alight') {
+      // alight.<busNo>.<stopName> — the stopCode for routing is the
+      // ALIGHT stop, sourced from the persisted ActiveAlight ride.
+      stopCode = AppModel.shared.activeAlight?.stopCode;
+      busNo = parts[1];
+    }
+    if (stopCode == null) return;
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
+    // Push onto the root navigator. The deep_link_service uses the
+    // same pattern for https://lyne.sg/stop/<code> URLs — keep them
+    // routing through identical machinery.
+    final code = stopCode;
+    final no = busNo;
+    navigator.push(MaterialPageRoute(
+      builder: (_) => DetailScreen(
+        stopCode: code,
+        initialSelectedNo: no,
+      ),
+    ));
+  };
   // Initialize the local-notifications plugin (tz database + Android
   // channel) so AppModel can schedule arrival alerts as soon as a pinned
   // bus's ETA crosses the lead window. Fire-and-forget — the only failure
   // mode is no-notifications, which the toggle already gracefully
   // handles via the auth state.
   NotificationsService.shared.init();
+
+  // Boot-time prompt for existing users past onboarding: if the system
+  // has never asked for POST_NOTIFICATIONS and our intent (toggle) is
+  // ON, fire the prompt now. Covers the upgrade path from versions
+  // before onboarding step 3 became an actual permission ask.
+  if (AppModel.shared.onboardingDone &&
+      AppModel.shared.notificationsEnabled) {
+    () async {
+      final status = await NotificationsService.shared.currentStatus();
+      if (status == NotifPermStatus.notDetermined) {
+        await AppModel.shared.setNotificationsEnabled(true);
+      }
+    }();
+  }
   // Kick off the 1-second tick now (live ETA countdown + arrival refresh).
   // Tests skip this so they exit without a pending periodic timer.
   AppModel.shared.startTicker();
@@ -151,6 +202,12 @@ class _AppRoot extends StatelessWidget {
             // Fire-and-forget: the OS dialog races with the step
             // transition, matching the legacy iOS behaviour.
             LocationService.shared.requestAndStart();
+          },
+          onRequestNotifications: () {
+            // Fire-and-forget like onRequestLocation — the step has
+            // already advanced; the OS prompt races with the
+            // transition. AppModel handles permission + scheduling.
+            AppModel.shared.setNotificationsEnabled(true);
           },
           onRequestTracking: () async {
             // UMP → ATT → MobileAds.initialize, then dismiss onboarding

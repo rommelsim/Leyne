@@ -185,12 +185,12 @@ struct DetailView: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
-        // Glass on iOS 26 — same vocabulary as the tab bar and the Home
-        // sticky-bar, so all floating chrome reads as one system. No
-        // hairline divider: the glass material itself separates the bar
-        // from content as soon as anything scrolls beneath it, and a
-        // static line below a static bar reads as a stray rule.
-        .background(t.glassSurface())
+        // No background — native iOS chrome doesn't paint a material at
+        // scroll-zero (the bar is transparent until content scrolls
+        // underneath it). The previous `.background(t.glassSurface())`
+        // produced a visible band between the safe area and the page
+        // below because no content was scrolled beneath the static
+        // material. The buttons read fine directly on t.bg.
     }
 
     private var heading: some View {
@@ -805,12 +805,40 @@ struct RouteProgress: View {
     let route: RouteInfo
     @Binding var alightCode: String?
 
-    /// Focus window: a bit before the bus → a few beyond your stop.
+    /// When true, the card swaps from the focused window to the full
+    /// route list. Driven by the "Show all N stops" expander pinned at
+    /// the bottom of the card; collapses back to the window on tap.
+    @State private var showAll = false
+
+    /// Focus window: a bit before the bus → a few beyond your stop,
+    /// auto-extended to cover the alight stop if one is set further
+    /// down the route (so the user can always see what they picked).
+    /// When `showAll` is true, every stop in the route is returned —
+    /// the user has opted into seeing the whole journey.
     private var window: [(idx: Int, stop: RouteStopLive)] {
+        if showAll {
+            return route.stops.enumerated().map { ($0, $1) }
+        }
         let base = route.busIndex ?? route.youIndex
         let lo = max(0, min(base, route.youIndex) - 1)
-        let hi = min(route.stops.count - 1, max(base, route.youIndex) + 5)
+        var hi = min(route.stops.count - 1, max(base, route.youIndex) + 5)
+        // Pull the alight stop into view when it sits past the default
+        // window upper bound. Cap so we don't accidentally render every
+        // stop on long routes — the expander handles the "show me
+        // everything" case.
+        if let code = alightCode,
+           let alightIdx = route.stops.firstIndex(where: { $0.code == code }),
+           alightIdx > hi {
+            hi = min(route.stops.count - 1, alightIdx + 1)
+        }
         return (lo...hi).map { ($0, route.stops[$0]) }
+    }
+
+    /// True when the focused window omits at least one stop — the
+    /// expander only matters in that case.
+    private var hasHiddenStops: Bool {
+        if showAll { return false }
+        return window.count < route.stops.count
     }
 
     var body: some View {
@@ -873,6 +901,30 @@ struct RouteProgress: View {
                 .opacity(passed ? 0.45 : 1)
                 .contentShape(Rectangle())
                 .onTapGesture { if canAlight { alightCode = isAlight ? nil : stop.code } }
+            }
+
+            if hasHiddenStops || showAll {
+                Button {
+                    withAnimation(.easeOut(duration: 0.22)) { showAll.toggle() }
+                    Feedback.shared.tap()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: showAll ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(showAll
+                             ? "Show focused view"
+                             : "Show all \(route.stops.count) stops")
+                            .font(t.mono(11, weight: .medium))
+                            .tracking(0.4)
+                    }
+                    .foregroundStyle(t.accent)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .overlay(alignment: .top) {
+                    Divider().overlay(t.line).padding(.horizontal, 18)
+                }
             }
         }
         .padding(.vertical, 14)

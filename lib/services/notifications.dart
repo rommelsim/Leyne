@@ -56,6 +56,12 @@ class NotificationsService {
 
   bool _initialized = false;
 
+  /// Tap callback set by main() — receives the payload string from a
+  /// tapped notification (e.g. `arrival.17249.282` or
+  /// `alight.282.Clementi Int`) and drives the in-app navigation. Set
+  /// before init() so the initial launch tap (from a cold start) lands.
+  void Function(String payload)? onNotificationTapped;
+
   /// Idempotent. Loads the tz database (zonedSchedule converts wall-clock
   /// times → TZDateTime, which needs the tz dataset initialised once),
   /// then creates the Android notification channel + sets up the plugin.
@@ -83,7 +89,25 @@ class NotificationsService {
     );
     await _plugin.initialize(
       const InitializationSettings(android: androidInit, iOS: darwinInit),
+      onDidReceiveNotificationResponse: (response) {
+        final payload = response.payload;
+        if (payload != null) onNotificationTapped?.call(payload);
+      },
     );
+
+    // Cold-start tap: if the user launched the app by tapping a
+    // notification, the plugin queues the response and exposes it here
+    // (vs. the live `onDidReceiveNotificationResponse` callback which
+    // fires only when the app is already running). Replay it once.
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details?.didNotificationLaunchApp == true) {
+      final payload = details?.notificationResponse?.payload;
+      if (payload != null) {
+        // Defer to next event-loop turn so main() finishes wiring the
+        // navigator before we try to push a route onto it.
+        Future.microtask(() => onNotificationTapped?.call(payload));
+      }
+    }
 
     // Pre-create the Android channel. Importance.high → heads-up banner,
     // matches what iOS's `.timeSensitive` interruption level achieves.

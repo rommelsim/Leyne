@@ -360,7 +360,12 @@ class AppModel extends ChangeNotifier {
         .firstWhere((m) => m.name == tm, orElse: () => ThemeMode.system);
     final lc = _prefs!.getString(_kLocaleKey);
     _locale = (lc == null || lc.isEmpty) ? null : Locale(lc);
-    _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? false;
+    // Defaults to true on first run so onboarding's notification step +
+    // the boot-time fallback can fire the system prompt without the user
+    // having to discover Settings → Notifications first. Existing
+    // installs that previously toggled this explicitly (true or false)
+    // keep their stored value.
+    _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? true;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
     _lastSeenVersion = _prefs!.getString(_kLastSeenVersionKey);
 

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import '../data/data_store.dart';
 import '../theme.dart';
 
-class RouteProgress extends StatelessWidget {
+class RouteProgress extends StatefulWidget {
   const RouteProgress({
     super.key,
     required this.busNo,
@@ -22,14 +22,39 @@ class RouteProgress extends StatelessWidget {
   final ValueChanged<String?> onAlightChanged;
 
   @override
+  State<RouteProgress> createState() => _RouteProgressState();
+}
+
+class _RouteProgressState extends State<RouteProgress> {
+  /// When true, the card swaps from the focused window to the full
+  /// route list. Driven by the "Show all N stops" expander pinned at
+  /// the bottom of the card; collapses back to the window on tap.
+  bool _showAll = false;
+
+  @override
   Widget build(BuildContext context) {
     final t = context.t;
+    final route = widget.route;
     final busIdx = route.busIndex ?? -1;
     final base = busIdx >= 0 ? busIdx : route.youIndex;
     final lo = (base < route.youIndex ? base : route.youIndex) - 1;
-    final hi = (base > route.youIndex ? base : route.youIndex) + 5;
-    final start = lo.clamp(0, route.stops.length - 1);
-    final end = hi.clamp(0, route.stops.length - 1);
+    var hi = (base > route.youIndex ? base : route.youIndex) + 5;
+    // Pull the alight stop into view when it sits past the default
+    // window upper bound. Capped to one beyond the alight so we don't
+    // accidentally render every stop on long routes — the expander
+    // handles the "show me everything" case.
+    final alightCode = widget.alightCode;
+    if (alightCode != null) {
+      final alightIdx =
+          route.stops.indexWhere((s) => s.code == alightCode);
+      if (alightIdx > hi) hi = alightIdx + 1;
+    }
+    final start = _showAll ? 0 : lo.clamp(0, route.stops.length - 1);
+    final end = _showAll
+        ? route.stops.length - 1
+        : hi.clamp(0, route.stops.length - 1);
+    final hasHiddenStops =
+        !_showAll && (end - start + 1) < route.stops.length;
 
     return Container(
       decoration: BoxDecoration(
@@ -44,22 +69,55 @@ class RouteProgress extends StatelessWidget {
           for (var i = start; i <= end; i++)
             _row(t, i, route.stops[i], busIdx,
                 isFirst: i == start, isLast: i == end),
+          if (hasHiddenStops || _showAll)
+            _expander(t, route.stops.length),
         ],
+      ),
+    );
+  }
+
+  Widget _expander(LyneTheme t, int total) {
+    return InkWell(
+      onTap: () => setState(() => _showAll = !_showAll),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: t.line)),
+        ),
+        width: double.infinity,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(_showAll ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                size: 14, color: t.accent),
+            const SizedBox(width: 6),
+            Text(
+              _showAll
+                  ? 'Show focused view'
+                  : 'Show all $total stops',
+              style: t.mono(11,
+                      weight: FontWeight.w500, color: t.accent)
+                  .copyWith(letterSpacing: 0.4),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _row(LyneTheme t, int i, RouteStopLive stop, int busIdx,
       {required bool isFirst, required bool isLast}) {
-    final isYou = i == route.youIndex;
+    final isYou = i == widget.route.youIndex;
     final isBus = i == busIdx;
-    final isAlight = alightCode == stop.code;
+    final isAlight = widget.alightCode == stop.code;
     final passed = busIdx >= 0 && i < busIdx;
     final canAlight = i > (busIdx >= 0 ? busIdx : 0) && !isYou;
-    final isEnd = i == route.stops.length - 1;
+    final isEnd = i == widget.route.stops.length - 1;
 
     return InkWell(
-      onTap: canAlight ? () => onAlightChanged(isAlight ? null : stop.code) : null,
+      onTap: canAlight
+          ? () => widget.onAlightChanged(isAlight ? null : stop.code)
+          : null,
       child: Container(
         color: (isYou || isAlight)
             ? t.accent.withValues(alpha: 0.07)
@@ -111,7 +169,7 @@ class RouteProgress extends StatelessWidget {
               ),
             ),
             if (isBus)
-              _trailingBadge(t, 'BUS $busNo', t.accent)
+              _trailingBadge(t, 'BUS ${widget.busNo}', t.accent)
             else if (isYou)
               _trailingBadge(t, 'BOARD HERE', t.accent, filled: true)
             else if (isAlight)

@@ -14,6 +14,10 @@ struct OnboardingView: View {
     let t: Theme
     let dark: Bool
     var onRequestLocation: () -> Void = {}
+    /// Fires the iOS notification permission prompt — wired from RootView
+    /// to AppModel.setNotificationsEnabled(true). Called on Continue from
+    /// step 3 ("STAY PRESENT") so the system prompt appears in context.
+    var onRequestNotifications: () -> Void = {}
     var onRequestTracking: () -> Void = {}
     let onDone: () -> Void
 
@@ -118,7 +122,10 @@ struct OnboardingView: View {
                 }
                 Button {
                     let last = steps.count - 1
-                    if step == last - 1 {            // LOCATION priming (2nd-to-last)
+                    if step == 3 {                   // NOTIFICATIONS priming
+                        onRequestNotifications()
+                        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 }
+                    } else if step == last - 1 {     // LOCATION priming (2nd-to-last)
                         onRequestLocation()
                         withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 }
                     } else if step == last {         // ADS / ATT priming (last)

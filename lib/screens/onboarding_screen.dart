@@ -19,6 +19,7 @@ class OnboardingScreen extends StatefulWidget {
     super.key,
     required this.onDone,
     required this.onRequestLocation,
+    required this.onRequestNotifications,
     required this.onRequestTracking,
   });
 
@@ -30,6 +31,12 @@ class OnboardingScreen extends StatefulWidget {
   /// own; the OS dialog races with the transition, which matches the
   /// legacy iOS behaviour.
   final VoidCallback onRequestLocation;
+
+  /// Step 3 (notifications-prime) Continue. Implementations should call
+  /// AppModel.setNotificationsEnabled(true), which fires the Android 13+
+  /// POST_NOTIFICATIONS prompt (and SCHEDULE_EXACT_ALARM on 14+) before
+  /// scheduling alerts. Same fire-and-forget shape as onRequestLocation.
+  final VoidCallback onRequestNotifications;
 
   /// Step 5 (ads/ATT prime) Continue. Implementations should run UMP →
   /// ATT → MobileAds.initialize, then dismiss onboarding. The button does
@@ -123,7 +130,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void _next() {
     if (_busy) return;
     final last = _steps.length - 1;
-    if (_step == last - 1) {
+    if (_step == 3) {
+      // Notifications prime: advance + kick the POST_NOTIFICATIONS
+      // prompt. Same shape as the location prime — the OS dialog races
+      // with the transition, which is fine for one-off permissions.
+      setState(() {
+        _busy = true;
+        _direction = 1;
+        _step += 1;
+      });
+      widget.onRequestNotifications();
+      _unlockAfterTransition();
+    } else if (_step == last - 1) {
       // Location prime: advance + kick the OS prompt. Stay locked through
       // the transition so a second tap can't jump to the ATT step and
       // race its prompt against the location one.

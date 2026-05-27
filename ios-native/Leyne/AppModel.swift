@@ -150,7 +150,13 @@ final class AppModel: ObservableObject {
     // the app is backgrounded. Toggle the user-facing intent through
     // `setNotificationsEnabled(_:)` so permission is requested at the right
     // moment; this raw storage flag is the persisted result of that flow.
-    @AppStorage("leyne.notifications") var notificationsEnabled = false
+    //
+    // Defaults to `true` so onboarding's notification step + the boot-time
+    // fallback can fire the system permission prompt without the user
+    // having to discover Settings → Notifications first. Existing
+    // installs that already toggled this off (the value is persisted)
+    // keep their explicit choice.
+    @AppStorage("leyne.notifications") var notificationsEnabled = true
 
     /// Last observed UNAuthorizationStatus, refreshed on launch and whenever
     /// the user toggles the Notifications setting. Drives the warning row
@@ -926,6 +932,13 @@ final class NotificationsManager {
         content.body = "Bus \(busNo) is approaching your stop — get ready."
         content.threadIdentifier = "alight"
         content.sound = .default
+        // For alight, we deep-link to the bus's current detail view —
+        // RootView reads `stopCode` from AppModel.activeAlight when this
+        // kind fires so the user lands on the right page.
+        content.userInfo = [
+            "kind": "alight",
+            "busNo": busNo,
+        ]
         if #available(iOS 15.0, *) {
             content.interruptionLevel = .timeSensitive
         }
@@ -972,6 +985,14 @@ final class NotificationsManager {
                     : "\(card.label) · head down to the stop"
                 content.threadIdentifier = card.stopCode
                 content.sound = .default
+                // userInfo drives the tap-to-open deep link: LeyneAppDelegate
+                // .didReceive reads these and posts a NotificationCenter event
+                // that RootView consumes to open the stop's DetailView.
+                content.userInfo = [
+                    "kind": "arrival",
+                    "stopCode": card.stopCode,
+                    "busNo": s.no,
+                ]
                 if #available(iOS 15.0, *) {
                     content.interruptionLevel = .timeSensitive
                 }

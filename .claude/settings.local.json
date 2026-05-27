@@ -94,7 +94,8 @@
       "Bash(pkill -f \"gradle\")",
       "Bash(unzip -p /Users/rommel/Documents/Leyne/build/app/outputs/bundle/release/app-release.aab BundleConfig.pb)",
       "Bash(aapt2 dump *)",
-      "Bash(/Users/rommel/Library/Android/sdk/build-tools/*/aapt2 dump *)"
+      "Bash(/Users/rommel/Library/Android/sdk/build-tools/*/aapt2 dump *)",
+      "Bash(grep -nA1 -E \"forceTestUnitForRelease|#warning\" /Users/rommel/Documents/Leyne/ios-native/Leyne/AdBanner.swift)"
     ]
   }
 }

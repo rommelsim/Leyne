@@ -45,6 +45,14 @@ struct LeyneApp: App {
     }
 }
 
+/// NotificationCenter event name posted whenever the user taps an arrival
+/// or alight notification — RootView subscribes and drives the
+/// drill-down via AppModel.open.
+extension Notification.Name {
+    static let leyneOpenStopFromNotification =
+        Notification.Name("LeyneOpenStopFromNotification")
+}
+
 // MARK: - App delegate
 //
 // Owns the UNUserNotificationCenter delegate so arrival alerts present as a
@@ -71,9 +79,16 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler:
                                 @escaping () -> Void) {
-        // Tapping the notification raises the app; no deep-link routing yet
-        // (the future tap → open stop hook can read response.notification
-        // .request.content.threadIdentifier, which we set to stopCode).
+        // Tap → broadcast the stopCode + busNo so RootView can drill into
+        // DetailView for that bus. Two notification kinds:
+        //   • "arrival" — userInfo carries stopCode + busNo directly
+        //   • "alight"  — userInfo carries only busNo; the stopCode comes
+        //                 from the persisted ActiveAlight on AppModel
+        let userInfo = response.notification.request.content.userInfo
+        NotificationCenter.default.post(
+            name: .leyneOpenStopFromNotification,
+            object: nil,
+            userInfo: userInfo)
         completionHandler()
     }
 }
