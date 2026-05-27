@@ -195,15 +195,21 @@ class NotificationsService {
   /// is approaching their alight stop. Replaces any prior alight alert.
   /// If `fireAt` is in the past or within ~1 s, fires immediately (the
   /// user picked a stop the bus is already at the 2-stop threshold for).
+  ///
+  /// The identifier (also the payload) uses the alight stop CODE, not
+  /// the user-facing name — names like "Opp Blk 211" contain characters
+  /// that would make the payload awkward to parse if it ever became
+  /// load-bearing for routing.
   Future<void> scheduleAlightAlert({
     required String busNo,
+    required String alightStopCode,
     required String alightStopName,
     required DateTime fireAt,
   }) async {
     if (!_initialized) return;
     await cancelAlightAlerts();
 
-    final identifier = '$_alightIdPrefix$busNo.$alightStopName';
+    final identifier = '$_alightIdPrefix$busNo.$alightStopCode';
     final notifId = identifier.hashCode & 0x7fffffff;
     final now = DateTime.now();
     final effectiveFireAt = fireAt.isAfter(now.add(const Duration(seconds: 1)))
@@ -284,9 +290,13 @@ class NotificationsService {
           identifier: '$_idPrefix${card.stopCode}.${s.no}',
           fireAt: fireAt,
           title: 'Bus ${s.no} arriving in 1 min',
+          // walkMin == 0 means "no location fix yet", not "user is
+          // already at the stop". The old "head down" suffix assumed
+          // the latter and read wrong when location was unknown — drop
+          // it and just show the label.
           body: card.walkMin > 0
               ? '${card.label} · ${card.walkMin} min walk'
-              : '${card.label} · head down to the stop',
+              : card.label,
           stopCode: card.stopCode,
         ));
       }

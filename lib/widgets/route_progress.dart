@@ -35,6 +35,11 @@ class _RouteProgressState extends State<RouteProgress> {
   Widget build(BuildContext context) {
     final t = context.t;
     final route = widget.route;
+    // Empty-stops guard: `int.clamp(0, -1)` throws ArgumentError.
+    // A RouteInfo with zero stops shouldn't reach here in practice
+    // (LTA always returns a populated list for a valid service), but
+    // we shouldn't crash on a malformed response or bootstrap race.
+    if (route.stops.isEmpty) return const SizedBox.shrink();
     final busIdx = route.busIndex ?? -1;
     final base = busIdx >= 0 ? busIdx : route.youIndex;
     final lo = (base < route.youIndex ? base : route.youIndex) - 1;

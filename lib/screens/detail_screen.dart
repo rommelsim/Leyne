@@ -675,76 +675,63 @@ class _DetailScreenState extends State<DetailScreen> {
     final base = ri.busIndex ?? ri.youIndex;
     final stopsToAlight = enabled ? (alightIdx - base).clamp(0, 1 << 30) : 0;
 
-    return InkWell(
-      onTap: enabled ? () => _onAlightChanged(null) : null,
-      borderRadius: BorderRadius.circular(14),
-      child: Ink(
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.line),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        child: Opacity(
-          opacity: enabled ? 1 : 0.65,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: 32, height: 32,
-                decoration: BoxDecoration(
-                  color: t.accent.withValues(alpha: 0.13),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.directions_walk,
-                    size: 16, color: t.accent),
+    // Material Switch (not a hand-drawn iOS-style sliding pill) so the
+    // control reads as native Android chrome — see the platform-design
+    // memory: Material idioms on Flutter, iOS idioms on iOS. The card
+    // itself is an outlined Material surface; tapping the switch toggles
+    // off, and the user arms a new alight by tapping a stop in the
+    // journey list below (the switch is disabled until then).
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: t.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: t.line),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                color: t.accent.withValues(alpha: 0.13),
+                borderRadius: BorderRadius.circular(8),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      enabled
-                          ? 'Buzz me 2 stops before $alightName'
-                          : 'Riding this bus? Pick where to alight',
-                      style: t.sans(13, weight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      enabled
-                          ? '$stopsToAlight stop${stopsToAlight == 1 ? "" : "s"} until arrival · tap to cancel'
-                          : 'Tap a stop in the journey below to set as your destination',
-                      style: t.sans(11, color: t.dim),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 36, height: 22,
-                decoration: BoxDecoration(
-                  color: enabled ? t.accent : t.line,
-                  borderRadius: BorderRadius.circular(99),
-                ),
-                child: AnimatedAlign(
-                  duration: const Duration(milliseconds: 150),
-                  alignment:
-                      enabled ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    width: 18, height: 18,
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
+              alignment: Alignment.center,
+              child: Icon(Icons.directions_walk,
+                  size: 16, color: t.accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    enabled
+                        ? 'Buzz me 2 stops before $alightName'
+                        : 'Riding this bus? Pick where to alight',
+                    style: t.sans(13, weight: FontWeight.w500),
                   ),
-                ),
+                  const SizedBox(height: 2),
+                  Text(
+                    enabled
+                        ? '$stopsToAlight stop${stopsToAlight == 1 ? "" : "s"} until arrival'
+                        : 'Tap a stop in the journey below to set as your destination',
+                    style: t.sans(11, color: t.dim),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 8),
+            Switch(
+              value: enabled,
+              onChanged: enabled ? (_) => _onAlightChanged(null) : null,
+            ),
+          ],
         ),
       ),
     );

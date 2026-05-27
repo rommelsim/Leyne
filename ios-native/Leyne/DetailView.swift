@@ -231,11 +231,6 @@ struct DetailView: View {
                 .foregroundStyle(t.dim)
                 .padding(.top, 4)
             }
-
-            if let s = selected {
-                Text("VIEWING BUS \(s.no) → \(s.dest)")
-                    .font(t.mono(12)).foregroundStyle(t.dim).padding(.top, 6)
-            }
         }
         .padding(.bottom, 16)
     }
@@ -816,6 +811,11 @@ struct RouteProgress: View {
     /// When `showAll` is true, every stop in the route is returned —
     /// the user has opted into seeing the whole journey.
     private var window: [(idx: Int, stop: RouteStopLive)] {
+        // Empty-stops guard: `(0)...(-1)` traps in Swift. RouteInfo with
+        // zero stops shouldn't reach here in practice (LTA always returns
+        // a populated stops list for a valid service), but a malformed
+        // response or in-flight bootstrap edge case shouldn't crash.
+        guard !route.stops.isEmpty else { return [] }
         if showAll {
             return route.stops.enumerated().map { ($0, $1) }
         }
@@ -871,7 +871,7 @@ struct RouteProgress: View {
                             .font(t.sans(14, weight: isYou || isBus || isAlight ? .semibold : .regular))
                             .foregroundStyle(t.fg).lineLimit(1)
                         Text(stop.code
-                             + (isYou ? " · YOUR STOP" : "")
+                             + (isYou ? " · BOARD HERE" : "")
                              + (isBus ? " · BUS HERE NOW" : "")
                              + (isAlight ? " · ALIGHT HERE" : ""))
                             .font(t.mono(10)).foregroundStyle(t.dim)
@@ -892,6 +892,16 @@ struct RouteProgress: View {
                         .font(t.mono(10, weight: .semibold)).tracking(0.5).foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(t.accent, in: Capsule())
+                    } else if isYou {
+                        // Mirrors Flutter's BOARD HERE filled badge so the
+                        // user's stop reads as a peer of BUS / ALIGHT —
+                        // three trailing badges, one vocabulary across
+                        // both platforms.
+                        Text("BOARD HERE")
+                            .font(t.mono(10, weight: .semibold)).tracking(0.5)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(t.accent, in: Capsule())
                     } else if canAlight {
                         Text("tap to alight").font(t.mono(9)).foregroundStyle(t.dim.opacity(0.6))
                     }

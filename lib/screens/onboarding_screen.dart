@@ -168,7 +168,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _back() {
-    if (_busy || _step == 0) return;
+    if (_step == 0) return;
+    // On every step except the final, _busy guards rapid taps during the
+    // slide transition. The final (ATT) step intentionally leaves _busy
+    // set after Continue is tapped — the caller dismisses onboarding when
+    // consent resolves. But Back must still work there, otherwise a
+    // stalled consent flow traps the user with no way out except Skip.
+    // Matches iOS, which only disables Continue (not Back) on the final.
+    final isFinal = _step == _steps.length - 1;
+    if (_busy && !isFinal) return;
     setState(() {
       _busy = true;
       _direction = -1;

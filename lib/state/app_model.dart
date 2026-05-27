@@ -280,7 +280,15 @@ class AppModel extends ChangeNotifier {
   /// toggle so it reads honest.
   Future<void> refreshNotificationAuth() async {
     _notificationAuth = await NotificationsService.shared.currentStatus();
-    if (_notificationsEnabled && _notificationAuth != NotifPermStatus.granted) {
+    // Only flip the toggle off when the system has an explicit "no"
+    // (denied or permanentlyDenied). `.notDetermined` can appear
+    // briefly during the boot-time prompt race, and treating it as
+    // "no" would silently disable the user's intent before iOS/Android
+    // even shows the dialog. Mirrors iOS AppModel.refreshNotificationAuth.
+    final explicitlyDenied =
+        _notificationAuth == NotifPermStatus.denied ||
+        _notificationAuth == NotifPermStatus.permanentlyDenied;
+    if (_notificationsEnabled && explicitlyDenied) {
       _notificationsEnabled = false;
       _prefs?.setBool(_kNotifKey, false);
       await NotificationsService.shared.clearAll();
@@ -313,7 +321,8 @@ class AppModel extends ChangeNotifier {
         busNo: busNo, stopCode: stopCode, stopName: stopName, fireAt: fireAt);
     _prefs?.setString(_kAlightKey, jsonEncode(_activeAlight!.toJson()));
     await NotificationsService.shared.scheduleAlightAlert(
-      busNo: busNo, alightStopName: stopName, fireAt: fireAt);
+      busNo: busNo, alightStopCode: stopCode,
+      alightStopName: stopName, fireAt: fireAt);
     notifyListeners();
   }
 

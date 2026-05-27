@@ -434,7 +434,8 @@ final class AppModel: ObservableObject {
         alightStopNameStore = stopName
         alightFireAtStore = fireAt.timeIntervalSince1970
         NotificationsManager.shared.scheduleAlightAlert(
-            busNo: busNo, alightStopName: stopName, fireAt: fireAt)
+            busNo: busNo, alightStopCode: stopCode,
+            alightStopName: stopName, fireAt: fireAt)
         objectWillChange.send()
     }
 
@@ -892,9 +893,14 @@ final class NotificationsManager {
     private let alightIdPrefix = "alight."
 
     /// One-shot notification scheduled at an absolute fire time. Replaces
-    /// any prior alight alert (only one active ride at a time).
-    func scheduleAlightAlert(busNo: String, alightStopName: String, fireAt: Date) {
+    /// any prior alight alert (only one active ride at a time). The
+    /// identifier uses the stop CODE (stable, no spaces or punctuation),
+    /// not the user-facing name — names like "Opp Blk 211" contain
+    /// characters that make the id awkward to parse downstream.
+    func scheduleAlightAlert(busNo: String, alightStopCode: String,
+                             alightStopName: String, fireAt: Date) {
         cancelAlightAlerts()
+        let identifier = "\(alightIdPrefix)\(busNo).\(alightStopCode)"
         let interval = fireAt.timeIntervalSinceNow
         // Must be at least 1 s in the future — UNTimeIntervalNotificationTrigger
         // rejects zero/negative intervals.
@@ -903,7 +909,7 @@ final class NotificationsManager {
             // bus is already at or past the 2-stop threshold).
             let content = alightContent(busNo: busNo, stopName: alightStopName)
             let req = UNNotificationRequest(
-                identifier: "\(alightIdPrefix)\(busNo).\(alightStopName)",
+                identifier: identifier,
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
             center.add(req) { err in
@@ -917,7 +923,7 @@ final class NotificationsManager {
         let trigger = UNTimeIntervalNotificationTrigger(
             timeInterval: interval, repeats: false)
         let req = UNNotificationRequest(
-            identifier: "\(alightIdPrefix)\(busNo).\(alightStopName)",
+            identifier: identifier,
             content: content, trigger: trigger)
         center.add(req) { err in
             if let err {
@@ -980,9 +986,13 @@ final class NotificationsManager {
 
                 let content = UNMutableNotificationContent()
                 content.title = "Bus \(s.no) arriving in 1 min"
+                // walkMin == 0 means "no location fix yet", not "user is
+                // already at the stop". The old "head down" suffix
+                // assumed the latter and read wrong when location was
+                // unknown — drop it and just show the label.
                 content.body = card.walkMin > 0
                     ? "\(card.label) · \(card.walkMin) min walk"
-                    : "\(card.label) · head down to the stop"
+                    : card.label
                 content.threadIdentifier = card.stopCode
                 content.sound = .default
                 // userInfo drives the tap-to-open deep link: LeyneAppDelegate
