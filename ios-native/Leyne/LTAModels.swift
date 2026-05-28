@@ -71,6 +71,34 @@ struct LTABusRouteDTO: Codable, Equatable {
     let Distance: Double?
 }
 
+// ─── Train service alerts (MRT/LRT) ───────────────────────
+// `value` is an object (not an array) so this endpoint uses its own
+// envelope rather than `LTAList`. Status: 1 = normal, 2 = disrupted.
+
+struct LTATrainAlertResponse: Codable {
+    let value: LTATrainAlerts
+}
+
+struct LTATrainAlerts: Codable {
+    let Status: Int
+    let AffectedSegments: [LTAAffectedSegment]
+    let Message: [LTATrainMessage]
+}
+
+struct LTAAffectedSegment: Codable, Equatable {
+    let Line: String              // e.g. "NEL", "EWL", "NSL", "CCL", "DTL", "TEL"
+    let Direction: String?        // "Both" | direction name
+    let Stations: String?         // comma-separated station codes, e.g. "NE6,NE7,..."
+    let FreePublicBus: String?
+    let FreeMRTShuttle: String?
+    let MRTShuttleDirection: String?
+}
+
+struct LTATrainMessage: Codable, Equatable {
+    let Content: String
+    let CreatedDate: String?
+}
+
 // ─── ISO-8601 (+08:00) date parsing ───────────────────────
 enum LTADate {
     private static let fmt: ISO8601DateFormatter = {

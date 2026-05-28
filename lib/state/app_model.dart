@@ -430,6 +430,9 @@ class AppModel extends ChangeNotifier {
       NotificationsService.shared.scheduleArrivalAlerts(
         pins: _pins, cards: allPinnedCards);
     }
+    // Pull MRT/LRT disruption alerts on a slow cadence. DataStore
+    // enforces a 60 s gate internally so this call is cheap.
+    _ds.refreshTrainAlertsIfStale();
     notifyListeners();
   }
 

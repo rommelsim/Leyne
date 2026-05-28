@@ -263,14 +263,50 @@ class LyneSignal {
 /// Singapore MRT line palette. Subset for the colours surfaced in
 /// Leyne 2.0; expand as additional lines need annotation.
 enum MRTLine {
-  ew(Color(0xFF009645), 'East-West'),
-  ns(Color(0xFFD42E12), 'North-South'),
-  ne(Color(0xFF9B26B6), 'North-East'),
-  cc(Color(0xFFFA9E0D), 'Circle'),
-  dt(Color(0xFF005EC4), 'Downtown'),
-  te(Color(0xFF9D5B25), 'Thomson-East Coast');
+  ew(Color(0xFF009645), 'East-West', 'EW'),
+  ns(Color(0xFFD42E12), 'North-South', 'NS'),
+  ne(Color(0xFF9B26B6), 'North-East', 'NE'),
+  cc(Color(0xFFFA9E0D), 'Circle', 'CC'),
+  dt(Color(0xFF005EC4), 'Downtown', 'DT'),
+  te(Color(0xFF9D5B25), 'Thomson-East Coast', 'TE');
 
-  const MRTLine(this.color, this.displayName);
+  const MRTLine(this.color, this.displayName, this.code);
   final Color color;
   final String displayName;
+
+  /// Two-letter code used in card headers ("NE Line · disrupted").
+  final String code;
+
+  /// Map LTA TrainServiceAlerts `Line` strings to our palette enum.
+  /// Returns null for lines we haven't catalogued yet — callers fall
+  /// back to a neutral marker so the alert still surfaces.
+  static MRTLine? fromLtaCode(String raw) {
+    switch (raw.toUpperCase()) {
+      case 'EWL':
+      case 'CGL':
+      case 'EWN':
+        return MRTLine.ew;
+      case 'NSL':
+        return MRTLine.ns;
+      case 'NEL':
+        return MRTLine.ne;
+      case 'CCL':
+      case 'CEL':
+      case 'CGE':
+        return MRTLine.cc;
+      case 'DTL':
+        return MRTLine.dt;
+      case 'TEL':
+        return MRTLine.te;
+      default:
+        return null;
+    }
+  }
+
+  /// Short human label for an LTA line code ("NE Line"). Falls back to
+  /// the raw code when we don't have a mapping.
+  static String shortLabelForLta(String raw) {
+    final m = fromLtaCode(raw);
+    return m == null ? raw : '${m.code} Line';
+  }
 }

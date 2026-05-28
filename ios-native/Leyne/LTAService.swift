@@ -146,6 +146,15 @@ final class LTAService: @unchecked Sendable {
     func busRoutes() async throws -> [LTABusRouteDTO] {
         try await cachedOrFetch("BusRoutes", "BusRoutes", LTABusRouteDTO.self)
     }
+
+    // ─── Live: Train Service Alerts (MRT/LRT) ─────────────
+    /// Always-on endpoint reporting current MRT/LRT line disruptions.
+    /// The body's `Status` is 1 (normal) or 2 (disrupted); when normal
+    /// `AffectedSegments` and `Message` are empty.
+    func trainServiceAlerts() async throws -> LTATrainAlerts {
+        let url = LTAConfig.baseURL.appendingPathComponent("TrainServiceAlerts")
+        return try await get(url, as: LTATrainAlertResponse.self).value
+    }
 }
 
 // MARK: - GeocodeService (OneMap postal-code lookup)

@@ -64,9 +64,9 @@ struct SoftSettingsView: View {
                 .padding(.horizontal, 16)
             }
 
-            SoftTabBar(t: t,
-                       selection: Binding(get: { .settings }, set: { onTab($0) }),
-                       onSelect: { _ in fb.select() })
+            SoftBottomBar(t: t,
+                          selection: Binding(get: { .settings }, set: { onTab($0) }),
+                          onSelect: { _ in fb.select() })
                 .padding(.bottom, 12)
         }
     }

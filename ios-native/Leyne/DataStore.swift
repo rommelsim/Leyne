@@ -37,6 +37,23 @@ struct RouteInfo: Equatable {
     }
 }
 
+/// MRT/LRT line disruption surfaced on the Home screen. Built from LTA's
+/// TrainServiceAlerts response — one entry per affected segment so a
+/// multi-line incident renders as multiple cards.
+struct TrainAlert: Identifiable, Equatable {
+    /// Stable per-line id so SwiftUI ForEach + Set-based dismissals key
+    /// off "the NEL alert" rather than the message text.
+    let id: String
+    /// LTA's line code as returned (e.g. "NEL", "EWL").
+    let lineCode: String
+    /// Mapped palette entry; nil for lines we haven't catalogued yet.
+    let line: MRTLine?
+    /// Header shown on the card — "NE Line · disrupted".
+    let title: String
+    /// Body text — a trimmed single-sentence summary of the LTA message.
+    let detail: String
+}
+
 /// The relevant slice of the route to draw on the map: from the bus's current
 /// position (or an approach window if it's passed/unknown) to just past your
 /// stop. Drawing the *whole* route connects 40–60 stops incl. loops with
@@ -60,6 +77,10 @@ final class DataStore: ObservableObject {
     @Published var nearby: [NearbyStop] = []
     @Published var arrivals: [String: ArrivalState] = [:]
     @Published var routesLoaded = false
+    /// MRT/LRT line disruptions, refreshed periodically by AppModel's tick.
+    /// Empty means no disruptions; the Home page renders one card per item.
+    @Published var trainAlerts: [TrainAlert] = []
+    private var lastTrainAlertFetch: Date?
 
     private(set) var stopByCode: [String: LTABusStop] = [:]
     private var services: [LTABusServiceDTO] = []
@@ -107,6 +128,59 @@ final class DataStore: ObservableObject {
     }
     func roadName(_ code: String) -> String {
         stopByCode[code]?.RoadName ?? ""
+    }
+
+    // ─── Train service alerts ─────────────────────────────
+    /// Refresh MRT/LRT alerts from LTA. AppModel's per-second tick calls
+    /// this; the inner gate keeps us at one network hit per 60 s.
+    func refreshTrainAlertsIfStale(force: Bool = false) {
+        if !force,
+           let last = lastTrainAlertFetch,
+           Date().timeIntervalSince(last) < 60 { return }
+        lastTrainAlertFetch = Date()
+        Task { await self.fetchTrainAlerts() }
+    }
+
+    private func fetchTrainAlerts() async {
+        do {
+            let r = try await api.trainServiceAlerts()
+            let alerts: [TrainAlert] = (r.Status == 2)
+                ? r.AffectedSegments.map { seg in
+                    TrainAlert(
+                        id: seg.Line,
+                        lineCode: seg.Line,
+                        line: MRTLine.from(ltaCode: seg.Line),
+                        title: "\(MRTLine.shortLabel(forLta: seg.Line)) · disrupted",
+                        detail: trainAlertSummary(
+                            seg: seg, messages: r.Message))
+                }
+                : []
+            // Don't bounce equal arrays through @Published — keeps the
+            // Home re-render quiet when nothing changed.
+            if alerts != trainAlerts { trainAlerts = alerts }
+        } catch {
+            // Network failures here are routine; we keep the previous
+            // snapshot rather than blanking the cards out.
+        }
+    }
+
+    /// Pluck the first matching `Message.Content` for the segment, trim
+    /// to a single sentence, and fall back to a generic note if LTA
+    /// returned segments without paired messages.
+    private func trainAlertSummary(
+        seg: LTAAffectedSegment, messages: [LTATrainMessage]
+    ) -> String {
+        let raw = messages.first { $0.Content.contains(seg.Line) }?.Content
+            ?? messages.first?.Content
+            ?? "Service disruption — tap to dismiss"
+        let trimmed = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        // Cut at the first full stop so the card stays one line tall.
+        if let dot = trimmed.firstIndex(of: ".") {
+            return String(trimmed[..<dot]) + " · tap to dismiss"
+        }
+        return trimmed + " · tap to dismiss"
     }
 
     // ─── Nearby ───────────────────────────────────────────

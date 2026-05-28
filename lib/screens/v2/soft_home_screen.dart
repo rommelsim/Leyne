@@ -4,10 +4,13 @@
 // compact rundown of its live services so the user can clock multiple
 // buses at the same stop at a glance.
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../data/data_store.dart';
 import '../../data/models.dart';
+import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
@@ -28,7 +31,9 @@ class SoftHomeScreen extends StatefulWidget {
 }
 
 class _SoftHomeScreenState extends State<SoftHomeScreen> {
-  bool _showMrtAlert = true;
+  /// Line codes the user has tapped to dismiss this session. Cleared
+  /// when the app cold-starts so a new disruption surfaces again.
+  final Set<String> _dismissedAlerts = {};
 
   @override
   void initState() {
@@ -48,10 +53,14 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     return Scaffold(
       backgroundColor: t.bg,
       bottomNavigationBar:
-          SoftTabBar(selection: SoftTab.home, onSelect: widget.onTab),
+          SoftBottomBar(selection: SoftTab.home, onSelect: widget.onTab),
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: Listenable.merge([AppModel.shared, DataStore.shared]),
+          listenable: Listenable.merge([
+            AppModel.shared,
+            DataStore.shared,
+            LocationService.shared,
+          ]),
           builder: (context, _) {
             final pins = AppModel.shared.pins;
             return ListView(
@@ -69,14 +78,12 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
                     _PinCard(
                       pin: pin,
                       services: _filteredServices(pin),
+                      walkMinutes: _walkMinutes(pin.code),
                       onTap: () => widget.onOpenStop(pin.code),
                     ),
                     const SizedBox(height: 12),
                   ],
-                if (_showMrtAlert) ...[
-                  const SizedBox(height: 4),
-                  _mrtAlert(context),
-                ],
+                ..._mrtAlertCards(context),
               ],
             );
           },
@@ -109,11 +116,25 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     );
   }
 
-  Widget _mrtAlert(BuildContext context) {
+  List<Widget> _mrtAlertCards(BuildContext context) {
+    final visible = DataStore.shared.trainAlerts
+        .where((a) => !_dismissedAlerts.contains(a.id))
+        .toList();
+    if (visible.isEmpty) return const [];
+    final out = <Widget>[const SizedBox(height: 4)];
+    for (var i = 0; i < visible.length; i++) {
+      if (i > 0) out.add(const SizedBox(height: 10));
+      out.add(_mrtAlertCard(context, visible[i]));
+    }
+    return out;
+  }
+
+  Widget _mrtAlertCard(BuildContext context, TrainAlert alert) {
     final t = context.t;
+    final color = alert.line?.color ?? t.dim;
     return InkWell(
       borderRadius: BorderRadius.circular(20),
-      onTap: () => setState(() => _showMrtAlert = false),
+      onTap: () => setState(() => _dismissedAlerts.add(alert.id)),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -121,18 +142,20 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            MRTLineBar(color: MRTLine.ne.color),
+            MRTLineBar(color: color),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('NE Line · short delays',
+                  Text(alert.title,
                       style: t.sans(13,
                           weight: FontWeight.w600, color: t.fg)),
                   const SizedBox(height: 2),
-                  Text('Outram Pk ↔ HarbourFront · tap to dismiss',
-                      style: t.sans(12, color: t.dim)),
+                  Text(alert.detail,
+                      style: t.sans(12, color: t.dim),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
@@ -157,6 +180,30 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     return a.services;
   }
 
+  /// Walk-time minutes from the user's last known location to the stop.
+  /// 80 m/min ≈ 5 km/h to match the iOS heuristic. Nil when location
+  /// hasn't been fixed yet — the chip is hidden in that case.
+  int? _walkMinutes(String code) {
+    final here = LocationService.shared.lastLocation;
+    final stop = DataStore.shared.stopByCode[code];
+    if (here == null || stop == null) return null;
+    final d = _haversine(here.lat, here.lon, stop.latitude, stop.longitude);
+    return math.max(1, (d / 80).round());
+  }
+
+  static double _haversine(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371000.0;
+    double rad(double v) => v * math.pi / 180;
+    final dLat = rad(lat2 - lat1);
+    final dLon = rad(lon2 - lon1);
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(rad(lat1)) *
+            math.cos(rad(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  }
+
   String _greeting() {
     final h = DateTime.now().hour;
     if (h < 12) return 'Good morning';
@@ -166,25 +213,38 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   }
 }
 
-/// Unified pinned-stop card: stop name + compact list of live services.
-/// Replaces the earlier primary/secondary split so multiple buses at the
-/// same stop stack legibly underneath the name.
+/// Pinned-stop card matching the Soft 2.0 prototype: pin-chip + stop-name
+/// + walk-time header row, up to 3 services sorted by next arrival with
+/// right-aligned ETA ("now" in accent, otherwise mono), an overflow
+/// "+N more arrivals →" link, and a quiet state when no live arrivals.
 class _PinCard extends StatelessWidget {
-  const _PinCard(
-      {required this.pin, required this.services, required this.onTap});
+  const _PinCard({
+    required this.pin,
+    required this.services,
+    required this.walkMinutes,
+    required this.onTap,
+  });
+
+  static const int _maxVisible = 3;
+
   final Pin pin;
   final List<Service> services;
+  final int? walkMinutes;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    final visible = services.take(4).toList();
+    final sorted = [...services]..sort((a, b) => a.etaSec.compareTo(b.etaSec));
+    final visible = sorted.take(_maxVisible).toList();
+    final overflow = math.max(0, sorted.length - _maxVisible);
     final dsName = DataStore.shared.stopName(pin.code);
     final stopName = dsName.isEmpty ? pin.code : dsName;
-    final nickname = pin.nickname.trim();
-    final showEyebrow = nickname.isNotEmpty &&
-        nickname.toLowerCase() != stopName.toLowerCase();
+    final nick = pin.nickname.trim();
+    final chip = (nick.isEmpty ||
+            nick.toLowerCase() == stopName.toLowerCase())
+        ? 'PIN'
+        : nick.toUpperCase();
 
     return Material(
       color: t.surface,
@@ -197,50 +257,76 @@ class _PinCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (showEyebrow) ...[
-                          Eyebrow(nickname),
-                          const SizedBox(height: 2),
-                        ],
-                        Text(stopName,
-                            style: t.sans(18,
-                                weight: FontWeight.w600, color: t.fg)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.chevron_right, color: t.dim, size: 18),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Container(height: 1, color: t.line),
+              _header(context, chip: chip, stopName: stopName),
               const SizedBox(height: 12),
               if (visible.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(
-                      services.isEmpty ? 'No live arrivals' : '—',
-                      style: t.sans(13, color: t.faint)),
-                )
-              else
-                Column(
-                  children: [
-                    for (var i = 0; i < visible.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 10),
-                      _serviceRow(context, visible[i]),
-                    ],
-                  ],
-                ),
+                _quietRow(context)
+              else ...[
+                for (var i = 0; i < visible.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 10),
+                  _serviceRow(context, visible[i]),
+                ],
+                if (overflow > 0) ...[
+                  const SizedBox(height: 10),
+                  Text('+$overflow more arrivals →',
+                      style: t.sans(12,
+                          weight: FontWeight.w500, color: t.dim)),
+                ],
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _header(BuildContext context,
+      {required String chip, required String stopName}) {
+    final t = context.t;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: t.liveBg,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(chip,
+              style: t.mono(10, weight: FontWeight.w600, color: t.accent)
+                  .copyWith(letterSpacing: 0.8)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(stopName,
+              style: t.sans(17, weight: FontWeight.w600, color: t.fg),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ),
+        if (walkMinutes != null) ...[
+          const SizedBox(width: 8),
+          _walkChip(context, walkMinutes!),
+        ],
+      ],
+    );
+  }
+
+  Widget _walkChip(BuildContext context, int minutes) {
+    final t = context.t;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: t.liveBg.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.directions_walk, size: 12, color: t.dim),
+          const SizedBox(width: 4),
+          Text('$minutes m',
+              style: t.mono(11, weight: FontWeight.w600, color: t.dim)),
+        ],
       ),
     );
   }
@@ -249,38 +335,49 @@ class _PinCard extends StatelessWidget {
     final t = context.t;
     final eta = fmtEta(s.etaSec);
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         ServiceBadge(svc: s.no, size: ServiceBadgeSize.sm),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Text('→ ${s.dest}',
+              style: t.sans(13, color: t.dim),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ),
+        const SizedBox(width: 8),
+        if (eta.live)
+          Text('now',
+              style: t.sans(13, weight: FontWeight.w600, color: t.accent))
+        else
+          Row(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
-              if (eta.live)
-                Text('Arriving now',
-                    style: t.sans(14,
-                        weight: FontWeight.w600, color: t.accent))
-              else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(eta.big,
-                        style: t.mono(14,
-                            weight: FontWeight.w600, color: t.fg)),
-                    const SizedBox(width: 2),
-                    Text(eta.small, style: t.mono(12, color: t.dim)),
-                  ],
-                ),
-              Text('→ ${s.dest}',
-                  style: t.sans(11, color: t.dim),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
+              Text(eta.big,
+                  style: t.mono(13, weight: FontWeight.w600, color: t.fg)),
+              const SizedBox(width: 2),
+              Text(eta.small, style: t.mono(11, color: t.dim)),
             ],
           ),
-        ),
+      ],
+    );
+  }
+
+  Widget _quietRow(BuildContext context) {
+    final t = context.t;
+    return Row(
+      children: [
+        Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+                color: t.dim.withValues(alpha: 0.6),
+                shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Text('Quiet · no live arrivals',
+            style: t.sans(13, color: t.dim)),
       ],
     );
   }

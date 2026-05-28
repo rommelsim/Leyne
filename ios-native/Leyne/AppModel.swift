@@ -386,6 +386,10 @@ final class AppModel: ObservableObject {
             NotificationsManager.shared.scheduleArrivalAlerts(
                 pins: pins, cards: allPinnedCards)
         }
+
+        // Pull MRT/LRT disruption alerts on a slow cadence. The DataStore
+        // itself enforces the 60 s gate; tick just gives it a heartbeat.
+        ds.refreshTrainAlertsIfStale()
     }
 
     // ─── Arrival-alert notifications (public surface) ─────

@@ -43,7 +43,7 @@ class _SoftNearbyScreenState extends State<SoftNearbyScreen> {
     return Scaffold(
       backgroundColor: t.bg,
       bottomNavigationBar:
-          SoftTabBar(selection: SoftTab.nearby, onSelect: widget.onTab),
+          SoftBottomBar(selection: SoftTab.nearby, onSelect: widget.onTab),
       body: SafeArea(
         child: ListenableBuilder(
           listenable: Listenable.merge(

@@ -17,6 +17,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+import '../theme.dart' show MRTLine;
 import 'geo.dart';
 import 'lta_config.dart';
 import 'lta_models.dart';
@@ -82,6 +83,37 @@ class GeoPoint {
   const GeoPoint(this.lat, this.lon);
   final double lat;
   final double lon;
+}
+
+/// MRT/LRT line disruption surfaced on the Home screen. Built from LTA's
+/// TrainServiceAlerts response — one entry per affected segment so a
+/// multi-line incident renders as multiple cards.
+class TrainAlert {
+  const TrainAlert({
+    required this.id,
+    required this.lineCode,
+    required this.line,
+    required this.title,
+    required this.detail,
+  });
+
+  /// Stable per-line id so ListView builders and dismissal sets key off
+  /// "the NEL alert" rather than the message text.
+  final String id;
+  final String lineCode;
+  final MRTLine? line;
+  final String title;
+  final String detail;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TrainAlert &&
+      other.id == id &&
+      other.title == title &&
+      other.detail == detail;
+
+  @override
+  int get hashCode => Object.hash(id, title, detail);
 }
 
 class RouteInfo {
@@ -158,6 +190,73 @@ class DataStore extends ChangeNotifier {
   final Map<String, DateTime> _lastFetched = {};
   final Set<String> _inflight = {};
   ({double lat, double lon})? _lastLoc;
+
+  /// MRT/LRT line disruptions refreshed periodically by AppModel's tick.
+  /// Empty means no current disruptions; the Home page renders one card
+  /// per item.
+  List<TrainAlert> _trainAlerts = const [];
+  List<TrainAlert> get trainAlerts => _trainAlerts;
+  DateTime? _lastTrainAlertFetch;
+  bool _trainAlertsInflight = false;
+
+  /// Tick from AppModel calls this once per second; the inner gate
+  /// keeps us at one network hit per 60 s.
+  void refreshTrainAlertsIfStale({bool force = false}) {
+    if (_trainAlertsInflight) return;
+    if (!force &&
+        _lastTrainAlertFetch != null &&
+        DateTime.now().difference(_lastTrainAlertFetch!) <
+            const Duration(seconds: 60)) {
+      return;
+    }
+    _trainAlertsInflight = true;
+    _lastTrainAlertFetch = DateTime.now();
+    () async {
+      try {
+        final r = await _api.trainServiceAlerts();
+        final next = (r.status == 2)
+            ? r.affectedSegments
+                .map((seg) => TrainAlert(
+                      id: seg.line,
+                      lineCode: seg.line,
+                      line: MRTLine.fromLtaCode(seg.line),
+                      title:
+                          '${MRTLine.shortLabelForLta(seg.line)} · disrupted',
+                      detail: _trainAlertSummary(seg, r.messages),
+                    ))
+                .toList(growable: false)
+            : const <TrainAlert>[];
+        // Skip a rebuild when nothing changed.
+        final unchanged = next.length == _trainAlerts.length &&
+            List.generate(next.length, (i) => next[i] == _trainAlerts[i])
+                .every((e) => e);
+        if (!unchanged) {
+          _trainAlerts = next;
+          notifyListeners();
+        }
+      } catch (_) {
+        // Network blip — keep the previous snapshot rather than blanking.
+      } finally {
+        _trainAlertsInflight = false;
+      }
+    }();
+  }
+
+  String _trainAlertSummary(
+      LtaAffectedSegment seg, List<LtaTrainMessage> messages) {
+    final raw = messages
+            .firstWhere((m) => m.content.contains(seg.line),
+                orElse: () => messages.isEmpty
+                    ? const LtaTrainMessage(content: '')
+                    : messages.first)
+            .content
+            .replaceAll('\n', ' ')
+            .trim();
+    if (raw.isEmpty) return 'Service disruption · tap to dismiss';
+    final dot = raw.indexOf('.');
+    final head = dot > 0 ? raw.substring(0, dot) : raw;
+    return '$head · tap to dismiss';
+  }
 
   // ─── Bootstrap reference data ──────────────────────────────
 

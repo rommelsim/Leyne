@@ -99,6 +99,23 @@ class LtaService {
   Future<List<LtaBusRoute>> busRoutes() =>
       _fetchAllPaged('BusRoutes', LtaBusRoute.fromJson);
 
+  // ─── Live: Train Service Alerts (MRT/LRT) ────────────────
+  /// Always-on endpoint reporting MRT/LRT line disruptions. `Status` is
+  /// 1 (normal) or 2 (disrupted); when normal the affected/messages
+  /// lists come back empty.
+  Future<LtaTrainAlerts> trainServiceAlerts() async {
+    final uri = LtaConfig.baseUrl.replace(
+      pathSegments: [...LtaConfig.baseUrl.pathSegments, 'TrainServiceAlerts'],
+    );
+    final json = await _get(uri);
+    final value = json['value'];
+    if (value is! Map<String, dynamic>) {
+      return const LtaTrainAlerts(
+          status: 1, affectedSegments: [], messages: []);
+    }
+    return LtaTrainAlerts.fromJson(value);
+  }
+
   // ─── Internal helpers ──────────────────────────────────────
 
   Future<Map<String, dynamic>> _get(Uri uri) async {

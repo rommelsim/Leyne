@@ -9,7 +9,9 @@ struct SoftHomeView: View {
     @EnvironmentObject var fb: Feedback
     @EnvironmentObject var ds: DataStore
 
-    @State private var showMrtAlert = true
+    /// Line codes the user has tapped to dismiss this session. Cleared
+    /// when the app cold-starts so a new disruption surfaces again.
+    @State private var dismissedAlerts: Set<String> = []
     let onTab: (SoftTab) -> Void
     let onOpenStop: (String) -> Void
     let onOpenSearch: () -> Void
@@ -33,9 +35,7 @@ struct SoftHomeView: View {
                         pinsList
                     }
 
-                    if showMrtAlert {
-                        mrtAlertCard
-                    }
+                    mrtAlertCards
 
                     Color.clear.frame(height: 100)
                 }
@@ -43,9 +43,9 @@ struct SoftHomeView: View {
                 .padding(.top, 8)
             }
 
-            SoftTabBar(t: t,
-                       selection: Binding(get: { .home }, set: { onTab($0) }),
-                       onSelect: { _ in fb.select() })
+            SoftBottomBar(t: t,
+                          selection: Binding(get: { .home }, set: { onTab($0) }),
+                          onSelect: { _ in fb.select() })
                 .padding(.bottom, 12)
         }
         .onAppear { warmArrivals() }
@@ -88,6 +88,7 @@ struct SoftHomeView: View {
                     t: t,
                     pin: pin,
                     services: filteredServices(for: pin),
+                    walkMinutes: walkMinutes(for: pin.code),
                     onTap: {
                         fb.select()
                         onOpenStop(pin.code)
@@ -97,24 +98,53 @@ struct SoftHomeView: View {
         }
     }
 
-    private var mrtAlertCard: some View {
+    /// Walk-time (in minutes) from the user's last known location to the
+    /// stop. Mirrors the heuristic used elsewhere: 80 m/min ≈ 5 km/h.
+    /// Returns nil when location isn't available so the chip is hidden.
+    private func walkMinutes(for code: String) -> Int? {
+        guard let here = LocationManager.shared.location,
+              let stop = ds.stopByCode[code] else { return nil }
+        let d = haversine(here.coordinate.latitude,
+                          here.coordinate.longitude,
+                          stop.Latitude, stop.Longitude)
+        return max(1, Int((d / 80).rounded()))
+    }
+
+    @ViewBuilder
+    private var mrtAlertCards: some View {
+        let visible = ds.trainAlerts.filter { !dismissedAlerts.contains($0.id) }
+        if !visible.isEmpty {
+            VStack(spacing: 10) {
+                ForEach(visible) { alert in
+                    mrtAlertCard(alert)
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: visible)
+        }
+    }
+
+    private func mrtAlertCard(_ alert: TrainAlert) -> some View {
         Button {
             fb.select()
-            withAnimation(.easeOut(duration: 0.2)) { showMrtAlert = false }
+            withAnimation(.easeOut(duration: 0.2)) {
+                _ = dismissedAlerts.insert(alert.id)
+            }
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                MRTLineBar(color: MRTLine.NE.color)
+                MRTLineBar(color: alert.line?.color ?? t.dim)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("NE Line · short delays")
+                    Text(alert.title)
                         .font(t.sans(13, weight: .semibold))
                         .foregroundStyle(t.fg)
-                    Text("Outram Pk ↔ HarbourFront · tap to dismiss")
+                    Text(alert.detail)
                         .font(t.sans(12))
                         .foregroundStyle(t.dim)
+                        .lineLimit(2)
                 }
                 Spacer(minLength: 0)
             }
             .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -146,34 +176,44 @@ struct SoftHomeView: View {
 
 // MARK: - SoftPinCard
 
-/// Unified pinned-stop card. Replaces the earlier hero+grid split — every
-/// pin gets the same full-width card so multiple services at the same stop
-/// stack cleanly underneath the stop name. Whole surface is tappable.
+/// Pinned-stop card matching the Soft 2.0 prototype: pin-chip + stop-name
+/// + walk-time header row, up to 3 service rows sorted by next arrival,
+/// right-aligned ETAs ("now" in accent, otherwise mono), an overflow
+/// "+N more arrivals →" link, and a quiet state when no live arrivals
+/// are available.
 struct SoftPinCard: View {
     let t: Theme
     let pin: Pin
     let services: [Service]
+    let walkMinutes: Int?
     let onTap: () -> Void
 
+    private static let maxVisible = 3
+
+    private var sorted: [Service] {
+        services.sorted { $0.etaSec < $1.etaSec }
+    }
     private var visibleServices: [Service] {
-        Array(services.prefix(4))
+        Array(sorted.prefix(Self.maxVisible))
+    }
+    private var overflowCount: Int {
+        max(0, sorted.count - Self.maxVisible)
     }
 
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 12) {
                 headerRow
-                Divider().background(t.line)
                 if visibleServices.isEmpty {
-                    Text(services.isEmpty ? "No live arrivals" : "—")
-                        .font(t.sans(13))
-                        .foregroundStyle(t.faint)
-                        .padding(.vertical, 4)
+                    quietRow
                 } else {
                     VStack(spacing: 10) {
                         ForEach(visibleServices, id: \.no) { s in
                             serviceRow(s)
                         }
+                    }
+                    if overflowCount > 0 {
+                        overflowLink
                     }
                 }
             }
@@ -185,71 +225,111 @@ struct SoftPinCard: View {
         .pressScale()
     }
 
+    // MARK: Header
+
     private var headerRow: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                if showEyebrow {
-                    Text(pin.nickname.uppercased())
-                        .font(t.mono(10, weight: .semibold))
-                        .tracking(1.5)
-                        .foregroundStyle(t.dim)
-                }
-                Text(stopName)
-                    .font(t.sans(18, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .center, spacing: 8) {
+            if !pinChipLabel.isEmpty {
+                Text(pinChipLabel)
+                    .font(t.mono(10, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(t.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(t.liveBg, in: Capsule())
             }
+            Text(stopDataStoreName)
+                .font(t.sans(17, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(t.dim)
+            if let w = walkMinutes {
+                walkChip(w)
+            }
         }
     }
+
+    private func walkChip(_ minutes: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "figure.walk")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(t.dim)
+            Text("\(minutes) m")
+                .font(t.mono(11, weight: .semibold))
+                .foregroundStyle(t.dim)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(t.liveBg.opacity(0.5), in: Capsule())
+    }
+
+    // MARK: Body
 
     @ViewBuilder
     private func serviceRow(_ s: Service) -> some View {
         let eta = fmtETA(s.etaSec)
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ServiceBadge(svc: s.no, t: t, size: .sm)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    if eta.live {
-                        Text("Arriving now")
-                            .font(t.sans(14, weight: .semibold))
-                            .foregroundStyle(t.accent)
-                    } else {
-                        Text(eta.big)
-                            .font(t.mono(14, weight: .semibold))
-                            .foregroundStyle(t.fg)
-                        Text(eta.small)
-                            .font(t.mono(12))
-                            .foregroundStyle(t.dim)
-                    }
+            Text("→ \(s.dest)")
+                .font(t.sans(13))
+                .foregroundStyle(t.dim)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            if eta.live {
+                Text("now")
+                    .font(t.sans(13, weight: .semibold))
+                    .foregroundStyle(t.accent)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(eta.big)
+                        .font(t.mono(13, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                    Text(eta.small)
+                        .font(t.mono(11))
+                        .foregroundStyle(t.dim)
                 }
-                Text("→ \(s.dest)")
-                    .font(t.sans(11))
-                    .foregroundStyle(t.dim)
-                    .lineLimit(1)
             }
+        }
+    }
+
+    private var overflowLink: some View {
+        HStack {
+            Text("+\(overflowCount) more arrivals →")
+                .font(t.sans(12, weight: .medium))
+                .foregroundStyle(t.dim)
             Spacer(minLength: 0)
         }
+        .padding(.top, 2)
+    }
+
+    private var quietRow: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(t.dim.opacity(0.6))
+                .frame(width: 6, height: 6)
+            Text("Quiet · no live arrivals")
+                .font(t.sans(13))
+                .foregroundStyle(t.dim)
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: Naming helpers
+
+    private var pinChipLabel: String {
+        let nick = pin.nickname.trimmingCharacters(in: .whitespaces)
+        // Avoid printing the stop name twice — if the nickname matches the
+        // data-store name the chip would just echo the title.
+        if nick.isEmpty { return "PIN" }
+        if nick.caseInsensitiveCompare(stopDataStoreName) == .orderedSame { return "PIN" }
+        return nick.uppercased()
     }
 
     private var stopDataStoreName: String {
         let n = DataStore.shared.stopName(pin.code)
         return n.isEmpty ? pin.code : n
-    }
-
-    private var stopName: String {
-        // Show the actual stop name as the primary title. If a nickname
-        // was supplied it surfaces as the eyebrow above.
-        return stopDataStoreName
-    }
-
-    private var showEyebrow: Bool {
-        let nick = pin.nickname.trimmingCharacters(in: .whitespaces)
-        return !nick.isEmpty && nick.caseInsensitiveCompare(stopDataStoreName) != .orderedSame
     }
 }
 

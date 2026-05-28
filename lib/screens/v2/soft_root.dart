@@ -80,6 +80,23 @@ class _SoftRootState extends State<SoftRoot> {
   }
 
   Widget _rootTab() {
+    // Material 3 "fade-through" — the standard tab-swap transition.
+    // AnimatedSwitcher cross-fades; child keying by _tab ensures the
+    // switcher sees a new widget identity on every tab change.
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, anim) =>
+          FadeTransition(opacity: anim, child: child),
+      child: KeyedSubtree(
+        key: ValueKey(_tab),
+        child: _tabBody(),
+      ),
+    );
+  }
+
+  Widget _tabBody() {
     switch (_tab) {
       case SoftTab.home:
         return SoftHomeScreen(

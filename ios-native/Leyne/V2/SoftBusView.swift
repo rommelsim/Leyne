@@ -15,10 +15,8 @@ struct SoftBusView: View {
 
     @State private var alightId: String? = nil
     @State private var route: RouteInfo?
-    @State private var camera = MapCameraPosition.region(MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 1.3083, longitude: 103.8617),
-        span:   MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-    ))
+    @State private var camera: MapCameraPosition = .automatic
+    @State private var didCenterOnStop = false
 
     private var t: Theme { m.t }
     private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
@@ -164,35 +162,53 @@ struct SoftBusView: View {
 
     private var liveMapSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Eyebrow(text: "Live map", t: t)
-                Spacer()
-                HStack(spacing: 10) {
-                    LegendDot(label: "BUS \(svc)", color: t.accent, t: t)
-                    LegendDot(label: "STOP", color: t.accent, t: t)
-                    LegendDot(label: "ME", color: t.meBlue, t: t)
-                }
-            }
+            Eyebrow(text: "Live map", t: t)
+            mapLegend
             Map(position: $camera) {
+                // The user's bus stop — a pin so the map has at least
+                // one annotation while the route loads.
+                if let stop = ds.stopByCode[stopCode] {
+                    Annotation(stop.Description,
+                               coordinate: CLLocationCoordinate2D(
+                                latitude: stop.Latitude,
+                                longitude: stop.Longitude)) {
+                        MapStopMarker(t: t)
+                    }
+                }
                 if let r = route {
-                    ForEach(journeySegment(r), id: \.code) { rs in
-                        Annotation(rs.name, coordinate: CLLocationCoordinate2D(latitude: rs.lat, longitude: rs.lon)) {
-                            Circle()
-                                .fill(rs.code == stopCode ? t.accent : t.dim)
-                                .frame(width: 8, height: 8)
+                    // Other stops on this journey — small dots so the
+                    // primary stop pin stays the visual focus.
+                    ForEach(journeySegment(r).filter { $0.code != stopCode },
+                            id: \.code) { rs in
+                        Annotation(rs.name,
+                                   coordinate: CLLocationCoordinate2D(
+                                    latitude: rs.lat, longitude: rs.lon)) {
+                            Circle().fill(t.dim).frame(width: 6, height: 6)
                         }
                     }
                     if let coord = r.busCoord {
                         Annotation("Bus \(svc)", coordinate: coord) {
-                            ServiceBadge(svc: svc, t: t, size: .sm)
+                            MapBusMarker(t: t, svc: svc)
                         }
                     }
                 }
                 UserAnnotation()
             }
             .mapStyle(.standard(elevation: .realistic))
+            .mapControls { MapUserLocationButton(); MapCompass() }
             .frame(height: 180)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // Recenter the camera once the user's bus stop is known. The
+            // initial value is `.automatic` so the map fits its
+            // annotations; this explicit region pull is here so the map
+            // also re-centres if the stop data lands after the view did.
+            .onChange(of: ds.stopByCode[stopCode]) { _, stop in
+                guard let s = stop, !didCenterOnStop else { return }
+                centerOnStop(s)
+            }
+            .onAppear {
+                if let s = ds.stopByCode[stopCode] { centerOnStop(s) }
+            }
         }
     }
 
@@ -237,6 +253,15 @@ struct SoftBusView: View {
         }
     }
 
+    private func centerOnStop(_ stop: LTABusStop) {
+        camera = .region(MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: stop.Latitude, longitude: stop.Longitude),
+            span: MKCoordinateSpan(
+                latitudeDelta: 0.006, longitudeDelta: 0.006)))
+        didCenterOnStop = true
+    }
+
     private func togglePin() {
         if isPinned {
             m.pins.removeAll { $0.code == stopCode }
@@ -255,5 +280,72 @@ struct SoftBusView: View {
         UserDefaults.standard.set(
             Date().addingTimeInterval(TimeInterval(15 * 60)).timeIntervalSince1970,
             forKey: "lyne.alight.fireAt")
+    }
+
+    private var mapLegend: some View {
+        HStack(spacing: 12) {
+            MapLegendItem(t: t, system: "mappin.and.ellipse",
+                          fill: t.accent, label: "STOP")
+            MapLegendItem(t: t, system: "bus.fill",
+                          fill: t.accent, label: "BUS \(svc)")
+            MapLegendItem(t: t, system: "location.fill",
+                          fill: t.meBlue, label: "YOU")
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+// MARK: - Map markers (shared icon language with the Android map)
+
+/// Stop marker — accent-coloured pin SF Symbol with a soft shadow so it
+/// stays legible over varied map tiles.
+struct MapStopMarker: View {
+    let t: Theme
+    var body: some View {
+        Image(systemName: "mappin.and.ellipse")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(t.accent)
+            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+    }
+}
+
+/// Bus marker — accent pill with bus icon + service number. Matches the
+/// Android marker pixel-for-pixel in spirit.
+struct MapBusMarker: View {
+    let t: Theme
+    let svc: String
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "bus.fill")
+                .font(.system(size: 10, weight: .semibold))
+            Text(svc)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+        }
+        .foregroundStyle(t.onAccent)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(t.accent, in: Capsule())
+        .overlay(Capsule().stroke(.white, lineWidth: 1.5))
+        .shadow(color: t.accent.opacity(0.6), radius: 4)
+    }
+}
+
+/// Map legend pill — same iconography as the on-map markers so the
+/// reader can match the legend to what they see on the map at a glance.
+struct MapLegendItem: View {
+    let t: Theme
+    let system: String
+    let fill: Color
+    let label: String
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: system)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(fill)
+            Text(label)
+                .font(t.mono(9, weight: .semibold))
+                .tracking(1)
+                .foregroundStyle(t.dim)
+        }
     }
 }

@@ -33,7 +33,7 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     return Scaffold(
       backgroundColor: t.bg,
       bottomNavigationBar:
-          SoftTabBar(selection: SoftTab.settings, onSelect: widget.onTab),
+          SoftBottomBar(selection: SoftTab.settings, onSelect: widget.onTab),
       body: SafeArea(
         child: ListenableBuilder(
           listenable: AppModel.shared,

@@ -55,9 +55,9 @@ struct SoftNearbyView: View {
                 .padding(.top, 8)
             }
 
-            SoftTabBar(t: t,
-                       selection: Binding(get: { .nearby }, set: { onTab($0) }),
-                       onSelect: { _ in fb.select() })
+            SoftBottomBar(t: t,
+                          selection: Binding(get: { .nearby }, set: { onTab($0) }),
+                          onSelect: { _ in fb.select() })
                 .padding(.bottom, 12)
         }
         .onAppear {

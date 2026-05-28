@@ -328,3 +328,62 @@ Deck _deckFromLta(String? raw) {
       return Deck.sd;
   }
 }
+
+// ─── Train service alerts (MRT/LRT) ─────────────────────────────
+// Mirrors LTAModels.swift. `Status` is 1 (normal) or 2 (disrupted); when
+// normal `affectedSegments` and `messages` come back empty.
+
+class LtaTrainAlerts {
+  const LtaTrainAlerts({
+    required this.status,
+    required this.affectedSegments,
+    required this.messages,
+  });
+
+  final int status;
+  final List<LtaAffectedSegment> affectedSegments;
+  final List<LtaTrainMessage> messages;
+
+  factory LtaTrainAlerts.fromJson(Map<String, dynamic> j) => LtaTrainAlerts(
+        status: (j['Status'] as num?)?.toInt() ?? 1,
+        affectedSegments: ((j['AffectedSegments'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>()
+            .map(LtaAffectedSegment.fromJson)
+            .toList(growable: false),
+        messages: ((j['Message'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>()
+            .map(LtaTrainMessage.fromJson)
+            .toList(growable: false),
+      );
+}
+
+class LtaAffectedSegment {
+  const LtaAffectedSegment({
+    required this.line,
+    this.direction,
+    this.stations,
+  });
+
+  final String line;
+  final String? direction;
+  final String? stations;
+
+  factory LtaAffectedSegment.fromJson(Map<String, dynamic> j) =>
+      LtaAffectedSegment(
+        line: (j['Line'] as String?) ?? '',
+        direction: j['Direction'] as String?,
+        stations: j['Stations'] as String?,
+      );
+}
+
+class LtaTrainMessage {
+  const LtaTrainMessage({required this.content, this.createdDate});
+
+  final String content;
+  final String? createdDate;
+
+  factory LtaTrainMessage.fromJson(Map<String, dynamic> j) => LtaTrainMessage(
+        content: (j['Content'] as String?) ?? '',
+        createdDate: j['CreatedDate'] as String?,
+      );
+}

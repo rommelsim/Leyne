@@ -1,11 +1,43 @@
-// SoftRoot — Leyne 2.0 root composition. Owns the simple stack-based
-// nav (Home / Nearby / Settings tabs; Search / Stop / Bus pushed).
-// Observes `AppModel.openCard` so notification / Spotlight deep links
-// surface as route pushes onto this stack.
+// SoftRoot — Leyne 2.0 root composition. Wraps Home / Nearby / Settings
+// in a NavigationStack so child views (Stop / Bus / Search) push with
+// UIKit's native slide-from-trailing animation + edge-swipe back
+// gesture. AppModel.openCard observation drives notification /
+// Spotlight deep-link pushes onto the stack.
 
 import SwiftUI
+import UIKit
 
-enum SoftRoute: Equatable {
+/// SwiftUI's NavigationStack drops the interactive pop gesture when the
+/// nav bar is hidden via `.toolbar(.hidden, …)`. Setting the gesture
+/// recogniser's delegate to `nil` reinstates it. Apply once at the root
+/// of each pushed destination.
+private struct SwipeBackEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        UIViewController()
+    }
+    func updateUIViewController(_ uiViewController: UIViewController,
+                                context: Context) {
+        DispatchQueue.main.async {
+            guard let nav = uiViewController.navigationController else { return }
+            nav.interactivePopGestureRecognizer?.delegate = nil
+            nav.interactivePopGestureRecognizer?.isEnabled = true
+        }
+    }
+}
+
+private struct EnableSwipeBack: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background(SwipeBackEnabler().frame(width: 0, height: 0))
+    }
+}
+
+extension View {
+    /// Re-enables the edge-swipe-from-left back gesture for SwiftUI
+    /// NavigationStack views that hide their toolbar.
+    func enableSwipeBack() -> some View { modifier(EnableSwipeBack()) }
+}
+
+enum SoftRoute: Hashable {
     case stop(String)
     case bus(stopCode: String, svc: String)
     case search
@@ -23,30 +55,31 @@ struct SoftRoot: View {
     private var t: Theme { m.t }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            // Base tab content
-            tabContent
-                .zIndex(0)
-
-            // Pushed routes
-            ForEach(Array(stack.enumerated()), id: \.offset) { idx, route in
-                routeView(route)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .zIndex(Double(10 + idx))
+            // Native push stack — NavigationStack handles the iOS
+            // slide-from-trailing animation, parallax on the
+            // underlying view, and the edge-swipe back gesture for free.
+            NavigationStack(path: $stack) {
+                tabContent
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationDestination(for: SoftRoute.self) { route in
+                        routeView(route)
+                            .toolbar(.hidden, for: .navigationBar)
+                            .enableSwipeBack()
+                    }
             }
 
-            // Map handoff toast (overlay)
+            // Map handoff toast overlays the whole stack.
             VStack {
                 MapHandoffToast(t: t, kind: $mapHandoff)
                     .padding(.top, 8)
                 Spacer()
             }
             .zIndex(100)
+            .allowsHitTesting(mapHandoff != .none)
         }
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: stack)
-        .animation(.easeInOut(duration: 0.18), value: tab)
         // Notification / Spotlight deep links arrive via AppModel.openCard.
         // Convert each new request into a Stop or Bus route push, then
         // clear so the same trigger fires the next tap.

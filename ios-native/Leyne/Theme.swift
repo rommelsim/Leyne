@@ -175,4 +175,27 @@ enum MRTLine: String, CaseIterable {
         case .TE: return "Thomson-East Coast"
         }
     }
+
+    /// Map LTA TrainServiceAlerts `Line` codes (e.g. "NEL", "EWL") to
+    /// our local palette enum. Returns nil for lines we don't colour
+    /// yet — callers fall back to a neutral marker so the alert still
+    /// surfaces.
+    static func from(ltaCode raw: String) -> MRTLine? {
+        switch raw.uppercased() {
+        case "EWL", "CGL", "EWN": return .EW
+        case "NSL": return .NS
+        case "NEL": return .NE
+        case "CCL", "CEL", "CGE": return .CC
+        case "DTL": return .DT
+        case "TEL": return .TE
+        default: return nil
+        }
+    }
+
+    /// LTA's `Line` strings are airport-code style; surface a short
+    /// human label ("NE Line") for headers without sounding bureaucratic.
+    static func shortLabel(forLta raw: String) -> String {
+        if let line = from(ltaCode: raw) { return "\(line.rawValue) Line" }
+        return raw
+    }
 }
