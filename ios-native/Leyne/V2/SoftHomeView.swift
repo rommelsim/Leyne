@@ -1,5 +1,6 @@
-// SoftHomeView — Leyne 2.0 Home: greeting, pinned stops (hero + grid),
-// MRT alert card. Empty state when no pins.
+// SoftHomeView — Leyne 2.0 Home: greeting + a vertical list of pinned-
+// stop cards, each showing the stop name and a compact rundown of its
+// live services. Empty state when no pins. Optional MRT alert below.
 
 import SwiftUI
 
@@ -29,10 +30,7 @@ struct SoftHomeView: View {
                                        onSearch: { onOpenSearch() })
                             .padding(.top, 8)
                     } else {
-                        primaryPinCard
-                        if m.pins.count > 1 {
-                            secondaryPinsGrid
-                        }
+                        pinsList
                     }
 
                     if showMrtAlert {
@@ -83,36 +81,18 @@ struct SoftHomeView: View {
         .padding(.top, 8)
     }
 
-    @ViewBuilder
-    private var primaryPinCard: some View {
-        if let pin = m.pins.first {
-            SoftPrimaryPinCard(
-                t: t,
-                pin: pin,
-                services: liveServices(for: pin.code),
-                onTap: { onOpenStop(pin.code) }
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var secondaryPinsGrid: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Also pinned")
-                .font(t.sans(13, weight: .semibold))
-                .tracking(0.5)
-                .foregroundStyle(t.dim)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                GridItem(.flexible(), spacing: 10)],
-                      spacing: 10) {
-                ForEach(Array(m.pins.dropFirst()), id: \.code) { pin in
-                    SoftSecondaryPinCard(
-                        t: t,
-                        pin: pin,
-                        firstService: liveServices(for: pin.code).first
-                    )
-                    .onTapGesture { onOpenStop(pin.code) }
-                }
+    private var pinsList: some View {
+        VStack(spacing: 12) {
+            ForEach(m.pins, id: \.code) { pin in
+                SoftPinCard(
+                    t: t,
+                    pin: pin,
+                    services: filteredServices(for: pin),
+                    onTap: {
+                        fb.select()
+                        onOpenStop(pin.code)
+                    }
+                )
             }
         }
     }
@@ -140,6 +120,14 @@ struct SoftHomeView: View {
         .buttonStyle(.plain)
     }
 
+    private func filteredServices(for pin: Pin) -> [Service] {
+        let all = liveServices(for: pin.code)
+        if let tracked = pin.tracked, !tracked.isEmpty {
+            return all.filter { tracked.contains($0.no) }
+        }
+        return all
+    }
+
     private func liveServices(for code: String) -> [Service] {
         if case .loaded(let s) = ds.arrivals[code] { return s }
         return []
@@ -156,134 +144,112 @@ struct SoftHomeView: View {
     }
 }
 
-// MARK: - PrimaryPinCard
+// MARK: - SoftPinCard
 
-struct SoftPrimaryPinCard: View {
+/// Unified pinned-stop card. Replaces the earlier hero+grid split — every
+/// pin gets the same full-width card so multiple services at the same stop
+/// stack cleanly underneath the stop name. Whole surface is tappable.
+struct SoftPinCard: View {
     let t: Theme
     let pin: Pin
     let services: [Service]
     let onTap: () -> Void
 
+    private var visibleServices: [Service] {
+        Array(services.prefix(4))
+    }
+
     var body: some View {
-        let primary = trackedFirst()
-        let next = services.dropFirst().first
-        let thirdEta = services.dropFirst(2).first.map { fmtETA($0.etaSec) }
-
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    LabelPill(text: pin.nickname.isEmpty ? "Pinned" : pin.nickname,
-                              t: t, variant: .solid)
-                    Spacer()
-                }
-                Text(stopName)
-                    .font(t.sans(20, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .multilineTextAlignment(.leading)
-
-                // Inset arrival sub-card
-                HStack(spacing: 12) {
-                    ServiceBadge(svc: primary?.no ?? "—", t: t, size: .md)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(primaryHeadline(primary))
-                            .font(t.sans(15, weight: .semibold))
-                            .foregroundStyle(t.fg)
-                        Text(primarySubline(primary))
-                            .font(t.sans(11))
-                            .foregroundStyle(t.dim)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(t.dim)
-                }
-                .padding(14)
-                .background(t.bg.opacity(0.5), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-                if let n = next {
-                    HStack(spacing: 4) {
-                        Text("Then ")
-                            .font(t.sans(12)).foregroundStyle(t.dim)
-                        Text(n.no).font(t.mono(12, weight: .semibold)).foregroundStyle(t.fg)
-                        Text(" \(fmtETA(n.etaSec).big)\(fmtETA(n.etaSec).small)")
-                            .font(t.mono(12)).foregroundStyle(t.dim)
-                        if let third = thirdEta {
-                            Text(" · \(third.big)\(third.small)")
-                                .font(t.mono(12)).foregroundStyle(t.faint)
+            VStack(alignment: .leading, spacing: 12) {
+                headerRow
+                Divider().background(t.line)
+                if visibleServices.isEmpty {
+                    Text(services.isEmpty ? "No live arrivals" : "—")
+                        .font(t.sans(13))
+                        .foregroundStyle(t.faint)
+                        .padding(.vertical, 4)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(visibleServices, id: \.no) { s in
+                            serviceRow(s)
                         }
                     }
                 }
             }
             .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(.plain)
         .pressScale()
     }
 
-    private func trackedFirst() -> Service? {
-        if let tracked = pin.tracked, !tracked.isEmpty {
-            return services.first { tracked.contains($0.no) }
-        }
-        return services.first
-    }
-
-    private func primaryHeadline(_ s: Service?) -> String {
-        guard let s else { return "Loading…" }
-        let eta = fmtETA(s.etaSec)
-        if eta.live { return "Arriving now" }
-        return "In \(eta.big) \(eta.small)"
-    }
-
-    private func primarySubline(_ s: Service?) -> String {
-        guard let s else { return "Tap to open" }
-        return "→ \(s.dest) · \(s.load.label.lowercased())"
-    }
-
-    private var stopName: String {
-        let nick = pin.nickname.trimmingCharacters(in: .whitespaces)
-        if !nick.isEmpty { return nick }
-        let n = DataStore.shared.stopName(pin.code)
-        return n.isEmpty ? pin.code : n
-    }
-}
-
-// MARK: - SecondaryPinCard
-
-struct SoftSecondaryPinCard: View {
-    let t: Theme
-    let pin: Pin
-    let firstService: Service?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LabelPill(text: pin.nickname.isEmpty ? "Pin" : pin.nickname, t: t, variant: .tinted)
-            Text(stopName)
-                .font(t.sans(13, weight: .semibold))
-                .foregroundStyle(t.fg)
-                .lineLimit(2)
-            Spacer(minLength: 0)
-            HStack(spacing: 4) {
-                if let s = firstService {
-                    Text(s.no).font(t.mono(11, weight: .semibold)).foregroundStyle(t.fg)
-                    Text(fmtETA(s.etaSec).big + fmtETA(s.etaSec).small)
-                        .font(t.mono(11)).foregroundStyle(t.dim)
-                } else {
-                    Text("—").font(t.mono(11)).foregroundStyle(t.faint)
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                if showEyebrow {
+                    Text(pin.nickname.uppercased())
+                        .font(t.mono(10, weight: .semibold))
+                        .tracking(1.5)
+                        .foregroundStyle(t.dim)
                 }
+                Text(stopName)
+                    .font(t.sans(18, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(t.dim)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .pressScale()
+    }
+
+    @ViewBuilder
+    private func serviceRow(_ s: Service) -> some View {
+        let eta = fmtETA(s.etaSec)
+        HStack(spacing: 12) {
+            ServiceBadge(svc: s.no, t: t, size: .sm)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    if eta.live {
+                        Text("Arriving now")
+                            .font(t.sans(14, weight: .semibold))
+                            .foregroundStyle(t.accent)
+                    } else {
+                        Text(eta.big)
+                            .font(t.mono(14, weight: .semibold))
+                            .foregroundStyle(t.fg)
+                        Text(eta.small)
+                            .font(t.mono(12))
+                            .foregroundStyle(t.dim)
+                    }
+                }
+                Text("→ \(s.dest)")
+                    .font(t.sans(11))
+                    .foregroundStyle(t.dim)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var stopDataStoreName: String {
+        let n = DataStore.shared.stopName(pin.code)
+        return n.isEmpty ? pin.code : n
     }
 
     private var stopName: String {
+        // Show the actual stop name as the primary title. If a nickname
+        // was supplied it surfaces as the eyebrow above.
+        return stopDataStoreName
+    }
+
+    private var showEyebrow: Bool {
         let nick = pin.nickname.trimmingCharacters(in: .whitespaces)
-        if !nick.isEmpty { return nick }
-        let n = DataStore.shared.stopName(pin.code)
-        return n.isEmpty ? pin.code : n
+        return !nick.isEmpty && nick.caseInsensitiveCompare(stopDataStoreName) != .orderedSame
     }
 }
 

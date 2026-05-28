@@ -1,4 +1,8 @@
 // SoftHomeScreen — Leyne 2.0 Home (Material 3 Android variant).
+//
+// Vertical list of pinned-stop cards. Each card shows the stop name and a
+// compact rundown of its live services so the user can clock multiple
+// buses at the same stop at a glance.
 
 import 'package:flutter/material.dart';
 
@@ -60,38 +64,17 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
                     onNearby: () => widget.onTab(SoftTab.nearby),
                     onSearch: widget.onOpenSearch,
                   )
-                else ...[
-                  _PrimaryPinCard(
-                    pin: pins.first,
-                    services: _liveServices(pins.first.code),
-                    onTap: () => widget.onOpenStop(pins.first.code),
-                  ),
-                  if (pins.length > 1) ...[
-                    const SizedBox(height: 16),
-                    Text('Also pinned',
-                        style: t.sans(13,
-                            weight: FontWeight.w600, color: t.dim)),
-                    const SizedBox(height: 8),
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      mainAxisSpacing: 10,
-                      crossAxisSpacing: 10,
-                      childAspectRatio: 1.2,
-                      children: [
-                        for (final pin in pins.skip(1))
-                          _SecondaryPinCard(
-                            pin: pin,
-                            first: _liveServices(pin.code).firstOrNull,
-                            onTap: () => widget.onOpenStop(pin.code),
-                          ),
-                      ],
+                else
+                  for (final pin in pins) ...[
+                    _PinCard(
+                      pin: pin,
+                      services: _filteredServices(pin),
+                      onTap: () => widget.onOpenStop(pin.code),
                     ),
+                    const SizedBox(height: 12),
                   ],
-                ],
                 if (_showMrtAlert) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 4),
                   _mrtAlert(context),
                 ],
               ],
@@ -159,6 +142,15 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     );
   }
 
+  List<Service> _filteredServices(Pin pin) {
+    final all = _liveServices(pin.code);
+    final tracked = pin.tracked;
+    if (tracked != null && tracked.isNotEmpty) {
+      return all.where((s) => tracked.contains(s.no)).toList();
+    }
+    return all;
+  }
+
   List<Service> _liveServices(String code) {
     final a = DataStore.shared.arrivals[code];
     if (a == null || a.kind != ArrivalStateKind.loaded) return const [];
@@ -174,8 +166,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   }
 }
 
-class _PrimaryPinCard extends StatelessWidget {
-  const _PrimaryPinCard(
+/// Unified pinned-stop card: stop name + compact list of live services.
+/// Replaces the earlier primary/secondary split so multiple buses at the
+/// same stop stack legibly underneath the name.
+class _PinCard extends StatelessWidget {
+  const _PinCard(
       {required this.pin, required this.services, required this.onTap});
   final Pin pin;
   final List<Service> services;
@@ -184,128 +179,109 @@ class _PrimaryPinCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    final primary = services.firstOrNull;
-    final next = services.skip(1).firstOrNull;
-    final eta = primary == null ? null : fmtEta(primary.etaSec);
-    return InkWell(
-      borderRadius: BorderRadius.circular(24),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-            color: t.surface, borderRadius: BorderRadius.circular(24)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            LabelPill(text: pin.nickname.isEmpty ? 'Pinned' : pin.nickname),
-            const SizedBox(height: 12),
-            Text(_stopName(pin),
-                style: t.sans(20, weight: FontWeight.w600, color: t.fg)),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: t.bg.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(18)),
-              child: Row(
+    final visible = services.take(4).toList();
+    final dsName = DataStore.shared.stopName(pin.code);
+    final stopName = dsName.isEmpty ? pin.code : dsName;
+    final nickname = pin.nickname.trim();
+    final showEyebrow = nickname.isNotEmpty &&
+        nickname.toLowerCase() != stopName.toLowerCase();
+
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(22),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  ServiceBadge(
-                      svc: primary?.no ?? '—', size: ServiceBadgeSize.md),
-                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                            eta == null
-                                ? 'Loading…'
-                                : eta.live
-                                    ? 'Arriving now'
-                                    : 'In ${eta.big} ${eta.small}',
-                            style: t.sans(15,
+                        if (showEyebrow) ...[
+                          Eyebrow(nickname),
+                          const SizedBox(height: 2),
+                        ],
+                        Text(stopName,
+                            style: t.sans(18,
                                 weight: FontWeight.w600, color: t.fg)),
-                        if (primary != null)
-                          Text('→ ${primary.dest}',
-                              style: t.sans(11, color: t.dim)),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Icon(Icons.chevron_right, color: t.dim, size: 18),
                 ],
               ),
-            ),
-            if (next != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                'Then ${next.no} ${fmtEta(next.etaSec).big}${fmtEta(next.etaSec).small}',
-                style: t.mono(12, color: t.dim),
-              ),
+              const SizedBox(height: 12),
+              Container(height: 1, color: t.line),
+              const SizedBox(height: 12),
+              if (visible.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                      services.isEmpty ? 'No live arrivals' : '—',
+                      style: t.sans(13, color: t.faint)),
+                )
+              else
+                Column(
+                  children: [
+                    for (var i = 0; i < visible.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 10),
+                      _serviceRow(context, visible[i]),
+                    ],
+                  ],
+                ),
             ],
-          ],
+          ),
         ),
       ),
     );
   }
 
-  String _stopName(Pin pin) {
-    final nick = pin.nickname.trim();
-    if (nick.isNotEmpty) return nick;
-    final n = DataStore.shared.stopName(pin.code);
-    return n.isEmpty ? pin.code : n;
-  }
-}
-
-class _SecondaryPinCard extends StatelessWidget {
-  const _SecondaryPinCard(
-      {required this.pin, required this.first, required this.onTap});
-  final Pin pin;
-  final Service? first;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _serviceRow(BuildContext context, Service s) {
     final t = context.t;
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-            color: t.surface, borderRadius: BorderRadius.circular(20)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            LabelPill(
-                text: pin.nickname.isEmpty ? 'Pin' : pin.nickname,
-                variant: LabelPillVariant.tinted),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Text(
-                pin.nickname.isEmpty
-                    ? DataStore.shared.stopName(pin.code)
-                    : pin.nickname,
-                style: t.sans(13, weight: FontWeight.w600, color: t.fg),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (first != null)
-              Row(
-                children: [
-                  Text(first!.no,
-                      style:
-                          t.mono(11, weight: FontWeight.w600, color: t.fg)),
-                  const SizedBox(width: 4),
-                  Text(
-                      '${fmtEta(first!.etaSec).big}${fmtEta(first!.etaSec).small}',
-                      style: t.mono(11, color: t.dim)),
-                ],
-              )
-            else
-              Text('—', style: t.mono(11, color: t.faint)),
-          ],
+    final eta = fmtEta(s.etaSec);
+    return Row(
+      children: [
+        ServiceBadge(svc: s.no, size: ServiceBadgeSize.sm),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (eta.live)
+                Text('Arriving now',
+                    style: t.sans(14,
+                        weight: FontWeight.w600, color: t.accent))
+              else
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(eta.big,
+                        style: t.mono(14,
+                            weight: FontWeight.w600, color: t.fg)),
+                    const SizedBox(width: 2),
+                    Text(eta.small, style: t.mono(12, color: t.dim)),
+                  ],
+                ),
+              Text('→ ${s.dest}',
+                  style: t.sans(11, color: t.dim),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -340,11 +316,20 @@ class _EmptyState extends StatelessWidget {
           Text('Pin a bus stop to see live arrivals at a glance.',
               style: t.sans(13, color: t.dim)),
           const SizedBox(height: 14),
-          FilledButton(
-            onPressed: onNearby,
-            style: FilledButton.styleFrom(
-                backgroundColor: t.accent, foregroundColor: t.onAccent),
-            child: const Text('Find nearby'),
+          Row(
+            children: [
+              FilledButton(
+                onPressed: onNearby,
+                style: FilledButton.styleFrom(
+                    backgroundColor: t.accent, foregroundColor: t.onAccent),
+                child: const Text('Nearby'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: onSearch,
+                child: const Text('Search'),
+              ),
+            ],
           ),
         ],
       ),
