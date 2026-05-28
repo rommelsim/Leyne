@@ -102,49 +102,57 @@ class LyneTheme {
     return Color(int.parse('FF$s', radix: 16));
   }
 
+  // Leyne 2.0 "Soft" palette — warm dark (#15201C) / warm light
+  // (#F4EFE7) with mint accent. Property names preserved from v1 so
+  // call sites compile unchanged. Cross-mode colours (MRT NE purple,
+  // ME-dot blue) live on the static `LyneSignal` helper below.
   static final LyneTheme dark = LyneTheme(
     isDark: true,
-    bg: _hex('0E0E0A'),
-    surface: _hex('161612'),
-    surfaceHi: _hex('1D1C18'),
-    contrast: _hex('ECE9E0'),
-    contrastFg: _hex('0B0B08'),
-    contrastSurface: _hex('2A251F'),
-    fg: _hex('ECE9E0'),
-    dim: const Color.fromRGBO(236, 233, 224, 0.52),
-    faint: const Color.fromRGBO(236, 233, 224, 0.32),
-    line: const Color.fromRGBO(255, 255, 255, 0.07),
-    lineHi: const Color.fromRGBO(255, 255, 255, 0.14),
-    accent: _hex('5EE597'),
-    live: _hex('5EE597'),
-    liveBg: const Color.fromRGBO(94, 229, 151, 0.14),
-    warn: _hex('E9B04B'),
-    warnBg: const Color.fromRGBO(233, 176, 75, 0.16),
-    crit: _hex('E96A5C'),
-    critBg: const Color.fromRGBO(233, 106, 92, 0.16),
+    bg: _hex('15201C'),
+    surface: _hex('1F2C28'),
+    surfaceHi: _hex('293732'),
+    contrast: _hex('F1EDE7'),
+    contrastFg: _hex('0E2218'),
+    contrastSurface: _hex('293732'),
+    fg: _hex('F1EDE7'),
+    dim: const Color.fromRGBO(241, 237, 231, 0.6),
+    faint: const Color.fromRGBO(241, 237, 231, 0.35),
+    line: const Color.fromRGBO(241, 237, 231, 0.08),
+    lineHi: const Color.fromRGBO(241, 237, 231, 0.14),
+    accent: _hex('8EE6C0'),
+    live: _hex('8EE6C0'),
+    liveBg: _hex('0F2A20'),
+    warn: _hex('F4B870'),
+    warnBg: const Color.fromRGBO(244, 184, 112, 0.16),
+    crit: _hex('F08F7C'),
+    critBg: const Color.fromRGBO(240, 143, 124, 0.16),
   );
 
   static final LyneTheme light = LyneTheme(
     isDark: false,
-    bg: _hex('F7F4ED'),
-    surface: _hex('FFFDF7'),
-    surfaceHi: _hex('F1ECDE'),
-    contrast: _hex('1A1916'),
-    contrastFg: _hex('F2EFE8'),
+    bg: _hex('F4EFE7'),
+    surface: _hex('FFFFFF'),
+    surfaceHi: _hex('EAE3D6'),
+    contrast: _hex('1A201D'),
+    contrastFg: _hex('FFFFFF'),
     contrastSurface: _hex('2A2925'),
-    fg: _hex('171612'),
-    dim: _hex('6D6859'),
-    faint: _hex('A8A192'),
-    line: _hex('E5E0D2'),
-    lineHi: _hex('D8D3C5'),
-    accent: _hex('2BAA67'),
-    live: _hex('2BAA67'),
-    liveBg: _hex('E3F5EA'),
-    warn: _hex('B58A1F'),
-    warnBg: _hex('F6EBC9'),
-    crit: _hex('C44A3A'),
-    critBg: _hex('F7DAD4'),
+    fg: _hex('1A201D'),
+    dim: const Color.fromRGBO(26, 32, 29, 0.6),
+    faint: const Color.fromRGBO(26, 32, 29, 0.35),
+    line: const Color.fromRGBO(26, 32, 29, 0.1),
+    lineHi: const Color.fromRGBO(26, 32, 29, 0.16),
+    accent: _hex('2D7A5A'),
+    live: _hex('2D7A5A'),
+    liveBg: _hex('E8F5EE'),
+    warn: _hex('A0631A'),
+    warnBg: const Color.fromRGBO(160, 99, 26, 0.14),
+    crit: _hex('A4422F'),
+    critBg: const Color.fromRGBO(164, 66, 47, 0.14),
   );
+
+  /// Foreground used on top of `accent` fills. White in light mode,
+  /// near-black mint-tinted in dark.
+  Color get onAccent => isDark ? _hex('0E2218') : _hex('FFFFFF');
 
   /// Material ThemeData built from this palette — wires bg/surface/accent
   /// into the Material 3 colour scheme so stock widgets (AppBar,
@@ -241,4 +249,28 @@ extension LyneThemeContext on BuildContext {
   LyneTheme get t => Theme.of(this).brightness == Brightness.dark
       ? LyneTheme.dark
       : LyneTheme.light;
+}
+
+/// Cross-mode signal colours that don't change between dark and light.
+/// Use for transit-specific overlays (MRT line indicators, "ME" dots).
+class LyneSignal {
+  /// MRT NE-line purple — alert cards and dots.
+  static const Color mrtNE = Color(0xFF9B26B6);
+  /// Live "ME" location dot on maps.
+  static const Color meBlue = Color(0xFF3B82F6);
+}
+
+/// Singapore MRT line palette. Subset for the colours surfaced in
+/// Leyne 2.0; expand as additional lines need annotation.
+enum MRTLine {
+  ew(Color(0xFF009645), 'East-West'),
+  ns(Color(0xFFD42E12), 'North-South'),
+  ne(Color(0xFF9B26B6), 'North-East'),
+  cc(Color(0xFFFA9E0D), 'Circle'),
+  dt(Color(0xFF005EC4), 'Downtown'),
+  te(Color(0xFF9D5B25), 'Thomson-East Coast');
+
+  const MRTLine(this.color, this.displayName);
+  final Color color;
+  final String displayName;
 }

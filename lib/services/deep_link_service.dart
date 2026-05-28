@@ -2,9 +2,9 @@
 //
 // Routes incoming https://lyne.sg/* URIs to in-app destinations:
 //
-//   /stop/{code}            → DetailScreen(stopCode)
-//   /stop/{code}/{busNo}    → DetailScreen(stopCode, initialSelectedNo)
-//   /service/{busNo}        → resolve origin stop, then DetailScreen
+//   /stop/{code}            → SoftStopScreen(stopCode)
+//   /stop/{code}/{busNo}    → SoftStopScreen + SoftBusScreen pushed on top
+//   /service/{busNo}        → resolve origin stop, then the same pair
 //
 // Two entry points:
 //   • getInitialLink — the URI the app was COLD-LAUNCHED with (deeplink
@@ -27,7 +27,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/data_store.dart';
-import '../screens/detail_screen.dart';
+import '../screens/v2/soft_bus_screen.dart';
+import '../screens/v2/soft_stop_screen.dart';
 
 class DeepLinkService {
   DeepLinkService._();
@@ -84,8 +85,7 @@ class DeepLinkService {
         if (segments.length >= 2) {
           final stopCode = segments[1];
           final busNo = segments.length >= 3 ? segments[2] : null;
-          _push(navigatorKey,
-              DetailScreen(stopCode: stopCode, initialSelectedNo: busNo));
+          _pushStopRoute(navigatorKey, stopCode, busNo);
         }
         break;
       case 'service':
@@ -107,13 +107,41 @@ class DeepLinkService {
       GlobalKey<NavigatorState> navigatorKey, String busNo) async {
     final origin = await DataStore.shared.originStop(busNo);
     if (origin == null) return;
-    _push(navigatorKey,
-        DetailScreen(stopCode: origin.busStopCode, initialSelectedNo: busNo));
+    _pushStopRoute(navigatorKey, origin.busStopCode, busNo);
   }
 
-  void _push(GlobalKey<NavigatorState> navigatorKey, Widget screen) {
+  /// Push a SoftStopScreen for the given stop; if a busNo was supplied,
+  /// follow up with a SoftBusScreen so the user lands on the tracking
+  /// view directly. Both pushes share the same Navigator so the user's
+  /// Back gesture pops them one level at a time.
+  void _pushStopRoute(GlobalKey<NavigatorState> navigatorKey, String stopCode,
+      String? busNo) {
     final nav = navigatorKey.currentState;
     if (nav == null) return;
-    nav.push(MaterialPageRoute(builder: (_) => screen));
+    nav.push(MaterialPageRoute(
+      builder: (_) => SoftStopScreen(
+        stopCode: stopCode,
+        onBack: () => nav.pop(),
+        onOpenBus: (svc) => nav.push(MaterialPageRoute(
+          builder: (_) => SoftBusScreen(
+            stopCode: stopCode,
+            svc: svc,
+            onBack: () => nav.pop(),
+          ),
+        )),
+        onSeeAll: () {},
+      ),
+    ));
+    if (busNo != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        nav.push(MaterialPageRoute(
+          builder: (_) => SoftBusScreen(
+            stopCode: stopCode,
+            svc: busNo,
+            onBack: () => nav.pop(),
+          ),
+        ));
+      });
+    }
   }
 }

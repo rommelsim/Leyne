@@ -8,6 +8,31 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Unreleased — Leyne 2.0 "Soft" redesign · 2026-05-29
+
+First execution pass of the Leyne 2.0 redesign from the Claude Design
+handoff bundle (`~/Downloads/leyne-2-0/`, Soft direction). Both
+platforms now carry the new palette; iOS additionally ships a
+behind-a-flag V2 UI layer.
+
+- **New Soft palette.** `ios-native/Leyne/Theme.swift` and
+  `lib/theme.dart` updated in place with the warm dark (`#15201C`) /
+  warm light (`#F4EFE7`) bg + mint accent
+  (`#8EE6C0` dark / `#2D7A5A` light). Property names preserved so
+  existing call sites compile against the new values.
+- **iOS V2 screens behind `leyne.softUI` flag.** New
+  `ios-native/Leyne/V2/` directory containing nine shared primitives
+  (ServiceBadge, LabelPill, SortChipRow, IOSGlassPill, SoftTabBar,
+  RouteTimeline, MapHandoffToast, SoftPrimitives) and six screens
+  (Home / Nearby / Stop / Bus / Search / Settings) wired to real
+  `DataStore` arrivals + `LocationManager` + LTA routes. Toggle with
+  `defaults write com.leyne.Leyne leyne.softUI -bool true`.
+- **MRT line palette.** New `MRTLine` enum + `LyneSignal` namespace
+  (Flutter) / cross-mode `mrtNE` + `meBlue` colours (iOS) for transit
+  overlays that don't change between dark and light.
+- See `specs/leyne-2.0-plan.md` for the full plan, sequencing, and
+  open decisions.
+
 ## 2.2.9+21 — Android (closed testing) · 2026-05-27
 
 Code-review polish pass — bugs/correctness + platform-design alignment.

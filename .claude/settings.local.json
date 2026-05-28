@@ -96,7 +96,8 @@
       "Bash(aapt2 dump *)",
       "Bash(/Users/rommel/Library/Android/sdk/build-tools/*/aapt2 dump *)",
       "Bash(grep -nA1 -E \"forceTestUnitForRelease|#warning\" /Users/rommel/Documents/Leyne/ios-native/Leyne/AdBanner.swift)",
-      "WebFetch(domain:claude.ai)"
+      "WebFetch(domain:claude.ai)",
+      "Bash(xargs basename -a)"
     ]
   }
 }

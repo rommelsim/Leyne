@@ -15,9 +15,10 @@ import 'data/changelog.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'l10n/app_localizations.dart';
-import 'screens/detail_screen.dart';
 import 'screens/onboarding_screen.dart';
-import 'screens/root_scaffold.dart';
+import 'screens/v2/soft_bus_screen.dart';
+import 'screens/v2/soft_root.dart';
+import 'screens/v2/soft_stop_screen.dart';
 import 'screens/whats_new_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
 import 'services/deep_link_service.dart';
@@ -56,29 +57,45 @@ void main() async {
     String? stopCode;
     String? busNo;
     if (kind == 'arrival') {
-      // arrival.<stopCode>.<busNo>
       stopCode = parts[1];
       busNo = parts[2];
     } else if (kind == 'alight') {
-      // alight.<busNo>.<stopName> — the stopCode for routing is the
-      // ALIGHT stop, sourced from the persisted ActiveAlight ride.
       stopCode = AppModel.shared.activeAlight?.stopCode;
       busNo = parts[1];
     }
     if (stopCode == null) return;
     final navigator = _navigatorKey.currentState;
     if (navigator == null) return;
-    // Push onto the root navigator. The deep_link_service uses the
-    // same pattern for https://lyne.sg/stop/<code> URLs — keep them
-    // routing through identical machinery.
     final code = stopCode;
     final no = busNo;
+    // Push the Soft stop screen on the root navigator. If the
+    // payload identifies a specific bus, follow with a SoftBusScreen
+    // push so the user lands directly on the tracking view.
     navigator.push(MaterialPageRoute(
-      builder: (_) => DetailScreen(
+      builder: (_) => SoftStopScreen(
         stopCode: code,
-        initialSelectedNo: no,
+        onBack: () => navigator.pop(),
+        onOpenBus: (svc) => navigator.push(MaterialPageRoute(
+          builder: (_) => SoftBusScreen(
+            stopCode: code,
+            svc: svc,
+            onBack: () => navigator.pop(),
+          ),
+        )),
+        onSeeAll: () {},
       ),
     ));
+    if (no != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        navigator.push(MaterialPageRoute(
+          builder: (_) => SoftBusScreen(
+            stopCode: code,
+            svc: no,
+            onBack: () => navigator.pop(),
+          ),
+        ));
+      });
+    }
   };
   // Initialize the local-notifications plugin (tz database + Android
   // channel) so AppModel can schedule arrival alerts as soon as a pinned
@@ -194,7 +211,7 @@ class _AppRoot extends StatelessWidget {
               onDismiss: AppModel.shared.markWhatsNewSeen,
             );
           }
-          return const RootScaffold();
+          return const SoftRoot();
         }
         return OnboardingScreen(
           onDone: AppModel.shared.finishOnboarding,

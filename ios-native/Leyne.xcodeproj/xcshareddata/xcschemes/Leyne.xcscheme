@@ -79,6 +79,10 @@
             argument = "-screenshots"
             isEnabled = "NO">
          </CommandLineArgument>
+         <CommandLineArgument
+            argument = "-leyne.softUI 1"
+            isEnabled = "NO">
+         </CommandLineArgument>
       </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
