@@ -8,6 +8,51 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## 2.2.9+21 — Android (closed testing) · 2026-05-27
+
+Code-review polish pass — bugs/correctness + platform-design alignment.
+
+- **RouteProgress no longer crashes on empty `route.stops`.** Defensive
+  early-return in `lib/widgets/route_progress.dart` (and iOS sibling
+  in `DetailView.swift`) — `int.clamp(0, -1)` was throwing
+  `ArgumentError` in the unlikely case where a RouteInfo arrived with
+  zero stops (malformed LTA response or bootstrap race). Now renders
+  an empty `SizedBox` instead of taking down the screen.
+- **`refreshNotificationAuth` no longer flips the toggle on
+  `.notDetermined`.** `lib/state/app_model.dart` was treating "the
+  system hasn't been asked yet" the same as "user said no", silently
+  disabling the user's intent during boot-time prompt races. Now only
+  flips off on explicit `.denied` / `.permanentlyDenied`. Mirrors the
+  iOS guard.
+- **Alight notification identifier uses the stop CODE, not the
+  user-facing name.** `lib/services/notifications.dart` was building
+  `alight.<busNo>.<stopName>` — names like "Opp Blk 211" contain
+  spaces and punctuation that would make the payload awkward to parse
+  if it ever became load-bearing for routing. Now uses
+  `alight.<busNo>.<stopCode>`. iOS `AppModel.swift` got the same fix.
+- **Onboarding Back button works on the final (ATT) step.**
+  `lib/screens/onboarding_screen.dart` was leaving `_busy = true`
+  after the ATT Continue tap (the caller drives dismissal), trapping
+  the user with no Back if `AdConsent.gatherThenStart()` stalled. Now
+  matches iOS — Back stays enabled on the final step.
+- **On-bus alert card uses a Material `Switch` instead of a
+  hand-drawn iOS-style sliding pill.** `lib/screens/detail_screen.dart`
+  `_onBusAlertCard` is now a proper Material `Card` + `Switch` row —
+  Android chrome on Android, per platform-design memory. iOS keeps
+  its `TogglePill`.
+- **"BOARD HERE" replaces "YOUR STOP" in iOS RouteProgress.** Both
+  platforms now use the same vocabulary for the three trailing badges
+  (BUS / BOARD HERE / ALIGHT). iOS DetailView also got a small badge
+  for the user's stop, matching Flutter's filled-accent style.
+- **Redundant "VIEWING BUS X → Y" heading row removed (iOS).** The
+  hero card right below shows the same bus number and destination in
+  much larger type — the meta row was duplicate ink.
+- **Arrival notification body drops "head down to the stop" when
+  `walkMin == 0`.** That suffix assumed "user is at the stop", but
+  `walkMin == 0` means "no location fix yet" — read wrong when the
+  user was actually elsewhere. Now just shows the stop label in that
+  case. Both platforms.
+
 ## 2.2.3+12 — iOS (next archive) · 2026-05-26
 ## 2.2.8+20 — Android (closed testing) · 2026-05-26
 

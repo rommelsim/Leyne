@@ -1,8 +1,9 @@
 // Home — hero arrival + compact saved-routes list.
 //
 // Picks the single most-urgent service across all pinned stops (smallest
-// `eta − walk` margin) and promotes it to a full-bleed card. Everything
-// else flows below as compact two-line rows.
+// `eta − walk` margin) and promotes it to a full-bleed card. Every pinned
+// stop (including the hero's own) renders below as a compact two-line card
+// so the rest of the tracked buses at that stop stay visible.
 
 import 'package:flutter/material.dart';
 
@@ -56,9 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (cards.isEmpty) return _emptyState(t);
 
     final hero = _selectHero(visibleCards);
-    final rest = hero == null
-        ? visibleCards
-        : visibleCards.where((c) => c.id != hero.card.id).toList();
+    final rest = visibleCards;
 
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
