@@ -270,6 +270,9 @@ class AppModel extends ChangeNotifier {
       _notificationsEnabled = false;
       _prefs?.setBool(_kNotifKey, false);
       await NotificationsService.shared.clearAll();
+      // Tear down the ongoing tracker too — it can't fire without the
+      // permission, so leaving it (and its in-app "active" state) would lie.
+      await _stopOngoingTracker();
     }
     notifyListeners();
   }
@@ -292,6 +295,7 @@ class AppModel extends ChangeNotifier {
       _notificationsEnabled = false;
       _prefs?.setBool(_kNotifKey, false);
       await NotificationsService.shared.clearAll();
+      await _stopOngoingTracker();
     }
     notifyListeners();
   }
@@ -369,11 +373,6 @@ class AppModel extends ChangeNotifier {
         .firstWhere((m) => m.name == tm, orElse: () => ThemeMode.system);
     final lc = _prefs!.getString(_kLocaleKey);
     _locale = (lc == null || lc.isEmpty) ? null : Locale(lc);
-    // Defaults to true on first run so onboarding's notification step +
-    // the boot-time fallback can fire the system prompt without the user
-    // having to discover Settings → Notifications first. Existing
-    // installs that previously toggled this explicitly (true or false)
-    // keep their stored value.
     // Default OFF: the flag is the persisted result of the permission
     // flow (see setNotificationsEnabled). Defaulting ON would show the
     // toggle enabled before POST_NOTIFICATIONS was ever granted, so no
@@ -401,6 +400,10 @@ class AppModel extends ChangeNotifier {
             jsonDecode(alightRaw) as Map<String, dynamic>);
       } catch (_) {/* corrupt — start empty */}
     }
+    // An ongoing tracker is in-memory only (`_ongoingKey`), so after a cold
+    // start there's nothing driving it — but the OS may still be showing a
+    // stale, frozen notification from the killed session. Clear it.
+    NotificationsService.shared.stopOngoing();
     notifyListeners();
   }
 
@@ -437,6 +440,11 @@ class AppModel extends ChangeNotifier {
     // Pull MRT/LRT disruption alerts on a slow cadence. DataStore
     // enforces a 60 s gate internally so this call is cheap.
     _ds.refreshTrainAlertsIfStale();
+    // Keep the ongoing tracker's ETA current. ETA shows whole minutes, so
+    // a 5 s cadence is plenty and avoids re-`show()`ing every second.
+    if (_ongoingKey != null && tick % 5 == 0) {
+      _refreshOngoing();
+    }
     notifyListeners();
   }
 
@@ -644,6 +652,108 @@ class AppModel extends ChangeNotifier {
     }
     _persistPins();
     notifyListeners();
+  }
+
+  /// Re-arm scheduled arrival alerts after the tracked-set changes (e.g. a
+  /// bell toggle on the stop screen), so it takes effect immediately instead
+  /// of waiting for the next tick. No-op when notifications are globally off.
+  Future<void> rescheduleIfNeeded() async {
+    if (!_notificationsEnabled) return;
+    await NotificationsService.shared
+        .scheduleArrivalAlerts(pins: _pins, cards: allPinnedCards);
+  }
+
+  // ─── Ongoing "live tracking" notification (Android Live Activity analog)
+  // One bus at a time, mirroring iOS's single Live Activity. `_ongoingKey`
+  // is "<busNo>@<stopCode>"; the per-second tick pushes ETA updates.
+  String? _ongoingKey;
+  String? get ongoingKey => _ongoingKey;
+  static String _liveKey(String busNo, String stopCode) => '$busNo@$stopCode';
+
+  bool isOngoingActive({required String busNo, required String stopCode}) =>
+      _ongoingKey == _liveKey(busNo, stopCode);
+
+  // Consecutive ticks where the tracked service was absent from arrivals.
+  // After [_ongoingMaxMisses] we finalise rather than show a frozen ETA
+  // forever (the bus finished its trips, LTA stopped reporting it, etc.).
+  int _ongoingMisses = 0;
+  static const int _ongoingMaxMisses = 3; // ~15 s at the 5 s cadence
+
+  /// Stops the ongoing tracker and clears its in-app state. Idempotent.
+  Future<void> _stopOngoingTracker() async {
+    if (_ongoingKey == null) return;
+    _ongoingKey = null;
+    _ongoingMisses = 0;
+    await NotificationsService.shared.stopOngoing();
+  }
+
+  /// Start (or stop, if already running for this bus) the ongoing tracking
+  /// notification. Caller should only surface this when notifications are
+  /// enabled — without POST_NOTIFICATIONS the OS silently drops it.
+  Future<void> toggleOngoing({
+    required String busNo,
+    required String stopCode,
+    required String stopName,
+  }) async {
+    if (isOngoingActive(busNo: busNo, stopCode: stopCode)) {
+      await _stopOngoingTracker();
+    } else {
+      // Replace any tracker for a different bus (one at a time, like iOS).
+      await NotificationsService.shared.stopOngoing();
+      _ongoingKey = _liveKey(busNo, stopCode);
+      _ongoingMisses = 0;
+      _ds.ensureArrivals(stopCode, force: true);
+      await _refreshOngoing();
+    }
+    notifyListeners();
+  }
+
+  /// Pushes the current ETA into the ongoing notification, or finalises it
+  /// when the bus has arrived. Driven from [_onTick].
+  Future<void> _refreshOngoing() async {
+    final key = _ongoingKey;
+    if (key == null) return;
+    final at = key.indexOf('@');
+    if (at < 0) return;
+    final busNo = key.substring(0, at);
+    final stopCode = key.substring(at + 1);
+    final matches =
+        liveServices(stopCode).where((s) => s.no == busNo).toList();
+    if (matches.isEmpty) {
+      // Data momentarily empty — keep the last shown state, but don't do it
+      // forever: if the service has truly dropped out, finalise the tracker
+      // instead of leaving a frozen ETA pinned indefinitely.
+      _ongoingMisses++;
+      if (_ongoingMisses >= _ongoingMaxMisses) {
+        await NotificationsService.shared.stopOngoing();
+        _ongoingKey = null;
+        _ongoingMisses = 0;
+        notifyListeners();
+      }
+      return;
+    }
+    _ongoingMisses = 0;
+    final s = matches.first;
+    if (s.etaSec <= 0) {
+      await NotificationsService.shared.showOngoing(
+        busNo: s.no,
+        dest: s.dest,
+        stopCode: stopCode,
+        stopName: _ds.stopName(stopCode),
+        etaSec: 0,
+        finished: true,
+      );
+      _ongoingKey = null; // stop updating; leave the final "Arriving now"
+      notifyListeners();
+    } else {
+      await NotificationsService.shared.showOngoing(
+        busNo: s.no,
+        dest: s.dest,
+        stopCode: stopCode,
+        stopName: _ds.stopName(stopCode),
+        etaSec: s.etaSec,
+      );
+    }
   }
 
   void reorderPins(List<String> newCodes) {

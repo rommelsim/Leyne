@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import '../../data/data_store.dart';
 import '../../data/models.dart';
 import '../../services/location_service.dart';
+import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/route_timeline.dart';
 import '../../widgets/v2/soft_components.dart';
@@ -33,12 +34,16 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       DataStore.shared.ensureArrivals(widget.stopCode);
-      final r = await DataStore.shared
-          .route(serviceNo: widget.svc, stopCode: widget.stopCode);
-      if (mounted) setState(() => _route = r);
+      _loadRoute();
     });
+  }
+
+  Future<void> _loadRoute() async {
+    final r = await DataStore.shared
+        .route(serviceNo: widget.svc, stopCode: widget.stopCode);
+    if (mounted) setState(() => _route = r);
   }
 
   @override
@@ -52,30 +57,40 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
             icon: const Icon(Icons.arrow_back), onPressed: widget.onBack),
         title: Text('Bus tracking',
             style: t.sans(18, weight: FontWeight.w500, color: t.fg)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.lock_outline),
-            tooltip: 'Start Live Activity',
-            onPressed: () {
-              // Live Activity equivalent on Android = ongoing notification.
-              // Defer to NotificationsService in a later patch.
-            },
-          ),
-        ],
+        // No Live Activity action: the Android equivalent (an ongoing
+        // notification) isn't built yet, so we don't surface a dead control.
       ),
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: DataStore.shared,
+          // AppModel too: the alert toggle + ongoing-tracking card reflect
+          // its state (isTracked / isOngoingActive / notificationsEnabled).
+          listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
           builder: (context, _) {
+            final m = AppModel.shared;
             final live = _liveService();
-            return ListView(
+            final st = DataStore.shared.arrivals[widget.stopCode];
+            final allNos = st != null && st.kind == ArrivalStateKind.loaded
+                ? st.services.map((s) => s.no).toList()
+                : <String>[];
+            return RefreshIndicator(
+              color: t.accent,
+              onRefresh: () async {
+                await DataStore.shared.refreshArrivals(widget.stopCode);
+                await _loadRoute();
+              },
+              child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
               children: [
                 _compactHeader(context),
                 const SizedBox(height: 16),
                 _arrivalCard(context, live),
-                const SizedBox(height: 16),
-                _liveActivityCard(context),
+                const SizedBox(height: 12),
+                _notifyButton(context, allNos),
+                if (live != null && m.notificationsEnabled) ...[
+                  const SizedBox(height: 12),
+                  _ongoingCard(context, live),
+                ],
                 const SizedBox(height: 16),
                 _mapSection(context),
                 const SizedBox(height: 16),
@@ -87,6 +102,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                     onAlight: (id) => setState(() => _alightId = id),
                   ),
               ],
+            ),
             );
           },
         ),
@@ -181,36 +197,93 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  Widget _liveActivityCard(BuildContext context) {
+  /// Full-width alert toggle for THIS bus — same `toggleTracked` mechanism
+  /// as the stop screen's bells (arrival alert ~1 min before arrival).
+  Widget _notifyButton(BuildContext context, List<String> allNos) {
     final t = context.t;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          color: t.surface, borderRadius: BorderRadius.circular(20)),
-      child: Row(children: [
-        Container(
-          width: 40,
-          height: 40,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-              color: t.liveBg, borderRadius: BorderRadius.circular(12)),
-          child: Icon(Icons.lock_outline, color: t.accent),
+    final on =
+        AppModel.shared.isTracked(code: widget.stopCode, busNo: widget.svc);
+    return InkWell(
+      borderRadius: BorderRadius.circular(99),
+      onTap: () async {
+        AppModel.shared.toggleTracked(
+            code: widget.stopCode, busNo: widget.svc, allNos: allNos);
+        await AppModel.shared.rescheduleIfNeeded();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: on ? t.accent : t.liveBg,
+          borderRadius: BorderRadius.circular(99),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Track in notifications',
-                  style: t.sans(14,
-                      weight: FontWeight.w600, color: t.fg)),
-              Text('Follow Bus ${widget.svc} from your status bar',
-                  style: t.sans(12, color: t.dim)),
-            ],
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(on ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
+                size: 18, color: on ? t.onAccent : t.accent),
+            const SizedBox(width: 8),
+            Text(on ? 'Alert on — tap to cancel' : 'Notify me before it arrives',
+                style: t.sans(14,
+                    weight: FontWeight.w600, color: on ? t.onAccent : t.accent)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Ongoing live-tracking notification toggle — the Android stand-in for
+  /// the iOS Live Activity. Only shown when notifications are enabled (the
+  /// caller gates on `notificationsEnabled`), so it never dead-ends.
+  Widget _ongoingCard(BuildContext context, Service live) {
+    final t = context.t;
+    final on = AppModel.shared
+        .isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode);
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => AppModel.shared.toggleOngoing(
+        busNo: widget.svc,
+        stopCode: widget.stopCode,
+        stopName: DataStore.shared.stopName(widget.stopCode),
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(20),
+          border:
+              on ? Border.all(color: t.accent.withValues(alpha: 0.4)) : null,
+        ),
+        child: Row(children: [
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+                color: on ? t.accent : t.liveBg,
+                borderRadius: BorderRadius.circular(12)),
+            child: Icon(on ? Icons.stop_rounded : Icons.notifications_active_outlined,
+                color: on ? t.onAccent : t.accent),
           ),
-        ),
-        Icon(Icons.chevron_right, color: t.dim),
-      ]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(on ? 'Tracking in notifications' : 'Track in notifications',
+                    style: t.sans(14, weight: FontWeight.w600, color: t.fg)),
+                Text(
+                    on
+                        ? 'In your status bar · updates while Leyne is open'
+                        : 'Follow Bus ${widget.svc} — updates while the app is open',
+                    style: t.sans(12, color: t.dim)),
+              ],
+            ),
+          ),
+          Icon(on ? Icons.check_circle_rounded : Icons.chevron_right,
+              color: on ? t.accent : t.dim),
+        ]),
+      ),
     );
   }
 
@@ -253,6 +326,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
             );
           },
         ),
+        const SizedBox(height: 8),
+        Text(
+            'Bus ${widget.svc}’s live position isn’t shared yet — '
+            'tracking by arrival time.',
+            style: t.mono(10, color: t.faint)),
       ],
     );
   }
@@ -269,11 +347,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                     .copyWith(letterSpacing: 1)),
           ],
         );
+    // No BUS marker: LTA doesn't share this service's live coordinate
+    // (route().busCoord is always null), so we don't claim one on the map.
     return Row(
       children: [
         item(Icons.location_on, t.accent, 'STOP'),
-        const SizedBox(width: 12),
-        item(Icons.directions_bus, t.accent, 'BUS ${widget.svc}'),
         const SizedBox(width: 12),
         item(Icons.my_location, LyneSignal.meBlue, 'YOU'),
       ],

@@ -1,0 +1,4 @@
+- [iOS native architecture](architecture-ios-native.md) — data flow, state singletons, SoftRoot nav stack, inline-everything strategy, theme system
+- [Uncommitted changes 2026-05-29](uncommitted-changes-2026-05-29.md) — pull-to-refresh wiring + UX honesty fixes across iOS V2 views and Flutter onboarding
+- [Parity gaps iOS ↔ Flutter + tech debt](parity-gaps-ios-flutter.md) — what iOS has that Flutter lacks, iOS V2 gaps vs spec, known debt items
+- [Next implementation tasks](next-implementation-tasks.md) — P1-P5 iOS tasks (alight wiring, Live Activity CTA, live bus map, changelog, fonts) + Flutter porting queue

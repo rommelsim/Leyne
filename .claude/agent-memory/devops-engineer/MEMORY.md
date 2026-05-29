@@ -1,0 +1,4 @@
+- [Build & release setup](build-release-setup.md) — what exists for Android AAB and iOS Archive, CI workflow, what is fully manual
+- [Signing & secrets](signing-and-secrets.md) — keystore location/gitignore status, LTA key embedding, AdMob IDs, risk table
+- [Release hygiene gaps](release-hygiene-gaps.md) — versioning split, changelog gaps, CI blind spots, manual ritual risks
+- [Pipeline hardening recommendations](pipeline-hardening-recommendations.md) — P1–P7 concrete steps ranked by impact/effort for solo dev

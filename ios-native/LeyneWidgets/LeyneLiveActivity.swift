@@ -14,18 +14,20 @@ private func dyn(dark: UIColor, light: UIColor) -> Color {
         trait.userInterfaceStyle == .dark ? dark : light
     })
 }
+// V2 "Soft" palette — mirrors Lyne/Theme.swift (Theme.dark / .light).
+// dim alpha nudged to 0.60 to match the app and stay legible on-glass.
 private let ink = dyn(
-    dark:  UIColor(red: 0x0E/255, green: 0x0E/255, blue: 0x0A/255, alpha: 1),
-    light: UIColor(red: 0xF7/255, green: 0xF4/255, blue: 0xED/255, alpha: 1))
+    dark:  UIColor(red: 0x15/255, green: 0x20/255, blue: 0x1C/255, alpha: 1),
+    light: UIColor(red: 0xF4/255, green: 0xEF/255, blue: 0xE7/255, alpha: 1))
 private let paper = dyn(
-    dark:  UIColor(red: 0xEC/255, green: 0xE9/255, blue: 0xE0/255, alpha: 1),
-    light: UIColor(red: 0x17/255, green: 0x16/255, blue: 0x12/255, alpha: 1))
+    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 1),
+    light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 1))
 private let green = dyn(
-    dark:  UIColor(red: 0x5E/255, green: 0xE5/255, blue: 0x97/255, alpha: 1),
-    light: UIColor(red: 0x2B/255, green: 0xAA/255, blue: 0x67/255, alpha: 1))
+    dark:  UIColor(red: 0x8E/255, green: 0xE6/255, blue: 0xC0/255, alpha: 1),
+    light: UIColor(red: 0x2D/255, green: 0x7A/255, blue: 0x5A/255, alpha: 1))
 private let dim = dyn(
-    dark:  UIColor(red: 0xEC/255, green: 0xE9/255, blue: 0xE0/255, alpha: 0.52),
-    light: UIColor(red: 0x6D/255, green: 0x68/255, blue: 0x59/255, alpha: 1))
+    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.60),
+    light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.60))
 
 private func etaText(_ s: LeyneActivityAttributes.ContentState) -> String {
     s.arrived ? "Now" : (s.etaMinutes <= 0 ? "Arr" : "\(s.etaMinutes)")
@@ -44,7 +46,7 @@ struct LeyneLiveActivity: Widget {
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(green, in: RoundedRectangle(cornerRadius: 8))
+                        .background(green, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -88,6 +90,7 @@ struct LeyneLiveActivity: Widget {
                 Text(context.attributes.busNo)
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(green)
+                    .widgetAccentable()
             } compactTrailing: {
                 Text(etaText(context.state) + (context.state.arrived || context.state.etaMinutes <= 0 ? "" : "m"))
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -96,6 +99,7 @@ struct LeyneLiveActivity: Widget {
                 Text(context.attributes.busNo)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(green)
+                    .widgetAccentable()
             }
             .keylineTint(green)
         }
@@ -112,7 +116,7 @@ private struct LockScreenView: View {
                 .font(.system(size: 16, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
                 .frame(width: 46, height: 46)
-                .background(green, in: RoundedRectangle(cornerRadius: 12))
+                .background(green, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("→ \(attributes.dest.uppercased())")
@@ -136,6 +140,7 @@ private struct LockScreenView: View {
                 Text(etaText(state))
                     .font(.system(size: state.arrived ? 22 : 40, weight: .light, design: .monospaced))
                     .foregroundStyle(state.arrived ? green : paper)
+                    .contentTransition(.numericText(countsDown: true))
                 if !state.arrived && state.etaMinutes > 0 {
                     Text("min").font(.system(size: 11, design: .monospaced)).foregroundStyle(dim)
                 }

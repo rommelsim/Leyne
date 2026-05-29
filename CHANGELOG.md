@@ -51,6 +51,87 @@ default (and only) path on iOS and Android — the original
   alerts / N alerts" instead of the misleading "Track all".
 - **Audio session fix (iOS).** `Feedback` no longer forces
   `setActive(true)`, which was interrupting background music on launch.
+- **Live Activity entry point in V2 (iOS).** `SoftBusView` now shows a
+  Start/Stop Live Activity row wired to the existing
+  `AppModel.toggleLiveActivity(...)` engine (15 s LTA polling, stops-away,
+  auto-end on arrival, relaunch restore — already used by V1
+  `DetailView`). The previous comment claiming "ActivityKit isn't wired"
+  was stale; the only missing piece was this surface. The row reflects
+  live on/off state and is hidden when there's no arriving service or the
+  user has disabled Live Activities system-wide, so it never dead-ends.
+- **WidgetKit surfaces aligned to the Soft palette (iOS).** Both the Home
+  Screen widget (`LeyneStopWidget`) and the Live Activity
+  (`LeyneLiveActivity`) had inline palettes left over from the pre-Soft
+  theme (bg `#0E0E0A`/`#F7F4ED`, mint `#5EE597`/`#2BAA67`). Repointed every
+  token at the current `Theme.swift` Soft values (bg `#15201C`/`#F4EFE7`,
+  accent `#8EE6C0`/`#2D7A5A`, solid `liveBg`), nudging `dim`/`faint` alpha
+  up for small-text legibility on-glass. Per UX direction: `.continuous`
+  corners throughout; `.widgetAccentable` on the semantic elements (arriving
+  ETA, mint arriving pill, the pinned `bookmark` glyph, compact/minimal bus
+  number) so meaning survives StandBy / Lock-Screen monochrome tint; a
+  numeric content-transition on the Live Activity countdown; Small-widget
+  stop name bumped 12→13pt. Deferred (P2): swapping the Unicode `→` for an
+  SF Symbol arrow.
+- **Android V2 parity pass (Flutter).** Closed several iOS↔Android gaps a
+  cross-platform UX review surfaced: (1) **pull-to-refresh** on Home / Stop /
+  Bus via a new awaitable `DataStore.refreshArrivals(code)` (Home refreshes
+  all pins concurrently); (2) Home pin card hides the chip when there's no
+  real nickname instead of showing a redundant "PIN" (matches iOS); (3)
+  Settings **Notifications** row now pushes the real `NotificationsScreen`,
+  and the dead **Routines** section + **Language** row (no destinations, not
+  on iOS) were removed; (4) removed the dead "Track in notifications" Live
+  Activity card and the no-op AppBar lock button on the Bus screen — the
+  Android ongoing-notification equivalent isn't built yet, so no dead
+  affordance; (5) the bus map drops the phantom "BUS N" legend entry (LTA
+  never shares that coordinate) for the same honest caption iOS uses.
+- **Android stop alert controls (Flutter).** Closed the largest parity gap:
+  the V2 stop screen now lets you choose which buses alert you, matching iOS
+  in capability via Material-native controls. Per-bus **bell** `IconButton`
+  on each row + primary card (tracked rows get a `liveBg` tint + left accent
+  rule — two non-colour cues), an AppBar **master bell** (alert-all / clear),
+  a `SegmentedButton` Soonest/Bus-no. sort, a discovery hint, and a
+  `warnBg` banner with an "Enable" action when notifications are globally
+  off. The FAB is gone — pinning is now implicit (first bell pins, last
+  untap unpins), matching iOS's `pinned ⟺ ≥1 tracked bus` invariant. This
+  reuses the existing `toggleTracked` / `setAllTracked` / `isTracked` APIs
+  (so it also drives the Home card's tracked subset — by design) plus one
+  new `AppModel.rescheduleIfNeeded()` that re-arms the scheduler immediately
+  after a toggle. Per UX, the per-bus model was chosen over iOS-style
+  independent alerts because both platforms already share the same
+  `Pin.tracked` data model — iOS just had the UI wired first.
+- **Android bus notify button + ongoing live-tracking notification
+  (Flutter).** The bus screen gains a full-width arrival-alert toggle
+  (same `toggleTracked` mechanism as the stop bells), closing the last
+  notify-button parity gap. And the Android stand-in for the iOS Live
+  Activity is now built: a silent, ongoing notification (new low-importance
+  `leyne.tracking` channel) that follows one bus's ETA, started from a
+  "Track in notifications" card on the bus screen (shown only when
+  notifications are enabled, so it never dead-ends). `AppModel.toggleOngoing`
+  manages a single tracker; the 1 s tick pushes ETA updates every ~5 s and
+  finalises to a dismissable "Arriving now" when the bus arrives; tapping it
+  deep-links back to the bus (new `track.<stop>.<bus>` payload). **Known
+  limit:** updates run while the app process is alive — a fully background
+  tracker needs a native foreground service (not built yet); the `ongoing`
+  flag still pins it in the shade until arrival/stop.
+- **Post-review hardening (team review fixes).** Ongoing-tracker leak fixed:
+  it's now torn down when notifications are disabled/denied and on cold start
+  (it was in-memory only, so the OS could otherwise keep showing a stale,
+  frozen notification). `_refreshOngoing` finalises after ~15 s of the
+  service being absent instead of pinning a frozen ETA forever; starting a
+  tracker for a different bus now explicitly replaces the prior one.
+  `clearAll`/`cancelAlightAlerts` gained `_initialized` guards (mirroring
+  `scheduleArrivalAlerts`) so a pre-init toggle can't crash. iOS: the two
+  missed `.widgetAccentable` modifiers (Large widget `bookmark`, service-row
+  ETA numeral) added so the arriving signal survives StandBy tinting. The
+  stop screen's master bell now reflects all-tracked vs partial honestly, and
+  the ongoing-tracking card copy states updates run "while the app is open".
+- **iOS-native CI + tests.** Added a third CI job (`ios-native`) that
+  `xcodebuild`s the SwiftUI app + LeyneWidgets extension on every push —
+  previously the iOS CI job only built the Flutter wrapper, so Swift/widget/
+  Live-Activity errors were invisible until Xcode. Added
+  `test/ongoing_tracking_test.dart` covering the ongoing-tracker lifecycle
+  (activate/replace/disable-clears), `setAllTracked` edge cases, and
+  `rescheduleIfNeeded` (Flutter suite now 91 passing).
 - **Tests realigned.** Flutter suite green (83 passing): onboarding
   tests follow the 6-step no-Skip flow, the empty-state and settings
   copy match V2, and the notification toggle path mocks the

@@ -1,1 +1,4 @@
 - [Leyne Design System & V2 Audit](project_leyne_design_system.md) — tokens, platform conventions, V2 Soft status, known issues from 2026-05-29 audit
+- [Widget Soft Spec](project_widget_soft_spec.md) — full token mapping (old inline hex → Soft hex), widgetAccentable rules, typography/shape corrections, per-surface notes, P0/P1/P2 priority ranking for WidgetKit alignment
+- [iOS ↔ Android Parity Map](project_parity_map.md) — per-flow parity status, idiom-bleed violations, and prioritized punch list (audited 2026-05-29)
+- [Android Stop Alert Spec](project_android_stop_alerts.md) — model decision, Material interaction spec, copy, build plan for GAP 7 (P0 stop-screen alert controls)

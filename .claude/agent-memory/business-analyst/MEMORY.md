@@ -1,1 +1,4 @@
-- [Leyne product overview](project_leyne_overview.md) — what the app is, platforms, data source, solo-developer constraint, 2.0 redesign state
+- [Leyne product overview](project_leyne_overview.md) — what the app is, platforms, data source, solo-developer constraint, 2.0 redesign state, full feature inventory
+- [Value proposition and target user](project_value_prop.md) — commuter calm, transparency differentiator, Singapore-only, ad-supported ceiling
+- [Business gaps and opportunities](project_gaps_opportunities.md) — V2 flag removal, Live Activity entry point, onboarding funnel, retention, monetization options
+- [Open requirements](project_open_requirements.md) — REQ-01 through REQ-05: decisions that must be made before specific build tasks proceed

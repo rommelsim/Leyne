@@ -50,6 +50,18 @@ class NotificationsService {
   /// any unrelated requests that happen to live in the pending queue.
   static const String _idPrefix = 'arrival.';
 
+  /// Separate low-importance channel for the ongoing "live tracking"
+  /// notification (the Android stand-in for an iOS Live Activity). Low
+  /// importance + silent so the per-tick ETA updates never buzz.
+  static const String _trackChannelId = 'leyne.tracking';
+  static const String _trackChannelName = 'Live tracking';
+  static const String _trackChannelDescription =
+      'An ongoing notification that follows a bus you are tracking.';
+  static const String _trackIdPrefix = 'track.';
+  // Fixed id — only one tracker runs at a time (mirrors iOS's single Live
+  // Activity), so re-`show()`ing this id updates the existing notification.
+  static const int _ongoingNotifId = 0x7e1ea0;
+
   /// Fire offset before the live arrival time (seconds). 60 matches the
   /// design's "1 min" framing.
   static const int _leadSec = 60;
@@ -124,6 +136,87 @@ class NotificationsService {
         playSound: true,
       ),
     );
+
+    // Silent, low-importance channel for the ongoing live-tracking
+    // notification — updates must not vibrate or ping every tick.
+    await androidImpl?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _trackChannelId,
+        _trackChannelName,
+        description: _trackChannelDescription,
+        importance: Importance.low,
+        enableVibration: false,
+        playSound: false,
+      ),
+    );
+  }
+
+  // ─── Ongoing "live tracking" notification (Live Activity analog) ──
+  //
+  // Shows a persistent, silent notification that follows one bus's ETA.
+  // Re-call [showOngoing] with a fresh `etaSec` to update it in place
+  // (the fixed id + `onlyAlertOnce` keep it quiet). Updates are driven
+  // from AppModel's 1 s tick, so the countdown stays live WHILE THE APP
+  // IS RUNNING. A fully background tracker (updates after the OS suspends
+  // the isolate) would need a native foreground service — not built yet;
+  // the `ongoing` flag still pins it in the shade until the bus arrives
+  // or the user stops tracking.
+
+  /// Show or update the ongoing tracker. Pass `finished: true` when the
+  /// bus has arrived — that flips it to a dismissable, non-ongoing final
+  /// state ("Arriving now") instead of a live countdown.
+  Future<void> showOngoing({
+    required String busNo,
+    required String dest,
+    required String stopCode,
+    required String stopName,
+    required int etaSec,
+    bool finished = false,
+  }) async {
+    if (!_initialized) return;
+    final mins = (etaSec / 60).ceil();
+    final body = etaSec <= 0
+        ? 'Arriving now · $stopName'
+        : 'Arrives in $mins min · $stopName';
+    try {
+      await _plugin.show(
+        _ongoingNotifId,
+        'Bus $busNo → $dest',
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _trackChannelId,
+            _trackChannelName,
+            channelDescription: _trackChannelDescription,
+            importance: Importance.low,
+            priority: Priority.low,
+            ongoing: !finished,
+            autoCancel: finished,
+            onlyAlertOnce: true,
+            showWhen: false,
+            category: AndroidNotificationCategory.transport,
+            ticker: 'Tracking bus $busNo',
+          ),
+          iOS: const DarwinNotificationDetails(
+            presentAlert: false,
+            presentBadge: false,
+            presentSound: false,
+          ),
+        ),
+        payload: '$_trackIdPrefix$stopCode.$busNo',
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        // ignore: avoid_print
+        print('[notif] ongoing show failed: $e');
+      }
+    }
+  }
+
+  /// Cancels the ongoing tracker.
+  Future<void> stopOngoing() async {
+    if (!_initialized) return;
+    await _plugin.cancel(_ongoingNotifId);
   }
 
   /// Reads the system `POST_NOTIFICATIONS` permission state. Android
@@ -170,6 +263,7 @@ class NotificationsService {
 
   /// Cancels every pending arrival alert we own.
   Future<void> clearAll() async {
+    if (!_initialized) return;
     final pending = await _plugin.pendingNotificationRequests();
     for (final r in pending) {
       // Our notification ids are integer hashes of "arrival.<stop>.<no>";
@@ -251,6 +345,7 @@ class NotificationsService {
 
   /// Cancels every pending alight alert we own.
   Future<void> cancelAlightAlerts() async {
+    if (!_initialized) return;
     final pending = await _plugin.pendingNotificationRequests();
     for (final r in pending) {
       if (r.payload != null && r.payload!.startsWith(_alightIdPrefix)) {

@@ -1,37 +1,41 @@
 ---
 name: project-risks
-description: "Key risks and dependencies for shipping Leyne V2 — likelihood, impact, and mitigations."
+description: "Key risks and dependencies for shipping Leyne V2 — likelihood, impact, and mitigations. Updated 2026-05-30."
 metadata:
   type: project
 ---
 
-## Top risks as of 2026-05-29
+## Top risks as of 2026-05-30
 
-### R1 — Uncommitted work lost (Likelihood: Medium, Impact: High)
-Eight modified files across iOS and Flutter have never been staged or committed. A git checkout, Xcode clean, or accidental discard would silently destroy the pull-to-refresh wiring, audio session fix, and onboarding parity change.
-**Mitigation:** Commit immediately before doing anything else.
+### R1 — Large uncommitted cross-cutting work lost (Likelihood: High, Impact: High)
+14 modified files span iOS widgets, Flutter stop/bus/home/settings screens, notification service, app model, and data store. A git checkout, Xcode clean, or accidental discard would silently destroy all of it. This is significantly larger than the prior session's 8-file risk.
+**Mitigation:** Commit before anything else. Split into logical chunks (iOS widget palette, Android parity pass, Android notifications) rather than one giant commit — reduces blame confusion and makes bisect viable.
 
-### R2 — V2 ships without flag removal (Likelihood: Medium, Impact: Medium)
-The V2 Soft UI is behind a `leyne.softUI` `UserDefaults` toggle on iOS and a flag branch in `lib/main.dart`. If an archive is cut before removing the flag, production users get the old V1 UI and reviewers won't see the redesign.
-**Mitigation:** Confirm flag removal strategy (flip default-on or delete old paths) before the next Archive/AAB.
+### R2 — No version bump before large cross-platform change (Likelihood: High, Impact: Medium)
+Both iOS (2.2.3+12) and Flutter (2.2.9+21) versions have not been bumped despite significant new functionality (stop alerts, bus notify, ongoing notification, settings wiring). If an Archive or AAB is cut from uncommitted state without a version bump, either App Store Connect rejects a duplicate build number or the release has no version differentiation.
+**Mitigation:** Bump iOS MARKETING_VERSION/CURRENT_PROJECT_VERSION in `project.pbxproj` and Flutter `pubspec.yaml` as part of the commit sequence, before any build.
 
-### R3 — iOS version mismatch between working tree and App Store Connect (Likelihood: Low, Impact: Medium)
-Current `project.pbxproj` is at 2.2.3+12. If a prior build was uploaded at the same version but different code, App Store Connect will reject the duplicate build number.
-**Mitigation:** Bump MARKETING_VERSION / CURRENT_PROJECT_VERSION in `project.pbxproj` before each Archive. Check CHANGELOG.md to see what +12 previously uploaded.
+### R3 — Android ongoing notification is foreground-only (Likelihood: High, Impact: Medium)
+The "Live Activity analog" for Android updates the ongoing notification only while the app is in the foreground. A user who pins a stop and backgrounds the app gets a stale or missing notification. This was documented as a known limitation but represents a material gap from the iOS Live Activity (which updates independently).
+**Mitigation:** Accepted limitation for now; must be documented in release notes. True fix requires a foreground service (Android `Service` + `startForeground`), which is a substantial engineering task. Do not ship without noting the limitation.
 
-### R4 — Flutter `onboarding_screen.dart` onDone removal breaks cold-start launch (Likelihood: Low, Impact: High)
-The in-flight Flutter change removes the `onDone` callback from `OnboardingScreen`. The `main.dart` diff removes it from the call site too, which is consistent. But `getNotificationAppLaunchDetails` cold-start path in `main.dart` must still correctly dismiss onboarding via `AppModel.shared.finishOnboarding`. Needs a quick smoke test after commit.
-**Mitigation:** Run onboarding flow end-to-end on Android after committing. Confirm the ATT/consent step still dismisses the screen.
+### R4 — Untested new notification logic (Likelihood: Medium, Impact: High)
+`lib/services/notifications.dart` has new ongoing notification logic that was not unit-tested in this session (83 existing tests pass, but these cover pre-existing paths). The notification permission state, channel registration, and update-on-foreground paths have no automated coverage.
+**Mitigation:** Add at minimum a smoke test for the happy path (notification created, updated, cancelled) via a MockNotificationsPlugin. Run on a real Android device before AAB upload.
 
-### R5 — Dead code / V1 screens inflating binary (Likelihood: High, Impact: Low)
-`AddStopSheet.swift` is acknowledged dead code. V1 screens (`HomeView`, `NearbyView`, `DetailView`) remain in the build graph even after V2 is the default. Not a ship-blocker but adds confusion and binary weight.
-**Mitigation:** Delete dead V1 screen files after V2 flag is removed and the build verifies clean.
+### R5 — iOS `ios-native/` has zero CI coverage (Likelihood: High, Impact: Medium)
+The CI iOS job builds the Flutter wrapper, not the SwiftUI native app. The newly wired Live Activity CTA and widget palette changes have no automated build validation. A broken `ios-native/` build would only surface at the next manual Archive.
+**Mitigation:** Add an `xcodebuild` job (`generic/platform=iOS Simulator`, `CODE_SIGNING_REQUIRED=NO`) to CI. Recs saved in `.claude/agent-memory/devops-engineer/`.
 
-### R6 — Android exact-alarm permission regression (Likelihood: Low, Impact: High)
-Must use `SCHEDULE_EXACT_ALARM` (not `USE_EXACT_ALARM`) in `AndroidManifest.xml`. Play Console rejects the latter for non-alarm/calendar apps. If anyone edits the manifest without checking this, a closed-testing upload will be auto-rejected.
-**Mitigation:** The build script enforces the right flag. Never change `USE_EXACT_ALARM` → `SCHEDULE_EXACT_ALARM` without re-reading the Play policy.
+### R6 — Commit scope too large (Likelihood: Medium, Impact: Low)
+14 files across iOS and Flutter touching widgets, screens, notifications, and data model in one uncommitted blob makes the commit history unreadable and git bisect unusable if a regression surfaces post-ship.
+**Mitigation:** Split into at minimum 3 commits: (1) iOS widget/LA palette + CTA wiring, (2) Android parity pass (stop/home/settings), (3) Android bus notify + ongoing notification.
 
-**Why:** Capturing these now so future sessions don't re-litigate settled decisions or miss a ship-blocking check.
+### R7 — Android exact-alarm permission regression (Likelihood: Low, Impact: High)
+Must use `SCHEDULE_EXACT_ALARM` (not `USE_EXACT_ALARM`) in `AndroidManifest.xml`. Play Console rejects the latter for non-alarm/calendar apps.
+**Mitigation:** The build script enforces the right flag. Never change without re-reading Play policy.
+
+**Why:** Updated post-session to reflect the larger uncommitted scope and new notification risk.
 **How to apply:** Run through R1–R4 at the start of any session that touches a build or flag removal.
 
-Related: [[project-status]], [[native-rewrite-status]]
+Related: [[project-status]], [[next-actions]]

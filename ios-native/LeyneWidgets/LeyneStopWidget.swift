@@ -21,20 +21,24 @@ private func dyn(light: UIColor, dark: UIColor) -> Color {
         trait.userInterfaceStyle == .dark ? dark : light
     })
 }
-private let wBg      = dyn(light: UIColor(red: 0xF7/255, green: 0xF4/255, blue: 0xED/255, alpha: 1),
-                            dark:  UIColor(red: 0x0E/255, green: 0x0E/255, blue: 0x0A/255, alpha: 1))
-private let wFg      = dyn(light: UIColor(red: 0x17/255, green: 0x16/255, blue: 0x12/255, alpha: 1),
-                            dark:  UIColor(red: 0xEC/255, green: 0xE9/255, blue: 0xE0/255, alpha: 1))
-private let wDim     = dyn(light: UIColor(red: 0x6D/255, green: 0x68/255, blue: 0x59/255, alpha: 1),
-                            dark:  UIColor(red: 0xEC/255, green: 0xE9/255, blue: 0xE0/255, alpha: 0.52))
-private let wFaint   = dyn(light: UIColor(red: 0xA8/255, green: 0xA1/255, blue: 0x92/255, alpha: 1),
-                            dark:  UIColor(red: 0xEC/255, green: 0xE9/255, blue: 0xE0/255, alpha: 0.32))
-private let wLine    = dyn(light: UIColor(red: 0xE5/255, green: 0xE0/255, blue: 0xD2/255, alpha: 1),
-                            dark:  UIColor.white.withAlphaComponent(0.07))
-private let wLive    = dyn(light: UIColor(red: 0x2B/255, green: 0xAA/255, blue: 0x67/255, alpha: 1),
-                            dark:  UIColor(red: 0x5E/255, green: 0xE5/255, blue: 0x97/255, alpha: 1))
-private let wLiveBg  = dyn(light: UIColor(red: 0xE3/255, green: 0xF5/255, blue: 0xEA/255, alpha: 1),
-                            dark:  UIColor(red: 0x5E/255, green: 0xE5/255, blue: 0x97/255, alpha: 0.14))
+// V2 "Soft" palette — values mirror Lyne/Theme.swift (Theme.dark / .light).
+// dim/faint alphas are nudged up vs the app (0.60 / 0.45) for legibility at
+// widget scale on unpredictable wallpapers; liveBg is the solid Soft fill
+// (not the old alpha overlay).
+private let wBg      = dyn(light: UIColor(red: 0xF4/255, green: 0xEF/255, blue: 0xE7/255, alpha: 1),
+                            dark:  UIColor(red: 0x15/255, green: 0x20/255, blue: 0x1C/255, alpha: 1))
+private let wFg      = dyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 1),
+                            dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 1))
+private let wDim     = dyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.60),
+                            dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.60))
+private let wFaint   = dyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.45),
+                            dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.45))
+private let wLine    = dyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.10),
+                            dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.08))
+private let wLive    = dyn(light: UIColor(red: 0x2D/255, green: 0x7A/255, blue: 0x5A/255, alpha: 1),
+                            dark:  UIColor(red: 0x8E/255, green: 0xE6/255, blue: 0xC0/255, alpha: 1))
+private let wLiveBg  = dyn(light: UIColor(red: 0xE8/255, green: 0xF5/255, blue: 0xEE/255, alpha: 1),
+                            dark:  UIColor(red: 0x0F/255, green: 0x2A/255, blue: 0x20/255, alpha: 1))
 
 // ─── Shared App Group (pins published by the app) ─────────
 private enum WGroup {
@@ -242,7 +246,7 @@ private struct SmallStopView: View {
             let arriving = (next.eta1 ?? 99) <= 1
             VStack(alignment: .leading, spacing: 0) {
                 Text(block.name)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(wFg).lineLimit(1)
 
                 Spacer(minLength: 4)
@@ -256,6 +260,9 @@ private struct SmallStopView: View {
                         .font(.system(size: etaLabel(next.eta1) == "Arr" ? 30 : 40,
                                       weight: .medium, design: .monospaced))
                         .foregroundStyle(arriving ? wLive : wFg)
+                        // Arriving is the primary signal — keep it tinted (not
+                        // desaturated) under StandBy / Lock Screen accenting.
+                        .widgetAccentable(arriving)
                     if etaLabel(next.eta1) != "Arr" {
                         Text("min").font(.system(size: 13)).foregroundStyle(wDim)
                     }
@@ -299,6 +306,7 @@ private struct WServiceRow: View {
             Capsule()
                 .fill(arriving ? wLive : Color.clear)
                 .frame(width: 3, height: 20)
+                .widgetAccentable(arriving)
 
             Text(row.id)
                 .font(.system(size: 16, weight: .bold, design: .monospaced))
@@ -313,20 +321,21 @@ private struct WServiceRow: View {
                         .font(.system(size: etaLabel(row.eta1) == "Arr" ? 17 : 22,
                                       weight: .medium, design: .monospaced))
                         .foregroundStyle(arriving ? wLive : wFg)
+                        .widgetAccentable(arriving)
                     if etaLabel(row.eta1) != "Arr" {
                         Text("m").font(.system(size: 9)).foregroundStyle(wDim)
                     }
                 }
                 if let eta2 = row.eta2 {
                     Text("then \(etaLabel(eta2))\(eta2 <= 0 ? "" : "m")")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(wFaint)
                 }
             }
         }
         .padding(.vertical, 3).padding(.horizontal, 4)
         .background(arriving ? wLiveBg : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6))
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -344,6 +353,7 @@ private struct MediumStopView: View {
                     Image(systemName: "bookmark.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(wLive)
+                        .widgetAccentable()
                     Text(block.name)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(wFg)
@@ -407,6 +417,7 @@ private struct LargeCommuteView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "bookmark.fill")
                         .font(.system(size: 10)).foregroundStyle(wLive)
+                        .widgetAccentable()
                     Text(block.name)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(wFg).lineLimit(1)

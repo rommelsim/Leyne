@@ -57,3 +57,22 @@ jobs:
       # compiles. analyze + test already ran on the Android job (they're
       # platform-agnostic), so this job stays lean on the costly runner.
       - run: flutter build ios --no-codesign --debug
+
+  ios-native:
+    name: iOS native build (SwiftUI app + widgets)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The active iOS product is the native SwiftUI app under ios-native/,
+      # NOT the Flutter wrapper the `ios` job builds. Nothing else compiles
+      # this target, so a Swift error — or a broken widget extension / Live
+      # Activity — is invisible until someone opens Xcode. This compiles the
+      # app + LeyneWidgets extension on every push. No signing needed.
+      - name: Build ios-native (app + LeyneWidgets extension)
+        run: |
+          xcodebuild build \
+            -project ios-native/Leyne.xcodeproj \
+            -scheme Leyne \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO

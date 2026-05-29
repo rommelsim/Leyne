@@ -63,7 +63,13 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
           ]),
           builder: (context, _) {
             final pins = AppModel.shared.pins;
-            return ListView(
+            return RefreshIndicator(
+              color: context.t.accent,
+              onRefresh: () => Future.wait(
+                pins.map((p) => DataStore.shared.refreshArrivals(p.code)),
+              ),
+              child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
                 _header(context),
@@ -85,6 +91,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
                   ],
                 ..._mrtAlertCards(context),
               ],
+            ),
             );
           },
         ),
@@ -241,9 +248,11 @@ class _PinCard extends StatelessWidget {
     final dsName = DataStore.shared.stopName(pin.code);
     final stopName = dsName.isEmpty ? pin.code : dsName;
     final nick = pin.nickname.trim();
+    // Empty when there's no real nickname — the card then shows no chip
+    // rather than a redundant "PIN" label. Matches iOS SoftPinCard.
     final chip = (nick.isEmpty ||
             nick.toLowerCase() == stopName.toLowerCase())
-        ? 'PIN'
+        ? ''
         : nick.toUpperCase();
 
     return Material(
@@ -286,17 +295,19 @@ class _PinCard extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: t.liveBg,
-            borderRadius: BorderRadius.circular(99),
+        if (chip.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: t.liveBg,
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Text(chip,
+                style: t.mono(10, weight: FontWeight.w600, color: t.accent)
+                    .copyWith(letterSpacing: 0.8)),
           ),
-          child: Text(chip,
-              style: t.mono(10, weight: FontWeight.w600, color: t.accent)
-                  .copyWith(letterSpacing: 0.8)),
-        ),
-        const SizedBox(width: 8),
+          const SizedBox(width: 8),
+        ],
         Expanded(
           child: Text(stopName,
               style: t.sans(17, weight: FontWeight.w600, color: t.fg),

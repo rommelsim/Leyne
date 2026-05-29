@@ -56,7 +56,7 @@ void main() async {
     final kind = parts[0];
     String? stopCode;
     String? busNo;
-    if (kind == 'arrival') {
+    if (kind == 'arrival' || kind == 'track') {
       stopCode = parts[1];
       busNo = parts[2];
     } else if (kind == 'alight') {

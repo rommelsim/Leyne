@@ -395,38 +395,52 @@ class DataStore extends ChangeNotifier {
       _arrivals[code] = ArrivalState.loading();
       notifyListeners();
     }
+    _fetchArrivals(code);
+  }
 
-    () async {
-      try {
-        final resp = await _api.busArrival(code);
-        final mapped = resp.services
-            .where((s) => s.nextBus.hasData)
-            .map((s) => s.toService(
-                destName: stopName(s.nextBus.destinationCode ?? '')))
-            .toList()
-          ..sort((a, b) => a.etaSec.compareTo(b.etaSec));
-        _arrivals[code] = mapped.isEmpty
-            ? ArrivalState.empty()
-            : ArrivalState.loaded(mapped);
-        _lastFetched[code] = DateTime.now();
-      } on LtaException catch (e) {
-        final prev = _arrivals[code];
-        if (prev == null || prev.kind == ArrivalStateKind.loading) {
-          _arrivals[code] = ArrivalState.error(e.message);
-        }
-      } catch (_) {
-        final prev = _arrivals[code];
-        if (prev == null || prev.kind == ArrivalStateKind.loading) {
-          _arrivals[code] = ArrivalState.error('Couldn’t reach LTA');
-        }
-      } finally {
-        _inflight.remove(code);
-        // Nearby rows hold their own service lists; refresh them so any
-        // newly-loaded arrivals propagate.
-        if (_lastLoc != null) _recomputeNearby();
-        notifyListeners();
+  /// Awaitable force-refresh for pull-to-refresh. Always hits the network
+  /// (bypasses the freshness window) and completes when the fetch settles,
+  /// so a [RefreshIndicator] can hold its spinner for the real duration.
+  /// Mirrors the iOS `DataStore.refreshArrivals(stop:)`.
+  Future<void> refreshArrivals(String code) async {
+    if (_inflight.contains(code)) return;
+    _inflight.add(code);
+    await _fetchArrivals(code);
+  }
+
+  /// Shared network body for [ensureArrivals] / [refreshArrivals]. The caller
+  /// owns the `_inflight` add; this clears it in `finally`. On error an
+  /// existing `.loaded` result is preserved (we don't blank good data).
+  Future<void> _fetchArrivals(String code) async {
+    try {
+      final resp = await _api.busArrival(code);
+      final mapped = resp.services
+          .where((s) => s.nextBus.hasData)
+          .map((s) => s.toService(
+              destName: stopName(s.nextBus.destinationCode ?? '')))
+          .toList()
+        ..sort((a, b) => a.etaSec.compareTo(b.etaSec));
+      _arrivals[code] = mapped.isEmpty
+          ? ArrivalState.empty()
+          : ArrivalState.loaded(mapped);
+      _lastFetched[code] = DateTime.now();
+    } on LtaException catch (e) {
+      final prev = _arrivals[code];
+      if (prev == null || prev.kind == ArrivalStateKind.loading) {
+        _arrivals[code] = ArrivalState.error(e.message);
       }
-    }();
+    } catch (_) {
+      final prev = _arrivals[code];
+      if (prev == null || prev.kind == ArrivalStateKind.loading) {
+        _arrivals[code] = ArrivalState.error('Couldn’t reach LTA');
+      }
+    } finally {
+      _inflight.remove(code);
+      // Nearby rows hold their own service lists; refresh them so any
+      // newly-loaded arrivals propagate.
+      if (_lastLoc != null) _recomputeNearby();
+      notifyListeners();
+    }
   }
 
   /// Warm arrivals for the visible nearby stops so expanding is instant.

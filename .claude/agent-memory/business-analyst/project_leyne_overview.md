@@ -11,39 +11,48 @@ Leyne is a free Singapore transit arrival-times app (bus + MRT). Data source: LT
 
 **Why:** Solo developer (Rommel). iOS leads; Android ports from iOS feature-for-feature.
 
-**Current state (2026-05-29):** Leyne V2 "Soft" redesign execution complete — all V2 screens built in `ios-native/Leyne/V2/` (behind `leyne.softUI` flag) and mirrored in `lib/screens/v2/`. V2 is NOT the default shipping UI yet; flag must be removed / defaulted to true before next release.
+**Current state (2026-05-30, post-session update):** iOS V2 flag gate is removed — `RootView.swift` unconditionally mounts `SoftRoot` (no `leyne.softUI` guard in the production launch path). Android `main.dart` routes directly to `SoftRoot` (Flutter). Both platforms ship V2 as the default. The `leyne.softUI` argument still appears in the Xcode debug scheme only, which is correct.
 
-**Core feature inventory (grounded in code, 2026-05-29):**
+**Session 2026-05-30 delivered:**
+- iOS Live Activity CTA wired in SoftBusView (was commented out stub). Entry point is now live, with guard for `areActivitiesEnabled`.
+- iOS widgets aligned to Soft brand palette.
+- Android pull-to-refresh added to SoftStopScreen and SoftBusScreen.
+- Android per-bus arrival-alert bells added to SoftStopScreen.
+- Android "notify" button added to SoftBusScreen.
+- Android ongoing "live tracking" notification added (`toggleOngoing`, `_ongoingKey`, `_refreshOngoing` in AppModel). Updates driven by the in-process per-second ticker — NOT a foreground service. Updates freeze if the OS kills the app process.
+- Several dead/no-op affordances removed (honesty fixes, both platforms).
+
+**Core feature inventory (grounded in code, 2026-05-30):**
 
 | Feature | iOS Native | Flutter Android |
 |---|---|---|
-| Pinned stops (save, rename, reorder) | Yes — Pin struct, AppModel.pins, HomeView | Yes |
-| Per-pin bus filter (track subset of routes) | Yes — Pin.tracked, m.hiddenSet | Yes |
-| Primary bus designation per pin | Yes — Pin.primary | Yes |
-| Live arrival times (LTA DataMall) | Yes — DataStore, LTAService | Yes |
-| Live/Scheduled provenance chip | Yes — Service.monitored, liveStatusChip | Yes |
-| Nearby stops (location-based, sort by distance/arrival/service) | Yes — NearbyView, SoftNearbyView | Yes |
-| Search by Stop ID / Postal code / Bus # / Place | Yes — SoftSearchView, SearchLogic, GeocodeService | Yes |
-| Bus detail view (ETA hero, following 2 arrivals, route timeline, map) | Yes — SoftBusView, RouteTimeline | Yes |
-| Alight alert (on-bus: tap stop in route timeline → notification N stops out) | Yes — alightId, scheduleAlight | Yes |
-| Arrival alert ("buzz 2 min before") per tracked bus at pinned stop | Yes — NotificationsManager, toggleTracked | Yes |
-| Deep-link from notification tap into stop/bus detail | Yes — SoftRoot openCard observation | Yes |
-| MRT/LRT disruption alerts on Home screen | Yes — TrainAlert, DataStore.trainAlerts | Yes (partial) |
-| Home Screen widget (Small/Medium/Large — next bus for 1-2 pinned stops) | Yes — LeyneStopWidget | No (iOS-only) |
-| Live Activity (Lock Screen + Dynamic Island — ETA countdown) | Yes — LeyneLiveActivity, LeyneActivityAttributes | No (iOS-only) |
-| Core Spotlight indexing of pinned stops | Yes — Spotlight.swift | No (iOS-only) |
-| Settings (appearance, language, notifications, search radius, 24h, sound, haptic) | Yes — SettingsView | Yes |
-| What's New screen (shown once per version update) | Yes — WhatsNewView, kChangelog | Yes |
-| Onboarding (6 steps: hero, pin, narrow, notify, location, ads/ATT) | Yes — OnboardingView | Yes |
+| Pinned stops (save, rename, reorder) | Yes | Yes |
+| Per-pin bus filter (track subset of routes) | Yes | Yes |
+| Primary bus designation per pin | Yes | Yes |
+| Live arrival times (LTA DataMall) | Yes | Yes |
+| Live/Scheduled provenance chip | Yes — `liveStatusChip`, `liveSchedTag`, `~ Scheduled` in BusView | Yes (partial — no chip on Android stop screen row) |
+| Nearby stops (location-based) | Yes | Yes |
+| Search by Stop ID / Postal code / Bus # / Place | Yes | Yes |
+| Bus detail view (ETA hero, following 2, route timeline, map) | Yes | Yes |
+| Alight alert (route timeline → notification) | Yes | Yes |
+| Arrival alert per tracked bus | Yes | Yes |
+| Per-bus notify button in BusView | Yes | Yes (new this session) |
+| Deep-link from notification into stop/bus detail | Yes | Yes |
+| MRT/LRT disruption alerts on Home | Yes | Yes (partial) |
+| Home Screen widget | Yes — LeyneStopWidget | No (iOS-only) |
+| Live Activity (Lock Screen + Dynamic Island) | Yes — entry point now live in SoftBusView | No (iOS-only) |
+| Ongoing "live tracking" notification (Android analog) | N/A | Yes (new this session — process-alive limitation) |
+| Core Spotlight indexing | Yes | No (iOS-only) |
+| Settings | Yes | Yes |
+| What's New screen | Yes | Yes |
+| Onboarding (6 steps) | Yes | Yes |
 
-**V2 screens still flagged (not default):** SoftHomeView, SoftStopView, SoftBusView, SoftNearbyView, SoftSearchView, SoftSettingsView, SoftRoot. The flag is `leyne.softUI` (UserDefaults). Removing the flag gate is the key unlock for the next public release.
+**Remaining deferred work (from code + kChangelog gap):**
+- First/last bus labels — referenced in kChangelog 2.0.0 "First & last bus" entry but NO implementation exists in `ios-native/` or `lib/`. This is an unfulfilled What's New promise.
+- Android ongoing notification is process-alive only — no foreground service; updates stop when app is backgrounded by OS.
+- Analytics SDK not wired (no Firebase, no Mixpanel).
+- l10n — English-only in practice.
+- Alight alert wiring in iOS is UserDefaults-direct (Phase 3 comment in SoftBusView); not yet through NotificationsManager.
+- AddStopSheet in iOS is dead code (m.showAdd never flips).
 
-**Known deferred work (from code comments):**
-- Live Activity CTA in SoftBusView is hidden (`// liveActivityCTA — hidden until ActivityKit is wired`) — the widget/activity code exists but the in-app entry point is commented out.
-- AddStopSheet is dead code (RootView still mounts it but m.showAdd never flips).
-- Flutter DetailView alight card still uses iOS-style toggle pill (Material redesign target).
-- First/last bus labels in DetailView — requires reading LTABusServiceDTO first/last fields.
-- "~ Scheduled" tag for non-monitored arrivals in DetailView (requires monitored field mapping).
-- l10n — language picker is aspirational; ARB→xcstrings port not done; app is English-only in practice.
-
-**How to apply:** Frame all analysis against a solo-developer constraint. Avoid recommending work that assumes a team. Prioritize highest-ROI items. The single most impactful pending action is shipping V2 as the default UI.
+**How to apply:** Frame all analysis against a solo-developer constraint. Avoid recommending work that assumes a team. The first/last bus gap is a launch blocker because it is promised in What's New copy.

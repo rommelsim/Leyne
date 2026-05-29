@@ -7,6 +7,7 @@ import '../../data/models.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
+import '../notifications_screen.dart';
 
 class SoftStopScreen extends StatefulWidget {
   const SoftStopScreen({
@@ -28,6 +29,8 @@ class SoftStopScreen extends StatefulWidget {
 }
 
 class _SoftStopScreenState extends State<SoftStopScreen> {
+  _StopSort _sort = _StopSort.arrival;
+
   @override
   void initState() {
     super.initState();
@@ -47,30 +50,37 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             icon: const Icon(Icons.arrow_back), onPressed: widget.onBack),
         title: Text('Stop ${widget.stopCode}',
             style: t.sans(18, weight: FontWeight.w500, color: t.fg)),
+        actions: [_masterBell(context)],
       ),
-      floatingActionButton: ListenableBuilder(
-        listenable: AppModel.shared,
-        builder: (context, _) {
-          final isPinned =
-              AppModel.shared.pins.any((p) => p.code == widget.stopCode);
-          return FloatingActionButton.extended(
-            onPressed: () => AppModel.shared.togglePin(widget.stopCode),
-            backgroundColor: isPinned ? t.accent : t.surface,
-            foregroundColor: isPinned ? t.onAccent : t.fg,
-            icon: Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
-            label: Text(isPinned ? 'Pinned' : 'Pin'),
-          );
-        },
-      ),
+      // No FAB: pinning is implicit now — the first bell tap pins the stop
+      // (tracking that bus), the last untap unpins it. Matches iOS.
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: DataStore.shared,
+          // AppModel too, so bell/tracked state and the notifications-off
+          // banner repaint when they change.
+          listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
           builder: (context, _) {
+            final m = AppModel.shared;
             final state = DataStore.shared.arrivals[widget.stopCode];
-            return ListView(
+            final loaded = state != null &&
+                state.kind == ArrivalStateKind.loaded;
+            final sorted =
+                loaded ? _sortServices(state.services) : <Service>[];
+            final allNos = sorted.map((s) => s.no).toList();
+            final isPinned = m.pinForCode(widget.stopCode) != null;
+            return RefreshIndicator(
+              color: t.accent,
+              onRefresh: () =>
+                  DataStore.shared.refreshArrivals(widget.stopCode),
+              child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
               children: [
                 _header(context),
+                if (isPinned && !m.notificationsEnabled) ...[
+                  const SizedBox(height: 12),
+                  _notifOffBanner(context),
+                ],
                 const SizedBox(height: 16),
                 if (state == null || state.kind == ArrivalStateKind.loading)
                   const Padding(
@@ -83,15 +93,137 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   _emptyCard(
                       context, state.errorMessage ?? 'Couldn\'t reach LTA')
                 else ...[
-                  _primaryCard(context, state.services.first),
+                  if (!isPinned) ...[
+                    _hintRow(context),
+                    const SizedBox(height: 12),
+                  ],
+                  _sortChips(context),
+                  const SizedBox(height: 12),
+                  _primaryCard(context, sorted.first, allNos),
                   const SizedBox(height: 16),
-                  _otherBuses(context, state.services.skip(1).toList()),
+                  _otherBuses(context, sorted.skip(1).toList(), allNos),
                 ],
               ],
+            ),
             );
           },
         ),
       ),
+    );
+  }
+
+  List<Service> _sortServices(List<Service> services) {
+    final out = [...services];
+    switch (_sort) {
+      case _StopSort.arrival:
+        out.sort((a, b) => a.etaSec.compareTo(b.etaSec));
+      case _StopSort.busNo:
+        out.sort((a, b) {
+          final na = int.tryParse(a.no.replaceAll(RegExp(r'\D'), ''));
+          final nb = int.tryParse(b.no.replaceAll(RegExp(r'\D'), ''));
+          if (na != null && nb != null && na != nb) return na.compareTo(nb);
+          return a.no.compareTo(b.no);
+        });
+    }
+    return out;
+  }
+
+  /// AppBar action: alert me for every bus at this stop / clear all.
+  /// State tracks "alerting for ALL services" (not merely pinned) so a
+  /// partial subset doesn't masquerade as a lit all-clear bell.
+  Widget _masterBell(BuildContext context) {
+    final t = context.t;
+    final m = AppModel.shared;
+    final all = m.allTracked(widget.stopCode); // pinned AND tracking every bus
+    final active = all && m.notificationsEnabled;
+    return IconButton(
+      tooltip: all ? 'Clear all alerts' : 'Alert me for every bus',
+      icon: Icon(
+        active
+            ? Icons.notifications_active_rounded
+            : Icons.notifications_none_rounded,
+        color: active ? t.accent : t.dim,
+      ),
+      onPressed: () async {
+        final state = DataStore.shared.arrivals[widget.stopCode];
+        final allNos = state != null && state.kind == ArrivalStateKind.loaded
+            ? state.services.map((s) => s.no).toList()
+            : const <String>[];
+        m.setAllTracked(
+            code: widget.stopCode, allNos: allNos, tracked: !all);
+        await m.rescheduleIfNeeded();
+      },
+    );
+  }
+
+  Widget _notifOffBanner(BuildContext context) {
+    final t = context.t;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+          color: t.warnBg, borderRadius: BorderRadius.circular(16)),
+      child: Row(children: [
+        Icon(Icons.notifications_off_outlined, size: 18, color: t.warn),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text("Notifications are off — arrival alerts won't fire.",
+              style: t.sans(13, color: t.fg)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const NotificationsScreen())),
+          child: Text('Enable',
+              style: t.sans(13, weight: FontWeight.w600, color: t.accent)),
+        ),
+      ]),
+    );
+  }
+
+  Widget _hintRow(BuildContext context) {
+    final t = context.t;
+    return Row(children: [
+      Icon(Icons.notifications_active_outlined, size: 14, color: t.accent),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+            'Tap the bell on a bus to be alerted ~1 min before it arrives.',
+            style: t.mono(11, color: t.dim)),
+      ),
+    ]);
+  }
+
+  Widget _sortChips(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SegmentedButton<_StopSort>(
+        segments: const [
+          ButtonSegment(value: _StopSort.arrival, label: Text('Soonest')),
+          ButtonSegment(value: _StopSort.busNo, label: Text('Bus no.')),
+        ],
+        selected: {_sort},
+        showSelectedIcon: false,
+        onSelectionChanged: (s) => setState(() => _sort = s.first),
+      ),
+    );
+  }
+
+  /// Per-bus alert bell — pins the stop on first tap, unpins on last untap.
+  Widget _bell(BuildContext context, String busNo, List<String> allNos) {
+    final t = context.t;
+    final on = AppModel.shared
+        .isTracked(code: widget.stopCode, busNo: busNo);
+    return IconButton(
+      tooltip: on ? 'Alerting for bus $busNo' : 'Alert me about bus $busNo',
+      icon: Icon(
+        on ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
+        color: on ? t.accent : t.dim,
+        size: 22,
+      ),
+      onPressed: () async {
+        AppModel.shared.toggleTracked(
+            code: widget.stopCode, busNo: busNo, allNos: allNos);
+        await AppModel.shared.rescheduleIfNeeded();
+      },
     );
   }
 
@@ -119,16 +251,25 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  Widget _primaryCard(BuildContext context, Service primary) {
+  Widget _primaryCard(
+      BuildContext context, Service primary, List<String> allNos) {
     final t = context.t;
     final eta = fmtEta(primary.etaSec);
+    final on = AppModel.shared
+        .isTracked(code: widget.stopCode, busNo: primary.no);
     return InkWell(
       borderRadius: BorderRadius.circular(24),
       onTap: () => widget.onOpenBus(primary.no),
       child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-            color: t.liveBg, borderRadius: BorderRadius.circular(24)),
+            color: t.liveBg,
+            borderRadius: BorderRadius.circular(24),
+            // Tracked: a left accent rule (shape, not just colour) so the
+            // alert state reads even on the already-liveBg card.
+            border: on
+                ? Border(left: BorderSide(color: t.accent, width: 3))
+                : null),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -153,7 +294,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: t.dim),
+              _bell(context, primary.no, allNos),
             ]),
             const SizedBox(height: 10),
             Row(children: [
@@ -173,7 +314,8 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  Widget _otherBuses(BuildContext context, List<Service> services) {
+  Widget _otherBuses(
+      BuildContext context, List<Service> services, List<String> allNos) {
     final t = context.t;
     final visible =
         widget.showAll ? services : services.take(3).toList();
@@ -199,7 +341,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           child: Column(
             children: [
               for (var i = 0; i < visible.length; i++) ...[
-                _busRow(context, visible[i]),
+                _busRow(context, visible[i], allNos),
                 if (i < visible.length - 1)
                   Divider(color: t.line, height: 1, indent: 56),
               ],
@@ -210,13 +352,23 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  Widget _busRow(BuildContext context, Service bus) {
+  Widget _busRow(BuildContext context, Service bus, List<String> allNos) {
     final t = context.t;
     final eta = fmtEta(bus.etaSec);
+    final on =
+        AppModel.shared.isTracked(code: widget.stopCode, busNo: bus.no);
     return InkWell(
       onTap: () => widget.onOpenBus(bus.no),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: on ? t.liveBg : Colors.transparent,
+          // Tracked rows carry a left accent rule + tint — two non-colour-
+          // alone cues for the alert state.
+          border: on
+              ? Border(left: BorderSide(color: t.accent, width: 3))
+              : null,
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
         child: Row(children: [
           ServiceBadge(svc: bus.no, size: ServiceBadgeSize.sm),
           const SizedBox(width: 12),
@@ -244,6 +396,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           Text(eta.big + eta.small,
               style: t.mono(13,
                   weight: FontWeight.w600, color: t.accent)),
+          _bell(context, bus.no, allNos),
         ]),
       ),
     );
@@ -265,3 +418,5 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 }
+
+enum _StopSort { arrival, busNo }

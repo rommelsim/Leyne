@@ -7,6 +7,7 @@ import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
+import '../notifications_screen.dart';
 
 class SoftSettingsScreen extends StatefulWidget {
   const SoftSettingsScreen({super.key, required this.onTab});
@@ -43,39 +44,17 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
               Text('Settings',
                   style: t.sans(28, weight: FontWeight.w400, color: t.fg)),
               const SizedBox(height: 16),
-              _section(context, 'Routines', [
-                _row(context,
-                    icon: Icons.wb_sunny_outlined,
-                    title: 'Morning commute',
-                    detail: 'Not set',
-                    onTap: () {}),
-                _divider(context),
-                _row(context,
-                    icon: Icons.nightlight_outlined,
-                    title: 'Evening commute',
-                    detail: 'Not set',
-                    onTap: () {}),
-                _divider(context),
-                _row(context,
-                    icon: Icons.add,
-                    title: 'Add a routine',
-                    onTap: () {}),
-              ]),
-              const SizedBox(height: 16),
               _section(context, 'Personalize', [
                 _row(context,
                     icon: Icons.notifications_outlined,
                     title: 'Notifications',
                     detail: AppModel.shared.notificationsEnabled ? 'On' : 'Off',
-                    onTap: () {}),
+                    onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const NotificationsScreen()),
+                        )),
                 _divider(context),
                 _appearanceRow(context),
-                _divider(context),
-                _row(context,
-                    icon: Icons.language_outlined,
-                    title: 'Language',
-                    detail: 'Device',
-                    onTap: () {}),
                 _divider(context),
                 _toggleRow(context,
                     icon: Icons.access_time,

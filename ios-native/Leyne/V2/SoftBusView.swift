@@ -1,8 +1,10 @@
 // SoftBusView — Leyne 2.0 Bus tracking: large arrival numeral,
-// Live Activity CTA, live map, tappable route timeline.
+// Live Activity CTA (Lock Screen / Dynamic Island), live map,
+// tappable route timeline.
 
 import SwiftUI
 import MapKit
+import ActivityKit
 
 struct SoftBusView: View {
     let stopCode: String
@@ -30,9 +32,7 @@ struct SoftBusView: View {
                     topActionRow
                     headerSection
                     arrivalCard
-                    // liveActivityCTA — hidden until ActivityKit is wired.
-                    // Re-add this row here to restore the Live Activity entry
-                    // point once parity.md Task #12 lands. See liveActivityCTA.
+                    liveActivityCTA
                     liveMapSection
                     if !timelineStops.isEmpty {
                         RouteTimeline(t: t,
@@ -253,40 +253,59 @@ struct SoftBusView: View {
         return [svc]
     }
 
-    // MARK: Live Activity CTA — DEFERRED
-    // This is fully built but intentionally NOT shown in `body` (see the
-    // commented-out call site above). It is a no-op stub today — tapping it
-    // does nothing because ActivityKit isn't wired yet, and surfacing a dead
-    // button in prime position is a trust bug. Bring it back by (1) wiring
-    // ActivityKit per parity.md Task #12, then (2) restoring the call site.
+    // MARK: Live Activity CTA
+    // Starts/stops the real ActivityKit Live Activity for this bus on the
+    // Lock Screen + Dynamic Island. The whole engine — request, 15 s LTA
+    // polling, stops-away, auto-end on arrival, relaunch restore — lives in
+    // AppModel (toggleLiveActivity / startLivePolling). This is just the V2
+    // entry point; the label reflects the live on/off state like the bell.
+    //
+    // Shown only when (a) we have a real arriving service to attach to and
+    // (b) the user hasn't disabled Live Activities system-wide — otherwise
+    // the tap would silently no-op, which is the dead-button trust bug.
+    @ViewBuilder
     private var liveActivityCTA: some View {
-        Button {
-            fb.select()
-            // ActivityKit wiring tracked in parity.md Task #12
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(t.accent)
-                    .frame(width: 40, height: 40)
-                    .background(t.liveBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Start Live Activity")
-                        .font(t.sans(14, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                    Text("Follow Bus \(svc) from your lock screen")
-                        .font(t.sans(12))
-                        .foregroundStyle(t.dim)
+        if let service = liveService(),
+           ActivityAuthorizationInfo().areActivitiesEnabled {
+            let liveOn = m.isLiveActivityActive(service, stopCode: stopCode)
+            Button {
+                fb.select()
+                m.toggleLiveActivity(service,
+                                     stopName: ds.stopName(stopCode),
+                                     stopCode: stopCode)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: liveOn ? "stop.fill" : "lock.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(liveOn ? t.onAccent : t.accent)
+                        .frame(width: 40, height: 40)
+                        .background(liveOn ? AnyShapeStyle(t.accent)
+                                           : AnyShapeStyle(t.liveBg),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(liveOn ? "Stop Live Activity" : "Start Live Activity")
+                            .font(t.sans(14, weight: .semibold))
+                            .foregroundStyle(t.fg)
+                        Text(liveOn ? "Bus \(svc) is on your lock screen"
+                                    : "Follow Bus \(svc) from your lock screen")
+                            .font(t.sans(12))
+                            .foregroundStyle(t.dim)
+                    }
+                    Spacer()
+                    Image(systemName: liveOn ? "checkmark.circle.fill" : "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(liveOn ? t.accent : t.dim)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.dim)
+                .padding(12)
+                .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(liveOn ? t.accent.opacity(0.4) : Color.clear, lineWidth: 1))
             }
-            .padding(12)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .buttonStyle(.plain)
+            .accessibilityLabel(liveOn
+                ? "Stop Live Activity for bus \(svc)"
+                : "Start Live Activity for bus \(svc) on your lock screen")
         }
-        .buttonStyle(.plain)
     }
 
     private var liveMapSection: some View {

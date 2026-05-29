@@ -1,23 +1,21 @@
 ---
 name: known-failing-tests
-description: Tests that are currently broken due to code changes not being reflected in the test suite (as of 2026-05-29)
+description: Known broken Flutter tests — updated after each major changeset
 metadata:
   type: project
 ---
 
-As of 2026-05-29 (confirmed by running `flutter test --no-pub`), 5 Flutter tests fail. All are hard failures, not flaky:
+**As of 2026-05-30**: All 83 Flutter tests pass. The 5 previously failing tests were fixed in this changeset (onboarding API drift, notification default `?? false`, widget empty-state copy).
 
-1. **`onboarding_test.dart` — entire file (compile/runtime error)**
-   All tests fail because `OnboardingScreen` no longer accepts `onDone` parameter (removed in diff). Every test constructor still passes `onDone: () {}`. Also tests a `Skip` button that no longer exists. Requires a full rewrite of the file: remove `onDone` param, add missing `onRequestNotifications`, remove the "Skip calls onDone" test, and update the double-tap test to remove `onDone` from the widget constructor.
+**Previously failing (now fixed):**
+1. `onboarding_test.dart` — `onDone` param removed, fixed by rewriting test
+2. `settings_features_test.dart:48` — notification default was `?? true`, test expected `false`; fixed to `?? false`
+3. `settings_features_test.dart:144` — same root cause
+4. `widget_test.dart:42` — expected `'No pinned stops yet'`, actual `'No stops pinned'`; string updated
 
-2. **`settings_features_test.dart:48` — "notifications toggle defaults off and persists"**
-   `AppModel` loads `notificationsEnabled` with `?? true` default (line 377 of app_model.dart), so a fresh SharedPreferences mock returns `true`. Test expects `false`. Fix: change the test to expect `true`, or seed prefs with `false`.
+**Latent failure risk (not currently failing but fragile):**
+- `settings_features_test.dart` tests target old `SettingsScreen` (v1), NOT `SoftSettingsScreen` (v2). The test asserts `find.text('Language')` finds one widget. If v1 SettingsScreen ever removes the Language row (as v2 already has), these tests will fail. The V2 settings screen is what users actually see.
+- If `settings_features_test.dart`'s "shows trimmed Personalize rows" test is ever pointed at `SoftSettingsScreen`, it will fail because that screen has no Language or Routines rows.
 
-3. **`settings_features_test.dart:144` — "Notifications row navigates and toggles the preference"**
-   Same root cause — notification default is `true`, not `false`. Toggle assertion direction is inverted relative to actual starting state.
-
-4. **`widget_test.dart:42` — "Root shell shows the four tabs"**
-   Test expects `'No pinned stops yet'` but `SoftHomeScreen` (via `SoftEmptyState`) now renders `'No stops pinned'`. One-line fix: update the expected string.
-
-**Why:** These are all caused by API/copy drift — code changed but tests were not updated in sync.
-**How to apply:** All four must be fixed before any CI gate. They are not flaky.
+**Why:** Track test health so CI gaps are visible.
+**How to apply:** Run `flutter test --no-pub` before every commit. If count drops below 83, check this file.
