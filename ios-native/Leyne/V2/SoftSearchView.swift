@@ -145,7 +145,6 @@ struct SoftSearchView: View {
             .padding(14)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .pressScale()
+        .buttonStyle(PressScaleButtonStyle())
     }
 }

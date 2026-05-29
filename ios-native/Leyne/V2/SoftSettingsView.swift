@@ -22,15 +22,6 @@ struct SoftSettingsView: View {
                         .foregroundStyle(t.fg)
                         .padding(.top, 8)
 
-                    section("Routines") {
-                        row(icon: "sunrise.fill", title: "Morning commute",
-                            detail: "Not set", chevron: true)
-                        row(icon: "moon.stars.fill", title: "Evening commute",
-                            detail: "Not set", chevron: true)
-                        row(icon: "plus", title: "Add a routine",
-                            detail: nil, chevron: true)
-                    }
-
                     section("Personalize") {
                         row(icon: "bell.fill", title: "Notifications",
                             detail: m.notificationsEnabled ? "On" : "Off", chevron: true)

@@ -114,7 +114,6 @@ struct SoftNearbyView: View {
             .padding(12)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .pressScale()
+        .buttonStyle(PressScaleButtonStyle())
     }
 }

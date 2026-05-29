@@ -41,7 +41,6 @@ enum SoftRoute: Hashable {
     case stop(String)
     case bus(stopCode: String, svc: String)
     case search
-    case allArrivals(String)
 }
 
 struct SoftRoot: View {
@@ -156,8 +155,7 @@ struct SoftRoot: View {
         case .stop(let code):
             SoftStopView(stopCode: code,
                          onBack: pop,
-                         onOpenBus: { svc in path.wrappedValue.append(.bus(stopCode: code, svc: svc)) },
-                         onSeeAll: { path.wrappedValue.append(.allArrivals(code)) })
+                         onOpenBus: { svc in path.wrappedValue.append(.bus(stopCode: code, svc: svc)) })
         case .bus(let code, let svc):
             SoftBusView(stopCode: code, svc: svc, onBack: pop)
         case .search:
@@ -170,13 +168,6 @@ struct SoftRoot: View {
                     path.wrappedValue.append(.stop(code))
                 }
             )
-        case .allArrivals(let code):
-            // Light wrapper around SoftStopView with the truncated list
-            // toggled off — full implementation in Phase 2 follow-up.
-            SoftStopView(stopCode: code,
-                         onBack: pop,
-                         onOpenBus: { svc in path.wrappedValue.append(.bus(stopCode: code, svc: svc)) },
-                         onSeeAll: {})
         }
     }
 }

@@ -214,8 +214,7 @@ struct SoftPinCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .pressScale()
+        .buttonStyle(PressScaleButtonStyle())
     }
 
     // MARK: Header

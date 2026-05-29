@@ -25,10 +25,13 @@ struct LTANextBus: Decodable {
     let Load: String?
     let Feature: String?
     let vehicleType: String?
+    /// LTA flag: 1 = position is from a live GPS feed; 0 = a scheduled
+    /// estimate (no vehicle telemetry). Drives the live/scheduled badge.
+    let Monitored: Int?
 
     enum CodingKeys: String, CodingKey {
         case OriginCode, DestinationCode, EstimatedArrival
-        case Latitude, Longitude, Load, Feature
+        case Latitude, Longitude, Load, Feature, Monitored
         case vehicleType = "Type"
     }
 
@@ -152,6 +155,9 @@ extension LTAArrivalService {
             load: Load(lta: NextBus.Load),
             wab: (NextBus.Feature ?? "").uppercased() == "WAB",
             deck: Deck(lta: NextBus.vehicleType),
+            // Absent Monitored ⟶ treat as live; LTA only emits 0 when it
+            // knows the estimate is schedule-derived.
+            monitored: (NextBus.Monitored ?? 1) == 1,
             op: BusOperator(lta: Operator),
             arrivalDate: NextBus.arrivalDate,
             followingDate: NextBus2.arrivalDate,

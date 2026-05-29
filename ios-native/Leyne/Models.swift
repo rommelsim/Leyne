@@ -39,6 +39,9 @@ struct Service: Identifiable, Equatable {
     var load: Load
     var wab: Bool
     var deck: Deck
+    /// True when the arrival came from a live GPS feed (LTA `Monitored == 1`),
+    /// false for a schedule-derived estimate. Drives the live/scheduled badge.
+    var monitored: Bool = true
     /// LTA operator code: SBST / SMRT / TTS / GAS. Drives the per-row
     /// operator stripe — Singapore commuters distinguish operators by
     /// frequency patterns and fare-card behaviour, so this is a useful

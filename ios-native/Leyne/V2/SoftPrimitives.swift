@@ -59,25 +59,20 @@ struct Eyebrow: View {
     }
 }
 
-/// Press-down scale modifier — recreates the prototype's 0.985 mousedown
-/// scale on tappable cards. Apply to any view inside a Button or onTapGesture.
-struct PressScale: ViewModifier {
-    @State private var pressed = false
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(pressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: pressed)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in pressed = true }
-                    .onEnded { _ in pressed = false }
-            )
+/// Press-down scale for tappable cards — recreates the prototype's 0.985
+/// mousedown scale. Implemented as a ButtonStyle so the scale is driven by
+/// the button's own `isPressed` state. The earlier version layered a
+/// `DragGesture(minimumDistance: 0)` onto the card, which claimed the touch
+/// on contact and blocked the enclosing ScrollView from panning — you
+/// couldn't scroll if your finger landed on a card. A ButtonStyle yields
+/// the same press feedback while letting the scroll gesture win, and it
+/// also replaces `.buttonStyle(.plain)` (no default button chrome).
+struct PressScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
-}
-
-extension View {
-    func pressScale() -> some View { modifier(PressScale()) }
 }
 
 /// Legend dot used on the LIVE MAP caption row ("● BUS 80   ● STOP   ● ME").
