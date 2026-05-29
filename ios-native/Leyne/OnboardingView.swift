@@ -53,7 +53,7 @@ struct OnboardingView: View {
     var body: some View {
         let s = steps[step]
         VStack(spacing: 0) {
-            // top bar: back / skip
+            // top bar: back only (no skip — onboarding runs the full flow)
             HStack {
                 Button { if step > 0 { step -= 1 } } label: {
                     HStack(spacing: 4) {

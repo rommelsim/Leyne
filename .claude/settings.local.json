@@ -106,7 +106,11 @@
       "Bash(sed -n '55,75p;119,135p' ios-native/Leyne/Models.swift)",
       "Bash(sed -n '40,80p' ios-native/Leyne/DataStore.swift)",
       "Bash(sed -n '50,75p' ios-native/Leyne/V2/SoftPrimitives.swift)",
-      "Bash(sed -n '584,598p' ios-native/Leyne/AppModel.swift)"
+      "Bash(sed -n '584,598p' ios-native/Leyne/AppModel.swift)",
+      "Bash(git log *)",
+      "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'generic/platform=iOS Simulator' build)",
+      "Bash(bash scripts/build-android-closed-test.sh)",
+      "Bash(git *)"
     ]
   }
 }

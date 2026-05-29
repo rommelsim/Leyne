@@ -40,6 +40,9 @@ struct SoftHomeView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
+            .refreshable {
+                for pin in m.pins { await ds.refreshArrivals(stop: pin.code) }
+            }
         }
         .onAppear { warmArrivals() }
         .onChange(of: m.pins) { _, _ in warmArrivals() }
@@ -312,10 +315,13 @@ struct SoftPinCard: View {
 
     private var pinChipLabel: String {
         let nick = pin.nickname.trimmingCharacters(in: .whitespaces)
-        // Avoid printing the stop name twice — if the nickname matches the
-        // data-store name the chip would just echo the title.
-        if nick.isEmpty { return "PIN" }
-        if nick.caseInsensitiveCompare(stopDataStoreName) == .orderedSame { return "PIN" }
+        // The chip only earns its place when it carries a real nickname. With
+        // no nickname (the common case) a literal "PIN" chip is pure noise on
+        // every card — the card already *is* the pinned stop — so we return ""
+        // and `headerRow` hides the chip entirely. Same when the nickname just
+        // echoes the stop name.
+        if nick.isEmpty { return "" }
+        if nick.caseInsensitiveCompare(stopDataStoreName) == .orderedSame { return "" }
         return nick.uppercased()
     }
 

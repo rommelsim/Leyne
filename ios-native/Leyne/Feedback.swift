@@ -64,8 +64,14 @@ final class Feedback: ObservableObject {
         let e = AVAudioEngine()
         let m = e.mainMixerNode
         do {
-            try AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
+            // `.ambient` + `.mixWithOthers` is the non-interrupting category for
+            // tiny UI blips. Critically, we do NOT call `setActive(true)`
+            // ourselves: explicitly force-activating the shared session is what
+            // stops the user's music on launch even under `.mixWithOthers`.
+            // `AVAudioEngine.start()` activates the session as needed, honouring
+            // the category, which lets background audio keep playing.
+            try AVAudioSession.sharedInstance()
+                .setCategory(.ambient, mode: .default, options: [.mixWithOthers])
             try e.start()
         } catch { return nil }
         engine = e; mixer = m

@@ -214,7 +214,6 @@ class _AppRoot extends StatelessWidget {
           return const SoftRoot();
         }
         return OnboardingScreen(
-          onDone: AppModel.shared.finishOnboarding,
           onRequestLocation: () {
             // Fire-and-forget: the OS dialog races with the step
             // transition, matching the legacy iOS behaviour.

@@ -1,0 +1,3 @@
+- [Project status](project-status.md) — what's done, in-flight (uncommitted), and left before V2 ships; snapshot 2026-05-29
+- [Project risks](project-risks.md) — top 6 risks with likelihoods, impacts, and mitigations
+- [Next actions](next-actions.md) — prioritized task list ordered by value; commit in-flight work is #1

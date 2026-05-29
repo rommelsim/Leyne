@@ -245,6 +245,31 @@ final class DataStore: ObservableObject {
         }
     }
 
+    /// Async force-refresh for pull-to-refresh. Unlike `ensureArrivals`,
+    /// this awaits the LTA round-trip so SwiftUI's `.refreshable` keeps the
+    /// spinner up until fresh data actually lands. Bypasses the freshness
+    /// window and the in-flight guard — a deliberate user pull always hits
+    /// the network.
+    func refreshArrivals(stop code: String) async {
+        inflight.remove(code)
+        do {
+            let resp = try await api.busArrival(stopCode: code)
+            let mapped: [Service] = resp.Services.compactMap { svc in
+                guard svc.NextBus.hasData else { return nil }
+                let destCode = svc.NextBus.DestinationCode ?? ""
+                return svc.toService(destName: self.stopName(destCode))
+            }
+            .sorted { $0.etaSec < $1.etaSec }
+            arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
+            lastFetched[code] = Date()
+        } catch {
+            if arrivals[code] == nil || arrivals[code] == .loading {
+                arrivals[code] = .error(
+                    (error as? LTAError)?.errorDescription ?? "Couldn’t reach LTA")
+            }
+        }
+    }
+
     /// Warm arrivals for the visible nearby stops so expanding is instant.
     // Warm only the closest few (nearby is distance-sorted) so a user-tapped
     // expand isn't queued behind a 12-request prefetch wave.

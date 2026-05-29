@@ -1,0 +1,2 @@
+- [Project test infra](project-test-infra.md) — Flutter `flutter test --no-pub`, iOS `LeyneTests/`, naming conventions, what exists, critical gaps
+- [Known failing tests](known-failing-tests.md) — 5 hard-failing Flutter tests as of 2026-05-29 with exact fix instructions

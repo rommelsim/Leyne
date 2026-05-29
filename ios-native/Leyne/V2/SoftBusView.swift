@@ -48,6 +48,10 @@ struct SoftBusView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
+            .refreshable {
+                await ds.refreshArrivals(stop: stopCode)
+                loadRoute()
+            }
         }
         .onAppear {
             ds.ensureArrivals(stop: stopCode)
@@ -83,11 +87,12 @@ struct SoftBusView: View {
     private var headerSection: some View {
         let service = liveService()
         return VStack(alignment: .leading, spacing: 6) {
-            // Context line: walk figure + "<walk> · <stop name>". We have no
-            // real walk-time source, so we lead with the stop name and only
-            // include a road hint when present — never a fabricated minute.
+            // Context line: a location pin + "<road> · <stop name>". We have no
+            // walk-time source, so a `figure.walk` icon here read as a broken
+            // "walk N min" with the minutes missing. A mappin states plainly
+            // that this is *where* the bus is being tracked from.
             HStack(spacing: 6) {
-                Image(systemName: "figure.walk").font(.system(size: 12))
+                Image(systemName: "mappin.and.ellipse").font(.system(size: 12))
                 Text(contextLine)
                     .font(t.mono(11))
                     .lineLimit(1)
@@ -295,7 +300,13 @@ struct SoftBusView: View {
                     Annotation(stop.Description,
                                coordinate: CLLocationCoordinate2D(
                                 latitude: stop.Latitude,
-                                longitude: stop.Longitude)) {
+                                longitude: stop.Longitude),
+                               // Anchor at the teardrop's tip so the marker body
+                               // floats *above* the coordinate. When the user is
+                               // standing at the stop this lifts the stop pin off
+                               // the system blue user-location dot instead of
+                               // covering it.
+                               anchor: .bottom) {
                         MapStopMarker(t: t)
                             .accessibilityLabel("Bus stop \(stop.Description)")
                     }

@@ -35,6 +35,17 @@ struct SoftStopView: View {
         return ds.servicesFor(stopCode).map(\.no)
     }
 
+    /// Label for the master pill. "Track" was ambiguous (track on a map?);
+    /// this stop's pill arms *arrival alerts*, so the copy says so. Shows the
+    /// count when some-but-not-all buses are armed, "All alerts" when every
+    /// service is, and "Alert all" as the call-to-action when nothing's armed.
+    private var trackAllLabel: String {
+        guard isPinned else { return "Alert all" }
+        let total = allServiceNos.count
+        if total > 0, trackedCount >= total { return "All alerts" }
+        return "\(trackedCount) alert\(trackedCount == 1 ? "" : "s")"
+    }
+
     /// Count of services the user is currently tracking (alerted on) here.
     private var trackedCount: Int {
         guard isPinned else { return 0 }
@@ -56,6 +67,7 @@ struct SoftStopView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
+            .refreshable { await ds.refreshArrivals(stop: stopCode) }
         }
         .onAppear { ds.ensureArrivals(stop: stopCode) }
     }
@@ -71,12 +83,12 @@ struct SoftStopView: View {
             // happens with the bell on each row below.
             GlassPillButton(t: t,
                             icon: isPinned ? "bell.fill" : "bell",
-                            label: isPinned ? "Tracking \(trackedCount)" : "Track all",
+                            label: trackAllLabel,
                             filled: isPinned,
                             action: { fb.select(); toggleTrackAll() })
             .accessibilityLabel(isPinned
-                ? "Tracking \(trackedCount) buses. Tap to stop tracking all."
-                : "Track all buses at this stop")
+                ? "Alerting for \(trackedCount) buses at this stop. Tap to turn all alerts off."
+                : "Alert me for every bus at this stop")
         }
     }
 
@@ -87,7 +99,7 @@ struct SoftStopView: View {
                 .font(t.sans(28, weight: .semibold))
                 .foregroundStyle(t.fg)
             HStack(spacing: 8) {
-                Image(systemName: "figure.walk").font(.system(size: 12))
+                Image(systemName: "mappin.and.ellipse").font(.system(size: 12))
                 Text(ds.roadName(stopCode).isEmpty
                      ? "Live arrivals · LTA"
                      : ds.roadName(stopCode))

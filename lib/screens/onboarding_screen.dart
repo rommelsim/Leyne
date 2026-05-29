@@ -8,7 +8,9 @@
 //   • Step 5 primes the ad/ATT prompts — tapping Continue calls
 //     `onRequestTracking` (AdConsent.gatherThenStart) which is responsible
 //     for closing onboarding when consent + ATT + Mobile Ads init resolve.
-//   • Skip closes immediately; AdConsent runs at next launch (see main.dart).
+//
+// There is no Skip: onboarding completes only by advancing through the final
+// step, so the location / notification / ads priming always runs.
 
 import 'package:flutter/material.dart';
 
@@ -17,14 +19,10 @@ import '../theme.dart';
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({
     super.key,
-    required this.onDone,
     required this.onRequestLocation,
     required this.onRequestNotifications,
     required this.onRequestTracking,
   });
-
-  /// Skip pressed, or last step finished after onRequestTracking resolved.
-  final VoidCallback onDone;
 
   /// Step 4 (location-prime) Continue. Implementations should call
   /// LocationService.requestAndStart and return — the step advances on its
@@ -173,7 +171,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // slide transition. The final (ATT) step intentionally leaves _busy
     // set after Continue is tapped — the caller dismisses onboarding when
     // consent resolves. But Back must still work there, otherwise a
-    // stalled consent flow traps the user with no way out except Skip.
+    // stalled consent flow would trap the user (there is no Skip).
     // Matches iOS, which only disables Continue (not Back) on the final.
     final isFinal = _step == _steps.length - 1;
     if (_busy && !isFinal) return;
@@ -214,7 +212,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           padding: const EdgeInsets.symmetric(vertical: 12),
           child: Column(
             children: [
-              // Top bar: Back / Skip.
+              // Top bar: Back only. Skip was removed so every user passes
+              // through the location + notification + ads/ATT priming steps;
+              // onboarding completes only by reaching the final step.
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
                 child: Row(
@@ -235,16 +235,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       ),
                     ),
                     const Spacer(),
-                    TextButton(
-                      onPressed: widget.onDone,
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: const Size(0, 32),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text('Skip',
-                          style: t.sans(15).copyWith(color: t.dim)),
-                    ),
                   ],
                 ),
               ),
