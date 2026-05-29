@@ -12,8 +12,9 @@ entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
 First execution pass of the Leyne 2.0 redesign from the Claude Design
 handoff bundle (`~/Downloads/leyne-2-0/`, Soft direction). Both
-platforms now carry the new palette; iOS additionally ships a
-behind-a-flag V2 UI layer.
+platforms now carry the new palette and the V2 "Soft" UI is the
+default (and only) path on iOS and Android — the original
+`leyne.softUI` gate has been retired.
 
 - **New Soft palette.** `ios-native/Leyne/Theme.swift` and
   `lib/theme.dart` updated in place with the warm dark (`#15201C`) /
@@ -30,6 +31,30 @@ behind-a-flag V2 UI layer.
 - **MRT line palette.** New `MRTLine` enum + `LyneSignal` namespace
   (Flutter) / cross-mode `mrtNE` + `meBlue` colours (iOS) for transit
   overlays that don't change between dark and light.
+- **Pull-to-refresh across the V2 stack (iOS).** New async
+  `DataStore.refreshArrivals(stop:)` (always hits the network and is
+  awaitable) wired to `.refreshable` on `SoftHomeView`, `SoftStopView`,
+  and `SoftBusView`. Stop/Bus also reload route geometry on pull.
+- **Onboarding parity + no Skip.** Flutter onboarding drops the `onDone`
+  callback and the Skip button to match iOS — every user passes through
+  the notification / location / ads priming steps; onboarding completes
+  only by reaching the final step (`lib/main.dart`,
+  `lib/screens/onboarding_screen.dart`, `OnboardingView.swift`).
+- **Notifications default OFF (Flutter bugfix).** `AppModel.load()` was
+  reading `lyne.notifications ?? true`, so a fresh install showed the
+  toggle ON before `POST_NOTIFICATIONS` was ever granted — a lying
+  toggle that fired no alerts. Now defaults to `false` (opt-in), the
+  honest "persisted result of the permission flow".
+- **UX honesty fixes (iOS).** Home cards suppress the empty "PIN" chip;
+  the stop-header `figure.walk` icon (walk minutes were never populated)
+  becomes `mappin.and.ellipse`; the master pill reads "Alert all / All
+  alerts / N alerts" instead of the misleading "Track all".
+- **Audio session fix (iOS).** `Feedback` no longer forces
+  `setActive(true)`, which was interrupting background music on launch.
+- **Tests realigned.** Flutter suite green (83 passing): onboarding
+  tests follow the 6-step no-Skip flow, the empty-state and settings
+  copy match V2, and the notification toggle path mocks the
+  permission / local-notification platform channels.
 - See `specs/leyne-2.0-plan.md` for the full plan, sequencing, and
   open decisions.
 

@@ -39,12 +39,13 @@ void main() {
     expect(find.text('Settings'), findsAtLeastNWidgets(1));
 
     // Home is the initial tab — its empty-state copy is visible.
-    expect(find.text('No pinned stops yet'), findsOneWidget);
+    expect(find.text('No stops pinned'), findsOneWidget);
 
     // Switch to Settings; pump one frame for the tap, one for the layout.
     await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('ABOUT'), findsOneWidget);
+    // The Soft settings screen leads with the Appearance section.
+    expect(find.text('Appearance'), findsOneWidget);
   });
 }

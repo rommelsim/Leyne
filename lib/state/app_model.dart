@@ -374,7 +374,11 @@ class AppModel extends ChangeNotifier {
     // having to discover Settings → Notifications first. Existing
     // installs that previously toggled this explicitly (true or false)
     // keep their stored value.
-    _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? true;
+    // Default OFF: the flag is the persisted result of the permission
+    // flow (see setNotificationsEnabled). Defaulting ON would show the
+    // toggle enabled before POST_NOTIFICATIONS was ever granted, so no
+    // alerts would actually fire — a lying toggle. Opt-in only.
+    _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? false;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
     _lastSeenVersion = _prefs!.getString(_kLastSeenVersionKey);
 

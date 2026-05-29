@@ -2,6 +2,7 @@
 // work added this cycle, plus AppModel preference persistence.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -23,8 +24,53 @@ Widget _host(Widget child) => MaterialApp(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  // permission_handler and flutter_local_notifications reach native code
+  // through platform channels that don't exist under flutter test. Stub
+  // them so the notification toggle can exercise its grant path: every
+  // permission resolves to "granted" (index 1) and the local-notifications
+  // plugin accepts every call.
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+
+  void mockNotificationChannels() {
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('flutter.baseflow.com/permissions/methods'),
+      (call) async {
+        switch (call.method) {
+          case 'checkPermissionStatus':
+          case 'checkServiceStatus':
+            return 1; // PermissionStatus.granted
+          case 'requestPermissions':
+            final perms = (call.arguments as List).cast<int>();
+            return {for (final p in perms) p: 1};
+          case 'shouldShowRequestPermissionRationale':
+            return false;
+          default:
+            return null;
+        }
+      },
+    );
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('dexterous.com/flutter/local_notifications'),
+      (call) async {
+        switch (call.method) {
+          case 'initialize':
+          case 'requestNotificationsPermission':
+          case 'requestExactAlarmsPermission':
+            return true;
+          case 'pendingNotificationRequests':
+          case 'getActiveNotifications':
+            return <Map<String, Object?>>[];
+          default:
+            return null;
+        }
+      },
+    );
+  }
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    mockNotificationChannels();
     await AppModel.shared.load();
   });
 
@@ -47,7 +93,7 @@ void main() {
 
     test('notifications toggle defaults off and persists', () async {
       expect(AppModel.shared.notificationsEnabled, isFalse);
-      AppModel.shared.setNotificationsEnabled(true);
+      await AppModel.shared.setNotificationsEnabled(true);
       expect(AppModel.shared.notificationsEnabled, isTrue);
       await AppModel.shared.load();
       expect(AppModel.shared.notificationsEnabled, isTrue);

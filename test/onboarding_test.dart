@@ -3,8 +3,9 @@
 // Covers:
 //   • finishOnboarding flips the lyne.onboardingDone key.
 //   • resetOnboarding clears it.
-//   • OnboardingScreen advances on Continue, retreats on Back, exits on Skip,
-//     and triggers the location/tracking callbacks at the right step.
+//   • OnboardingScreen advances on Continue, retreats on Back, and triggers
+//     the notification/location/tracking callbacks at the right step. There
+//     is no Skip — every user passes through the priming steps.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,7 +53,7 @@ void main() {
   group('OnboardingScreen', () {
     testWidgets('renders the intro step on first frame', (tester) async {
       await tester.pumpWidget(_host(OnboardingScreen(
-        onDone: () {},
+        onRequestNotifications: () {},
         onRequestLocation: () {},
         onRequestTracking: () {},
       )));
@@ -67,26 +68,23 @@ void main() {
       expect(back.opacity, 0);
     });
 
-    testWidgets('Skip calls onDone', (tester) async {
-      var doneCalls = 0;
+    testWidgets('there is no Skip button', (tester) async {
       await tester.pumpWidget(_host(OnboardingScreen(
-        onDone: () => doneCalls++,
+        onRequestNotifications: () {},
         onRequestLocation: () {},
         onRequestTracking: () {},
       )));
       await tester.pump();
-      await tester.tap(find.text('Skip'));
-      await tester.pump();
-      expect(doneCalls, 1);
+      expect(find.text('Skip'), findsNothing);
     });
 
     testWidgets('Continue advances through steps and fires priming callbacks',
         (tester) async {
+      var notificationCalls = 0;
       var locationCalls = 0;
       var trackingCalls = 0;
-      var doneCalls = 0;
       await tester.pumpWidget(_host(OnboardingScreen(
-        onDone: () => doneCalls++,
+        onRequestNotifications: () => notificationCalls++,
         onRequestLocation: () => locationCalls++,
         onRequestTracking: () => trackingCalls++,
       )));
@@ -98,12 +96,14 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
       }
       expect(find.text('STEP 3 · STAY PRESENT'), findsOneWidget);
+      expect(notificationCalls, 0);
       expect(locationCalls, 0);
       expect(trackingCalls, 0);
 
-      // Step 3 → 4 (location-prime).
+      // Step 3 → 4: triggers onRequestNotifications AND advances.
       await tester.tap(find.text('Continue'));
       await tester.pump(const Duration(milliseconds: 500));
+      expect(notificationCalls, 1);
       expect(find.text('STEP 4 · LOCATION'), findsOneWidget);
 
       // Step 4 → 5: triggers onRequestLocation AND advances.
@@ -112,17 +112,16 @@ void main() {
       expect(locationCalls, 1);
       expect(find.text('STEP 5 · ADS'), findsOneWidget);
 
-      // Step 5: triggers onRequestTracking but does NOT call onDone
-      // (the host drives dismissal once consent resolves).
+      // Step 5: triggers onRequestTracking. The host drives dismissal
+      // once consent resolves; there is no onDone callback.
       await tester.tap(find.text('Continue'));
       await tester.pump();
       expect(trackingCalls, 1);
-      expect(doneCalls, 0);
     });
 
     testWidgets('Back walks the user back one step', (tester) async {
       await tester.pumpWidget(_host(OnboardingScreen(
-        onDone: () {},
+        onRequestNotifications: () {},
         onRequestLocation: () {},
         onRequestTracking: () {},
       )));
@@ -140,7 +139,7 @@ void main() {
       var locationCalls = 0;
       var trackingCalls = 0;
       await tester.pumpWidget(_host(OnboardingScreen(
-        onDone: () {},
+        onRequestNotifications: () {},
         onRequestLocation: () => locationCalls++,
         onRequestTracking: () => trackingCalls++,
       )));
