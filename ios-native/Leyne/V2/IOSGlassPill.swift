@@ -51,6 +51,8 @@ struct GlassPillButton: View {
                     .font(.system(size: 13, weight: .semibold))
                 Text(label)
                     .font(t.sans(13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .foregroundStyle(filled ? t.onAccent : t.fg)
             .padding(.horizontal, 14)

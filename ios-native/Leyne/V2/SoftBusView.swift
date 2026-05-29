@@ -28,9 +28,11 @@ struct SoftBusView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     topActionRow
-                    compactStopHeader
+                    headerSection
                     arrivalCard
-                    liveActivityCTA
+                    // liveActivityCTA — hidden until ActivityKit is wired.
+                    // Re-add this row here to restore the Live Activity entry
+                    // point once parity.md Task #12 lands. See liveActivityCTA.
                     liveMapSection
                     if !timelineStops.isEmpty {
                         RouteTimeline(t: t,
@@ -55,9 +57,18 @@ struct SoftBusView: View {
 
     private var topActionRow: some View {
         HStack {
-            GlassPillButton(t: t, icon: "chevron.left", label: "Stop",
+            // Back pill carries the stop's own name (the place the user is
+            // looking at / came from) instead of the literal word "Stop", so
+            // the affordance reads "‹ Beauty World". Truncate by tail so a
+            // long name stays a single line and never wraps the pill.
+            GlassPillButton(t: t, icon: "chevron.left",
+                            label: ds.stopName(stopCode),
                             action: { fb.select(); onBack() })
-            Spacer()
+                // Let the pin pill keep its full width; the back pill's long
+                // stop name truncates (tail) rather than crowding it.
+                .layoutPriority(0)
+                .frame(maxWidth: 220, alignment: .leading)
+            Spacer(minLength: 8)
             GlassPillButton(t: t,
                             icon: isPinned ? "pin.fill" : "pin",
                             label: isPinned ? "Pinned" : "Pin",
@@ -66,19 +77,45 @@ struct SoftBusView: View {
         }
     }
 
-    private var compactStopHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Eyebrow(text: "STOP \(stopCode)", t: t)
-            Text(ds.stopName(stopCode))
-                .font(t.sans(24, weight: .semibold))
-                .foregroundStyle(t.fg)
+    // v3 header: the SERVICE NUMBER is the hero. A small dim context line
+    // (walk time · stop name) sits above the headline; the stop name is
+    // demoted out of the title role it held in v2.
+    private var headerSection: some View {
+        let service = liveService()
+        return VStack(alignment: .leading, spacing: 6) {
+            // Context line: walk figure + "<walk> · <stop name>". We have no
+            // real walk-time source, so we lead with the stop name and only
+            // include a road hint when present — never a fabricated minute.
             HStack(spacing: 6) {
                 Image(systemName: "figure.walk").font(.system(size: 12))
-                Text(ds.roadName(stopCode).isEmpty ? "Live · LTA" : ds.roadName(stopCode))
+                Text(contextLine)
                     .font(t.mono(11))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .foregroundStyle(t.dim)
+
+            Eyebrow(text: "Bus", t: t)
+            Text(svc)
+                .font(t.sans(40, weight: .bold))
+                .foregroundStyle(t.fg)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text("Towards \(service?.dest ?? "—")")
+                .font(t.sans(15, weight: .medium))
+                .foregroundStyle(t.dim)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
+    }
+
+    /// "<stop name>" or, when a road name exists, "<road> · <stop name>".
+    /// No walk-time minute is shown because we have no routing source for it
+    /// — fabricating "4 min" would be a precision the app can't back up.
+    private var contextLine: String {
+        let name = ds.stopName(stopCode)
+        let road = ds.roadName(stopCode)
+        return road.isEmpty ? name : "\(road) · \(name)"
     }
 
     private var arrivalCard: some View {
@@ -90,18 +127,36 @@ struct SoftBusView: View {
             return fmtETA(s)
         }
 
-        return HStack(alignment: .center, spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 6) {
-                    ServiceBadge(svc: svc, t: t, size: .sm)
-                    Text("→ \(service?.dest ?? "—")")
-                        .font(t.sans(13, weight: .medium))
-                        .foregroundStyle(t.fg)
-                        .lineLimit(1)
+        return VStack(alignment: .leading, spacing: 14) {
+            // ETA-led row: "ARRIVES IN" + big numeral on the left, the
+            // live-vs-scheduled provenance chip on the right. The redundant
+            // route/destination pill that used to sit here is gone — the
+            // header already states the bus number and direction.
+            HStack(alignment: .center, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Eyebrow(text: "Arrives in", t: t)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(eta?.big ?? "—")
+                            .font(.system(size: 56, weight: .regular, design: .monospaced))
+                            .tracking(-2)
+                            .foregroundStyle(t.accent)
+                        Text(eta?.small ?? "")
+                            .font(t.mono(13))
+                            .foregroundStyle(t.dim)
+                    }
                 }
-                Eyebrow(text: "Next arrival", t: t)
                 Spacer()
+                if let service {
+                    liveStatusChip(service.monitored)
+                }
+            }
+
+            Divider().overlay(t.line)
+
+            // FOLLOWING: the next two real arrivals (following + third).
+            HStack {
                 Eyebrow(text: "Following", t: t)
+                Spacer()
                 HStack(spacing: 8) {
                     Text(next.map { $0.big + $0.small } ?? "—")
                         .font(t.mono(14, weight: .semibold))
@@ -114,22 +169,91 @@ struct SoftBusView: View {
                     }
                 }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 0) {
-                Text(eta?.big ?? "—")
-                    .font(.system(size: 56, weight: .regular, design: .monospaced))
-                    .tracking(-2)
-                    .foregroundStyle(t.accent)
-                Text(eta?.small ?? "")
-                    .font(t.mono(12))
-                    .foregroundStyle(t.dim)
-            }
+
+            notifyButton
         }
         .padding(18)
-        .frame(maxWidth: .infinity, minHeight: 160)
+        .frame(maxWidth: .infinity)
         .background(t.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
+    /// Right-aligned provenance chip beside the ETA. Live (GPS-monitored)
+    /// shows a green dot + "Live · GPS"; scheduled shows a clock + dim
+    /// "~ Scheduled". Mirrors the `Service.monitored` flag used elsewhere.
+    @ViewBuilder
+    private func liveStatusChip(_ monitored: Bool) -> some View {
+        HStack(spacing: 5) {
+            if monitored {
+                Circle().fill(t.accent).frame(width: 7, height: 7)
+                Text("Live · GPS")
+            } else {
+                Image(systemName: "clock").font(.system(size: 10, weight: .semibold))
+                Text("~ Scheduled")
+            }
+        }
+        .font(t.mono(11, weight: .medium))
+        .foregroundStyle(monitored ? t.accent : t.dim)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(
+            (monitored ? t.liveBg : t.surfaceHi),
+            in: Capsule()
+        )
+        .overlay(Capsule().stroke(monitored ? t.accent.opacity(0.4) : t.line, lineWidth: 1))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(monitored
+            ? "Live arrival, tracked by GPS"
+            : "Scheduled estimate, not GPS tracked")
+    }
+
+    /// Full-width subtle-green capsule that toggles an arrival alert for
+    /// THIS bus at THIS stop. The mockup label ("Notify me when it's 1 stop
+    /// away") implies live bus-position data we don't have, so we wire the
+    /// real mechanism instead — `m.toggleTracked`, which makes the bus
+    /// eligible for the arrival-alert that AppModel fires ~1 min before
+    /// arrival — and relabel honestly to match what actually happens.
+    private var notifyButton: some View {
+        let on = m.isTracked(code: stopCode, busNo: svc)
+        return Button {
+            fb.select()
+            m.toggleTracked(code: stopCode, busNo: svc, allNos: allServiceNos)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: on ? "bell.fill" : "bell")
+                    .font(.system(size: 14, weight: .semibold))
+                Text(on ? "Alert on — tap to cancel" : "Notify me before it arrives")
+                    .font(t.sans(14, weight: .semibold))
+            }
+            .foregroundStyle(on ? t.onAccent : t.accent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                on ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.liveBg),
+                in: Capsule()
+            )
+            .overlay(Capsule().stroke(on ? Color.clear : t.accent.opacity(0.35), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(on
+            ? "Arrival alert on for bus \(svc). Tap to cancel."
+            : "Notify me before bus \(svc) arrives")
+    }
+
+    /// All service numbers currently arriving at this stop — passed to
+    /// `toggleTracked` so untracking the last one collapses to "no buses"
+    /// correctly and tracking everything maps back to the "all" state.
+    private var allServiceNos: [String] {
+        if case .loaded(let s) = ds.arrivals[stopCode] {
+            return s.map(\.no)
+        }
+        return [svc]
+    }
+
+    // MARK: Live Activity CTA — DEFERRED
+    // This is fully built but intentionally NOT shown in `body` (see the
+    // commented-out call site above). It is a no-op stub today — tapping it
+    // does nothing because ActivityKit isn't wired yet, and surfacing a dead
+    // button in prime position is a trust bug. Bring it back by (1) wiring
+    // ActivityKit per parity.md Task #12, then (2) restoring the call site.
     private var liveActivityCTA: some View {
         Button {
             fb.select()
@@ -173,6 +297,7 @@ struct SoftBusView: View {
                                 latitude: stop.Latitude,
                                 longitude: stop.Longitude)) {
                         MapStopMarker(t: t)
+                            .accessibilityLabel("Bus stop \(stop.Description)")
                     }
                 }
                 if let r = route {
@@ -186,11 +311,9 @@ struct SoftBusView: View {
                             Circle().fill(t.dim).frame(width: 6, height: 6)
                         }
                     }
-                    if let coord = r.busCoord {
-                        Annotation("Bus \(svc)", coordinate: coord) {
-                            MapBusMarker(t: t, svc: svc)
-                        }
-                    }
+                    // No live bus annotation: r.busCoord is always nil today
+                    // (DataStore.route hard-codes it). Restore a bus marker
+                    // here once real bus-coordinate data exists.
                 }
                 UserAnnotation()
             }
@@ -198,6 +321,16 @@ struct SoftBusView: View {
             .mapControls { MapUserLocationButton(); MapCompass() }
             .frame(height: 180)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // Honest bus-absent state: we never receive a live bus location
+            // from LTA, so say so plainly instead of implying a missing dot.
+            HStack(spacing: 6) {
+                Image(systemName: "bus")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Bus \(svc)’s live position isn’t shared yet — tracking by arrival time.")
+                    .font(t.mono(10))
+            }
+            .foregroundStyle(t.dim)
+            .fixedSize(horizontal: false, vertical: true)
             // Recenter the camera once the user's bus stop is known. The
             // initial value is `.automatic` so the map fits its
             // annotations; this explicit region pull is here so the map
@@ -224,19 +357,8 @@ struct SoftBusView: View {
             else if idx == youSeq { state = .board }
             else if idx < (busSeq ?? -1) { state = .past }
             else { state = .next }
-            let etaMin: Int? = state == .next
-                ? estimatedMinutes(fromIndex: idx, route: r)
-                : nil
-            return RouteStop(id: stop.code, name: stop.name, state: state, etaMin: etaMin)
+            return RouteStop(id: stop.code, name: stop.name, state: state)
         }
-    }
-
-    private func estimatedMinutes(fromIndex idx: Int, route r: RouteInfo) -> Int? {
-        guard let svc = liveService() else { return nil }
-        let baseMin = max(0, svc.etaSec / 60)
-        let yIdx = max(0, r.youIndex)
-        let delta = idx - yIdx
-        return max(0, baseMin + delta * 2)   // rough 2 min/stop heuristic
     }
 
     private func liveService() -> Service? {
@@ -283,11 +405,13 @@ struct SoftBusView: View {
     }
 
     private var mapLegend: some View {
+        // No BUS entry: LTA gives us no live bus coordinate (DataStore.route
+        // hard-codes busCoord: nil), so a "BUS" key would promise a marker
+        // that can never appear. STOP (accent pin) and YOU (system blue dot)
+        // are the only two things actually drawn — keep the legend honest.
         HStack(spacing: 12) {
-            MapLegendItem(t: t, system: "mappin.and.ellipse",
+            MapLegendItem(t: t, system: "bus",
                           fill: t.accent, label: "STOP")
-            MapLegendItem(t: t, system: "bus.fill",
-                          fill: t.accent, label: "BUS \(svc)")
             MapLegendItem(t: t, system: "location.fill",
                           fill: t.meBlue, label: "YOU")
             Spacer(minLength: 0)
@@ -297,36 +421,30 @@ struct SoftBusView: View {
 
 // MARK: - Map markers (shared icon language with the Android map)
 
-/// Stop marker — accent-coloured pin SF Symbol with a soft shadow so it
-/// stays legible over varied map tiles.
+/// Stop marker — a green teardrop pin carrying a small bus glyph, per the
+/// v3 mockup. The teardrop silhouette + white ring make it unmistakably a
+/// deliberate place-marker, distinct from the smaller system-blue
+/// user-location dot (YOU). There is exactly one of these on the map.
 struct MapStopMarker: View {
     let t: Theme
     var body: some View {
-        Image(systemName: "mappin.and.ellipse")
-            .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(t.accent)
-            .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-    }
-}
-
-/// Bus marker — accent pill with bus icon + service number. Matches the
-/// Android marker pixel-for-pixel in spirit.
-struct MapBusMarker: View {
-    let t: Theme
-    let svc: String
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "bus.fill")
-                .font(.system(size: 10, weight: .semibold))
-            Text(svc)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-        }
-        .foregroundStyle(t.onAccent)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(t.accent, in: Capsule())
-        .overlay(Capsule().stroke(.white, lineWidth: 1.5))
-        .shadow(color: t.accent.opacity(0.6), radius: 4)
+        Image(systemName: "bus")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(t.onAccent)
+            .frame(width: 28, height: 28)
+            .background(
+                Circle()
+                    .fill(t.accent)
+                    .overlay(Circle().stroke(.white, lineWidth: 2))
+            )
+            .background(
+                // Teardrop tail so the marker reads as a pin, not a dot.
+                Image(systemName: "arrowtriangle.down.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(t.accent)
+                    .offset(y: 12)
+            )
+            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
     }
 }
 

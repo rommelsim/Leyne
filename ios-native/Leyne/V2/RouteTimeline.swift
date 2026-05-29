@@ -3,7 +3,8 @@
 //   past   — bus has passed; dot muted, connector faint
 //   here   — bus's current location; filled dot with halo, "BUS HERE NOW"
 //   board  — user's boarding stop; filled dot with halo, "BOARD" chip
-//   next   — upcoming; hollow dot, ETA clock time on right, tap to alight
+//   next   — upcoming; hollow dot, tap to alight (no per-stop ETA: LTA
+//            gives us no per-stop times and a guessed clock would mislead)
 //   alight — user-selected alight target (upcoming); filled accent + 🔔 chip
 //
 // Tap behaviour: tapping an upcoming row toggles the alight selection
@@ -20,8 +21,6 @@ struct RouteStop: Identifiable, Equatable {
     let id: String        // stop code
     let name: String
     let state: RouteStopState
-    /// Minutes from now until bus arrives at this stop (for `.next`/`.alight`).
-    let etaMin: Int?
 }
 
 struct RouteTimeline: View {
@@ -29,9 +28,6 @@ struct RouteTimeline: View {
     let svc: String
     let stops: [RouteStop]
     @Binding var alightId: String?
-    /// Reference instant used to format clock-time ETAs. Pass current
-    /// `Date()` — kept as a parameter so previews can pin the clock.
-    var now: Date = Date()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,18 +37,16 @@ struct RouteTimeline: View {
                     .tracking(1)
                     .foregroundStyle(t.dim)
                 Spacer()
-                if stops.contains(where: { $0.state == .here }) {
-                    let aheadCount = stops.firstIndex(where: { $0.state == .here })
-                        .map { stops.count - $0 - 1 } ?? 0
-                    Text("\(aheadCount) STOP\(aheadCount == 1 ? "" : "S") AWAY")
-                        .font(t.mono(10, weight: .semibold))
-                        .tracking(1)
-                        .foregroundStyle(t.dim)
-                }
+                // No "N STOPS AWAY" badge: it requires the bus's live route
+                // position (RouteInfo.busIndex), which is always nil today —
+                // DataStore.route hard-codes busIndex/busCoord to nil. A count
+                // derived without it would be fabricated. Restore this badge
+                // (count of stops between `.here` and the boarding stop) once
+                // real live bus coordinates land.
             }
             .padding(.bottom, 8)
 
-            if alightId == nil && stops.contains(where: { $0.state == .next }) {
+            if stops.contains(where: { $0.state == .next }) {
                 Text("Tap a stop to be alerted when arriving.")
                     .font(t.sans(12))
                     .foregroundStyle(t.dim)
@@ -106,17 +100,20 @@ struct RouteTimeline: View {
                             .font(t.sans(14, weight: resolved == .past ? .regular : .medium))
                             .foregroundStyle(resolved == .past ? t.faint : t.fg)
                         Spacer(minLength: 0)
-                        if resolved == .next, let m = stop.etaMin {
-                            Text(clockETA(m))
-                                .font(t.mono(12, weight: .medium))
-                                .foregroundStyle(t.dim)
-                        }
+                    }
+                    // Stop code as a dim mono subline (e.g. "42071"). `id` is
+                    // the LTA stop code; only show it when it differs from the
+                    // displayed name so we never echo a code that *is* the name.
+                    if stop.id != stop.name {
+                        Text(stop.id)
+                            .font(t.mono(10))
+                            .foregroundStyle(t.faint)
                     }
                     switch resolved {
                     case .here:
                         chip("BUS HERE NOW", filled: false)
                     case .board:
-                        chip("BOARD", filled: true)
+                        chip("THIS STOP", filled: true)
                     case .alight:
                         chip("🔔 ALIGHT", filled: true)
                     default:
@@ -170,12 +167,5 @@ struct RouteTimeline: View {
                 in: Capsule()
             )
             .overlay(Capsule().stroke(filled ? Color.clear : t.accent.opacity(0.4), lineWidth: 1))
-    }
-
-    private func clockETA(_ mins: Int) -> String {
-        let target = now.addingTimeInterval(TimeInterval(mins * 60))
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: target)
     }
 }

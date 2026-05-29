@@ -97,7 +97,16 @@
       "Bash(/Users/rommel/Library/Android/sdk/build-tools/*/aapt2 dump *)",
       "Bash(grep -nA1 -E \"forceTestUnitForRelease|#warning\" /Users/rommel/Documents/Leyne/ios-native/Leyne/AdBanner.swift)",
       "WebFetch(domain:claude.ai)",
-      "Bash(xargs basename -a)"
+      "Bash(xargs basename -a)",
+      "Bash(grep -iA2 \"platform\\\\|material\\\\|liquid\\\\|glass\\\\|native\\\\|search\")",
+      "Bash(grep -niA1 \"notify\\\\|live activity\\\\|searchable\\\\|search field\\\\|accessib\\\\|dynamic type\\\\|voiceover\" specs/parity.md specs/leyne-2.0-plan.md)",
+      "Bash(xcodebuild -list -project ios-native/Leyne.xcodeproj)",
+      "Bash(xcodebuild -project ios-native/Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build)",
+      "Bash(xcodebuild -project ios-native/Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build)",
+      "Bash(sed -n '55,75p;119,135p' ios-native/Leyne/Models.swift)",
+      "Bash(sed -n '40,80p' ios-native/Leyne/DataStore.swift)",
+      "Bash(sed -n '50,75p' ios-native/Leyne/V2/SoftPrimitives.swift)",
+      "Bash(sed -n '584,598p' ios-native/Leyne/AppModel.swift)"
     ]
   }
 }
