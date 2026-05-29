@@ -36,17 +36,10 @@ struct SoftHomeView: View {
                     }
 
                     mrtAlertCards
-
-                    Color.clear.frame(height: 100)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
-
-            SoftBottomBar(t: t,
-                          selection: Binding(get: { .home }, set: { onTab($0) }),
-                          onSelect: { _ in fb.select() })
-                .padding(.bottom, 12)
         }
         .onAppear { warmArrivals() }
         .onChange(of: m.pins) { _, _ in warmArrivals() }

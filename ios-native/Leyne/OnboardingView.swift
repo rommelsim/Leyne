@@ -19,7 +19,6 @@ struct OnboardingView: View {
     /// step 3 ("STAY PRESENT") so the system prompt appears in context.
     var onRequestNotifications: () -> Void = {}
     var onRequestTracking: () -> Void = {}
-    let onDone: () -> Void
 
     @State private var step = 0
     // Single-shot guard for the final "Ads" step. Without it, rapid taps
@@ -66,9 +65,6 @@ struct OnboardingView: View {
                 }
                 .disabled(step == 0)
                 Spacer()
-                Button(action: onDone) {
-                    Text("Skip").font(t.sans(15)).foregroundStyle(t.dim)
-                }
             }
             .padding(.horizontal, 20).padding(.top, 10)
 

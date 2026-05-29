@@ -1,112 +1,55 @@
-// SoftTabBar — floating Liquid Glass pill with 4 tab icons. Mirrors
-// the prototype's tabbar (Home / Nearby / Settings / Search). Pinned
-// to the bottom; consumer pads its own ScrollView content so the bar
-// doesn't occlude the last row.
-//
-// SoftBottomBar combines the tab pill with the AdMob banner sitting
-// above it — this is what tabbed views (Home / Nearby / Settings)
-// actually mount.
+// SoftTab — tab identity for the native iOS 26 TabView mounted in
+// SoftRoot. The custom floating-pill tab bar that used to live here was
+// replaced by the system TabView, which renders the Liquid Glass bar and
+// the detached `.search` circle natively. This file now only carries the
+// tab enum plus the ad-banner gutter the tabbed screens share.
 
 import SwiftUI
 
 enum SoftTab: String, CaseIterable {
     case home, nearby, settings, search
-
-    var icon: String {
-        switch self {
-        case .home:     return "house.fill"
-        case .nearby:   return "location.fill"
-        case .settings: return "gearshape.fill"
-        case .search:   return "magnifyingglass"
-        }
-    }
 }
 
-struct SoftTabBar: View {
-    let t: Theme
-    @Binding var selection: SoftTab
-    var onSelect: ((SoftTab) -> Void)? = nil
+// MARK: - Top scroll-edge blur
 
-    var body: some View {
-        let bar = HStack(spacing: 4) {
-            ForEach(SoftTab.allCases, id: \.self) { tab in
-                let active = selection == tab
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) { selection = tab }
-                    onSelect?(tab)
-                } label: {
-                    Image(systemName: tab.icon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(active ? t.onAccent : t.fg)
-                        .frame(width: 56, height: 40)
-                        .background(
-                            active ? AnyShapeStyle(t.accent)
-                                   : AnyShapeStyle(Color.clear),
-                            in: Capsule()
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-
-        // iOS 26's Liquid Glass replaces the legacy `.regularMaterial`
-        // backdrop. `.glassEffect` is the new system primitive — it
-        // bends, blurs and refracts the content underneath in a way
-        // that the older material can't. We layer a subtle stroke +
-        // shadow on top so the bar reads as a distinct floating
-        // element even when nothing varied is behind it to refract.
-        // Fall back to a translucent surface on iOS 25 and below.
+extension View {
+    /// Re-instates the iOS 26 soft scroll-edge effect on the top edge.
+    /// These screens hide the navigation bar, which is what normally
+    /// anchors the system's top blur — without it, scrolled content
+    /// bleeds straight under the status bar / Dynamic Island. Requesting
+    /// the `.soft` style restores a progressive blur so the OS chrome
+    /// stays legible. No-op on iOS 25 and below.
+    @ViewBuilder
+    func softTopEdgeBlur() -> some View {
         if #available(iOS 26.0, *) {
-            bar
-                .glassEffect(.regular, in: Capsule())
-                .overlay(Capsule().strokeBorder(
-                    t.fg.opacity(t.isDark ? 0.12 : 0.06), lineWidth: 0.5))
-                .shadow(color: .black.opacity(t.isDark ? 0.35 : 0.10),
-                        radius: t.isDark ? 14 : 18,
-                        x: 0, y: t.isDark ? 4 : 6)
+            self.scrollEdgeEffectStyle(.soft, for: .top)
         } else {
-            bar
-                .background(Capsule().fill(.ultraThinMaterial))
-                .background(Capsule().fill(t.surface.opacity(0.4)))
-                .overlay(Capsule().stroke(t.line, lineWidth: 1))
-                .shadow(color: .black.opacity(t.isDark ? 0.3 : 0.06),
-                        radius: t.isDark ? 16 : 20,
-                        x: 0, y: t.isDark ? 4 : 6)
+            self
         }
     }
 }
 
-// MARK: - SoftBottomBar (ad banner + tab pill)
+// MARK: - Ad banner gutter
 
-/// Bottom-of-screen composite mounted by every tabbed Soft view. Stacks
-/// the AdMob banner above the floating SoftTabBar pill so the ad sits
-/// in the same gutter on every screen. The banner self-suppresses when
-/// `AdConfig.adsEnabled` is off or `screenshotMode` is on, leaving the
-/// tab pill flush with the safe area.
-struct SoftBottomBar: View {
-    let t: Theme
-    @Binding var selection: SoftTab
-    var onSelect: ((SoftTab) -> Void)? = nil
-
-    var body: some View {
-        VStack(spacing: 6) {
-            if AdConfig.adsEnabled && !AdConfig.screenshotMode {
-                // AdBanner's inner ZStack uses a Color fill that has no
-                // intrinsic max-height — left unbounded inside a VStack
-                // ⟶ ZStack(alignment: .bottom) chain, it grew to fill
-                // the entire screen and pushed the tab pill off the
-                // bottom. The explicit 50pt clamp matches the AdMob
-                // banner unit's size.
+extension View {
+    /// Inserts the AdMob banner just above the floating tab bar via a
+    /// bottom safe-area inset, so it sits in the same gutter on every
+    /// tabbed screen and never occludes scroll content. Self-suppresses
+    /// when ads are disabled or screenshot mode is on.
+    @ViewBuilder
+    func adBannerGutter() -> some View {
+        if AdConfig.adsEnabled && !AdConfig.screenshotMode {
+            self.safeAreaInset(edge: .bottom) {
                 AdBanner()
                     .frame(height: 50)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 12,
                                                 style: .continuous))
                     .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
             }
-            SoftTabBar(t: t, selection: $selection, onSelect: onSelect)
+        } else {
+            self
         }
     }
 }

@@ -31,9 +31,7 @@ struct RootView: View {
                     onRequestTracking: {
                         Task { await AdConsent.gatherThenStart(); m.finishOnboarding() }
                     }
-                ) {
-                    m.finishOnboarding()
-                }
+                )
                 .transition(.opacity)
                 .zIndex(50)
             }

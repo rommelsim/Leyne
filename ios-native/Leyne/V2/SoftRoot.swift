@@ -49,7 +49,13 @@ struct SoftRoot: View {
     @EnvironmentObject var fb: Feedback
 
     @State private var tab: SoftTab = .home
-    @State private var stack: [SoftRoute] = []
+    // One navigation stack per tab so a drill-down in Home doesn't follow
+    // the user over to Nearby or Search. The native TabView preserves each
+    // path across tab switches, matching iOS's standard tab behaviour.
+    @State private var homeStack: [SoftRoute] = []
+    @State private var nearbyStack: [SoftRoute] = []
+    @State private var settingsStack: [SoftRoute] = []
+    @State private var searchStack: [SoftRoute] = []
     @State private var mapHandoff: MapHandoffKind = .none
 
     private var t: Theme { m.t }
@@ -58,18 +64,44 @@ struct SoftRoot: View {
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            // Native push stack — NavigationStack handles the iOS
-            // slide-from-trailing animation, parallax on the
-            // underlying view, and the edge-swipe back gesture for free.
-            NavigationStack(path: $stack) {
-                tabContent
-                    .toolbar(.hidden, for: .navigationBar)
-                    .navigationDestination(for: SoftRoute.self) { route in
-                        routeView(route)
-                            .toolbar(.hidden, for: .navigationBar)
-                            .enableSwipeBack()
+            // Native iOS 26 TabView — the system renders the floating
+            // Liquid Glass tab bar, handles selection switching, and
+            // detaches the `.search` role into its own trailing circle
+            // for free. Each tab owns a NavigationStack so child pushes
+            // (Stop / Bus) keep the native slide + edge-swipe-back.
+            TabView(selection: $tab) {
+                Tab("Home", systemImage: "house.fill", value: SoftTab.home) {
+                    navStack($homeStack) {
+                        SoftHomeView(
+                            onTab: { tab = $0 },
+                            onOpenStop: { homeStack.append(.stop($0)) },
+                            onOpenSearch: { tab = .search }
+                        )
                     }
+                }
+                Tab("Nearby", systemImage: "location.fill", value: SoftTab.nearby) {
+                    navStack($nearbyStack) {
+                        SoftNearbyView(
+                            onTab: { tab = $0 },
+                            onOpenStop: { nearbyStack.append(.stop($0)) }
+                        )
+                    }
+                }
+                Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
+                    navStack($settingsStack) {
+                        SoftSettingsView(onTab: { tab = $0 })
+                    }
+                }
+                Tab(value: SoftTab.search, role: .search) {
+                    navStack($searchStack) {
+                        SoftSearchView(
+                            onClose: { tab = .home },
+                            onOpenStop: { searchStack.append(.stop($0)) }
+                        )
+                    }
+                }
             }
+            .tint(t.accent)
 
             // Map handoff toast overlays the whole stack.
             VStack {
@@ -81,86 +113,70 @@ struct SoftRoot: View {
             .allowsHitTesting(mapHandoff != .none)
         }
         // Notification / Spotlight deep links arrive via AppModel.openCard.
-        // Convert each new request into a Stop or Bus route push, then
-        // clear so the same trigger fires the next tap.
+        // Route them into the Home tab's stack, then clear so the same
+        // trigger fires the next tap.
         .onChange(of: m.openCard) { _, card in
             guard let c = card else { return }
+            tab = .home
             if let svc = c.initialSelectedNo, !svc.isEmpty {
-                stack = [.stop(c.stopCode), .bus(stopCode: c.stopCode, svc: svc)]
+                homeStack = [.stop(c.stopCode), .bus(stopCode: c.stopCode, svc: svc)]
             } else {
-                stack = [.stop(c.stopCode)]
+                homeStack = [.stop(c.stopCode)]
             }
             m.openCard = nil
         }
     }
 
+    /// Wraps a tab's root in a NavigationStack bound to that tab's path,
+    /// registering the shared route destinations. The ad-banner gutter is
+    /// applied to the root only, so pushed detail views stay full-bleed.
     @ViewBuilder
-    private var tabContent: some View {
-        switch tab {
-        case .home:
-            SoftHomeView(
-                onTab: handleTabSelect,
-                onOpenStop: { push(.stop($0)) },
-                onOpenSearch: { push(.search) }
-            )
-        case .nearby:
-            SoftNearbyView(
-                onTab: handleTabSelect,
-                onOpenStop: { push(.stop($0)) }
-            )
-        case .settings:
-            SoftSettingsView(onTab: handleTabSelect)
-        case .search:
-            // Search is a route in the prototype; if the user tapped the
-            // search tab, push it as a route and snap back to Home so the
-            // tabbar reflects a base tab.
-            SoftHomeView(
-                onTab: handleTabSelect,
-                onOpenStop: { push(.stop($0)) },
-                onOpenSearch: { push(.search) }
-            )
+    private func navStack<Root: View>(_ path: Binding<[SoftRoute]>,
+                                      @ViewBuilder root: () -> Root) -> some View {
+        NavigationStack(path: path) {
+            root()
+                .adBannerGutter()
+                .softTopEdgeBlur()
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: SoftRoute.self) { route in
+                    routeView(route, path: path)
+                        .softTopEdgeBlur()
+                        .toolbar(.hidden, for: .navigationBar)
+                        .toolbar(.hidden, for: .tabBar)
+                        .enableSwipeBack()
+                }
         }
     }
 
     @ViewBuilder
-    private func routeView(_ route: SoftRoute) -> some View {
+    private func routeView(_ route: SoftRoute,
+                           path: Binding<[SoftRoute]>) -> some View {
+        let pop = { if !path.wrappedValue.isEmpty { path.wrappedValue.removeLast() } }
         switch route {
         case .stop(let code):
             SoftStopView(stopCode: code,
-                         onBack: { pop() },
-                         onOpenBus: { svc in push(.bus(stopCode: code, svc: svc)) },
-                         onSeeAll: { push(.allArrivals(code)) })
+                         onBack: pop,
+                         onOpenBus: { svc in path.wrappedValue.append(.bus(stopCode: code, svc: svc)) },
+                         onSeeAll: { path.wrappedValue.append(.allArrivals(code)) })
         case .bus(let code, let svc):
-            SoftBusView(stopCode: code, svc: svc, onBack: { pop() })
+            SoftBusView(stopCode: code, svc: svc, onBack: pop)
         case .search:
+            // Legacy route — Search is now a first-class tab. Kept so any
+            // stale path still resolves; route taps into the same stack.
             SoftSearchView(
-                onClose: { pop() },
+                onClose: pop,
                 onOpenStop: { code in
                     pop()
-                    push(.stop(code))
+                    path.wrappedValue.append(.stop(code))
                 }
             )
         case .allArrivals(let code):
             // Light wrapper around SoftStopView with the truncated list
             // toggled off — full implementation in Phase 2 follow-up.
             SoftStopView(stopCode: code,
-                         onBack: { pop() },
-                         onOpenBus: { svc in push(.bus(stopCode: code, svc: svc)) },
+                         onBack: pop,
+                         onOpenBus: { svc in path.wrappedValue.append(.bus(stopCode: code, svc: svc)) },
                          onSeeAll: {})
         }
-    }
-
-    private func handleTabSelect(_ next: SoftTab) {
-        fb.select()
-        if next == .search { push(.search); return }
-        tab = next
-        stack = []
-    }
-
-    private func push(_ route: SoftRoute) {
-        stack.append(route)
-    }
-    private func pop() {
-        if !stack.isEmpty { stack.removeLast() }
     }
 }

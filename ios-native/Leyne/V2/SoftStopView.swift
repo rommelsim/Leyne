@@ -124,7 +124,7 @@ struct SoftStopView: View {
 
     private func followingSuffix(_ s: Service) -> String {
         let f = fmtETA(s.followingSec)
-        return " · Then \(f.big)\(f.small)"
+        return " · Then \(f.big) \(f.small)"
     }
 
     @ViewBuilder
@@ -174,7 +174,7 @@ struct SoftStopView: View {
                 }
                 Spacer()
                 let eta = fmtETA(bus.etaSec)
-                Text(eta.big + eta.small)
+                Text("\(eta.big) \(eta.small)")
                     .font(t.mono(13, weight: .semibold))
                     .foregroundStyle(t.accent)
             }

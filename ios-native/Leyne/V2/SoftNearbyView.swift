@@ -49,16 +49,10 @@ struct SoftNearbyView: View {
                         }
                     }
 
-                    Color.clear.frame(height: 100)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
-
-            SoftBottomBar(t: t,
-                          selection: Binding(get: { .nearby }, set: { onTab($0) }),
-                          onSelect: { _ in fb.select() })
-                .padding(.bottom, 12)
         }
         .onAppear {
             loc.startIfAuthorized()
@@ -97,9 +91,7 @@ struct SoftNearbyView: View {
     }
 
     private func row(stop: NearbyStop) -> some View {
-        let live = ds.servicesFor(stop.stopCode).first
-
-        return Button {
+        Button {
             fb.select()
             onOpenStop(stop.stopCode)
         } label: {
@@ -110,18 +102,9 @@ struct SoftNearbyView: View {
                         .font(t.sans(15, weight: .semibold))
                         .foregroundStyle(t.fg)
                         .lineLimit(2)
-                    HStack(spacing: 6) {
-                        Text("\(fmtDistance(stop.distanceM)) · \(stop.stopCode)")
-                            .font(t.mono(11))
-                            .foregroundStyle(t.dim)
-                        if let s = live {
-                            Text("·")
-                                .font(t.mono(11)).foregroundStyle(t.faint)
-                            Text("\(s.no) \(fmtETA(s.etaSec).big)\(fmtETA(s.etaSec).small)")
-                                .font(t.mono(11, weight: .semibold))
-                                .foregroundStyle(t.accent)
-                        }
-                    }
+                    Text("\(fmtDistance(stop.distanceM)) · \(stop.stopCode)")
+                        .font(t.mono(11))
+                        .foregroundStyle(t.dim)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")

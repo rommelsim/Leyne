@@ -59,15 +59,9 @@ struct SoftSettingsView: View {
                         .foregroundStyle(t.faint)
                         .padding(.top, 8)
 
-                    Color.clear.frame(height: 100)
                 }
                 .padding(.horizontal, 16)
             }
-
-            SoftBottomBar(t: t,
-                          selection: Binding(get: { .settings }, set: { onTab($0) }),
-                          onSelect: { _ in fb.select() })
-                .padding(.bottom, 12)
         }
     }
 
