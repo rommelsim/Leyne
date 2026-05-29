@@ -63,7 +63,7 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                     onChanged: (v) => AppModel.shared.setUse24h(v)),
               ]),
               const SizedBox(height: 24),
-              Text('Leyne v$_version · beta · Data from LTA DataMall.',
+              Text('Leyne v$_version · Data from LTA DataMall.',
                   style: t.mono(10, color: t.faint)),
             ],
           ),

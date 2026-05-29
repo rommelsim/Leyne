@@ -40,12 +40,6 @@ const Map<String, WhatsNewEntry> kChangelog = {
             '"~ scheduled", so you know which ones to fully trust.',
       ),
       WhatsNewItem(
-        icon: Icons.schedule_rounded,
-        title: 'First & last bus',
-        body: 'Each service now shows its first and last bus for the day — '
-            'with a heads-up when the last one has already left.',
-      ),
-      WhatsNewItem(
         icon: Icons.my_location_rounded,
         title: 'Search by postal code',
         body: 'Enter any 6-digit postal code to map the bus stops near that '

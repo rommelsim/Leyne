@@ -57,7 +57,7 @@ struct SoftSettingsView: View {
             } header: {
                 sectionHeader("Feedback")
             } footer: {
-                Text("Leyne v\(appVersion) · beta · Data from LTA DataMall.")
+                Text("Leyne v\(appVersion) · Data from LTA DataMall.")
                     .font(t.mono(10))
                     .foregroundStyle(t.faint)
                     .padding(.top, 8)

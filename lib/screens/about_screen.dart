@@ -120,7 +120,7 @@ class AboutScreen extends StatelessWidget {
                   final info = snap.data;
                   final v = info == null
                       ? '…'
-                      : 'v${info.version} (${info.buildNumber}) · beta';
+                      : 'v${info.version} (${info.buildNumber})';
                   return Text(v,
                       style: t.mono(12, color: t.dim)
                           .copyWith(letterSpacing: 0.4));

@@ -383,7 +383,7 @@ class SettingsScreen extends StatelessWidget {
                           final info = snap.data;
                           final v = info == null
                               ? '…'
-                              : 'v${info.version} (${info.buildNumber}) · beta';
+                              : 'v${info.version} (${info.buildNumber})';
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,

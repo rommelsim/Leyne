@@ -8,6 +8,36 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Unreleased — Leyne 2.3.0 (13) · 2026-05-30
+
+App Store **Guideline 2.2** resubmission fixes (prior build 2.2.1/2.2.3 was
+rejected as a "pre-release/trial with a limited feature set"):
+
+- **Removed every "beta" label.** The live V2 Settings footer no longer says
+  "· beta" (`SoftSettingsView`); the string is also stripped from the dead V1
+  `HomeView`/`SettingsView` and the Flutter `soft_settings_screen` /
+  `about_screen` / `settings_screen` so it's gone from the binary entirely.
+  The explicit "BETA" badge was the most likely rejection trigger.
+- **Alight alert is now a real feature, not a stub.** `SoftBusView`'s route-
+  timeline alight picker called a `UserDefaults`-only stub with a fake 15-min
+  timer; it now arms the actual alert via `AppModel.setActiveAlight(...)`
+  (fireAt = 90 s × (stopsToAlight − 2), mirroring V1 `DetailView`) and clears
+  it on untap. No partially-implemented feature for a reviewer to find.
+- **What's New no longer over-promises.** Removed the "First & last bus" item
+  (not surfaced in the V2 screens) from `kChangelog` and Flutter `changelog`.
+- **Search filter chips are now real, not decorative (iOS).** `SoftSearchView`
+  previously routed all four chips (Postal / Stop ID / Bus # / Place) through
+  the same stop-name search — a Guideline 2.2 partial-feature risk. Now:
+  **Postal** OneMap-geocodes the 6-digit code and lists bus stops within the
+  Settings radius, nearest first (e.g. `120338` → nearby stops); **Bus #**
+  searches services and opens the chosen service's origin stop; **Stop ID /
+  Place** search stops. Ports the proven V1 `SearchSheet` postal flow
+  (`GeocodeService` + `haversine`). This makes the "Search by postal code"
+  What's New claim truthful.
+- **Version bumped** to iOS `2.3.0 (13)` and Flutter `2.3.0+22` (stores reject
+  a duplicate of the rejected `(12)` build; also a clean marketing version for
+  the 2.0 "Soft" release).
+
 ## Unreleased — Leyne 2.0 "Soft" redesign · 2026-05-29
 
 First execution pass of the Leyne 2.0 redesign from the Claude Design

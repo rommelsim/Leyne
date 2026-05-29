@@ -423,15 +423,20 @@ struct SoftBusView: View {
     }
 
     private func scheduleAlight(stopCode code: String?) {
-        // Phase 3 wires this to NotificationsManager.scheduleAlight(_:)
-        // For now just store via AppModel UserDefaults keys directly.
-        guard let code else { return }
-        UserDefaults.standard.set(svc, forKey: "lyne.alight.busNo")
-        UserDefaults.standard.set(code, forKey: "lyne.alight.stopCode")
-        UserDefaults.standard.set(ds.stopName(code), forKey: "lyne.alight.stopName")
-        UserDefaults.standard.set(
-            Date().addingTimeInterval(TimeInterval(15 * 60)).timeIntervalSince1970,
-            forKey: "lyne.alight.fireAt")
+        // Arm (or clear) the real alight alert through AppModel, which
+        // schedules the actual notification. fireAt mirrors DetailView:
+        // 90 s × (stopsToAlight − 2) from now, so the heads-up lands about
+        // two stops before the drop-off.
+        guard let code, let r = route,
+              let alightIdx = r.stops.firstIndex(where: { $0.code == code }) else {
+            m.clearActiveAlight()
+            return
+        }
+        let base = r.busIndex ?? r.youIndex
+        let stopsToWait = max(0, (alightIdx - base) - 2)
+        let fireAt = Date().addingTimeInterval(TimeInterval(stopsToWait) * 90)
+        m.setActiveAlight(busNo: svc, stopCode: code,
+                          stopName: r.stops[alightIdx].name, fireAt: fireAt)
     }
 
     private var mapLegend: some View {

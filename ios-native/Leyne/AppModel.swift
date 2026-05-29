@@ -72,12 +72,6 @@ let kChangelog: [String: WhatsNewEntry] = [
                     + "\"~ scheduled\", so you know which ones to fully trust."
             ),
             WhatsNewItem(
-                icon: "clock",
-                title: "First & last bus",
-                body: "Each service now shows its first and last bus for the "
-                    + "day — with a heads-up when the last one has already left."
-            ),
-            WhatsNewItem(
                 icon: "location.circle",
                 title: "Search by postal code",
                 body: "Enter any 6-digit postal code to map the bus stops near "

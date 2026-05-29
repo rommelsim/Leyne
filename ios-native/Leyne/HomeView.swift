@@ -219,7 +219,7 @@ struct HomeView: View {
                         reorderableCards.padding(.horizontal, 16).padding(.bottom, 24)
                     }
 
-                    Text("LEYNE · BETA · v\(versionShort)")
+                    Text("LEYNE · v\(versionShort)")
                         .font(t.mono(10)).tracking(1).foregroundStyle(t.dim)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 16).padding(.bottom, 8)

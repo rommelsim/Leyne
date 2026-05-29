@@ -268,7 +268,7 @@ struct SettingsView: View {
     private var versionLabel: String {
         let v = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
         let b = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
-        return "v\(v) (\(b)) · beta"
+        return "v\(v) (\(b))"
     }
 
     private func themeLabel(_ m: LeyneThemeMode) -> String {
@@ -607,7 +607,7 @@ struct AboutView: View {
     private var versionLabel: String {
         let v = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
         let b = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
-        return "v\(v) (\(b)) · beta"
+        return "v\(v) (\(b))"
     }
 }
 
