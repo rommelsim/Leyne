@@ -799,10 +799,18 @@ final class AppModel: ObservableObject {
                 await self.liveActivity?.update(
                     ActivityContent(state: state, staleDate: Date().addingTimeInterval(120)))
                 if snap.etaSec <= 0 {
+                    // Show "Bus is here" for a few seconds while still active
+                    // (visible in both the Dynamic Island and Lock Screen),
+                    // then dismiss IMMEDIATELY. `.default` kept the ENDED
+                    // activity on the Lock Screen for up to ~4h while iOS drops
+                    // ended activities from the Dynamic Island at once — so an
+                    // arrived bus lingered as a stale Lock-Screen ghost (still
+                    // showing the previous bus) that was absent from the
+                    // Dynamic Island. `.immediate` clears both surfaces together.
                     try? await Task.sleep(nanoseconds: 6_000_000_000)
                     await self.liveActivity?.end(
                         ActivityContent(state: state, staleDate: nil),
-                        dismissalPolicy: .default)
+                        dismissalPolicy: .immediate)
                     await MainActor.run {
                         self.liveActivityEndObserver?.cancel()
                         self.liveActivityEndObserver = nil

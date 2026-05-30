@@ -33,12 +33,26 @@ private func etaText(_ s: LeyneActivityAttributes.ContentState) -> String {
     s.arrived ? "Now" : (s.etaMinutes <= 0 ? "Arr" : "\(s.etaMinutes)")
 }
 
+// Deep link into the app's Bus view for this tracked service. The app
+// (RootView.onOpenURL) maps lyne://bus/<stopCode>/<busNo> onto the same
+// AppModel.open(...) path a notification tap uses, so tapping the lock-screen
+// Live Activity or the Dynamic Island lands on Bus <busNo> at <stopCode>.
+// (Previously the Live Activity set no widgetURL, so a tap only foregrounded
+// the app wherever it happened to be — it never opened the bus.)
+private func busURL(_ a: LeyneActivityAttributes) -> URL? {
+    guard !a.stopCode.isEmpty, !a.busNo.isEmpty else { return nil }
+    let bus = a.busNo.addingPercentEncoding(
+        withAllowedCharacters: .urlPathAllowed) ?? a.busNo
+    return URL(string: "lyne://bus/\(a.stopCode)/\(bus)")
+}
+
 struct LeyneLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LeyneActivityAttributes.self) { context in
             LockScreenView(attributes: context.attributes, state: context.state)
                 .activityBackgroundTint(ink)
                 .activitySystemActionForegroundColor(paper)
+                .widgetURL(busURL(context.attributes))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -63,6 +77,7 @@ struct LeyneLiveActivity: Widget {
                     .padding(.trailing, 6)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
+                    // .widgetURL here makes the expanded info area tap → Bus view.
                     VStack(alignment: .leading, spacing: 2) {
                         Text("→ \(context.attributes.dest)")
                             .font(.system(size: 12, weight: .medium)).foregroundStyle(paper)
@@ -85,21 +100,25 @@ struct LeyneLiveActivity: Widget {
                         }
                     }
                     .padding(.horizontal, 6).padding(.bottom, 2)
+                    .widgetURL(busURL(context.attributes))
                 }
             } compactLeading: {
                 Text(context.attributes.busNo)
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(green)
                     .widgetAccentable()
+                    .widgetURL(busURL(context.attributes))
             } compactTrailing: {
                 Text(etaText(context.state) + (context.state.arrived || context.state.etaMinutes <= 0 ? "" : "m"))
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundStyle(context.state.arrived ? green : paper)
+                    .widgetURL(busURL(context.attributes))
             } minimal: {
                 Text(context.attributes.busNo)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(green)
                     .widgetAccentable()
+                    .widgetURL(busURL(context.attributes))
             }
             .keylineTint(green)
         }

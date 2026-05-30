@@ -30,15 +30,22 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned so a stable-channel bump can't silently change compileSdk /
+          # Dart version / plugin compat out from under CI. Bump in lockstep
+          # with the local Flutter when upgrading.
+          flutter-version: '3.44.0'
           channel: stable
           cache: true
 
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      # Debug APK — verifies the Android build compiles. The LTA key has a
-      # baked-in fallback (lib/data/lta_config.dart), so no secrets needed.
-      - run: flutter build apk --debug
+      # Release AAB — verifies the actual shipping artifact and the release /
+      # AOT code path (a debug APK skips AOT, so AOT-only failures slip past).
+      # The LTA key has a baked-in fallback (lib/data/lta_config.dart), and the
+      # release build falls back to debug signing when key.properties is absent
+      # (it is, in CI), so no secrets are needed to produce a verifiable bundle.
+      - run: flutter build appbundle --release
 
   ios:
     name: iOS build
@@ -49,6 +56,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pinned so a stable-channel bump can't silently change compileSdk /
+          # Dart version / plugin compat out from under CI. Bump in lockstep
+          # with the local Flutter when upgrading.
+          flutter-version: '3.44.0'
           channel: stable
           cache: true
 

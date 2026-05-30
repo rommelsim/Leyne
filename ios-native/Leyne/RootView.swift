@@ -101,5 +101,31 @@ struct RootView: View {
                    busNo: busNo,
                    feedback: false)
         }
+        // Widget + Live Activity deep links (lyne:// scheme, registered in
+        // LeyneInfo.plist). The Home Screen widget opens lyne://stop/<code>;
+        // the Live Activity (lock screen / Dynamic Island) opens
+        // lyne://bus/<stopCode>/<busNo>. Both route through the same
+        // AppModel.open(...) plumbing as a notification tap, so SoftRoot pushes
+        // Stop or Bus accordingly. Without this handler the registered scheme
+        // had no receiver — a widget / Live Activity tap only foregrounded the
+        // app instead of opening the stop or bus.
+        .onOpenURL { url in
+            guard url.scheme == "lyne", let host = url.host else { return }
+            let parts = url.pathComponents.filter { $0 != "/" }
+            switch host {
+            case "bus" where parts.count >= 2:
+                m.open(stopCode: parts[0],
+                       label: DataStore.shared.stopName(parts[0]),
+                       busNo: parts[1],
+                       feedback: false)
+            case "stop" where !parts.isEmpty:
+                m.open(stopCode: parts[0],
+                       label: DataStore.shared.stopName(parts[0]),
+                       busNo: nil,
+                       feedback: false)
+            default:
+                break
+            }
+        }
     }
 }

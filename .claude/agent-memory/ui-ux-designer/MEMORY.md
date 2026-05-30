@@ -2,3 +2,5 @@
 - [Widget Soft Spec](project_widget_soft_spec.md) — full token mapping (old inline hex → Soft hex), widgetAccentable rules, typography/shape corrections, per-surface notes, P0/P1/P2 priority ranking for WidgetKit alignment
 - [iOS ↔ Android Parity Map](project_parity_map.md) — per-flow parity status, idiom-bleed violations, and prioritized punch list (audited 2026-05-29)
 - [Android Stop Alert Spec](project_android_stop_alerts.md) — model decision, Material interaction spec, copy, build plan for GAP 7 (P0 stop-screen alert controls)
+- [Android V2 UI Audit](project_android_v2_audit.md) — full P0–P3 findings: Material 3 violations, a11y failures, custom-vs-native component issues — 2026-05-30
+- [Slide-to-Unpin Spec](project_slide_to_unpin_spec.md) — per-platform gesture spec, button-removal verdict, undo, discoverability, a11y, edit-mode interplay — 2026-05-30

@@ -29,7 +29,15 @@ class SoftBusScreen extends StatefulWidget {
 
 class _SoftBusScreenState extends State<SoftBusScreen> {
   RouteInfo? _route;
-  String? _alightId;
+
+  /// The picked alight stop for THIS service, read from the shared
+  /// AppModel.activeAlight (one ride at a time, persisted). Filtered to
+  /// widget.svc so another bus screen's selection doesn't light up here.
+  String? get _alightId {
+    final a = AppModel.shared.activeAlight;
+    if (a == null || a.busNo != widget.svc) return null;
+    return a.stopCode;
+  }
 
   @override
   void initState() {
@@ -44,6 +52,35 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     final r = await DataStore.shared
         .route(serviceNo: widget.svc, stopCode: widget.stopCode);
     if (mounted) setState(() => _route = r);
+  }
+
+  /// Arms (or clears) the alight alert for the picked stop via the shared
+  /// AppModel engine — the same path DetailScreen uses. Fires ~2 stops before
+  /// the alight stop (90 s/stop), measured from the bus's current index
+  /// (falling back to the boarding index). Tapping the armed stop again
+  /// (code == null) disarms the ride. Previously `onAlight` only set
+  /// widget-local state, so the chip lit up but no notification was scheduled.
+  Future<void> _onAlightChanged(String? code) async {
+    final route = _route;
+    if (route == null) return;
+    if (code == null) {
+      await AppModel.shared.clearActiveAlight();
+      if (mounted) setState(() {});
+      return;
+    }
+    final alightIdx = route.stops.indexWhere((s) => s.code == code);
+    if (alightIdx < 0) return;
+    final stop = route.stops[alightIdx];
+    final base = route.busIndex ?? route.youIndex;
+    final stopsToAlight = (alightIdx - base).clamp(0, 1 << 30);
+    final stopsToWait = (stopsToAlight - 2).clamp(0, 1 << 30);
+    final fireAt = DateTime.now().add(Duration(seconds: stopsToWait * 90));
+    await AppModel.shared.setActiveAlight(
+        busNo: widget.svc,
+        stopCode: code,
+        stopName: stop.name,
+        fireAt: fireAt);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -97,9 +134,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                 if (_route != null)
                   RouteTimeline(
                     svc: widget.svc,
-                    stops: _timelineStops(live),
+                    stops: _timelineStops(),
                     alightId: _alightId,
-                    onAlight: (id) => setState(() => _alightId = id),
+                    onAlight: _onAlightChanged,
                   ),
               ],
             ),
@@ -358,14 +395,12 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  List<SoftRouteStop> _timelineStops(Service? live) {
+  List<SoftRouteStop> _timelineStops() {
     final r = _route;
     if (r == null) return const [];
     final seg = journeySegment(r);
     final youSeq = r.youIndex;
     final busSeq = r.busIndex;
-    final baseMin = (live?.etaSec ?? 0) ~/ 60;
-    final yIdx = youSeq < 0 ? 0 : youSeq;
     return seg.map((stop) {
       final idx = r.stops.indexWhere((s) => s.code == stop.code);
       SoftRouteStopState state;
@@ -378,11 +413,10 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       } else {
         state = SoftRouteStopState.next;
       }
-      final etaMin = state == SoftRouteStopState.next
-          ? (baseMin + (idx - yIdx) * 2).clamp(0, 999)
-          : null;
-      return SoftRouteStop(
-          id: stop.code, name: stop.name, state: state, etaMin: etaMin);
+      // No per-stop ETA: LTA only publishes an arrival time for the queried
+      // stop, so a downstream-stop time would be fabricated. Show position
+      // only. (Was: baseMin + 2 min × stopsAway — invented clock times.)
+      return SoftRouteStop(id: stop.code, name: stop.name, state: state);
     }).toList();
   }
 }

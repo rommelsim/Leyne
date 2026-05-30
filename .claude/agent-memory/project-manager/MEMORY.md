@@ -1,3 +1,4 @@
-- [Project status](project-status.md) — what's done, in-flight (uncommitted), and left before V2 ships; snapshot 2026-05-29
-- [Project risks](project-risks.md) — top 6 risks with likelihoods, impacts, and mitigations
-- [Next actions](next-actions.md) — prioritized task list ordered by value; commit in-flight work is #1
+- [Project status](project-status.md) — what's done, in-flight (uncommitted), and left before V2 ships; updated 2026-05-30 with Android audit
+- [Project risks](project-risks.md) — top risks with likelihoods, impacts, mitigations; R0/R0b are new Android launch blockers
+- [Next actions](next-actions.md) — prioritized task list; Android Sprint 0 items prepended as launch blockers
+- [Android quality roadmap](android-quality-roadmap.md) — full 36-finding remediation plan, 4 sprints + native XL items; 2026-05-30 audit

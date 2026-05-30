@@ -51,7 +51,10 @@ android {
             if (keystorePropertiesFile.exists()) {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = (keystoreProperties["storeFile"] as String?)?.let { file(it) }
+                // rootProject.file() resolves a relative storeFile against the
+                // android/ dir (so a repo-local, gitignored keystore is portable
+                // across machines/CI); an absolute path is still honored as-is.
+                storeFile = (keystoreProperties["storeFile"] as String?)?.let { rootProject.file(it) }
                 storePassword = keystoreProperties["storePassword"] as String
             }
         }

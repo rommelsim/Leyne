@@ -34,9 +34,51 @@ rejected as a "pre-release/trial with a limited feature set"):
   Place** search stops. Ports the proven V1 `SearchSheet` postal flow
   (`GeocodeService` + `haversine`). This makes the "Search by postal code"
   What's New claim truthful.
+- **Live Activity + widget taps now deep-link (iOS).** The Live Activity (lock
+  screen / Dynamic Island) set no `widgetURL`, and the app had no `onOpenURL`
+  receiver at all — so tapping a live bus (e.g. 184) under the notch just
+  foregrounded the app instead of opening that bus, and the Home Screen widget's
+  `lyne://stop/<code>` link was silently dropped too. Added a
+  `lyne://bus/<stopCode>/<busNo>` URL to the Live Activity (lock screen + all
+  Dynamic Island presentations) and an `onOpenURL` handler in `RootView` that
+  routes both `bus` and `stop` links through the same `AppModel.open(...)` path a
+  notification tap uses (`SoftRoot` then pushes Stop or Bus). The `lyne` scheme
+  was already registered in `LeyneInfo.plist`; only the receiver was missing.
+- **Live Activity no longer lingers as a stale ghost after arrival (iOS).** On
+  arrival the activity ended with `dismissalPolicy: .default`, which keeps an
+  *ended* Live Activity on the Lock Screen for up to ~4 h while iOS drops it from
+  the Dynamic Island immediately — so an arrived bus showed a stale Lock-Screen
+  card (still the previous bus) that was absent from the Dynamic Island. Changed
+  to `.immediate` (`AppModel.startLivePolling`) so both surfaces clear together
+  after the brief "Bus is here" state.
 - **Version bumped** to iOS `2.3.0 (13)` and Flutter `2.3.0+22` (stores reject
   a duplicate of the rejected `(12)` build; also a clean marketing version for
   the 2.0 "Soft" release).
+
+Android quality pass (full-team Android review, 2026-05-30) — brings the
+Flutter/Android side to parity with the iOS fixes above:
+
+- **Search filter chips are now real on Android too.** `soft_search_screen.dart`
+  routed all four chips (Postal / Stop ID / Bus # / Place) through the same
+  `searchStops` call — the identical decorative-chip Guideline 2.2 / Google Play
+  "deceptive behavior" risk just fixed on iOS. Now **Postal** OneMap-geocodes the
+  6-digit code and lists stops within the Settings radius, **Bus #** searches
+  services and opens the chosen service's origin stop, **Stop ID / Place** search
+  stops. Mirrors the V1 `SearchScreen` dispatch.
+- **Alight alert now fires on Android.** `SoftBusScreen` held the picked stop in
+  widget-local `_alightId` and never scheduled anything — the 🔔 chip lit up but
+  no notification armed. Now wired to `AppModel.setActiveAlight(...)` via
+  `_onAlightChanged` (fireAt = 90 s × (stopsToAlight − 2)), mirroring
+  `DetailScreen`; tapping the armed stop again disarms the ride.
+- **Route timeline no longer fabricates per-stop ETAs.** Downstream stops showed
+  invented clock times (`liveETA + 2 min × stopsAway`); LTA only publishes an ETA
+  for the queried stop, so those are gone — the timeline shows position only.
+- **Android build/release hardening.** CI now builds the release AAB (was a debug
+  APK, which skips the AOT/release code path); Flutter is pinned to `3.44.0`;
+  Gradle heap `8G → 4G` (the 8G request risked OOM on ~7G CI runners); and the
+  upload keystore moved to a repo-local, gitignored path resolved via
+  `rootProject.file()` (was an absolute `/Users/...` path that broke on any other
+  machine).
 
 ## Unreleased — Leyne 2.0 "Soft" redesign · 2026-05-29
 

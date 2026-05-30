@@ -1,0 +1,3 @@
+- [Project structure](project-structure.md) — Android is Flutter (lib/), no native Kotlin beyond MainActivity.kt; V2 screens under lib/screens/v2/; V1 legacy screens untouched
+- [Architecture patterns](architecture-patterns.md) — AppModel singleton ChangeNotifier god-object; DataStore singleton ChangeNotifier; ListenableBuilder rebuild scope; 1-second global tick
+- [Known code quality issues](known-issues.md) — confirmed P0/P1/P2 issues from 2026-05-30 audit with file:line citations

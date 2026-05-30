@@ -5,47 +5,52 @@ metadata:
   type: project
 ---
 
-## Immediate (do before anything else)
+## ANDROID SPRINT 0 — do before cutting any new AAB (audit findings 2026-05-30)
 
-1. **Commit in-flight work — in 3 logical splits:**
-   - Commit A: iOS widget/LA palette + Live Activity CTA wiring (`SoftBusView.swift`, `LeyneLiveActivity.swift`, `LeyneStopWidget.swift`)
-   - Commit B: Android parity pass — stop alerts, home PIN chip, settings wiring (`soft_stop_screen.dart`, `soft_home_screen.dart`, `soft_settings_screen.dart`, `app_model.dart`, `data_store.dart`)
-   - Commit C: Android bus notify + ongoing notification (`soft_bus_screen.dart`, `notifications.dart`, `main.dart`)
-   Update `CHANGELOG.md` before each commit (or in one final commit). See [[feedback_changelog]].
+0-A. **Wire search filter chips** (`soft_search_screen.dart:104`) — branch `_results()` on `_filter`: postal→GeocodeService, Bus#→searchServices, StopID/Place→searchStops. iOS reference: `SoftSearchView.swift`. **LAUNCH BLOCKER / store-rejection risk. 5/6 agents.** Size: L.
+0-B. **Wire alight alert** (`soft_bus_screen.dart:32,101`) — call `AppModel.setActiveAlight()`; clear on dispose. Port from `detail_screen.dart:61-79`. Size: M.
+0-C. **Stop fabricating route ETAs** (`soft_bus_screen.dart:381-383`) — pass null, label "est." or omit. Size: S.
+0-D. **CI: build release AAB not debug APK** (`ci.yml:41`) — `flutter build appbundle --release`. Size: S.
+0-E. **Pin Flutter SDK in CI** (`ci.yml`) — `flutter-version: 3.44.0`. Size: S.
+0-F. **Drop Gradle heap to 4G** (`android/gradle.properties`) — was `-Xmx8G`, > runner RAM. Size: S.
+0-G. **Project-relative key.properties path** — replace absolute `/Users/rommel/...jks`. Size: S.
+0-H. **Clean up CHANGELOG stale Unreleased blocks**. Size: S.
 
-2. **Bump versions before any build:**
-   - iOS: increment MARKETING_VERSION (2.2.3 → 2.3.0 recommended given scope) + CURRENT_PROJECT_VERSION in `project.pbxproj` (6 blocks)
-   - Flutter: bump `pubspec.yaml` version string
+Full Android roadmap (Sprint 0–3 + native XL items) in [[android-quality-roadmap]].
 
-## Next session — pre-ship polish (highest value remaining)
+## Immediate — do before cutting the builds
 
-3. **Fix `SoftBusView.scheduleAlight`** — replace raw UserDefaults write with `m.setActiveAlight(busNo:stopCode:stopName:fireAt:)`. ~5 lines. P1 iOS correctness.
+1. **Fix `kChangelog` in `AppModel.swift`** — add 2.1.0 / 2.2.x / 2.3.0 entries so What's New shows for upgraders. ~20 lines. P1 iOS pre-archive. File: `ios-native/Leyne/AppModel.swift` around line 64.
 
-4. **Fix `kChangelog` in `AppModel.swift`** — add 2.1.0 / 2.2.x / 2.3.x entries so What's New works for upgraders.
+2. **Move CHANGELOG.md "Unreleased 2.3.0" → versioned block** — required by feedback_changelog rule before every Archive/AAB. File: `CHANGELOG.md`.
 
-5. **Add pull-to-refresh on Android** (Home, Stop, Bus) — wrap Flutter `ListView` in `RefreshIndicator` calling `DataStore.shared.refreshArrivals`. GAP 6/9/15. The `refreshArrivals` method already exists in the uncommitted diff.
+## Ship actions (after above)
 
-6. **Fix GAP 14** — delete `etaMin` fabrication in `_SoftBusScreenState._timelineStops`. One-liner. iOS removed this; Android is inventing per-stop minutes.
+3. **iOS Archive 2.3.0+13 → TestFlight → App Store resubmit.** Verify `forceTestUnitForRelease = false` in `AdBanner.swift` before submitting to App Store (may be true for TestFlight). Scheme: `Lyne`, destination: `Any iOS Device`. Organizer → Distribute.
 
-## Near-term (next iOS archive)
+4. **Android AAB: `scripts/build-android-prod.sh` → Play upload.** Confirm `SCHEDULE_EXACT_ALARM` in `AndroidManifest.xml`. Upload to closed testing or production depending on review status.
 
-7. **iOS Archive for new version.** Once commits + version bump are done: cut Archive in Xcode, distribute via TestFlight, then App Store. Verify `forceTestUnitForRelease` is false before App Store submission.
+## Next session — pre-ship polish
 
-8. **Android AAB.** Run `scripts/build-android-closed-test.sh`, upload to Play closed testing. Verify `SCHEDULE_EXACT_ALARM` in manifest.
+5. **Port Android search chip logic from iOS** (`soft_search_screen.dart`): wire postal geocode via OneMap HTTP, Bus# → `searchServices`, Stop ID → `searchStops`. iOS reference: `SoftSearchView.swift`. Closes Guideline 2.2 exposure on Android.
+
+6. **Fix `SoftBusView.scheduleAlight`** — replace raw UserDefaults write with `m.setActiveAlight(busNo:stopCode:stopName:fireAt:)`. ~5 lines. P1 iOS correctness. File: `ios-native/Leyne/V2/SoftBusView.swift`.
+
+7. **Android pull-to-refresh** (GAP 6/9/15) — wrap `ListView` in `RefreshIndicator` calling `DataStore.shared.refreshArrivals(code)` in `soft_home_screen.dart`, `soft_stop_screen.dart`, `soft_bus_screen.dart`. Method already exists.
 
 ## Deferred / not blocking ship
 
-9. **Android true background tracking** via foreground service. Current ongoing notification is foreground-only — document the limitation in release notes. Full fix is a significant Android `Service` implementation.
+8. **Dynamic Type on iOS** — `Theme.swift` `sans`/`mono` missing `relativeTo:`. One-file cascades everywhere. P2.
 
-10. **iOS CI for `ios-native/`** — add `xcodebuild` job to CI. Zero coverage today.
+9. **Live bus map marker** — `DataStore.route()` hard-codes `busCoord: nil`; call `liveBus(service:stopCode:)` after route resolves. P2.
 
-11. **`SoftBusView` live bus map marker** — `DataStore.route()` hard-codes `busCoord: nil`; call `liveBus(service:stopCode:)` after route resolves and merge coordinate. P2.
+10. **iOS `SoftToggle` → native `Toggle`** — a11y, size, system tint. P2.
 
-12. **Dynamic Type on iOS** — `Theme.swift` `sans`/`mono` missing `relativeTo:`. One-file fix.
+11. **Delete dead V1 iOS files** — `HomeView.swift`, `SettingsView.swift` are unreferenced. Needs Xcode UI delete (pbxproj update). P2 cleanup.
 
-13. **iOS `SoftToggle` → native `Toggle`** — a11y, size, system tint. P2.
+12. **Android true background tracking** — foreground service. Significant effort. Post-launch fast-follow.
 
-**Why:** Commits must precede any build. Version bumps must precede commits if a build follows. The rest is ordered by value-to-effort ratio.
-**How to apply:** Start every session with git status. If uncommitted work remains, that is action #1.
+**Why:** Working tree is clean (d3980e2). The only gate is builds. Fix kChangelog first — What's New is broken for all upgraders and it's 20 lines.
+**How to apply:** Start every session with git status. If clean, jump to item #1 above.
 
 Related: [[project-status]], [[project-risks]]

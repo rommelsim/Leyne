@@ -110,7 +110,8 @@
       "Bash(git log *)",
       "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'generic/platform=iOS Simulator' build)",
       "Bash(bash scripts/build-android-closed-test.sh)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(grep -v \"^\\\\s*$\")"
     ]
   }
 }

@@ -1,0 +1,1 @@
+- [User role](user-role.md) — iOS and Android owner, judges Android quality against iOS native rewrite; wants concrete file-level diffs
