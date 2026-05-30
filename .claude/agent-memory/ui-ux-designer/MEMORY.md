@@ -4,3 +4,4 @@
 - [Android Stop Alert Spec](project_android_stop_alerts.md) — model decision, Material interaction spec, copy, build plan for GAP 7 (P0 stop-screen alert controls)
 - [Android V2 UI Audit](project_android_v2_audit.md) — full P0–P3 findings: Material 3 violations, a11y failures, custom-vs-native component issues — 2026-05-30
 - [Slide-to-Unpin Spec](project_slide_to_unpin_spec.md) — per-platform gesture spec, button-removal verdict, undo, discoverability, a11y, edit-mode interplay — 2026-05-30
+- [SoftBusView Audit](project_softbusview_audit.md) — P0–P2 findings: "Arr" clip, map/caption contradiction, notify+LiveActivity confusion, FOLLOWING label — 2026-05-30

@@ -30,6 +30,29 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.3.0': WhatsNewEntry(
+    headline: 'Smarter alerts, quicker taps.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.notifications_active_rounded,
+        title: 'Get a heads-up before your stop',
+        body: 'Pick your drop-off in the route view and Leyne nudges you about '
+            'two stops early — so you can look up and still get off in time.',
+      ),
+      WhatsNewItem(
+        icon: Icons.my_location_rounded,
+        title: 'Find stops by postal code',
+        body: 'Type any 6-digit postal code in Search to list the bus stops '
+            'nearest that address, within your Settings radius.',
+      ),
+      WhatsNewItem(
+        icon: Icons.schedule_rounded,
+        title: 'Plan around your next buses',
+        body: 'The bus view now shows your next arrivals and tags each as live '
+            'GPS or a schedule estimate, so you know which to trust.',
+      ),
+    ],
+  ),
   '2.0.0': WhatsNewEntry(
     headline: 'A clearer, more honest commute.',
     items: [

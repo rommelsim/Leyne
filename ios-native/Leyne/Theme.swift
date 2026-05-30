@@ -4,6 +4,7 @@
 // only the values move to the Soft palette per specs/leyne-2.0-plan.md.
 
 import SwiftUI
+import UIKit  // UIFontMetrics — Dynamic Type scaling for sans()/mono()
 
 extension Color {
     /// Hex like "F7F4ED" or "#F7F4ED".
@@ -69,11 +70,19 @@ struct Theme: Equatable {
     // Leyne 2.0 typography target is Inter; for now we use the system
     // face. Inter bundling tracked separately — `sans()` is the single
     // place to swap when the font asset lands.
+    //
+    // Sizes are run through UIFontMetrics so the whole app honours the
+    // user's Dynamic Type setting — `Font.system(size:)` alone is a fixed
+    // point size and ignores it. Scaling here (the single font factory)
+    // cascades to every call site. `Font.system` has no `relativeTo:`
+    // parameter, so we scale the value, not the Font.
     func sans(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .default)
+        .system(size: UIFontMetrics.default.scaledValue(for: size),
+                weight: weight, design: .default)
     }
     func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        .system(size: UIFontMetrics.default.scaledValue(for: size),
+                weight: weight, design: .monospaced)
     }
 
     static let dark = Theme(

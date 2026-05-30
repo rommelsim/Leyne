@@ -8,7 +8,41 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Unreleased — Leyne 2.3.0 (13) · 2026-05-30
+## Unreleased — Leyne 2.3.0 · iOS (14) · Android (24) · 2026-05-31
+
+**2026-05-31 — UX review, cross-platform parity & ads verification (build 14 / 24):**
+
+iOS — bus arrival screen UX review (`SoftBusView`):
+- Fixed the clipped arrival headline: "Arr" could truncate at large Dynamic
+  Type sizes. Arriving now reads "ARRIVING · Now"; real minute counts keep the
+  big numeral. Guarded with `lineLimit(1)` + `minimumScaleFactor`.
+- Map stop marker + legend now use a location pin (`mappin.fill`). The old bus
+  glyph implied a live bus position that the on-screen caption explicitly says
+  isn't shared — a direct contradiction.
+- Renamed "Following" → "Then"; grouped the notify + Live Activity actions
+  under one "Alerts" header so they no longer read as duplicate buttons; pinned
+  the Back/Pin bar so it doesn't scroll away on long routes; "Pinned" button
+  now reads "Unpin"; removed a "Tap to cancel" VoiceOver instruction.
+- Added a notifications-off warning banner on the stop screen, and the next
+  arrival now shows inline on Nearby rows (parity with Android).
+
+Android — cross-platform parity + correctness:
+- Fixed a wrong-bus bug: when the tracked service had departed, the screen
+  silently showed a different bus's ETA under the original number. It now
+  shows an honest "no live data" state.
+- Bus screen gained the "Live · GPS" / "~ Scheduled" provenance chip, a third
+  upcoming arrival, the "Then" label, an "Alerts" group header, and the
+  ongoing-tracker card now stays visible (with an Enable prompt) when
+  notifications are off.
+- Settings gained Sound & Haptics toggles. Search-preview map markers use a
+  location pin instead of a bus icon.
+
+Ads — verified production-ready on both platforms (no code changes): real
+AdMob app + unit IDs, Google test units gated behind `#if DEBUG` /
+`kLyneAdsTest`, UMP → ATT → SDK-init consent ordering enforced, SKAdNetwork
+items present. Action item before promoting Android to production: confirm the
+Play Data Safety form discloses Advertising ID (the `AD_ID` permission is
+declared in the manifest).
 
 App Store **Guideline 2.2** resubmission fixes (prior build 2.2.1/2.2.3 was
 rejected as a "pre-release/trial with a limited feature set"):
@@ -79,6 +113,42 @@ Flutter/Android side to parity with the iOS fixes above:
   upload keystore moved to a repo-local, gitignored path resolved via
   `rootProject.file()` (was an absolute `/Users/...` path that broke on any other
   machine).
+- **Build artifact (Android).** `flutter build appbundle --release` (Flutter
+  3.44.0) → `build/app/outputs/bundle/release/app-release.aab` (62 MB),
+  versionCode **23** / versionName **2.3.0**, signed with the `upload` key
+  (self-signed `CN=Rommel`, SHA-256 `CD:61:…:3B:95`, valid to 2053) — ready for
+  Play Console upload. iOS build (13) Archive was submitted to App Store Connect.
+
+Post-review quick-wins (full-team standup, 2026-05-30) — small, verified fixes
+landed after the 2.3.0 build above; fold into the next Archive/AAB:
+
+- **What's New now displays on iOS 2.3.0.** `kChangelog` in `AppModel.swift` only
+  had a `2.0.0` entry, so the What's New gate silently no-op'd for everyone
+  updating to 2.3.0 (`whatsNewVersion` returns nil when `kChangelog[current]` is
+  absent). Added an honest `2.3.0` entry (alight heads-up, Live Activity / widget
+  deep-link, postal-code search) — all three are features that actually shipped.
+- **iOS now honours Dynamic Type.** `Theme.swift` `sans()`/`mono()` used a fixed
+  `Font.system(size:)` and ignored the user's text-size setting app-wide. Now
+  scaled through `UIFontMetrics.default.scaledValue(for:)` in the single font
+  factory, cascading to every call site; the hardcoded 56 pt ETA numeral in
+  `SoftBusView.arrivalCard` was bypassing the factory and now routes through
+  `t.mono(56)`. (Still verify layout at the largest accessibility sizes.)
+- **iOS test host fixed.** `LeyneTests` `TEST_HOST` still pointed at the pre-rename
+  `Lyne.app/Lyne`; the app builds as `Leyne.app/Leyne`, so the host app could not
+  be injected. Corrected in both Debug and Release test configs (`project.pbxproj`).
+- **Android onboarding icon.** The notification-priming step rendered the
+  iOS-specific `Icons.phone_iphone`; swapped to the platform-neutral
+  `Icons.smartphone` (`onboarding_screen.dart`).
+
+Verified: `xcodebuild … -scheme Leyne` **BUILD SUCCEEDED**; `flutter analyze lib/`
+clean. NOT done (and why): the "dead V1" `HomeView.swift` / `SettingsView.swift`
+were **not** deleted — they still define live V2 types (`WhatsNewView`,
+`NotificationsView`, `StickyCompactBar`, `TitleOffsetKey`), so deletion breaks the
+build; dropping the dead `HomeView`/`SettingsView` structs needs a type-extraction
+refactor first. The `AdBanner` `#warning` was **not** un-commented — it is paired
+to `forceTestUnitForRelease` (currently `false` / App-Store-safe), so un-commenting
+would fire a false "ads are ON" alarm; the real guard is a `check-ad-toggle.sh`
+pre-Archive grep (still open).
 
 ## Unreleased — Leyne 2.0 "Soft" redesign · 2026-05-29
 

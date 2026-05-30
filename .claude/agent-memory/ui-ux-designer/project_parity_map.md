@@ -1,253 +1,215 @@
 ---
 name: project-parity-map
-description: Cross-platform iOS ↔ Flutter/Android V2 parity map — per-flow status, idiom-bleed violations, and open punch list (audited 2026-05-29)
+description: Cross-platform iOS ↔ Flutter/Android V2 parity map — per-flow status, idiom-bleed violations, and open punch list (audited 2026-05-31, supersedes 2026-05-29 version)
 metadata:
   type: project
 ---
 
-Full audit of ios-native/Leyne/V2/ against lib/screens/v2/ as of 2026-05-29.
+Full audit of ios-native/Leyne/V2/ against lib/screens/v2/ as of 2026-05-31.
 Governing rule: feature/flow parity required; platform-native implementation
 correct; brand-layer (cards, chips, warm palette) intentionally shared.
 
-## Flow Parity Status
+## Resolved since last audit (2026-05-29 → 2026-05-31)
+
+- GAP 3 RESOLVED: Flutter pin card chip logic now matches iOS exactly — empty when no nickname, empty when nickname == stop name.
+- GAP 6 RESOLVED: Flutter Home has RefreshIndicator.
+- GAP 7 RESOLVED: Flutter SoftStopScreen now has per-bus bell (_bell), master bell (_masterBell in AppBar), sort chips (Soonest/Bus no.), track hint row, and notifications-off banner. The hero+others layout is retained but all alert controls are present.
+- GAP 9 RESOLVED: Flutter Stop detail has RefreshIndicator.
+- GAP 11 RESOLVED: Flutter SoftBusScreen _ongoingCard is fully wired to AppModel.toggleOngoing — no longer a dead tap.
+- GAP 13 RESOLVED: Flutter bus map legend no longer shows a BUS entry (matches iOS).
+- GAP 14 RESOLVED: Flutter _timelineStops no longer passes etaMin to SoftRouteStop — no fabricated per-stop clock times.
+- GAP 15 RESOLVED: Flutter Bus detail has RefreshIndicator.
+- GAP 19 RESOLVED: Android V2 Settings Routines section is gone.
+- GAP 20 RESOLVED: Android V2 Settings Notifications row navigates to NotificationsScreen.
+- GAP 21 RESOLVED: Android V2 Settings Language row is absent (matches iOS V2 omission).
+
+## Current Open Gaps
+
+### Stop Detail screen
+GAP A [PARITY]: Flutter SoftStopScreen hint row only shown when !isPinned
+(lib/screens/v2/soft_stop_screen.dart:96). iOS SoftStopView shows trackHint
+unconditionally whenever arrivals are loaded (SoftStopView.swift:116).
+After the first bell tap the stop becomes pinned and the hint disappears on
+Android. iOS keeps the hint visible throughout. Minor but creates slightly
+different discoverability.
+
+GAP B [PARITY]: Flutter SoftStopScreen notifications-off banner shown when
+isPinned && !notificationsEnabled (stop_screen.dart:80). iOS SoftStopView has
+no equivalent notifications-off banner. iOS-side gap: user can pin a stop with
+notifications off and get no contextual warning. Android is more complete here.
+
+GAP C [COPY]: Flutter stop master bell tooltip uses "Clear all alerts" (stop_screen.dart:141)
+while iOS master pill label cycles "Alert all" / "N alerts" / "All alerts"
+(SoftStopView.swift:43-46). Functional equivalence but label vocabulary differs.
+Also: Flutter bell icon uses notifications_active/notifications_none; iOS uses
+bell.fill/bell. Platform-appropriate difference, not bleed — but Android bell
+tooltip "Clear all alerts" could be more explicit (iOS says "Alerting for N buses").
+
+GAP D [PARITY/LAYOUT]: Flutter SoftStopScreen uses a "primary card" hero for
+the first sorted bus + "Other buses" subsection for the rest (stop_screen.dart:102-104).
+iOS SoftStopView renders all buses in a flat uniform list (SoftStopView.swift:151-161).
+These produce different mental models: on Android the first sorted bus is
+visually promoted regardless of tracking state; on iOS all buses are equal weight.
+The primary card on Android has an extra "load · Then Xmin" summary row
+(stop_screen.dart:308) that iOS bus rows in the stop view do not show.
+
+GAP E [COPY]: Flutter SoftStopScreen primary card renders arrival as "Arriving now"
+or "In N min" (stop_screen.dart:289-293). iOS SoftStopView bus row ETA column
+shows `eta.big + eta.small` joined (SoftStopView.swift:218). Natural language
+"In 4 min" vs mono "4 min" — not a usability blocker but copy register differs.
+
+### Bus Detail screen
+GAP F [COPY/PARITY]: Flutter SoftBusScreen uses "Next arrival" + "Following"
+eyebrow labels in the arrival card (soft_bus_screen.dart:212-214).
+iOS SoftBusView uses "Arrives in" + "Then" eyebrows (SoftBusView.swift:159-187).
+"Following" was explicitly relabeled to "Then" on iOS in the 2026-05-29 pass to
+avoid confusion with "the bus you're following". Android reverted/retained the
+old label. Should align to "Then".
+
+GAP G [PARITY — FEATURE]: iOS SoftBusView shows a THIRD arrival in the "Then"
+row when available (SoftBusView.swift:139-198 — thirdDate). Flutter SoftBusScreen
+only shows following (one bus after next), not a third. iOS shows "Next · Then
+14min · 28min"; Android shows "Following 14min" only. Data model has thirdDate on
+both platforms (models.dart:75); Flutter just doesn't render it.
+
+GAP H [PARITY — FEATURE]: iOS SoftBusView shows a `liveStatusChip` in the
+arrival card showing "Live · GPS" (green dot) or "~ Scheduled" (clock icon)
+based on Service.monitored (SoftBusView.swift:211-233). Flutter SoftBusScreen
+arrival card has no provenance chip. The field exists in the Flutter data model
+(models.dart:69) but is not displayed. User has no way to know if the ETA is
+GPS-accurate or estimated on Android.
+
+GAP I [PARITY — FEATURE]: iOS SoftBusView "Alerts" section groups the notify
+button and Live Activity CTA under a single "ALERTS" eyebrow header
+(SoftBusView.swift:286-292), making both actions feel like two flavours of one
+intent. Flutter SoftBusScreen has the notify button and ongoing card as siblings
+in the list with no grouping header — the relationship between them is unclear.
+
+GAP J [PARITY]: iOS SoftBusView has an "alertsSection" block — the notify
+button and live-activity CTA are always in a group. Flutter shows the _ongoingCard
+only when `live != null && m.notificationsEnabled` (soft_bus_screen.dart:127-130),
+which means it disappears when notifications are off — opposite of what a user
+needs to see when deciding whether to enable them.
+
+### Home screen
+GAP K [COPY]: iOS home header + button uses a `plus` circle icon
+(SoftHomeView.swift:69). Android uses `Icons.search_rounded` in a
+`IconButton.filledTonal` (soft_home_screen.dart:118). Same action (open Search),
+different icons. "Plus" reads as "add a stop"; "search" reads as "find something".
+The plus is more semantically accurate for the empty-state CTA context.
+
+GAP L [PARITY]: MRT alert dismiss: iOS has `.easeOut(duration: 0.2)` animation
+on removal (SoftHomeView.swift:125). Flutter has instant setState dismiss (no
+animation). Minor polish gap.
+
+### Settings screen
+GAP M [PARITY — FEATURE]: iOS SoftSettingsView has a "Feedback" section with
+Sound and Haptics toggles (SoftSettingsView.swift:51-64). Flutter SoftSettingsScreen
+has no Feedback section at all — no Sound or Haptics controls. iOS shows two
+extra settings rows Android does not have. Android has no sound/haptic control
+surface in V2 settings.
+
+GAP N [PARITY — FEATURE]: iOS Settings (V1 SettingsView.swift, not V2 SoftSettingsView)
+has Language and Search Radius rows in Personalize (SettingsView.swift:122-133).
+Flutter settings_screen.dart also has these. However, iOS V2 SoftSettingsView
+omits Language and Search Radius, while the V1 SettingsView (still used)
+retains them. This creates an internal iOS V1/V2 settings divergence, not an
+iOS/Android cross-platform divergence — but worth noting that Android V2
+(SoftSettingsScreen) also omits these rows, consistent with iOS V2.
 
 ### Onboarding
-PARITY: Both platforms have 6 steps (Hero → Pin → Narrow → Notify → Location → Ads)
-in the same order with identical copy and no Skip. Both fire the same callbacks
-at the same steps (step 3 notifications, step 4 location, step 5 ATT/tracking).
-Both use Back-only nav (hidden at step 0), identical dot indicators, and identical
-CTA logic including the single-shot guard on the final step.
-GAP 1: iOS steps 4 and 5 carry footnote callouts (`OnboardingView.OnbStep.footnote`
-rendered as an info-circle row beneath the subtitle). Flutter has no footnote
-slot — those two steps show the marketing copy but drop the contextual hint
-("You'll see the standard iOS location prompt next." / "Next, iOS asks whether
-Leyne can track."). Minor copy parity gap; not a flow gap.
-GAP 2: Flutter transition is a directional slide (respects Back direction via
-`_direction` variable). iOS uses `.opacity.combined(with:.move(edge:.trailing))`
-— always slides left regardless of Back direction. Low-impact visual only.
+GAP O [COPY/POLISH]: iOS OnboardingView has footnote callouts on steps 4 and 5
+(OnboardingView.swift:47-50 — info-circle row with platform context hint).
+Flutter OnboardingScreen has no footnote slot. Both steps show the marketing
+copy but drop "You'll see the standard iOS location prompt next." / "Next, iOS
+asks whether Leyne can track." These are platform-specific context notes; their
+absence on Android is arguably correct since the prompts look different anyway.
+Minor.
 
-### Home / Pinned Stops
-PARITY: Both platforms show a greeting eyebrow + "Your stops" title, pinned-stop
-cards sorted by next arrival (up to 3 services visible), walk-time chip, overflow
-link, quiet state, empty state with Nearby/Search CTAs, and MRT alert cards with
-tap-to-dismiss.
-GAP 3 (FLOW): iOS pin card shows the nickname chip ONLY when a non-empty nickname
-that differs from the stop name exists. Flutter always shows a chip — it falls
-back to "PIN" when no nickname is set. Every card on Android shows a "PIN" chip
-even when no nickname has been given, adding noise on every card. Behavioural
-parity broken: iOS is correct, Flutter has the old behaviour.
-GAP 4 (FLOW): Home search button. iOS renders a `plus` icon in a circle
-(suggests "add a stop"). Flutter renders `IconButton.filledTonal(Icons.search_rounded)`
-(Material search). These represent the SAME action (open Search) but with
-different iconography — a minor discoverability inconsistency, not idiom bleed.
-GAP 5 (FLOW): MRT alert tap-to-dismiss. iOS wraps the card in a SwiftUI
-`Button` with `.easeOut` animation + haptic. Flutter uses `InkWell` + `setState`
-— dismiss is instant, no fade animation, no haptic. Low-impact but the
-animated removal is noticeably different between platforms.
-GAP 6 (PARITY): Pull-to-refresh on Home. iOS has `.refreshable` on the
-ScrollView (all pins refreshed). Flutter has no `RefreshIndicator` on the
-home `ListView`. Missing feature on Android.
+GAP P [POLISH]: iOS onboarding Back transition always slides from trailing
+regardless of direction (uses `.move(edge:.trailing)` — OnboardingView.swift:85).
+Flutter correctly reverses slide direction for Back (uses `_direction` variable).
+iOS should match Flutter here — sliding right to go back is the standard gesture
+direction.
 
-### Stop Detail
-PARITY: Both platforms show stop header (eyebrow, stop name, road name), arrival
-list, bus rows tappable to bus detail. Both show live/sched tag per bus row.
-GAP 7 (FLOW — CRITICAL): Alert / tracking controls are completely different in
-structure. iOS: per-bus bell toggle on every row (44pt tap) + master "Alert all /
-All alerts / N alerts" GlassPillButton in the top action row. Sort chips (Soonest /
-Bus no.) present. Track hint text appears above the list.
-Flutter: FAB for pin/unpin only — no bell per row, no per-bus tracking, no master
-alert pill, no sort chips. The FAB toggles the entire stop pin (`togglePin`) but
-does NOT toggle individual bus tracking. This is a P0 flow parity gap: the core
-"narrow to buses you ride" flow (onboarding Step 2) is absent on Android's V2 stop screen.
-GAP 8 (FLOW): Flutter stop detail has a DISTINCT LAYOUT pattern — `_primaryCard`
-elevated hero for the first service, then an `_otherBuses` section with "See all N"
-truncation + a separate full-list route push. iOS has a flat sorted list for all
-services with sort chips. These produce different mental models for the same data.
-The Flutter hero+others layout is unique to that platform and not reflected in iOS
-at all, making the conceptual model diverge.
-GAP 9 (FLOW): Pull-to-refresh: iOS has `.refreshable`. Flutter Stop has no
-`RefreshIndicator`. Missing on Android.
-GAP 10 (FLOW): AppBar on Flutter stop shows "Stop {code}" as the title. iOS
-has no navigation bar — uses GlassPillButton Back + Bell pill. This is the
-platform-correct difference (Material AppBar vs Liquid Glass pills) — NOT a parity
-gap, just correct native chrome.
+### Nearby screen
+GAP Q [PARITY]: Flutter SoftNearbyScreen nearby row shows first live arrival
+inline in the subtitle (first.no + ETA in accent — soft_nearby_screen.dart:153-159).
+iOS SoftNearbyView nearby row shows only distance + stop code (SoftNearbyView.swift:105).
+Android is more informative here; iOS rows are quieter.
 
-### Bus Detail
-PARITY: Both platforms show: arrival hero with large ETA, "Following" next buses,
-notify/alert button, live map section with stop pin, route timeline (tap-to-alight).
-Both have a Live Activity concept (iOS = real ActivityKit CTA; Android = deferred
-"Track in notifications" card). Both show a live/sched provenance chip.
-GAP 11 (FLOW): Live Activity. iOS `liveActivityCTA` is fully wired to
-`m.toggleLiveActivity` and shown only when `ActivityAuthorizationInfo().areActivitiesEnabled`.
-Flutter `_liveActivityCard` is a static non-tappable display card (onPressed is empty
-comment). The card looks tappable (has a `chevron_right`) but does nothing. This is
-a dead-button trust violation on Android — same pattern that was fixed on iOS
-(where liveActivityCTA was previously a no-op stub). Should be hidden until wired,
-not shown as a tappable row that doesn't respond.
-GAP 12 (FLOW): Flutter bus screen AppBar title is a generic "Bus tracking" string.
-iOS bus view header shows the service number as a 40pt bold hero with the stop
-name in the back pill. The Flutter header section shows "Stop {code}" eyebrow +
-stop name — it doesn't lead with the service number at all. The mental framing
-is reversed: iOS = "I am tracking Bus 88 from this stop"; Flutter = "I am at stop
-X watching bus 88". Both contain the same info but the hierarchy differs.
-GAP 13 (MAP LEGEND): Android map legend in `_mapLegend` shows "BUS {svc}" as a
-legend entry with a bus icon. However `_route?.busCoord` is still always nil
-(DataStore.route hard-codes busCoord: nil — same state as iOS before the fix),
-so the BUS marker can never appear on the map. iOS correctly removed the BUS
-legend entry after its 2026-05-29 fix. Android still shows a "BUS N" legend item
-for a marker that will never render. Dishonest empty state — mirrors the iOS P
-resolved bug, now re-opened on Android.
-GAP 14 (FLOW): Route timeline per-stop ETA. Android's `_timelineStops` computes
-`etaMin` for stops in the `next` state using `(baseMin + (idx - yIdx) * 2)` —
-fabricated per-stop minute estimates. iOS explicitly deleted this (`estimatedMinutes`
-removed in 2026-05-29 SoftBusView pass). Android is back to showing invented
-per-stop clock times.
-GAP 15 (FLOW): Pull-to-refresh on Bus detail. iOS has `.refreshable`. Flutter has
-no `RefreshIndicator`. Missing on Android.
+### Navigation / shell
+GAP R [PARITY — IDIOM]: iOS SoftRoot uses native iOS 26 TabView with Liquid Glass
+floating tab bar. The Search tab uses `.role(.search)` which renders as a
+detached search circle in the Liquid Glass bar (SoftRoot.swift:94). Android
+SoftRoot uses a Navigator + AnimatedSwitcher for tab switching with a custom
+SoftBottomBar (Material NavigationBar). Both are idiomatically correct for their
+platform. Noting for completeness: not a gap.
 
-### Nearby
-PARITY: Both show "Stops within 500m" eyebrow, "Near you" title, three sort
-chips (Distance / Arrival / Service), stop rows with WalkTile + name + distance
-+ stop code. Both respect location-denied/not-determined empty states. Both
-show up to 20 results.
-GAP 16 (FEATURE): Flutter nearby row shows first live arrival inline in the
-subtitle row (`first.no + ETA big+small` in accent). iOS nearby row does not —
-shows only distance + stop code in the dim caption. Android shows more info per
-row; iOS rows are quieter. Mild parity difference, Android is richer here.
-GAP 17 (PARITY): Pull-to-refresh: not present on either platform for Nearby.
-Consistent absence — not a parity gap. But it's a usability gap on both.
+## Idiom-Bleed Check (current state)
 
-### Search
-PARITY: Both platforms present a full-screen search overlay (not a tab body)
-with a text input, 4 filter chips (Postal / Stop ID / Bus # / Place), and result
-rows showing stop name + "Stop {code} · {road}". Both autofocus the field on
-appear. Both filters currently fall through to name search (cosmetic filter chips).
-DIFFERENCE (NATIVE, CORRECT): iOS uses a custom pill `TextField` + "Cancel"
-`Button` because `.searchable` isn't wired to the Search tab yet. Flutter uses
-a `Material TextField` with `borderRadius: 28` and `Icons.arrow_back` as the
-prefix — effectively a Material search bar. Both are custom implementations but
-the Flutter one looks materially closer to a standard Material 3 search bar.
-This is acceptable native-divergence, not bleed.
-GAP 18 (FLOW): Flutter search "Cancel/back" is an `Icons.arrow_back` inside
-the search field prefixIcon — same as the system back button on Android, which
-is correct. iOS uses a separate text "Cancel" button outside the search field.
-Both are platform-appropriate patterns. Not a gap.
+BLEED 1 (ACTIVE): `SoftToggle` on iOS (SoftPrimitives.swift:28) — custom 38×22pt
+hand-drawn toggle replaces UISwitch. 38pt height < 44pt iOS minimum. No system
+accessibility trait (no UISwitch role). Settings is the only place this appears in
+V2. Should be replaced with native SwiftUI `Toggle` styled to match visual spec.
 
-### Settings
-PARITY: Both platforms show Personalize section (Notifications, Appearance,
-24-hour time), Feedback section (Sound, Haptics on iOS), version footer.
-Appearance control uses platform-native segmented picker on both (`Picker(.segmented)`
-on iOS, `SegmentedButton` on Android — both are the correct native control).
-GAP 19 (FLOW): Android Settings has a "Routines" section at the top
-(Morning commute, Evening commute, Add routine) with all rows wired to empty
-`onTap: () {}` callbacks — all dead rows. iOS Settings has no Routines section
-at all. This is two parity problems in one: (a) Android has an extra section
-iOS lacks, and (b) every row in it is dead. Should be removed or hidden behind a
-feature flag until wired.
-GAP 20 (FLOW): Android "Notifications" row in settings taps to `onTap: () {}`
-— empty callback, dead row. iOS NavigationLink properly pushes `NotificationsView`.
-The Notifications screen exists in Flutter (`NotificationsScreen`) but is never
-navigated to from Settings. Critical: this is the path to enable/disable bus
-alerts, the app's primary value prop.
-GAP 21 (FLOW): Android "Language" row present in Settings (taps to empty `() {}`).
-iOS removed the Language row entirely because no destination existed (resolved in
-prior pass). Android kept the dead row. Should be removed to match iOS.
-GAP 22 (PARITY): SoftToggle on iOS is 38×22pt — below the 44pt iOS minimum. On
-Android, `SoftToggle` is 44×26pt — closer to spec. Android is actually more correct
-on toggle size here. iOS toggle should be replaced with native `Toggle` (which
-renders a UISwitch at correct size with free a11y). See [[project-leyne-design-system]].
+BLEED 2 (ACTIVE): iOS SortChipRow is a custom pill-chip row (SortChipRow.swift).
+Android uses the same custom SortChipRow (soft_components.dart:79). The iOS
+platform-native alternative would be a `Picker(.segmented)` or
+`UISegmentedControl`. However given that these chips are brand-language (Soft
+spec) and the app custom-draws them on both platforms intentionally, this is a
+deliberate brand decision, not unintentional bleed. Low risk.
 
-## Idiom-Bleed Violations
+BLEED 3 (NOT BLEED): GlassPillButton (iOS) vs Material AppBar + IconButton
+(Android) for back/bell navigation. Correct native divergence.
 
-BLEED 1: `SoftToggle` on iOS (`ios-native/Leyne/V2/SoftPrimitives.swift:28`).
-A custom 38×22pt hand-drawn toggle exists on BOTH platforms (Swift + Dart).
-On Android (Flutter) this is the custom brand toggle — acceptable since Material
-Switch is not required. On iOS specifically the native `UISwitch` / SwiftUI `Toggle`
-is expected; replacing a UISwitch with a smaller custom pill is a regression in
-accessibility (no system switch trait, no a11y value), size (38pt < 44pt minimum),
-and system-tint behavior. iOS should use native `Toggle`; Android may keep `SoftToggle`
-since Material doesn't mandate the native Switch appearance.
+## Consistency Wins (current state)
+- Onboarding: near-perfect step/copy/CTA parity (only footnote and Back animation differ).
+- Home: pin card layout, service rows, overflow link, quiet state, empty state, MRT alerts — all matched.
+- Nearby: three sort chips, same empty messages, WalkTile, 20-row cap — matched.
+- Stop: bell icons, sort chips (Soonest/Bus no.), track hint, per-bus toggle, master bell — all matched as of 2026-05-31.
+- Bus: arrival hero, notify button, map legend (STOP/YOU only), route timeline tap-to-alight — matched.
+- Route timeline: states (past/here/board/next/alight), connector colors, tap behavior — matched.
+- Theme tokens: shared naming convention across platforms.
+- Appearance picker: Picker(.segmented) / SegmentedButton — both native, no bleed.
+- RefreshIndicator / .refreshable: all three main screens present on both platforms.
 
-BLEED 2: `SortChipRow` for Stop sort in `SoftStopView.swift` — present on iOS,
-absent on Flutter. This is not bleed per se (the iOS component is Soft-brand chips,
-not Android idiom), but the PRESENCE is iOS-only, creating a flow difference (GAP 7).
+## Prioritized Punch List (2026-05-31)
 
-BLEED 3: `GlassPillButton` on iOS for Back + master Bell vs Material `AppBar` +
-`FloatingActionButton.extended` on Android for Back + Pin. These are correct
-platform-native differences. NOT bleed. Listed here only to clarify they are exempt.
+### P0 — Feature/Experience gaps that directly affect core value prop
+1. GAP H: Flutter bus screen missing live/scheduled provenance chip.
+   The field is in the model. Add a chip to the arrival card matching iOS
+   liveStatusChip. One widget addition.
+2. GAP G: Flutter bus screen shows only 1 following bus; iOS shows 2 ("Then 14min · 28min").
+   Add thirdDate rendering to Flutter arrival card. One Text widget addition.
+3. GAP M: Flutter Settings V2 has no Sound/Haptics controls.
+   iOS v2 Settings has a whole Feedback section. Add toggleRows to Flutter
+   SoftSettingsScreen. Low effort, significant parity gap.
 
-BLEED 4 (MINOR): Flutter `SoftSearchScreen` search field uses `Material(borderRadius: 28)`
-wrapping a `TextField` with `Icons.arrow_back` prefix. This closely mimics a Material
-3 SearchBar, which is correct. However the custom-drawn pill is not the native
-`SearchBar` widget (M3 `SearchBar` / `SearchAnchor`). Low-impact — still looks native
-enough on Android. No iOS bleed.
+### P1 — Noticeable parity gaps
+4. GAP F: "Following" label → should be "Then" (matches iOS, avoids ambiguity).
+   One string change in soft_bus_screen.dart:214.
+5. GAP D (layout): Flutter stop primary-card-hero vs iOS flat list creates
+   different mental models. Consider whether to unify or accept as deliberate.
+6. GAP I/J: Flutter bus screen missing "Alerts" grouping header + incorrect
+   visibility rule for ongoing card. Add Eyebrow("Alerts") and show ongoing
+   card regardless of notificationsEnabled (let the card explain the off state).
+7. GAP Q: iOS nearby rows don't show first live arrival. Add first-arrival
+   accent label to iOS SoftNearbyView row caption.
+8. GAP K: Home header icon — plus vs search. Align to plus on both platforms.
 
-## Consistency Wins
-- Onboarding: near-perfect step/copy/CTA parity across both platforms.
-- Home card layout: stop name, service badge, ETA, overflow link, quiet state —
-  pixel-spec matched between platforms.
-- WalkTile: identical spec on both (44pt square, liveBg, accent number, dim "min").
-- Nearby: same three sort chips, same empty messages, same 20-row cap.
-- Bus detail: arrival card layout (ETA hero, Following, notify button) — closely aligned.
-- Route timeline: same tap-to-alight interaction, same state enum (past/here/board/next).
-- Theme tokens: both platforms share `t.bg`, `t.surface`, `t.accent`, `t.liveBg` by name.
-- AppBar title on Android stop/bus views uses correct Material pattern.
-- SegmentedButton/Picker for Appearance: both platforms use the native segmented control — no bleed.
-
-## Prioritized Punch List
-
-### P0 — Flow/Parity Bugs (blocks the core value prop)
-1. GAP 7: Flutter SoftStopScreen missing per-bus bell + master alert pill.
-   The "narrow to buses you ride" promise is onboarding Step 2; V2 Android doesn't
-   deliver it. Fix: replicate iOS `busRow` bell button + `GlassPillButton`-equivalent
-   FAB-replacement (or AppBar action) for track-all. Substantial work.
-2. GAP 20: Flutter Settings Notifications row is a dead `onTap: () {}`.
-   One-liner fix: navigate to `NotificationsScreen`. Critical path to alert management.
-3. GAP 11: Flutter Bus Screen `_liveActivityCard` is a tappable no-op (chevron_right
-   visible, onPressed empty). Either wire to Android ongoing notification or hide the
-   card until wired. One-liner hide: wrap in `if false` or remove until wired.
-4. GAP 14: Flutter route timeline invents per-stop ETA minutes. iOS removed this
-   in the 2026-05-29 pass. Delete `etaMin` computation in `_SoftBusScreenState._timelineStops`.
-   One-liner data-model change.
-5. GAP 13: Flutter bus map legend shows "BUS N" entry for a marker that can never
-   appear (busCoord always nil). Remove the `item(Icons.directions_bus, …, 'BUS N')` line.
-   One-liner.
-
-### P1 — Flow/Parity Bugs (noticeable but not blocking)
-6. GAP 6 / GAP 9 / GAP 15: Pull-to-refresh missing on Android Home, Stop detail,
-   Bus detail. iOS has `.refreshable` on all three. Wrap each Flutter `ListView` in
-   a `RefreshIndicator` that calls the appropriate `DataStore.shared.refreshArrivals`.
-7. GAP 19 + GAP 21: Android Settings dead rows (Routines section: 3 rows; Language row).
-   Remove until wired. These actively erode trust. One-liner removal each.
-8. GAP 3: Flutter pin card shows "PIN" chip when no nickname set. Change the Flutter
-   `_PinCard` `chip` logic to return empty string (matching iOS) and hide the chip
-   widget when empty. One-liner.
-9. GAP 8: Flutter stop detail uses hero-card-first layout vs iOS flat sorted list.
-   Consider aligning to a single model — the hero card is fine but it means the first
-   bus always appears prominent regardless of whether the user tracks it. Moderate effort.
-
-### P2 — Idiom Violations
-10. BLEED 1 / GAP 22: iOS `SoftToggle` → replace with native SwiftUI `Toggle` styled
-    with `toggleStyle`. Gets correct UISwitch size, a11y trait, and system tint for free.
-    Settings is the only place it's used in V2. One-liner swap, moderate styling work.
+### P2 — Idiom violations
+9. BLEED 1: iOS SoftToggle → replace with native SwiftUI Toggle. Settings only.
 
 ### P3 — Polish
-11. GAP 1: Flutter onboarding missing footnote hints on steps 4–5. Add a footnote
-    widget to `_OnbStep` and the Flutter step definitions.
-12. GAP 2: iOS onboarding Back transition always slides from right regardless of direction.
-    Add a `_direction` state variable and reverse the `.move` edge for Back.
-13. GAP 4: Home search button iconography (plus circle on iOS vs search icon on Android).
-    Consider aligning to a `plus` on both since the action is "add a stop" not "search".
-14. GAP 5: MRT alert dismiss animation missing on Android. Add an `AnimatedSize` or
-    `AnimatedOpacity` wrapper to the alert list items on Flutter.
-15. GAP 12: Flutter bus screen header leads with stop name rather than bus number.
-    Restructure `_compactHeader` to promote the service number as the headline, matching
-    iOS's v3 header (`Text(svc)` at 40pt bold).
-16. GAP 16: iOS nearby row doesn't show first live arrival inline. Add the first-arrival
-    accent label to the iOS nearby row caption (already done on Android).
+10. GAP L: MRT alert dismiss animation missing on Android. Wrap in AnimatedSize.
+11. GAP A: Flutter hint row visibility (hide after pinning vs always visible on iOS). Align.
+12. GAP B: iOS stop screen missing notifications-off banner. Add to iOS SoftStopView.
+13. GAP P: iOS onboarding Back always slides trailing → add _direction inversion.
+14. GAP O: Flutter onboarding missing footnote hints on steps 4-5.
 
-**Why:** Gaps 1–5 map to features explicitly promised in onboarding (PIN, NARROW,
-STAY PRESENT). Dead rows and invented data erode trust immediately. Pull-to-refresh
-is a hygiene expectation on both platforms.
-**How to apply:** Use this map in any roadmap discussion. Re-verify each gap
-against code before acting — active development may have closed items.
+**Why:** P0 items directly affect the "stop reaching for your phone" promise
+(provenance chip tells user if ETA is trustworthy; third arrival helps planning).
+P1 items create divergent mental models for the same data. Bleed-1 affects
+accessibility on iOS.
+**How to apply:** Verify against code before acting — this audit is a snapshot.

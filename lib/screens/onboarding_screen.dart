@@ -826,7 +826,7 @@ class _OnbVisualNotification extends StatelessWidget {
                     horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
-                    Icon(Icons.phone_iphone, size: 18, color: t.fg),
+                    Icon(Icons.smartphone, size: 18, color: t.fg),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(

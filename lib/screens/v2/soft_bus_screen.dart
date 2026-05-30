@@ -12,6 +12,7 @@ import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/route_timeline.dart';
 import '../../widgets/v2/soft_components.dart';
+import '../notifications_screen.dart';
 
 class SoftBusScreen extends StatefulWidget {
   const SoftBusScreen(
@@ -103,7 +104,6 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           // its state (isTracked / isOngoingActive / notificationsEnabled).
           listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
           builder: (context, _) {
-            final m = AppModel.shared;
             final live = _liveService();
             final st = DataStore.shared.arrivals[widget.stopCode];
             final allNos = st != null && st.kind == ArrivalStateKind.loaded
@@ -122,9 +122,15 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                 _compactHeader(context),
                 const SizedBox(height: 16),
                 _arrivalCard(context, live),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
+                // [GAP-I] Group notify + ongoing tracker under an "Alerts" eyebrow.
+                const Eyebrow('Alerts'),
+                const SizedBox(height: 8),
                 _notifyButton(context, allNos),
-                if (live != null && m.notificationsEnabled) ...[
+                // [GAP-J] Show the ongoing card whenever there's a live service,
+                // regardless of notificationsEnabled — when off, render a
+                // "enable notifications" nudge rather than hiding the card.
+                if (live != null) ...[
                   const SizedBox(height: 12),
                   _ongoingCard(context, live),
                 ],
@@ -150,8 +156,14 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   Service? _liveService() {
     final a = DataStore.shared.arrivals[widget.stopCode];
     if (a == null || a.kind != ArrivalStateKind.loaded) return null;
-    return a.services.firstWhere((s) => s.no == widget.svc,
-        orElse: () => a.services.first);
+    // Return null when the tracked service is absent — callers render an
+    // honest "no live data" state rather than silently showing a different
+    // bus's ETA under this service number.
+    try {
+      return a.services.firstWhere((s) => s.no == widget.svc);
+    } on StateError {
+      return null;
+    }
   }
 
   Widget _compactHeader(BuildContext context) {
@@ -179,13 +191,73 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
 
   Widget _arrivalCard(BuildContext context, Service? svc) {
     final t = context.t;
-    final eta = svc == null ? null : fmtEta(svc.etaSec);
-    final next = svc == null ? null : fmtEta(svc.followingSec);
+
+    // When the service is absent from the live response, render an honest
+    // empty state rather than substituting a different bus's ETA.
+    if (svc == null) {
+      return Container(
+        padding: const EdgeInsets.all(18),
+        height: 160,
+        decoration: BoxDecoration(
+            color: t.liveBg, borderRadius: BorderRadius.circular(24)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.directions_bus_outlined, color: t.dim, size: 28),
+            const SizedBox(height: 8),
+            Text('Bus ${widget.svc} has passed — no live data',
+                style: t.sans(13, color: t.dim),
+                textAlign: TextAlign.center),
+          ],
+        ),
+      );
+    }
+
+    final eta = fmtEta(svc.etaSec);
+    final next = fmtEta(svc.followingSec);
+
+    // Third arrival ("Then X · Y min") — render only when the date exists.
+    final thirdSec = svc.thirdDate
+        ?.difference(DateTime.now())
+        .inSeconds
+        .clamp(0, 1 << 30);
+    final third = thirdSec != null ? fmtEta(thirdSec) : null;
+
+    // Provenance chip — "Live · GPS" or "~ Scheduled".
+    Widget provenanceChip() {
+      if (svc.monitored) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                  color: t.accent, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 5),
+            Text('Live · GPS',
+                style: t.mono(10,
+                    weight: FontWeight.w600, color: t.accent)),
+          ],
+        );
+      } else {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.schedule, size: 11, color: t.dim),
+            const SizedBox(width: 5),
+            Text('~ Scheduled',
+                style: t.mono(10, color: t.dim)),
+          ],
+        );
+      }
+    }
+
     // Fixed height (not minHeight) because the child Column uses a
-    // Spacer to push "Following" to the bottom — that needs a bounded
+    // Spacer to push "Then" to the bottom — that needs a bounded
     // parent height. The ListView this card sits in provides unbounded
-    // height, so an unbounded Spacer crashes layout (RenderBox not laid
-    // out → cascading null-check exceptions on the next frame).
+    // height, so an unbounded Spacer crashes layout.
     return Container(
       padding: const EdgeInsets.all(18),
       height: 160,
@@ -202,7 +274,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                   ServiceBadge(svc: widget.svc, size: ServiceBadgeSize.sm),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: Text('→ ${svc?.dest ?? "—"}',
+                    child: Text('→ ${svc.dest}',
                         style: t.sans(13,
                             weight: FontWeight.w500, color: t.fg),
                         overflow: TextOverflow.ellipsis),
@@ -211,21 +283,29 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                 const SizedBox(height: 12),
                 const Eyebrow('Next arrival'),
                 const Spacer(),
-                const Eyebrow('Following'),
+                // [GAP-F] "Then" (was "Following") + third arrival [GAP-G]
+                const Eyebrow('Then'),
                 const SizedBox(height: 4),
-                Text(next == null ? '—' : '${next.big}${next.small}',
-                    style: t.mono(14,
-                        weight: FontWeight.w600, color: t.fg)),
+                Text(
+                  third != null
+                      ? '${next.big}${next.small} · ${third.big}${third.small}'
+                      : '${next.big}${next.small}',
+                  style: t.mono(14,
+                      weight: FontWeight.w600, color: t.fg),
+                ),
               ],
             ),
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(eta?.big ?? '—',
+              // [GAP-H] Provenance chip — top-right of the ETA column.
+              provenanceChip(),
+              const Spacer(),
+              Text(eta.big,
                   style: t.mono(56, color: t.accent)
                       .copyWith(letterSpacing: -2, height: 1)),
-              Text(eta?.small ?? '',
+              Text(eta.small,
                   style: t.mono(12, color: t.dim)),
             ],
           ),
@@ -270,15 +350,61 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   }
 
   /// Ongoing live-tracking notification toggle — the Android stand-in for
-  /// the iOS Live Activity. Only shown when notifications are enabled (the
-  /// caller gates on `notificationsEnabled`), so it never dead-ends.
+  /// the iOS Live Activity. Shown whenever there's a live service.
+  /// When notifications are OFF, renders an explanatory nudge + enable link
+  /// rather than hiding the card (so the feature stays discoverable).
   Widget _ongoingCard(BuildContext context, Service live) {
     final t = context.t;
-    final on = AppModel.shared
-        .isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode);
+    final m = AppModel.shared;
+
+    // [GAP-J] Notifications-off state: surface the card with a nudge.
+    if (!m.notificationsEnabled) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(children: [
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+                color: t.liveBg,
+                borderRadius: BorderRadius.circular(12)),
+            child: Icon(Icons.notifications_off_outlined,
+                color: t.dim, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Track in your status bar',
+                    style: t.sans(14, weight: FontWeight.w600, color: t.fg)),
+                Text(
+                    'Enable notifications to track Bus ${widget.svc} in your status bar.',
+                    style: t.sans(12, color: t.dim)),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            ),
+            child: Text('Enable',
+                style: t.sans(13,
+                    weight: FontWeight.w600, color: t.accent)),
+          ),
+        ]),
+      );
+    }
+
+    final on = m.isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode);
     return InkWell(
       borderRadius: BorderRadius.circular(20),
-      onTap: () => AppModel.shared.toggleOngoing(
+      onTap: () => m.toggleOngoing(
         busNo: widget.svc,
         stopCode: widget.stopCode,
         stopName: DataStore.shared.stopName(widget.stopCode),

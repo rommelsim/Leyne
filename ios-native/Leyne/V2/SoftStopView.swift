@@ -70,6 +70,7 @@ struct SoftStopView: View {
             .refreshable { await ds.refreshArrivals(stop: stopCode) }
         }
         .onAppear { ds.ensureArrivals(stop: stopCode) }
+        .task { await m.refreshNotificationAuth() }
     }
 
     private var topActionRow: some View {
@@ -109,10 +110,53 @@ struct SoftStopView: View {
         }
     }
 
+    /// True when this stop is pinned/armed AND system notifications are off.
+    /// Mirrors the Android condition: pinned (tracked ≥1 bus) && notif disabled.
+    private var shouldShowNotifBanner: Bool {
+        isPinned && m.notificationAuth == .denied
+    }
+
+    /// Warn banner shown above the bus list when the stop is pinned but
+    /// notifications are denied at the system level. Mirrors Android's warn
+    /// banner (soft_stop_screen.dart:80-82).
+    private var notifOffBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "bell.slash.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(t.warn)
+            Text("Notifications are off — arrival alerts won't fire.")
+                .font(t.mono(11))
+                .foregroundStyle(t.fg)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Text("Enable")
+                    .font(t.sans(12, weight: .semibold))
+                    .foregroundStyle(t.bg)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(t.warn, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(t.warnBg)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(t.warn.opacity(0.4), lineWidth: 1)
+        )
+    }
+
     @ViewBuilder
     private var arrivalContent: some View {
         switch ds.arrivals[stopCode] {
         case .some(.loaded(let services)) where !services.isEmpty:
+            if shouldShowNotifBanner { notifOffBanner }
             trackHint
             sortControl
             busList(sortedServices(services))

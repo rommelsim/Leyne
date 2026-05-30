@@ -111,7 +111,12 @@
       "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'generic/platform=iOS Simulator' build)",
       "Bash(bash scripts/build-android-closed-test.sh)",
       "Bash(git *)",
-      "Bash(grep -v \"^\\\\s*$\")"
+      "Bash(grep -v \"^\\\\s*$\")",
+      "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build)",
+      "Bash(echo \"=== exit $? ===\")",
+      "Bash(echo \"widget exit $?\")",
+      "Bash(xcodebuild -project ios-native/Leyne.xcodeproj -scheme Leyne -configuration Release -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build)",
+      "Bash(jarsigner -verify build/app/outputs/bundle/release/app-release.aab)"
     ]
   }
 }

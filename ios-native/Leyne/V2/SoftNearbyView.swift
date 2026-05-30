@@ -90,6 +90,15 @@ struct SoftNearbyView: View {
         }
     }
 
+    /// Returns "88 · 3min" for the first loaded live arrival at this stop,
+    /// or nil when no arrivals are loaded yet. Mirrors Android nearby row
+    /// (soft_nearby_screen.dart:153-159).
+    private func firstArrivalLabel(for stop: NearbyStop) -> String? {
+        guard let first = ds.servicesFor(stop.stopCode).first else { return nil }
+        let eta = fmtETA(first.etaSec)
+        return "\(first.no) · \(eta.big)\(eta.small)"
+    }
+
     private func row(stop: NearbyStop) -> some View {
         Button {
             fb.select()
@@ -102,9 +111,21 @@ struct SoftNearbyView: View {
                         .font(t.sans(15, weight: .semibold))
                         .foregroundStyle(t.fg)
                         .lineLimit(2)
-                    Text("\(fmtDistance(stop.distanceM)) · \(stop.stopCode)")
-                        .font(t.mono(11))
-                        .foregroundStyle(t.dim)
+                    // Distance + stop code, optionally suffixed by the first
+                    // live arrival so the row is actionable without tapping in.
+                    Group {
+                        if let arrival = firstArrivalLabel(for: stop) {
+                            Text("\(fmtDistance(stop.distanceM)) · \(stop.stopCode)")
+                                .foregroundStyle(t.dim)
+                            + Text("   \(arrival)")
+                                .foregroundStyle(t.accent)
+                        } else {
+                            Text("\(fmtDistance(stop.distanceM)) · \(stop.stopCode)")
+                                .foregroundStyle(t.dim)
+                        }
+                    }
+                    .font(t.mono(11))
+                    .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")

@@ -81,7 +81,10 @@ class StopsMap extends StatelessWidget {
                     width: 26,
                     height: 26,
                     child: const _CircleBadge(
-                      icon: Icons.directions_bus_rounded,
+                      // directions_bus_rounded read as a live vehicle, not a
+                      // place. Use location_on (drop-pin) — the standard
+                      // Material marker for a fixed point of interest.
+                      icon: Icons.location_on,
                       fill: _kStopColor,
                       size: 26,
                     ),

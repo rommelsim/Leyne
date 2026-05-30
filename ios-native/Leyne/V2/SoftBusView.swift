@@ -27,30 +27,39 @@ struct SoftBusView: View {
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    topActionRow
-                    headerSection
-                    arrivalCard
-                    liveActivityCTA
-                    liveMapSection
-                    if !timelineStops.isEmpty {
-                        RouteTimeline(t: t,
-                                      svc: svc,
-                                      stops: timelineStops,
-                                      alightId: $alightId)
-                            .onChange(of: alightId) { _, new in
-                                scheduleAlight(stopCode: new)
-                            }
+            VStack(spacing: 0) {
+                // Pinned action row — Back / Pin stay reachable while the
+                // route timeline scrolls. Mirrors DetailView's
+                // [topBar, ScrollView] structure rather than letting the
+                // controls scroll off the top of a long route.
+                topActionRow
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        headerSection
+                        arrivalCard
+                        alertsSection
+                        liveMapSection
+                        if !timelineStops.isEmpty {
+                            RouteTimeline(t: t,
+                                          svc: svc,
+                                          stops: timelineStops,
+                                          alightId: $alightId)
+                                .onChange(of: alightId) { _, new in
+                                    scheduleAlight(stopCode: new)
+                                }
+                        }
+                        Color.clear.frame(height: 40)
                     }
-                    Color.clear.frame(height: 40)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-            }
-            .refreshable {
-                await ds.refreshArrivals(stop: stopCode)
-                loadRoute()
+                .refreshable {
+                    await ds.refreshArrivals(stop: stopCode)
+                    loadRoute()
+                }
             }
         }
         .onAppear {
@@ -75,7 +84,7 @@ struct SoftBusView: View {
             Spacer(minLength: 8)
             GlassPillButton(t: t,
                             icon: isPinned ? "pin.fill" : "pin",
-                            label: isPinned ? "Pinned" : "Pin",
+                            label: isPinned ? "Unpin" : "Pin",
                             filled: isPinned,
                             action: { fb.select(); togglePin() })
         }
@@ -139,15 +148,27 @@ struct SoftBusView: View {
             // header already states the bus number and direction.
             HStack(alignment: .center, spacing: 0) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Eyebrow(text: "Arrives in", t: t)
+                    // When the bus is arriving, fmtETA returns big "Arr" /
+                    // small "now". At mono(56) "Arr" clipped — the numeral
+                    // slot is sized for two digits, and Dynamic Type made it
+                    // worse. So render the arriving state as eyebrow
+                    // "Arriving" + hero "Now" (no redundant "ARRIVES IN: Arr
+                    // now"), and reserve the big slot for real minute counts.
+                    // lineLimit + minimumScaleFactor are the scale safety net.
+                    let arriving = (eta?.big == "Arr")
+                    Eyebrow(text: arriving ? "Arriving" : "Arrives in", t: t)
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(eta?.big ?? "—")
-                            .font(.system(size: 56, weight: .regular, design: .monospaced))
+                        Text(arriving ? "Now" : (eta?.big ?? "—"))
+                            .font(t.mono(56))
                             .tracking(-2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
                             .foregroundStyle(t.accent)
-                        Text(eta?.small ?? "")
-                            .font(t.mono(13))
-                            .foregroundStyle(t.dim)
+                        if !arriving {
+                            Text(eta?.small ?? "")
+                                .font(t.mono(13))
+                                .foregroundStyle(t.dim)
+                        }
                     }
                 }
                 Spacer()
@@ -158,9 +179,12 @@ struct SoftBusView: View {
 
             Divider().overlay(t.line)
 
-            // FOLLOWING: the next two real arrivals (following + third).
+            // THEN: the next two real arrivals (following + third). "Then"
+            // reads as a time sequence ("then 20min · 35min"), matching the
+            // vocabulary in DetailView/PinnedCardView; "Following" was
+            // ambiguous — it can mean "the bus you're following".
             HStack {
-                Eyebrow(text: "Following", t: t)
+                Eyebrow(text: "Then", t: t)
                 Spacer()
                 HStack(spacing: 8) {
                     Text(next.map { $0.big + $0.small } ?? "—")
@@ -174,8 +198,6 @@ struct SoftBusView: View {
                     }
                 }
             }
-
-            notifyButton
         }
         .padding(18)
         .frame(maxWidth: .infinity)
@@ -239,7 +261,7 @@ struct SoftBusView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(on
-            ? "Arrival alert on for bus \(svc). Tap to cancel."
+            ? "Arrival alert on for bus \(svc)"
             : "Notify me before bus \(svc) arrives")
     }
 
@@ -251,6 +273,22 @@ struct SoftBusView: View {
             return s.map(\.no)
         }
         return [svc]
+    }
+
+    // MARK: Alerts
+    // Groups the two ways to be alerted under one "ALERTS" header so they
+    // read as two flavors of one intent, not duplicate buttons:
+    //  • notifyButton    — a single heads-up ~1 min before arrival.
+    //  • liveActivityCTA — a persistent Lock Screen / Dynamic Island feed.
+    // The arrival card above is now pure info (ETA + next two); the
+    // actions live here. When Live Activities are unavailable the CTA
+    // collapses and only the notify capsule shows under the header.
+    private var alertsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: "Alerts", t: t)
+            notifyButton
+            liveActivityCTA
+        }
     }
 
     // MARK: Live Activity CTA
@@ -445,7 +483,7 @@ struct SoftBusView: View {
         // that can never appear. STOP (accent pin) and YOU (system blue dot)
         // are the only two things actually drawn — keep the legend honest.
         HStack(spacing: 12) {
-            MapLegendItem(t: t, system: "bus",
+            MapLegendItem(t: t, system: "mappin.fill",
                           fill: t.accent, label: "STOP")
             MapLegendItem(t: t, system: "location.fill",
                           fill: t.meBlue, label: "YOU")
@@ -456,14 +494,16 @@ struct SoftBusView: View {
 
 // MARK: - Map markers (shared icon language with the Android map)
 
-/// Stop marker — a green teardrop pin carrying a small bus glyph, per the
-/// v3 mockup. The teardrop silhouette + white ring make it unmistakably a
-/// deliberate place-marker, distinct from the smaller system-blue
-/// user-location dot (YOU). There is exactly one of these on the map.
+/// Stop marker — a green teardrop pin carrying a mappin glyph. A *bus*
+/// glyph here read as the bus's live location, directly contradicting the
+/// "live position isn't shared yet" caption below the map; a mappin states
+/// plainly that this marks *where the stop is*. The teardrop silhouette +
+/// white ring keep it distinct from the smaller system-blue user-location
+/// dot (YOU). There is exactly one of these on the map.
 struct MapStopMarker: View {
     let t: Theme
     var body: some View {
-        Image(systemName: "bus")
+        Image(systemName: "mappin.fill")
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(t.onAccent)
             .frame(width: 28, height: 28)

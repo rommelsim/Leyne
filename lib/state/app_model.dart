@@ -40,6 +40,8 @@ const _kNotifKey = 'lyne.notifications';
 const _kSearchRadiusKey = 'lyne.searchRadiusM';
 const _kLastSeenVersionKey = 'lyne.lastSeenVersion';
 const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
+const _kSoundKey = 'lyne.sound';
+const _kHapticsKey = 'lyne.haptics';
 
 /// The currently-armed on-bus alert: which bus, where to alight, when
 /// the heads-up notification fires. Single ride at a time — see
@@ -300,6 +302,30 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Sound & haptics (persisted) ─────────────────────────
+  // Whether arrival-alert notifications play a sound and whether the device
+  // vibrates when they fire. Mirrors iOS AppModel setSound / setHaptics.
+  // Default ON for both — matches the iOS defaults.
+  bool _soundEnabled = true;
+  bool get soundEnabled => _soundEnabled;
+
+  void setSound(bool v) {
+    if (_soundEnabled == v) return;
+    _soundEnabled = v;
+    _prefs?.setBool(_kSoundKey, v);
+    notifyListeners();
+  }
+
+  bool _hapticsEnabled = true;
+  bool get hapticsEnabled => _hapticsEnabled;
+
+  void setHaptics(bool v) {
+    if (_hapticsEnabled == v) return;
+    _hapticsEnabled = v;
+    _prefs?.setBool(_kHapticsKey, v);
+    notifyListeners();
+  }
+
   // ─── Active alight ride (persisted) ─────────────────────
   ActiveAlight? _activeAlight;
   ActiveAlight? get activeAlight => _activeAlight;
@@ -378,6 +404,8 @@ class AppModel extends ChangeNotifier {
     // toggle enabled before POST_NOTIFICATIONS was ever granted, so no
     // alerts would actually fire — a lying toggle. Opt-in only.
     _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? false;
+    _soundEnabled = _prefs!.getBool(_kSoundKey) ?? true;
+    _hapticsEnabled = _prefs!.getBool(_kHapticsKey) ?? true;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
     _lastSeenVersion = _prefs!.getString(_kLastSeenVersionKey);
 

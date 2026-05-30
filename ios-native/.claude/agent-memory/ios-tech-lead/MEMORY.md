@@ -1,0 +1,1 @@
+- [iOS Native Rewrite State](project_ios_rewrite_state.md) — V2 (Soft* views) is default; parity gaps vs V1/Android and key file locations
