@@ -378,7 +378,7 @@ final class DataStore: ObservableObject {
     /// Live snapshot for one service at a stop — used by the Live Activity to
     /// poll the real ETA + bus position (no mock/elapsed-time simulation).
     func liveServiceSnapshot(serviceNo: String, stopCode: String)
-        async -> (etaSec: Int, coord: CLLocationCoordinate2D?)? {
+        async -> (etaSec: Int, coord: CLLocationCoordinate2D?, monitored: Bool)? {
         guard let resp = try? await api.busArrival(stopCode: stopCode, serviceNo: serviceNo),
               let svc = resp.Services.first(where: { $0.ServiceNo == serviceNo }),
               let arr = svc.NextBus.arrivalDate
@@ -388,7 +388,10 @@ final class DataStore: ObservableObject {
         if let lat = svc.NextBus.lat, let lon = svc.NextBus.lon, lat != 0, lon != 0 {
             coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
-        return (eta, coord)
+        // Absent Monitored ⟶ live (LTA only emits 0 when it genuinely has no
+        // GPS), matching the convention used in LTAModels.
+        let monitored = (svc.NextBus.Monitored ?? 1) == 1
+        return (eta, coord, monitored)
     }
 }
 

@@ -52,6 +52,11 @@ struct Service: Identifiable, Equatable {
     var arrivalDate: Date? = nil
     var followingDate: Date? = nil
     var thirdDate: Date? = nil
+    /// Live GPS position of the next bus (from LTA `NextBus.Latitude/Longitude`),
+    /// present only for monitored arrivals. Drives the Stop view's Distance
+    /// sort — nearest bus first; nil (ghost / no telemetry) sorts last.
+    var busLat: Double? = nil
+    var busLon: Double? = nil
     var id: String { no }
 }
 

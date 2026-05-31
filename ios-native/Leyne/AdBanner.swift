@@ -57,9 +57,10 @@ enum AdConfig {
     //#warning("forceTestUnitForRelease is ON — DO NOT submit this Archive to App Store")
 
     // Ad unit selection. DEBUG always serves the test unit (Xcode Run).
-    // RELEASE serves either the test unit or the real leyne0000 unit
+    // RELEASE serves either the test unit or the real production unit
     // depending on `forceTestUnitForRelease` (the toggle above).
-    // Production unit lives in the leyne0000 AdMob account, matching the
+    // Production unit lives in the verified personal Google AdMob account
+    // (ca-app-pub-6816620800052795), matching the
     // GADApplicationIdentifier in LeyneInfo.plist
     // (ca-app-pub-6816620800052795~4249846169).
     #if DEBUG
@@ -67,7 +68,7 @@ enum AdConfig {
     #else
     static let bannerUnitID = forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/2934735716"  // Google test unit
-        : "ca-app-pub-6816620800052795/8532706109"  // leyne0000 prod
+        : "ca-app-pub-6816620800052795/8532706109"  // personal-acct prod
     #endif
 
     /// Extra devices to force into TEST ads even in a RELEASE build (rarely

@@ -52,7 +52,6 @@ struct SoftRoot: View {
     // the user over to Nearby or Search. The native TabView preserves each
     // path across tab switches, matching iOS's standard tab behaviour.
     @State private var homeStack: [SoftRoute] = []
-    @State private var nearbyStack: [SoftRoute] = []
     @State private var settingsStack: [SoftRoute] = []
     @State private var searchStack: [SoftRoute] = []
     @State private var mapHandoff: MapHandoffKind = .none
@@ -75,14 +74,6 @@ struct SoftRoot: View {
                             onTab: { tab = $0 },
                             onOpenStop: { homeStack.append(.stop($0)) },
                             onOpenSearch: { tab = .search }
-                        )
-                    }
-                }
-                Tab("Nearby", systemImage: "location.fill", value: SoftTab.nearby) {
-                    navStack($nearbyStack) {
-                        SoftNearbyView(
-                            onTab: { tab = $0 },
-                            onOpenStop: { nearbyStack.append(.stop($0)) }
                         )
                     }
                 }

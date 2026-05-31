@@ -33,6 +33,13 @@ private func etaText(_ s: LeyneActivityAttributes.ContentState) -> String {
     s.arrived ? "Now" : (s.etaMinutes <= 0 ? "Arr" : "\(s.etaMinutes)")
 }
 
+/// "~" before a scheduled-only ETA so a timetable guess never reads as a
+/// confident live number; pairs with a dimmed colour at the call site. The
+/// status line already spells out "Scheduled · N min".
+private func confPrefix(_ s: LeyneActivityAttributes.ContentState) -> String {
+    (!s.monitored && !s.arrived && s.etaMinutes > 0) ? "~" : ""
+}
+
 // Deep link into the app's Bus view for this tracked service. The app
 // (RootView.onOpenURL) maps lyne://bus/<stopCode>/<busNo> onto the same
 // AppModel.open(...) path a notification tap uses, so tapping the lock-screen
@@ -65,13 +72,15 @@ struct LeyneLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(etaText(context.state))
+                        Text(confPrefix(context.state) + etaText(context.state))
                             .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(context.state.arrived ? green : paper)
+                            .foregroundStyle(context.state.arrived ? green
+                                             : (context.state.monitored ? paper : dim))
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                         if !context.state.arrived && context.state.etaMinutes > 0 {
-                            Text("min").font(.system(size: 10)).foregroundStyle(dim)
+                            Text(context.state.monitored ? "min" : "sched")
+                                .font(.system(size: 10)).foregroundStyle(dim)
                         }
                     }
                     .padding(.trailing, 6)
@@ -109,9 +118,11 @@ struct LeyneLiveActivity: Widget {
                     .widgetAccentable()
                     .widgetURL(busURL(context.attributes))
             } compactTrailing: {
-                Text(etaText(context.state) + (context.state.arrived || context.state.etaMinutes <= 0 ? "" : "m"))
+                Text(confPrefix(context.state) + etaText(context.state)
+                     + (context.state.arrived || context.state.etaMinutes <= 0 ? "" : "m"))
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(context.state.arrived ? green : paper)
+                    .foregroundStyle(context.state.arrived ? green
+                                     : (context.state.monitored ? paper : dim))
                     .widgetURL(busURL(context.attributes))
             } minimal: {
                 Text(context.attributes.busNo)
@@ -156,12 +167,13 @@ private struct LockScreenView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 0) {
-                Text(etaText(state))
+                Text(confPrefix(state) + etaText(state))
                     .font(.system(size: state.arrived ? 22 : 40, weight: .light, design: .monospaced))
-                    .foregroundStyle(state.arrived ? green : paper)
+                    .foregroundStyle(state.arrived ? green : (state.monitored ? paper : dim))
                     .contentTransition(.numericText(countsDown: true))
                 if !state.arrived && state.etaMinutes > 0 {
-                    Text("min").font(.system(size: 11, design: .monospaced)).foregroundStyle(dim)
+                    Text(state.monitored ? "min" : "sched")
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(dim)
                 }
             }
         }

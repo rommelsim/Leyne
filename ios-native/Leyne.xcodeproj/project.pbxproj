@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		3C00000000000000000000C1 /* LeyneActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000C0 /* LeyneActivityAttributes.swift */; };
-		3C00000000000000000000D1 /* LyneWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000A1 /* LeyneWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3C00000000000000000000D1 /* LeyneWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000A1 /* LeyneWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		AD0000000000000000000F01 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000F00 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
@@ -36,7 +36,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				3C00000000000000000000D1 /* LyneWidgetsExtension.appex in Embed Foundation Extensions */,
+				3C00000000000000000000D1 /* LeyneWidgetsExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -118,7 +118,7 @@
 /* Begin PBXNativeTarget section */
 		1A0000000000000000000005 /* Leyne */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1A0000000000000000000008 /* Build configuration list for PBXNativeTarget "Lyne" */;
+			buildConfigurationList = 1A0000000000000000000008 /* Build configuration list for PBXNativeTarget "Leyne" */;
 			buildPhases = (
 				1A000000000000000000000D /* Sources */,
 				1A000000000000000000000E /* Frameworks */,
@@ -143,7 +143,7 @@
 		};
 		2B0000000000000000000005 /* LeyneTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 2B0000000000000000000008 /* Build configuration list for PBXNativeTarget "LyneTests" */;
+			buildConfigurationList = 2B0000000000000000000008 /* Build configuration list for PBXNativeTarget "LeyneTests" */;
 			buildPhases = (
 				2B000000000000000000000D /* Sources */,
 				2B000000000000000000000E /* Frameworks */,
@@ -164,7 +164,7 @@
 		};
 		3C00000000000000000000A5 /* LeyneWidgetsExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3C00000000000000000000A7 /* Build configuration list for PBXNativeTarget "LyneWidgetsExtension" */;
+			buildConfigurationList = 3C00000000000000000000A7 /* Build configuration list for PBXNativeTarget "LeyneWidgetsExtension" */;
 			buildPhases = (
 				3C00000000000000000000AD /* Sources */,
 				3C00000000000000000000AE /* Frameworks */,
@@ -204,7 +204,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 1A0000000000000000000007 /* Build configuration list for PBXProject "Lyne" */;
+			buildConfigurationList = 1A0000000000000000000007 /* Build configuration list for PBXProject "Leyne" */;
 			compatibilityVersion = "Xcode 15.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -580,7 +580,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1A0000000000000000000007 /* Build configuration list for PBXProject "Lyne" */ = {
+		1A0000000000000000000007 /* Build configuration list for PBXProject "Leyne" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1A0000000000000000000009 /* Debug */,
@@ -589,7 +589,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A0000000000000000000008 /* Build configuration list for PBXNativeTarget "Lyne" */ = {
+		1A0000000000000000000008 /* Build configuration list for PBXNativeTarget "Leyne" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1A000000000000000000000B /* Debug */,
@@ -598,7 +598,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		2B0000000000000000000008 /* Build configuration list for PBXNativeTarget "LyneTests" */ = {
+		2B0000000000000000000008 /* Build configuration list for PBXNativeTarget "LeyneTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				2B000000000000000000000B /* Debug */,
@@ -607,7 +607,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3C00000000000000000000A7 /* Build configuration list for PBXNativeTarget "LyneWidgetsExtension" */ = {
+		3C00000000000000000000A7 /* Build configuration list for PBXNativeTarget "LeyneWidgetsExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3C00000000000000000000AB /* Debug */,

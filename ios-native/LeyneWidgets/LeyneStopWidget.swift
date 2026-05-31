@@ -111,7 +111,10 @@ enum WLTA {
         let NextBus: Bus
         let NextBus2: Bus
     }
-    private struct Bus: Decodable { let EstimatedArrival: String? }
+    // `Monitored` is LTA's per-arrival GPS flag (1 = live, 0 = schedule-only
+    // "ghost bus"). The widget used to discard it; capturing it lets the
+    // home-screen glance be as honest about uncertainty as the app is.
+    private struct Bus: Decodable { let EstimatedArrival: String?; let Monitored: Int? }
 
     private static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
@@ -126,7 +129,11 @@ enum WLTA {
         return max(0, Int((d.timeIntervalSinceNow / 60).rounded()))
     }
 
-    struct Row: Identifiable, Hashable { let id: String; let eta1: Int?; let eta2: Int? }
+    struct Row: Identifiable, Hashable {
+        let id: String; let eta1: Int?; let eta2: Int?
+        /// First arrival is GPS-monitored (live). False = scheduled-only.
+        var mon1: Bool = true
+    }
 
     static func arrivals(stop: String) async -> [Row] {
         var c = URLComponents(url: base.appendingPathComponent("v3/BusArrival"),
@@ -142,7 +149,8 @@ enum WLTA {
         else { return [] }
         return decoded.Services
             .map { Row(id: $0.ServiceNo, eta1: mins($0.NextBus.EstimatedArrival),
-                       eta2: mins($0.NextBus2.EstimatedArrival)) }
+                       eta2: mins($0.NextBus2.EstimatedArrival),
+                       mon1: ($0.NextBus.Monitored ?? 1) == 1) }
             .sorted { ($0.eta1 ?? 999) < ($1.eta1 ?? 999) }
     }
 }
@@ -226,6 +234,13 @@ private func etaLabel(_ m: Int?) -> String {
     return m <= 0 ? "Arr" : "\(m)"
 }
 
+/// Scheduled (non-GPS) arrivals get a "~" prefix so a timetable guess never
+/// reads as a confident live number — the widget-scale version of the app's
+/// ghost-bus treatment. Pairs with a dimmed colour at the call site.
+private func schedPrefix(_ mon: Bool, _ m: Int?) -> String {
+    (!mon && (m ?? 0) > 0) ? "~" : ""
+}
+
 /// Deep link the host app can route. The app isn't required to handle this
 /// today — adding it is free and unblocks the future tap-to-open-stop path.
 private func stopURL(_ code: String) -> URL? {
@@ -243,7 +258,7 @@ private struct SmallStopView: View {
 
     var body: some View {
         if let block, let next = block.rows.first {
-            let arriving = (next.eta1 ?? 99) <= 1
+            let arriving = next.mon1 && (next.eta1 ?? 99) <= 1
             VStack(alignment: .leading, spacing: 0) {
                 Text(block.name)
                     .font(.system(size: 13, weight: .semibold))
@@ -253,18 +268,19 @@ private struct SmallStopView: View {
 
                 Text(next.id)
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
-                    .foregroundStyle(wFg)
+                    .foregroundStyle(next.mon1 ? wFg : wDim)
 
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(etaLabel(next.eta1))
+                    Text(schedPrefix(next.mon1, next.eta1) + etaLabel(next.eta1))
                         .font(.system(size: etaLabel(next.eta1) == "Arr" ? 30 : 40,
                                       weight: .medium, design: .monospaced))
-                        .foregroundStyle(arriving ? wLive : wFg)
+                        .foregroundStyle(arriving ? wLive : (next.mon1 ? wFg : wDim))
                         // Arriving is the primary signal — keep it tinted (not
                         // desaturated) under StandBy / Lock Screen accenting.
                         .widgetAccentable(arriving)
                     if etaLabel(next.eta1) != "Arr" {
-                        Text("min").font(.system(size: 13)).foregroundStyle(wDim)
+                        Text(next.mon1 ? "min" : "sched")
+                            .font(.system(size: 13)).foregroundStyle(wDim)
                     }
                 }
                 .contentTransition(.numericText(countsDown: true))
@@ -297,7 +313,9 @@ private struct SmallStopView: View {
 // ─── Service row — matches in-app PinnedCardView ServiceRow ─
 private struct WServiceRow: View {
     let row: WLTA.Row
-    private var arriving: Bool { (row.eta1 ?? 99) <= 1 }
+    // Arriving = imminent AND live. A scheduled (non-GPS) guess never gets
+    // the confident mint-arriving treatment, even at <=1 min.
+    private var arriving: Bool { row.mon1 && (row.eta1 ?? 99) <= 1 }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -310,17 +328,17 @@ private struct WServiceRow: View {
 
             Text(row.id)
                 .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundStyle(wFg)
+                .foregroundStyle(row.mon1 ? wFg : wDim)
                 .frame(minWidth: 38, alignment: .leading)
 
             Spacer(minLength: 0)
 
             VStack(alignment: .trailing, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(etaLabel(row.eta1))
+                    Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
                         .font(.system(size: etaLabel(row.eta1) == "Arr" ? 17 : 22,
                                       weight: .medium, design: .monospaced))
-                        .foregroundStyle(arriving ? wLive : wFg)
+                        .foregroundStyle(arriving ? wLive : (row.mon1 ? wFg : wDim))
                         .widgetAccentable(arriving)
                     if etaLabel(row.eta1) != "Arr" {
                         Text("m").font(.system(size: 9)).foregroundStyle(wDim)

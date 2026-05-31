@@ -712,7 +712,7 @@ final class AppModel: ObservableObject {
         if liveActivity != nil { stopLiveActivity() }
         let attrs = LeyneActivityAttributes(busNo: s.no, dest: s.dest,
                                            stopName: stopName, stopCode: stopCode)
-        let state = liveState(etaSec: s.etaSec, stopsAway: -1)
+        let state = liveState(etaSec: s.etaSec, stopsAway: -1, monitored: s.monitored)
         do {
             let act = try Activity.request(
                 attributes: attrs,
@@ -783,17 +783,18 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func liveState(etaSec: Int, stopsAway: Int)
+    private func liveState(etaSec: Int, stopsAway: Int, monitored: Bool = true)
         -> LeyneActivityAttributes.ContentState {
         let arrived = etaSec <= 0
         let mins = max(0, Int(ceil(Double(etaSec) / 60)))
         let status: String
         if arrived { status = "Bus is here" }
+        else if !monitored { status = "Scheduled · \(mins) min" }
         else if etaSec <= 30 { status = "Now" }
         else if etaSec <= 90 { status = "Arrives in 1 min" }
         else { status = "Arrives in \(mins) min" }
         return .init(etaMinutes: arrived ? 0 : mins, status: status,
-                     stopsAway: stopsAway, arrived: arrived)
+                     stopsAway: stopsAway, arrived: arrived, monitored: monitored)
     }
 
     /// Polls real LTA every ~15 s and pushes updates into the Live Activity,
@@ -820,7 +821,8 @@ final class AppModel: ObservableObject {
                     })?.offset ?? 0
                     stopsAway = max(0, you - bi)
                 }
-                let state = self.liveState(etaSec: snap.etaSec, stopsAway: stopsAway)
+                let state = self.liveState(etaSec: snap.etaSec, stopsAway: stopsAway,
+                                           monitored: snap.monitored)
                 await self.liveActivity?.update(
                     ActivityContent(state: state, staleDate: Date().addingTimeInterval(120)))
                 if snap.etaSec <= 0 {

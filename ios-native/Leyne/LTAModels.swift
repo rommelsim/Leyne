@@ -161,7 +161,10 @@ extension LTAArrivalService {
             op: BusOperator(lta: Operator),
             arrivalDate: NextBus.arrivalDate,
             followingDate: NextBus2.arrivalDate,
-            thirdDate: NextBus3.arrivalDate
+            thirdDate: NextBus3.arrivalDate,
+            // Live bus GPS (monitored only) → honest Distance sort on Stop.
+            busLat: (NextBus.lat ?? 0) != 0 ? NextBus.lat : nil,
+            busLon: (NextBus.lon ?? 0) != 0 ? NextBus.lon : nil
         )
     }
 }

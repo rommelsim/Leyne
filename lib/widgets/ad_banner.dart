@@ -59,7 +59,8 @@ const bool kLyneAdsEnabled = true;
 /// Resolve the banner ad unit ID at runtime. Flutter powers the Android
 /// build only — iOS ships via the SwiftUI app at `ios-native/`.
 ///   • DEBUG or LYNE_ADS_TEST=true: Google's universal Android test unit
-///   • RELEASE (public Play Store): leyne0000 production banner unit
+///   • RELEASE (public Play Store): production banner unit (verified
+///     personal Google AdMob account, ca-app-pub-6816620800052795)
 String _bannerUnitId() {
   if (kDebugMode || kLyneAdsTest) {
     return 'ca-app-pub-3940256099942544/6300978111';

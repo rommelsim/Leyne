@@ -1,6 +1,13 @@
-// SoftBusView — Leyne 2.0 Bus tracking: large arrival numeral,
-// Live Activity CTA (Lock Screen / Dynamic Island), live map,
-// tappable route timeline.
+// SoftBusView — Leyne 3.0 immersive bus tracking. A full-bleed live map
+// with a draggable bottom sheet on top. The sheet's PEEK answers the only
+// question that matters at a glance — "when's my bus" — with a
+// confidence-aware hero ETA, a LIVE/ESTIMATED/SCHEDULED status pill, which
+// stop it's for, and the crowd. PULLING THE SHEET UP reveals the alerts and
+// the full route timeline inline (no separate screen).
+//
+// Honest throughout, exactly as the design's thesis demands: we never draw
+// a fake bus position (LTA shares none), never invent per-stop times, and
+// the confidence treatment softens/dashes anything we're unsure about.
 
 import SwiftUI
 import MapKit
@@ -19,225 +26,302 @@ struct SoftBusView: View {
     @State private var route: RouteInfo?
     @State private var camera: MapCameraPosition = .automatic
     @State private var didCenterOnStop = false
+    @StateObject private var loc = LocationManager.shared
 
     private var t: Theme { m.t }
     private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
 
+    /// Stop-level feed freshness — feeds the per-arrival confidence below.
+    private var feed: Freshness { Freshness.from(ds.lastRefresh(stopCode)) }
+
+    /// Confidence for the tracked service: ghost when LTA isn't GPS-tracking
+    /// it, stale when the feed has aged, live otherwise.
+    private var confidence: ArrivalConfidence {
+        guard let s = liveService() else { return .none }
+        return ArrivalConfidence.of(monitored: s.monitored, feed: feed)
+    }
+
+    /// True when the tracked bus is monitored and LTA gave us a GPS position,
+    /// so it can be plotted on the map.
+    private var busHasLivePosition: Bool { liveService()?.busLat != nil }
+
     var body: some View {
         ZStack(alignment: .top) {
-            t.bg.ignoresSafeArea()
+            // Full-bleed live map — the immersive backdrop.
+            mapBackground
+                .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Pinned action row — Back / Pin stay reachable while the
-                // route timeline scrolls. Mirrors DetailView's
-                // [topBar, ScrollView] structure rather than letting the
-                // controls scroll off the top of a long route.
-                topActionRow
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+            // Floating controls over the map (back · route badge · pin).
+            floatingTopControls
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        headerSection
-                        arrivalCard
-                        alertsSection
-                        liveMapSection
-                        if !timelineStops.isEmpty {
-                            RouteTimeline(t: t,
-                                          svc: svc,
-                                          stops: timelineStops,
-                                          alightId: $alightId)
-                                .onChange(of: alightId) { _, new in
-                                    scheduleAlight(stopCode: new)
-                                }
-                        }
-                        Color.clear.frame(height: 40)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                }
-                .refreshable {
-                    await ds.refreshArrivals(stop: stopCode)
-                    loadRoute()
-                }
+            // Draggable sheet pinned to the bottom. Peek = the answer;
+            // pull up = alerts + full route.
+            DraggableSheet(t: t, peek: 322) {
+                sheetHeader
+            } content: {
+                sheetBody
             }
         }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             ds.ensureArrivals(stop: stopCode)
             loadRoute()
+            if let s = ds.stopByCode[stopCode] { centerOnStop(s) }
         }
     }
 
-    private var topActionRow: some View {
-        HStack {
-            // Back pill carries the stop's own name (the place the user is
-            // looking at / came from) instead of the literal word "Stop", so
-            // the affordance reads "‹ Beauty World". Truncate by tail so a
-            // long name stays a single line and never wraps the pill.
-            GlassPillButton(t: t, icon: "chevron.left",
-                            label: ds.stopName(stopCode),
-                            action: { fb.select(); onBack() })
-                // Let the pin pill keep its full width; the back pill's long
-                // stop name truncates (tail) rather than crowding it.
-                .layoutPriority(0)
-                .frame(maxWidth: 220, alignment: .leading)
-            Spacer(minLength: 8)
-            GlassPillButton(t: t,
-                            icon: isPinned ? "pin.fill" : "pin",
-                            label: isPinned ? "Unpin" : "Pin",
-                            filled: isPinned,
-                            action: { fb.select(); togglePin() })
+    // MARK: Floating controls
+
+    private var floatingTopControls: some View {
+        HStack(spacing: 10) {
+            // Back — a solid circle so it stays legible over any map tile.
+            Button {
+                fb.select(); onBack()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .frame(width: 40, height: 40)
+                    .background(t.surface, in: Circle())
+                    .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to \(ds.stopName(stopCode))")
+
+            // Route badge — the bus identity, self-labeling over the map.
+            HStack(spacing: 7) {
+                Image(systemName: "bus.fill").font(.system(size: 15, weight: .bold))
+                Text(svc).font(t.sans(19, weight: .bold)).lineLimit(1)
+            }
+            .foregroundStyle(t.contrastFg)
+            .padding(.horizontal, 13)
+            .frame(height: 40)
+            .background(t.contrast, in: Capsule())
+            .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
+
+            Spacer(minLength: 0)
+
+            // Recenter on the user's location — a custom control so it stays
+            // within the safe area (MapKit's own button bled into the status
+            // bar on the full-bleed map).
+            Button {
+                fb.select()
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    camera = .userLocation(fallback: .automatic)
+                    didCenterOnStop = false   // allow re-centering on the stop later
+                }
+            } label: {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .frame(width: 40, height: 40)
+                    .background(t.surface, in: Circle())
+                    .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Center on my location")
+
+            // Pin — preserves the existing pin-to-Home affordance.
+            Button {
+                fb.select(); togglePin()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(isPinned ? "Pinned" : "Pin")
+                        .font(t.sans(13, weight: .semibold))
+                }
+                .foregroundStyle(isPinned ? t.onAccent : t.fg)
+                .padding(.horizontal, 13)
+                .frame(height: 40)
+                .background(isPinned ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.surface),
+                            in: Capsule())
+                .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPinned ? "Unpin this stop" : "Pin this stop to Home")
         }
     }
 
-    // v3 header: the SERVICE NUMBER is the hero. A small dim context line
-    // (walk time · stop name) sits above the headline; the stop name is
-    // demoted out of the title role it held in v2.
-    private var headerSection: some View {
+    // MARK: Sheet header (always visible in the peek)
+
+    private var sheetHeader: some View {
         let service = liveService()
-        return VStack(alignment: .leading, spacing: 6) {
-            // Context line: a location pin + "<road> · <stop name>". We have no
-            // walk-time source, so a `figure.walk` icon here read as a broken
-            // "walk N min" with the minutes missing. A mappin states plainly
-            // that this is *where* the bus is being tracked from.
-            HStack(spacing: 6) {
-                Image(systemName: "mappin.and.ellipse").font(.system(size: 12))
-                Text(contextLine)
-                    .font(t.mono(11))
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Eyebrow(text: "Bus service", t: t)
+                Text("Towards \(service?.dest ?? "—")")
+                    .font(t.sans(15.5, weight: .semibold))
+                    .foregroundStyle(t.fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .foregroundStyle(t.dim)
-
-            Eyebrow(text: "Bus", t: t)
-            Text(svc)
-                .font(t.sans(40, weight: .bold))
-                .foregroundStyle(t.fg)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text("Towards \(service?.dest ?? "—")")
-                .font(t.sans(15, weight: .medium))
-                .foregroundStyle(t.dim)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            ConfidenceStatusPill(confidence: confidence, t: t)
         }
     }
 
-    /// "<stop name>" or, when a road name exists, "<road> · <stop name>".
-    /// No walk-time minute is shown because we have no routing source for it
-    /// — fabricating "4 min" would be a precision the app can't back up.
-    private var contextLine: String {
-        let name = ds.stopName(stopCode)
-        let road = ds.roadName(stopCode)
-        return road.isEmpty ? name : "\(road) · \(name)"
+    // MARK: Sheet body (peek shows the hero; pull-up reveals the rest)
+
+    private var sheetBody: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Divider().overlay(t.line)
+            heroETA
+            if confidence == .stale || confidence == .unconfirmed {
+                honestNote
+            }
+            alertsSection
+            routeSection
+            Color.clear.frame(height: 8)
+        }
+        .padding(.top, 12)
     }
 
-    private var arrivalCard: some View {
+    /// The hero answer: ARRIVES IN → big confidence-treated numeral, then a
+    /// single quiet line tying it to the stop + crowd. No "N stops away" —
+    /// that needs a live bus position LTA doesn't give us.
+    private var heroETA: some View {
         let service = liveService()
         let eta = service.map { fmtETA($0.etaSec) }
         let next = service.map { fmtETA($0.followingSec) }
         let third = service?.thirdDate.map { d -> ETA in
-            let s = max(0, Int(d.timeIntervalSinceNow))
-            return fmtETA(s)
+            fmtETA(max(0, Int(d.timeIntervalSinceNow)))
         }
+        let arriving = (eta?.big == "Arr")
+        let imminent = confidence == .live && (eta?.live ?? false)
 
-        return VStack(alignment: .leading, spacing: 14) {
-            // ETA-led row: "ARRIVES IN" + big numeral on the left, the
-            // live-vs-scheduled provenance chip on the right. The redundant
-            // route/destination pill that used to sit here is gone — the
-            // header already states the bus number and direction.
-            HStack(alignment: .center, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    // When the bus is arriving, fmtETA returns big "Arr" /
-                    // small "now". At mono(56) "Arr" clipped — the numeral
-                    // slot is sized for two digits, and Dynamic Type made it
-                    // worse. So render the arriving state as eyebrow
-                    // "Arriving" + hero "Now" (no redundant "ARRIVES IN: Arr
-                    // now"), and reserve the big slot for real minute counts.
-                    // lineLimit + minimumScaleFactor are the scale safety net.
-                    let arriving = (eta?.big == "Arr")
-                    Eyebrow(text: arriving ? "Arriving" : "Arrives in", t: t)
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(arriving ? "Now" : (eta?.big ?? "—"))
-                            .font(t.mono(56))
-                            .tracking(-2)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                            .foregroundStyle(t.accent)
-                        if !arriving {
-                            Text(eta?.small ?? "")
-                                .font(t.mono(13))
-                                .foregroundStyle(t.dim)
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Eyebrow(text: arriving ? "Arriving" : "Arrives in", t: t)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(arriving
+                         ? "Now"
+                         : "\(confidence.etaPrefix)\(eta?.big ?? "—")")
+                        .font(t.mono(56))
+                        .tracking(-2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .foregroundStyle(confidence.numeralColor(imminent: imminent, t: t))
+                        .opacity(confidence.numeralOpacity())
+                    if !arriving {
+                        Text(eta?.small ?? "")
+                            .font(t.mono(18))
+                            .foregroundStyle(imminent ? t.accent : t.dim)
+                    }
+                    Spacer()
+                    // The next two real arrivals, kept small to the side.
+                    if let next {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Eyebrow(text: "Then", t: t)
+                            HStack(spacing: 6) {
+                                Text(next.big + next.small)
+                                    .font(t.mono(13, weight: .semibold))
+                                    .foregroundStyle(t.fg)
+                                if let third {
+                                    Text("·").foregroundStyle(t.faint)
+                                    Text(third.big + third.small)
+                                        .font(t.mono(13, weight: .semibold))
+                                        .foregroundStyle(t.fg)
+                                }
+                            }
                         }
                     }
                 }
-                Spacer()
-                if let service {
-                    liveStatusChip(service.monitored)
-                }
             }
 
-            Divider().overlay(t.line)
-
-            // THEN: the next two real arrivals (following + third). "Then"
-            // reads as a time sequence ("then 20min · 35min"), matching the
-            // vocabulary in DetailView/PinnedCardView; "Following" was
-            // ambiguous — it can mean "the bus you're following".
-            HStack {
-                Eyebrow(text: "Then", t: t)
-                Spacer()
-                HStack(spacing: 8) {
-                    Text(next.map { $0.big + $0.small } ?? "—")
-                        .font(t.mono(14, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                    if let th = third {
-                        Text("·").foregroundStyle(t.faint)
-                        Text(th.big + th.small)
-                            .font(t.mono(14, weight: .semibold))
-                            .foregroundStyle(t.fg)
+            // Stop + crowd: "to <stop> (<code>)"  ·  crowd glyph.
+            HStack(spacing: 10) {
+                Text("to ")
+                    .font(t.sans(13)).foregroundStyle(t.dim)
+                + Text(ds.stopName(stopCode))
+                    .font(t.sans(13, weight: .semibold)).foregroundStyle(t.fg)
+                + Text(" (\(stopCode))")
+                    .font(t.mono(12)).foregroundStyle(t.dim)
+                Spacer(minLength: 8)
+                if let load = service?.load {
+                    HStack(spacing: 5) {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 11)).foregroundStyle(t.dim)
+                        CrowdMeter(load: load, t: t, showLabel: false)
                     }
                 }
             }
+            .lineLimit(1)
         }
-        .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    /// Right-aligned provenance chip beside the ETA. Live (GPS-monitored)
-    /// shows a green dot + "Live · GPS"; scheduled shows a clock + dim
-    /// "~ Scheduled". Mirrors the `Service.monitored` flag used elsewhere.
-    @ViewBuilder
-    private func liveStatusChip(_ monitored: Bool) -> some View {
-        HStack(spacing: 5) {
-            if monitored {
-                Circle().fill(t.accent).frame(width: 7, height: 7)
-                Text("Live · GPS")
-            } else {
-                Image(systemName: "clock").font(.system(size: 10, weight: .semibold))
-                Text("~ Scheduled")
+    /// One honest sentence explaining a softened/dashed hero, so the rider
+    /// understands the dimming is a truth signal, not a glitch.
+    private var honestNote: some View {
+        HStack(alignment: .top, spacing: 8) {
+            ConfidenceDot(confidence: confidence, t: t, size: 7)
+                .padding(.top, 3)
+            Group {
+                if confidence == .stale {
+                    Text("Estimated. ").font(t.sans(12, weight: .semibold)).foregroundStyle(t.fg)
+                    + Text("The live signal has aged — shown, not faked.")
+                        .font(t.sans(12)).foregroundStyle(t.dim)
+                } else {
+                    Text("Ghost bus. ").font(t.sans(12, weight: .semibold)).foregroundStyle(t.fg)
+                    + Text("Timetabled but not transmitting GPS right now.")
+                        .font(t.sans(12)).foregroundStyle(t.dim)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: Route (revealed on pull-up)
+
+    private var routeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                Eyebrow(text: timelineStops.isEmpty
+                        ? "Full route"
+                        : "Full route · \(timelineStops.count) stops", t: t)
+                Rectangle().fill(t.line).frame(height: 1)
+            }
+
+            // Honest about the map: monitored buses are plotted at their real
+            // LTA GPS position; ghost/scheduled buses have none, so we say so
+            // rather than faking a marker.
+            HStack(spacing: 7) {
+                ConfidenceDot(confidence: busHasLivePosition ? .live : .unconfirmed, t: t, size: 6)
+                Text(busHasLivePosition
+                     ? "Bus \(svc) is plotted live above (dark pin); your stop is the green pin."
+                     : "This bus isn’t transmitting GPS — no live position to map; your stop is the green pin.")
+                    .font(t.mono(10)).foregroundStyle(t.faint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+
+            if !timelineStops.isEmpty {
+                RouteTimeline(t: t, svc: svc, stops: timelineStops, alightId: $alightId)
+                    .onChange(of: alightId) { _, new in scheduleAlight(stopCode: new) }
             }
         }
-        .font(t.mono(11, weight: .medium))
-        .foregroundStyle(monitored ? t.accent : t.dim)
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(
-            (monitored ? t.liveBg : t.surfaceHi),
-            in: Capsule()
-        )
-        .overlay(Capsule().stroke(monitored ? t.accent.opacity(0.4) : t.line, lineWidth: 1))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(monitored
-            ? "Live arrival, tracked by GPS"
-            : "Scheduled estimate, not GPS tracked")
     }
 
-    /// Full-width subtle-green capsule that toggles an arrival alert for
-    /// THIS bus at THIS stop. The mockup label ("Notify me when it's 1 stop
-    /// away") implies live bus-position data we don't have, so we wire the
-    /// real mechanism instead — `m.toggleTracked`, which makes the bus
-    /// eligible for the arrival-alert that AppModel fires ~1 min before
-    /// arrival — and relabel honestly to match what actually happens.
+    // MARK: Alerts (notify + Live Activity) — unchanged wiring
+
+    private var alertsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: "Alerts", t: t)
+            notifyButton
+            liveActivityCTA
+        }
+    }
+
     private var notifyButton: some View {
         let on = m.isTracked(code: stopCode, busNo: svc)
         return Button {
@@ -253,10 +337,7 @@ struct SoftBusView: View {
             .foregroundStyle(on ? t.onAccent : t.accent)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(
-                on ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.liveBg),
-                in: Capsule()
-            )
+            .background(on ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.liveBg), in: Capsule())
             .overlay(Capsule().stroke(on ? Color.clear : t.accent.opacity(0.35), lineWidth: 1))
         }
         .buttonStyle(.plain)
@@ -265,42 +346,6 @@ struct SoftBusView: View {
             : "Notify me before bus \(svc) arrives")
     }
 
-    /// All service numbers currently arriving at this stop — passed to
-    /// `toggleTracked` so untracking the last one collapses to "no buses"
-    /// correctly and tracking everything maps back to the "all" state.
-    private var allServiceNos: [String] {
-        if case .loaded(let s) = ds.arrivals[stopCode] {
-            return s.map(\.no)
-        }
-        return [svc]
-    }
-
-    // MARK: Alerts
-    // Groups the two ways to be alerted under one "ALERTS" header so they
-    // read as two flavors of one intent, not duplicate buttons:
-    //  • notifyButton    — a single heads-up ~1 min before arrival.
-    //  • liveActivityCTA — a persistent Lock Screen / Dynamic Island feed.
-    // The arrival card above is now pure info (ETA + next two); the
-    // actions live here. When Live Activities are unavailable the CTA
-    // collapses and only the notify capsule shows under the header.
-    private var alertsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Eyebrow(text: "Alerts", t: t)
-            notifyButton
-            liveActivityCTA
-        }
-    }
-
-    // MARK: Live Activity CTA
-    // Starts/stops the real ActivityKit Live Activity for this bus on the
-    // Lock Screen + Dynamic Island. The whole engine — request, 15 s LTA
-    // polling, stops-away, auto-end on arrival, relaunch restore — lives in
-    // AppModel (toggleLiveActivity / startLivePolling). This is just the V2
-    // entry point; the label reflects the live on/off state like the bell.
-    //
-    // Shown only when (a) we have a real arriving service to attach to and
-    // (b) the user hasn't disabled Live Activities system-wide — otherwise
-    // the tap would silently no-op, which is the dead-button trust bug.
     @ViewBuilder
     private var liveActivityCTA: some View {
         if let service = liveService(),
@@ -317,8 +362,7 @@ struct SoftBusView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(liveOn ? t.onAccent : t.accent)
                         .frame(width: 40, height: 40)
-                        .background(liveOn ? AnyShapeStyle(t.accent)
-                                           : AnyShapeStyle(t.liveBg),
+                        .background(liveOn ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.liveBg),
                                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(liveOn ? "Stop Live Activity" : "Start Live Activity")
@@ -335,7 +379,7 @@ struct SoftBusView: View {
                         .foregroundStyle(liveOn ? t.accent : t.dim)
                 }
                 .padding(12)
-                .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(liveOn ? t.accent.opacity(0.4) : Color.clear, lineWidth: 1))
             }
@@ -346,71 +390,67 @@ struct SoftBusView: View {
         }
     }
 
-    private var liveMapSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Eyebrow(text: "Live map", t: t)
-            mapLegend
-            Map(position: $camera) {
-                // The user's bus stop — a pin so the map has at least
-                // one annotation while the route loads.
-                if let stop = ds.stopByCode[stopCode] {
-                    Annotation(stop.Description,
+    // MARK: Map background
+
+    private var mapBackground: some View {
+        Map(position: $camera) {
+            // Bus stop — green accent pin.
+            if let stop = ds.stopByCode[stopCode] {
+                Annotation(stop.Description,
+                           coordinate: CLLocationCoordinate2D(
+                            latitude: stop.Latitude, longitude: stop.Longitude),
+                           anchor: .bottom) {
+                    MapStopMarker(t: t)
+                        .accessibilityLabel("Bus stop \(stop.Description)")
+                }
+            }
+            // Other stops on the journey — faint dots, so the three primary
+            // markers stay the focus.
+            if let r = route {
+                ForEach(journeySegment(r).filter { $0.code != stopCode }, id: \.code) { rs in
+                    Annotation(rs.name,
                                coordinate: CLLocationCoordinate2D(
-                                latitude: stop.Latitude,
-                                longitude: stop.Longitude),
-                               // Anchor at the teardrop's tip so the marker body
-                               // floats *above* the coordinate. When the user is
-                               // standing at the stop this lifts the stop pin off
-                               // the system blue user-location dot instead of
-                               // covering it.
-                               anchor: .bottom) {
-                        MapStopMarker(t: t)
-                            .accessibilityLabel("Bus stop \(stop.Description)")
+                                latitude: rs.lat, longitude: rs.lon)) {
+                        Circle().fill(t.dim.opacity(0.5)).frame(width: 6, height: 6)
                     }
                 }
-                if let r = route {
-                    // Other stops on this journey — small dots so the
-                    // primary stop pin stays the visual focus.
-                    ForEach(journeySegment(r).filter { $0.code != stopCode },
-                            id: \.code) { rs in
-                        Annotation(rs.name,
-                                   coordinate: CLLocationCoordinate2D(
-                                    latitude: rs.lat, longitude: rs.lon)) {
-                            Circle().fill(t.dim).frame(width: 6, height: 6)
-                        }
-                    }
-                    // No live bus annotation: r.busCoord is always nil today
-                    // (DataStore.route hard-codes it). Restore a bus marker
-                    // here once real bus-coordinate data exists.
+            }
+            // Live bus — dark pill + bus glyph + number, at its real GPS
+            // position. Only for monitored arrivals (ghost buses have no
+            // coordinate, so none is drawn rather than faking one).
+            if let s = liveService(), let lat = s.busLat, let lon = s.busLon {
+                Annotation("Bus \(svc)",
+                           coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                           anchor: .center) {
+                    MapBusMarker(t: t, svc: svc)
+                        .accessibilityLabel("Bus \(svc), live position")
                 }
-                UserAnnotation()
             }
-            .mapStyle(.standard(elevation: .realistic))
-            .mapControls { MapUserLocationButton(); MapCompass() }
-            .frame(height: 180)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            // Honest bus-absent state: we never receive a live bus location
-            // from LTA, so say so plainly instead of implying a missing dot.
-            HStack(spacing: 6) {
-                Image(systemName: "bus")
-                    .font(.system(size: 10, weight: .semibold))
-                Text("Bus \(svc)’s live position isn’t shared yet — tracking by arrival time.")
-                    .font(t.mono(10))
-            }
-            .foregroundStyle(t.dim)
-            .fixedSize(horizontal: false, vertical: true)
-            // Recenter the camera once the user's bus stop is known. The
-            // initial value is `.automatic` so the map fits its
-            // annotations; this explicit region pull is here so the map
-            // also re-centres if the stop data lands after the view did.
-            .onChange(of: ds.stopByCode[stopCode]) { _, stop in
-                guard let s = stop, !didCenterOnStop else { return }
-                centerOnStop(s)
-            }
-            .onAppear {
-                if let s = ds.stopByCode[stopCode] { centerOnStop(s) }
+            // You — a blue person marker, unmistakably distinct from the green
+            // stop pin (the system dot inherited the green accent tint and
+            // looked identical to the stop).
+            if let here = loc.location {
+                Annotation("You", coordinate: here.coordinate, anchor: .center) {
+                    MapUserMarker().accessibilityLabel("Your location")
+                }
             }
         }
+        .mapStyle(.standard(elevation: .realistic))
+        // No `.mapControls { MapUserLocationButton() }`: on a full-bleed map
+        // MapKit anchors its controls to the map's edges, so the location
+        // button rode up under the status bar / battery. We provide our own
+        // recenter button in `floatingTopControls`, which sits in the safe area.
+        .onChange(of: ds.stopByCode[stopCode]) { _, stop in
+            guard let s = stop, !didCenterOnStop else { return }
+            centerOnStop(s)
+        }
+    }
+
+    // MARK: Data helpers (unchanged)
+
+    private var allServiceNos: [String] {
+        if case .loaded(let s) = ds.arrivals[stopCode] { return s.map(\.no) }
+        return [svc]
     }
 
     private var timelineStops: [RouteStop] {
@@ -445,10 +485,8 @@ struct SoftBusView: View {
 
     private func centerOnStop(_ stop: LTABusStop) {
         camera = .region(MKCoordinateRegion(
-            center: CLLocationCoordinate2D(
-                latitude: stop.Latitude, longitude: stop.Longitude),
-            span: MKCoordinateSpan(
-                latitudeDelta: 0.006, longitudeDelta: 0.006)))
+            center: CLLocationCoordinate2D(latitude: stop.Latitude, longitude: stop.Longitude),
+            span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)))
         didCenterOnStop = true
     }
 
@@ -461,10 +499,6 @@ struct SoftBusView: View {
     }
 
     private func scheduleAlight(stopCode code: String?) {
-        // Arm (or clear) the real alight alert through AppModel, which
-        // schedules the actual notification. fireAt mirrors DetailView:
-        // 90 s × (stopsToAlight − 2) from now, so the heads-up lands about
-        // two stops before the drop-off.
         guard let code, let r = route,
               let alightIdx = r.stops.firstIndex(where: { $0.code == code }) else {
             m.clearActiveAlight()
@@ -476,30 +510,99 @@ struct SoftBusView: View {
         m.setActiveAlight(busNo: svc, stopCode: code,
                           stopName: r.stops[alightIdx].name, fireAt: fireAt)
     }
+}
 
-    private var mapLegend: some View {
-        // No BUS entry: LTA gives us no live bus coordinate (DataStore.route
-        // hard-codes busCoord: nil), so a "BUS" key would promise a marker
-        // that can never appear. STOP (accent pin) and YOU (system blue dot)
-        // are the only two things actually drawn — keep the legend honest.
-        HStack(spacing: 12) {
-            MapLegendItem(t: t, system: "mappin.fill",
-                          fill: t.accent, label: "STOP")
-            MapLegendItem(t: t, system: "location.fill",
-                          fill: t.meBlue, label: "YOU")
-            Spacer(minLength: 0)
+// MARK: - Draggable bottom sheet
+
+/// A bottom sheet that snaps between a `peek` height and (near) full height.
+/// Drag the handle to move it, release to snap to the nearest state, or tap
+/// the handle to toggle. It lives in a ZStack over the map — no modal
+/// presentation — so it composes cleanly inside a NavigationStack push and
+/// leaves the upper map interactive while collapsed.
+struct DraggableSheet<Handle: View, Content: View>: View {
+    let t: Theme
+    var peek: CGFloat
+    @ViewBuilder var handle: () -> Handle
+    @ViewBuilder var content: () -> Content
+
+    @State private var expanded = false
+    @State private var drag: CGFloat = 0
+
+    private let snap = Animation.spring(response: 0.36, dampingFraction: 0.86)
+
+    var body: some View {
+        GeometryReader { geo in
+            let sheetH = max(peek, geo.size.height * 0.92)
+            let collapsedY = sheetH - peek
+            let baseY = expanded ? 0 : collapsedY
+            let y = min(max(baseY + drag, 0), collapsedY)
+
+            VStack(spacing: 0) {
+                handleBar
+                ScrollView {
+                    content()
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
+                }
+                .scrollDisabled(!expanded)
+            }
+            .frame(width: geo.size.width, height: sheetH, alignment: .top)
+            .background(t.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .shadow(color: .black.opacity(0.18), radius: 18, y: -6)
+            .offset(y: y)
+            .frame(maxHeight: .infinity, alignment: .bottom)
         }
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    private var handleBar: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(t.faint)
+                .frame(width: 40, height: 5)
+                .padding(.top, 10).padding(.bottom, 8)
+            handle()
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity)
+        .background(t.surface)
+        .contentShape(Rectangle())
+        .gesture(
+            // `.global` space is essential: the sheet is offset *by* this
+            // drag, so measuring in `.local` makes the view move under the
+            // finger and halves the reported translation — which is why it
+            // felt like you had to drag past mid-screen. Global = screen
+            // coordinates, so 1pt of finger = 1pt of sheet.
+            DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                .onChanged { v in drag = v.translation.height }
+                .onEnded { v in
+                    // predictedEndTranslation carries the flick's momentum, so
+                    // a quick upward flick expands without a long drag.
+                    let p = v.predictedEndTranslation.height
+                    withAnimation(snap) {
+                        if p < -50 { expanded = true }
+                        else if p > 50 { expanded = false }
+                        // else: barely moved — settle back to current state.
+                        drag = 0
+                    }
+                }
+        )
+        .onTapGesture {
+            withAnimation(snap) { expanded.toggle() }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(expanded ? "Collapse details" : "Expand for alerts and full route")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { withAnimation(snap) { expanded.toggle() } }
     }
 }
 
 // MARK: - Map markers (shared icon language with the Android map)
 
-/// Stop marker — a green teardrop pin carrying a mappin glyph. A *bus*
-/// glyph here read as the bus's live location, directly contradicting the
-/// "live position isn't shared yet" caption below the map; a mappin states
-/// plainly that this marks *where the stop is*. The teardrop silhouette +
-/// white ring keep it distinct from the smaller system-blue user-location
-/// dot (YOU). There is exactly one of these on the map.
+/// Stop marker — a green teardrop pin carrying a mappin glyph. A *bus* glyph
+/// here read as the bus's live location, contradicting the "position isn't
+/// shared yet" honesty; a mappin states plainly that this marks the stop.
 struct MapStopMarker: View {
     let t: Theme
     var body: some View {
@@ -508,12 +611,9 @@ struct MapStopMarker: View {
             .foregroundStyle(t.onAccent)
             .frame(width: 28, height: 28)
             .background(
-                Circle()
-                    .fill(t.accent)
-                    .overlay(Circle().stroke(.white, lineWidth: 2))
+                Circle().fill(t.accent).overlay(Circle().stroke(.white, lineWidth: 2))
             )
             .background(
-                // Teardrop tail so the marker reads as a pin, not a dot.
                 Image(systemName: "arrowtriangle.down.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(t.accent)
@@ -523,8 +623,45 @@ struct MapStopMarker: View {
     }
 }
 
-/// Map legend pill — same iconography as the on-map markers so the
-/// reader can match the legend to what they see on the map at a glance.
+/// "You" — the user's live position. Blue + person glyph so it can never be
+/// confused with the green stop pin (the system location dot inherited the
+/// app's green accent tint and looked identical to the stop).
+struct MapUserMarker: View {
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.blue.opacity(0.16)).frame(width: 34, height: 34)
+            Image(systemName: "person.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color.blue))
+                .overlay(Circle().stroke(.white, lineWidth: 2))
+        }
+        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+    }
+}
+
+/// Live bus — a dark capsule carrying a bus glyph + the service number, so a
+/// moving vehicle reads distinctly from the stationary stop pin and the
+/// blue "you" marker.
+struct MapBusMarker: View {
+    let t: Theme
+    let svc: String
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "bus.fill").font(.system(size: 12, weight: .bold))
+            Text(svc).font(t.mono(13, weight: .bold))
+        }
+        .foregroundStyle(t.contrastFg)
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(t.contrast, in: Capsule())
+        .overlay(Capsule().stroke(.white, lineWidth: 2))
+        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+    }
+}
+
+/// Map legend pill — same iconography as the on-map markers.
 struct MapLegendItem: View {
     let t: Theme
     let system: String

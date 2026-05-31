@@ -8,9 +8,77 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Unreleased — Leyne 2.3.0 · iOS (14) · Android (24) · 2026-05-31
+## Unreleased — Leyne 2.3.0 · iOS (14) · Android (25) · 2026-05-31
 
-**2026-05-31 — UX review, cross-platform parity & ads verification (build 14 / 24):**
+**2026-05-31 — Leyne 3.0 design alignment: the data-confidence system (iOS):**
+
+> Implemented the "honest about uncertainty" design (Claude Design handoff) on
+> iOS, keeping the Soft mint palette. Per the spec, confidence is expressed
+> hue-free — opacity, dot shape and freshness microcopy — so it never competes
+> with the accent. No version bump / archive yet; `kChangelog` gets its
+> user-facing entry when this is cut into a build.
+
+- New four-state per-arrival confidence (`V2/Confidence.swift`): live / stale /
+  unconfirmed (ghost bus) / no-service, derived honestly from LTA's `Monitored`
+  flag + feed freshness — nothing fabricated. Ships reusable treatments:
+  confidence-aware ETA numerals, a freshness dot (filled / hollow / dashed),
+  a LIVE/ESTIMATED/SCHEDULED status pill, and a crowd meter glyph.
+- Stop view (`SoftStopView`): every arrival now carries the confidence
+  treatment; a crowd glyph (person + fill-bars) replaces the dot + word; a
+  footer explains the aging / scheduled-only rows. Distance sort was
+  intentionally **not** added — LTA shares no live bus position, so a
+  bus-distance sort would be fabricated (contradicting the design's own thesis).
+- Bus view (`SoftBusView`) rebuilt as an immersive full-bleed map + draggable
+  bottom sheet: the peek answers "when's my bus" (confidence hero ETA + status
+  pill + which stop + crowd); pulling the sheet up reveals alerts and the full
+  route timeline inline. All prior wiring (alerts, Live Activity, alight
+  scheduling, pin) preserved.
+- Onboarding gained an upfront honesty value-prop screen showing the
+  live / estimated / scheduled mini-states. The three iOS permission prompts
+  (Location, Notifications, ATT) were already primed in-context.
+- Home-screen widget + Live Activity now distinguish live vs scheduled arrivals
+  (the "~" + dimmed treatment), and the Live Activity reflects honest
+  live → scheduled transitions mid-trip — `Monitored` threaded end-to-end
+  (LTA → snapshot → `ContentState` → lock screen / Dynamic Island).
+- App + widget extension build clean (`xcodebuild`, iOS Simulator).
+
+**2026-05-31 — Leyne 3.0 flow-prototype overhaul (iOS): Home · Search · tabs · onboarding:**
+
+> Second pass after an honest gap review — the first pass shipped only the Bus
+> view + confidence engine; this brings the *rest* of the navigable flow (per
+> `Flow Prototype.html`) into the Leyne 3.0 language. The Disruption / Mid-trip /
+> Fare artboards are deliberately out of scope — they live on a separate
+> wireframe canvas, not the prototype, and assume a journey planner / fare
+> engine the app doesn't have.
+
+- New `SoftStopCard` (+ `MiniBusChip`): the design's stop card — pin tile, name,
+  code·road, distance, and a row of confidence-treated next-bus chips.
+- **Home** rebuilt: greeting + search bar + live-location row, then **Pinned**
+  and **Nearby** sections of StopCards. The standalone Nearby tab folds into
+  Home, so the bar is now **Home / Search / Settings**.
+- **Search** rebuilt as the design's "Find" surface: tall field, tap-to-fill
+  example chips (code/postal/place/bus), auto-detected input, and results split
+  into Services + Bus stops with slim pin-tile rows. Real postal/geocode logic
+  preserved.
+- **Onboarding** restructured to the prototype's 6 steps: Welcome → "Honest
+  about your wait" (live/estimated/scheduled) → Location → Notifications → ATT →
+  "You're all set" grant summary (reflects the real granted states). Real system
+  prompts preserved; consent-gather split from finish (`RootView`).
+- **Stop** rebuilt to the minimal prototype layout: a clean header (back · name ·
+  code·road · distance), an **ETA / Distance / Bus no.** sort, and arrival cards
+  reduced to a neutral service badge + a big confidence-treated ETA. Destination,
+  crowd, route and per-bus alerts now live on the Bus view (matching the
+  prototype). The **Distance sort is honest** — it uses the live bus GPS position
+  (`NextBus` lat/lon → `Service.busLat/busLon`) vs the stop; ghost / no-signal
+  buses have no real distance and sort last.
+- Fixed Home StopCard chips truncating ("1… 4 m…") — they now **wrap** via a
+  `FlowLayout` at intrinsic width, so each service number + ETA reads in full.
+- App + widget extension build clean (`xcodebuild`, iOS Simulator).
+
+**2026-05-31 — UX review, cross-platform parity & ads verification (build 14 / 25):**
+
+> Android versionCode bumped 24 → 25: code 24 was already consumed on Play
+> Console, so the closed-test upload re-builds under 25 (same 2.3.0 content).
 
 iOS — bus arrival screen UX review (`SoftBusView`):
 - Fixed the clipped arrival headline: "Arr" could truncate at large Dynamic

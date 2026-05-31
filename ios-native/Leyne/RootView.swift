@@ -29,8 +29,11 @@ struct RootView: View {
                         Task { await m.setNotificationsEnabled(true) }
                     },
                     onRequestTracking: {
-                        Task { await AdConsent.gatherThenStart(); m.finishOnboarding() }
-                    }
+                        // Gather UMP + ATT consent here; the summary screen's
+                        // "Enter Leyne" finishes onboarding (onFinish).
+                        Task { await AdConsent.gatherThenStart() }
+                    },
+                    onFinish: { m.finishOnboarding() }
                 )
                 .transition(.opacity)
                 .zIndex(50)
