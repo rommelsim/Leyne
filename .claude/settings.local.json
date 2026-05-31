@@ -116,7 +116,10 @@
       "Bash(echo \"=== exit $? ===\")",
       "Bash(echo \"widget exit $?\")",
       "Bash(xcodebuild -project ios-native/Leyne.xcodeproj -scheme Leyne -configuration Release -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build)",
-      "Bash(jarsigner -verify build/app/outputs/bundle/release/app-release.aab)"
+      "Bash(jarsigner -verify build/app/outputs/bundle/release/app-release.aab)",
+      "Bash(find . -name \"Package.resolved\")",
+      "Bash(find . -path \"*xcshareddata/swiftpm*\")",
+      "Bash(xcodebuild -resolvePackageDependencies -project Leyne.xcodeproj -scheme Leyne)"
     ]
   }
 }

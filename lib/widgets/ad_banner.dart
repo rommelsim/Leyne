@@ -64,7 +64,7 @@ String _bannerUnitId() {
   if (kDebugMode || kLyneAdsTest) {
     return 'ca-app-pub-3940256099942544/6300978111';
   }
-  return 'ca-app-pub-5864511655536507/6513878972';
+  return 'ca-app-pub-6816620800052795/4134673394';
 }
 
 class AdBanner extends StatefulWidget {

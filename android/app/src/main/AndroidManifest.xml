@@ -46,7 +46,7 @@
              lib/widgets/ad_banner.dart (test in DEBUG, real in RELEASE). -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-5864511655536507~5685985257"/>
+            android:value="ca-app-pub-6816620800052795~7997519487"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"
