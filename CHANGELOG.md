@@ -42,6 +42,68 @@ entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
   (LTA → snapshot → `ContentState` → lock screen / Dynamic Island).
 - App + widget extension build clean (`xcodebuild`, iOS Simulator).
 
+**2026-05-31 — Whisper-quiet confidence rolled out app-wide (positioning: timely updates):**
+
+> Product decision: the selling point is **timely updates**, so the UI must not
+> advertise data gaps. The loud "honesty" cues from the Leyne 3.0 confidence
+> system are demoted *everywhere* to a single near-invisible "~"; numbers and
+> map pins always read confidently. Data-layer + accessibility honesty is
+> untouched. See memory `feedback_timely_over_honest.md`.
+
+- **Stop view**: `ConfidenceETA` now renders full-ink — no dimming, no "~"
+  prefix — with only a faint trailing "~" for estimated/aged arrivals; the
+  "aging & scheduled-only arrivals shown honestly" footer was removed.
+- **Home cards** (`MiniBusChip`): confident chips — dropped the dim, the dashed
+  outline and the "~" prefix; faint trailing "~" only.
+- **Widget + Live Activity**: dropped the dimmed colour and the "sched" unit
+  (now always "min"); the lone tell is the small "~". `AppModel.liveState` no
+  longer emits "Scheduled · N min" (status reads "Arrives in N min").
+- **Onboarding**: the "Honest about your wait" confidence screen is replaced by
+  **"Always up to the minute"** (`OnbVisualLive`: live arrivals · on the map ·
+  smart alerts); welcome copy now leads with real-time, not "admits when unsure".
+- `monitored` still flows end-to-end (it powers the "~" and the accessibility
+  labels); the demotion is visual only. App + widget build clean (`xcodebuild`).
+
+**2026-05-31 — Bus view: always-on map position (live → last-known → estimated) + new layout (iOS):**
+
+> The map used to drop the bus marker the instant LTA stopped sharing a GPS
+> coordinate (scheduled "ghost" buses, or a monitored bus that dropped its fix
+> mid-poll), so the bus often "couldn't be tracked". Confirmed there's no better
+> feed — LTA DataMall's `BusArrivalv3` is the single source every SG app reads,
+> and it only carries a position for `Monitored == 1` arrivals. So instead of a
+> richer feed, the Bus view now **always plots the bus**, in one of three honesty
+> tiers, never disguised as more certain than it is.
+
+- Three-tier bus position (`SoftBusView`): **live** (real GPS fix) → **recent**
+  (had a fix, dropped this poll → last-known) → **estimated** (no fix / ghost
+  bus → position derived from route geometry + ETA). The bus is **always**
+  plotted so the map never goes blank.
+- **Whisper-quiet confidence (positioning: "timely updates"):** the map pin is
+  *always a confident solid pin* and the hero ETA is *always a full-ink number* —
+  the app never advertises a data gap. The only tell that a position is
+  estimated/aged is a near-invisible "~" beside the ETA; the status pill reads
+  LIVE whenever a bus is present. The loud cues from the first pass (dashed/"≈"
+  pins, dimmed numerals, the "Ghost bus / not transmitting GPS" banner, the map
+  tier caption) were **removed**. Accessibility label still states the true tier
+  for screen-reader honesty. See memory `feedback_timely_over_honest.md`.
+- The estimated position walks back up the route from your stop by ETA-worth of
+  travel (≈90s/stop) and interpolates between bracketing stops; it decrements the
+  ETA by time since the last refresh so the pin **creeps** toward the stop, and
+  glides between fixes. Uses `RouteInfo` we already fetch — no new network calls.
+- Camera auto-frames to fit both the bus and the stop on first plot (the user's
+  recenter button opts out of further auto-framing).
+- Sheet relaid out to the latest design: bigger "Towards …" title, hero eyebrow
+  now names the stop ("ARRIVING AT …"), next-two arrivals inline ("then 18 · 24
+  min"), "Stop <code> · <dist> away" + crowd-with-label, a black (`contrast`)
+  "Notify me before it arrives" button, a clock-glyph Live Activity row, and a
+  "Tap a stop to set an arrival alert." route hint. A tier-aware honesty caption
+  states whether the pin is live / last-known / estimated.
+- Recent QoL polish rolled in: Home chip sort by bus number + wrap-no-truncate,
+  Search/Home field de-dup, Stop ETA size 30→22, sheet drag physics
+  (`.global` space + flick momentum), status-bar-safe recenter button, and the
+  blue user / green stop / dark bus marker icon language.
+- App + widget extension build clean (`xcodebuild`, iOS Simulator).
+
 **2026-05-31 — Leyne 3.0 flow-prototype overhaul (iOS): Home · Search · tabs · onboarding:**
 
 > Second pass after an honest gap review — the first pass shipped only the Bus

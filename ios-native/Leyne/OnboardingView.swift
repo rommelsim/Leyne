@@ -1,5 +1,5 @@
-// Onboarding — Leyne 3.0 first-run flow, matching Onboarding.html:
-// Welcome → "Honest about your wait" (the confidence wedge) → three primed
+// Onboarding — Leyne 3.0 first-run flow:
+// Welcome → "Always up to the minute" (the timeliness wedge) → three primed
 // iOS permission requests (Location → Notifications → ATT) → "You're all
 // set" grant summary. Each primer shows in-app context, then fires the real
 // system prompt; the summary reflects the actual granted states.
@@ -21,7 +21,7 @@ struct OnboardingView: View {
 
     @EnvironmentObject private var m: AppModel
 
-    // 0 welcome · 1 honest · 2 location · 3 notifications · 4 ATT · 5 done
+    // 0 welcome · 1 live · 2 location · 3 notifications · 4 ATT · 5 done
     @State private var step = 0
     // Single-shot guard so rapid taps don't spawn multiple consent flows.
     @State private var trackingTapped = false
@@ -38,7 +38,7 @@ struct OnboardingView: View {
                 Group {
                     switch step {
                     case 0: welcome
-                    case 1: honest
+                    case 1: live
                     case 2: locationPrimer
                     case 3: notifPrimer
                     case 4: attPrimer
@@ -74,12 +74,12 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             Spacer()
             wordmark(size: 44)
-            Text("Singapore’s buses & MRT,\ntold honestly.")
+            Text("Singapore’s buses & MRT,\nin real time.")
                 .font(t.sans(20, weight: .semibold))
                 .foregroundStyle(t.fg)
                 .multilineTextAlignment(.center)
                 .padding(.top, 24)
-            Text("Every app reads the same live feed. Leyne is the one that admits when it’s unsure — so you’re never left guessing.")
+            Text("Live arrivals the moment they change — your bus on the map, and a nudge before it pulls in.")
                 .font(t.sans(14))
                 .foregroundStyle(t.dim)
                 .multilineTextAlignment(.center)
@@ -109,22 +109,22 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: 1 · Honest (the confidence wedge)
+    // MARK: 1 · Live (the timeliness wedge)
 
-    private var honest: some View {
+    private var live: some View {
         stepScaffold(dotsIndex: -1) {
             VStack(alignment: .leading, spacing: 0) {
                 kicker("Why Leyne")
-                Text("Honest about your wait.")
+                Text("Always up to the minute.")
                     .font(t.sans(27, weight: .bold))
                     .foregroundStyle(t.fg)
                     .padding(.top, 8)
-                Text("Live feeds drop out. Buses run without signal. Leyne shows you exactly how much it knows:")
+                Text("Real-time arrivals, refreshed continuously — so you always know when to leave and exactly where your bus is.")
                     .font(t.sans(15))
                     .foregroundStyle(t.dim)
                     .lineSpacing(3)
                     .padding(.top, 12)
-                OnbVisualConfidence(t: t).padding(.top, 22)
+                OnbVisualLive(t: t).padding(.top, 22)
             }
         } cta: {
             primaryButton("Continue") { advance() }
@@ -350,34 +350,35 @@ struct OnboardingView: View {
     }
 }
 
-// MARK: - The confidence wedge visual (3 mini-states)
+// MARK: - The timeliness wedge visual (3 feature rows)
 
-private struct OnbVisualConfidence: View {
+private struct OnbVisualLive: View {
     let t: Theme
     private struct Row: Identifiable {
         let id = UUID()
-        let conf: ArrivalConfidence
-        let label: String
+        let icon: String
+        let title: String
         let desc: String
-        let sec: Int
     }
     private let rows: [Row] = [
-        .init(conf: .live,        label: "Live",      desc: "fresh · GPS-tracked",   sec: 180),
-        .init(conf: .stale,       label: "Estimated", desc: "live signal is aging",  sec: 180),
-        .init(conf: .unconfirmed, label: "Scheduled", desc: "ghost bus · no GPS",    sec: 540),
+        .init(icon: "dot.radiowaves.up.forward", title: "Live arrivals", desc: "refreshed continuously"),
+        .init(icon: "map.fill",                  title: "On the map",    desc: "your bus, you and your stop"),
+        .init(icon: "bell.fill",                 title: "Smart alerts",  desc: "a nudge before it pulls in"),
     ]
     var body: some View {
         VStack(spacing: 10) {
             ForEach(rows) { r in
                 HStack(spacing: 12) {
-                    ConfidenceDot(confidence: r.conf, t: t, size: 9)
+                    Image(systemName: r.icon)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(t.accent)
+                        .frame(width: 40, height: 40)
+                        .background(t.liveBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(r.label).font(t.sans(14, weight: .semibold)).foregroundStyle(t.fg)
+                        Text(r.title).font(t.sans(14, weight: .semibold)).foregroundStyle(t.fg)
                         Text(r.desc).font(t.mono(11)).foregroundStyle(t.dim)
                     }
                     Spacer(minLength: 8)
-                    ConfidenceETA(eta: fmtETA(r.sec), confidence: r.conf,
-                                  t: t, size: 22, weight: .semibold)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))

@@ -234,9 +234,10 @@ private func etaLabel(_ m: Int?) -> String {
     return m <= 0 ? "Arr" : "\(m)"
 }
 
-/// Scheduled (non-GPS) arrivals get a "~" prefix so a timetable guess never
-/// reads as a confident live number — the widget-scale version of the app's
-/// ghost-bus treatment. Pairs with a dimmed colour at the call site.
+/// Whisper-quiet estimate tell: a single faint "~" before a scheduled-only
+/// ETA. No dimming, no "sched" unit at the call site — the widget reads as a
+/// confident live number (timeliness is the promise); the "~" is the only
+/// quiet signal. See memory `feedback_timely_over_honest`.
 private func schedPrefix(_ mon: Bool, _ m: Int?) -> String {
     (!mon && (m ?? 0) > 0) ? "~" : ""
 }
@@ -268,18 +269,18 @@ private struct SmallStopView: View {
 
                 Text(next.id)
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
-                    .foregroundStyle(next.mon1 ? wFg : wDim)
+                    .foregroundStyle(wFg)
 
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(schedPrefix(next.mon1, next.eta1) + etaLabel(next.eta1))
                         .font(.system(size: etaLabel(next.eta1) == "Arr" ? 30 : 40,
                                       weight: .medium, design: .monospaced))
-                        .foregroundStyle(arriving ? wLive : (next.mon1 ? wFg : wDim))
+                        .foregroundStyle(arriving ? wLive : wFg)
                         // Arriving is the primary signal — keep it tinted (not
                         // desaturated) under StandBy / Lock Screen accenting.
                         .widgetAccentable(arriving)
                     if etaLabel(next.eta1) != "Arr" {
-                        Text(next.mon1 ? "min" : "sched")
+                        Text("min")
                             .font(.system(size: 13)).foregroundStyle(wDim)
                     }
                 }
@@ -328,7 +329,7 @@ private struct WServiceRow: View {
 
             Text(row.id)
                 .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundStyle(row.mon1 ? wFg : wDim)
+                .foregroundStyle(wFg)
                 .frame(minWidth: 38, alignment: .leading)
 
             Spacer(minLength: 0)
@@ -338,7 +339,7 @@ private struct WServiceRow: View {
                     Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
                         .font(.system(size: etaLabel(row.eta1) == "Arr" ? 17 : 22,
                                       weight: .medium, design: .monospaced))
-                        .foregroundStyle(arriving ? wLive : (row.mon1 ? wFg : wDim))
+                        .foregroundStyle(arriving ? wLive : wFg)
                         .widgetAccentable(arriving)
                     if etaLabel(row.eta1) != "Arr" {
                         Text("m").font(.system(size: 9)).foregroundStyle(wDim)

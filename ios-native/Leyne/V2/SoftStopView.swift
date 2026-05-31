@@ -116,7 +116,6 @@ struct SoftStopView: View {
                     arrivalCard(bus)
                 }
             }
-            honestFooter(services)
         case .some(.empty):
             emptyArrivals(message: "No buses in operation right now.")
         case .some(.error(let e)):
@@ -195,27 +194,6 @@ struct SoftStopView: View {
         case .stale: return "\(when), estimated"
         case .unconfirmed: return "\(when), scheduled only"
         case .none: return "no service"
-        }
-    }
-
-    /// Honest footer — only when at least one arrival is aging or
-    /// scheduled-only, so the softened/outlined cards above read as a
-    /// deliberate truth signal, not a glitch.
-    @ViewBuilder
-    private func honestFooter(_ services: [Service]) -> some View {
-        let hasGhost = services.contains { !$0.monitored }
-        let hasStale = feed != .live && services.contains { $0.monitored }
-        if hasGhost || hasStale {
-            HStack(spacing: 7) {
-                ConfidenceDot(confidence: hasGhost ? .unconfirmed : .stale, t: t, size: 6)
-                Text("aging & scheduled-only arrivals shown honestly")
-                    .font(t.mono(10.5))
-                    .foregroundStyle(t.faint)
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 4)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .multilineTextAlignment(.center)
         }
     }
 

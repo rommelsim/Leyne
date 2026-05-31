@@ -5,13 +5,37 @@
 // stop it's for, and the crowd. PULLING THE SHEET UP reveals the alerts and
 // the full route timeline inline (no separate screen).
 //
-// Honest throughout, exactly as the design's thesis demands: we never draw
-// a fake bus position (LTA shares none), never invent per-stop times, and
-// the confidence treatment softens/dashes anything we're unsure about.
+// The map ALWAYS shows the bus, connected to your stop by a dashed tether,
+// in one of three honesty tiers — and the tier is never disguised as more
+// certain than it is:
+//   • live      — LTA gave a real GPS fix this poll       → solid dark pin
+//   • recent    — had a fix, dropped this poll            → dimmed pin, "last seen"
+//   • estimated — no fix / ghost bus, position derived    → hollow dashed pin, "≈"
+//                 from the route geometry + ETA
+// The pin glides between fixes and creeps along the route as the ETA counts
+// down, so the bus reads as "en route" even when LTA shares no position.
 
 import SwiftUI
 import MapKit
 import ActivityKit
+
+/// How confident we are about the bus's *position* on the map (distinct from
+/// the arrival-time confidence, which the status pill carries).
+enum BusTier { case live, recent, estimated }
+
+/// A resolved bus position to plot, with its tier and (for `recent`) how long
+/// ago the underlying GPS fix was seen.
+struct BusPlot: Equatable {
+    var coord: CLLocationCoordinate2D
+    var tier: BusTier
+    var ageSec: Int
+
+    static func == (a: BusPlot, b: BusPlot) -> Bool {
+        a.tier == b.tier && a.ageSec == b.ageSec
+            && a.coord.latitude == b.coord.latitude
+            && a.coord.longitude == b.coord.longitude
+    }
+}
 
 struct SoftBusView: View {
     let stopCode: String
@@ -28,22 +52,47 @@ struct SoftBusView: View {
     @State private var didCenterOnStop = false
     @StateObject private var loc = LocationManager.shared
 
+    // Bus-position plotting state.
+    @State private var plot: BusPlot?                      // current tier + target
+    @State private var displayCoord: CLLocationCoordinate2D?  // where the pin is drawn
+    @State private var lastFix: (coord: CLLocationCoordinate2D, at: Date)?
+    @State private var didAutoFrame = false
+
+    /// Drives the glide/creep + recency aging. App code, so wall-clock Date()
+    /// is fine here (the no-Date rule applies only to workflow scripts).
+    private let ticker = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+
     private var t: Theme { m.t }
     private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
 
     /// Stop-level feed freshness — feeds the per-arrival confidence below.
     private var feed: Freshness { Freshness.from(ds.lastRefresh(stopCode)) }
 
-    /// Confidence for the tracked service: ghost when LTA isn't GPS-tracking
-    /// it, stale when the feed has aged, live otherwise.
+    /// Confidence for the tracked service's *arrival time*: ghost when LTA
+    /// isn't GPS-tracking it, stale when the feed has aged, live otherwise.
+    /// Used internally for the whisper cue & accessibility — NOT surfaced as a
+    /// loud label (see `pillConfidence` / `showWhisper`).
     private var confidence: ArrivalConfidence {
         guard let s = liveService() else { return .none }
         return ArrivalConfidence.of(monitored: s.monitored, feed: feed)
     }
 
-    /// True when the tracked bus is monitored and LTA gave us a GPS position,
-    /// so it can be plotted on the map.
-    private var busHasLivePosition: Bool { liveService()?.busLat != nil }
+    /// What the status pill shows. Timely-first: we present a confident "LIVE"
+    /// whenever there's a bus with a current ETA — only a true no-service state
+    /// drops to "—". The fact that a given arrival is estimated/aged is carried
+    /// by the whisper cue, not advertised here.
+    private var pillConfidence: ArrivalConfidence {
+        confidence == .none ? .none : .live
+    }
+
+    /// Whether to show the near-invisible "~" whisper: true when the position
+    /// is anything other than a fresh live GPS fix (estimated, last-known, or
+    /// the feed has aged). Casual users won't notice; power users get a quiet
+    /// tell that we're not on a verified fix — without a banner.
+    private var showWhisper: Bool {
+        guard confidence != .none else { return false }
+        return confidence != .live || plot?.tier != .live
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -70,7 +119,11 @@ struct SoftBusView: View {
             ds.ensureArrivals(stop: stopCode)
             loadRoute()
             if let s = ds.stopByCode[stopCode] { centerOnStop(s) }
+            recomputePlot()
         }
+        .onReceive(ticker) { _ in recomputePlot() }
+        .onChange(of: route) { _, _ in recomputePlot() }
+        .onChange(of: ds.arrivals[stopCode]) { _, _ in recomputePlot() }
     }
 
     // MARK: Floating controls
@@ -109,9 +162,10 @@ struct SoftBusView: View {
             // bar on the full-bleed map).
             Button {
                 fb.select()
+                didAutoFrame = true   // user took over framing; don't auto-fit again
                 withAnimation(.easeInOut(duration: 0.3)) {
                     camera = .userLocation(fallback: .automatic)
-                    didCenterOnStop = false   // allow re-centering on the stop later
+                    didCenterOnStop = false
                 }
             } label: {
                 Image(systemName: "location.fill")
@@ -154,13 +208,13 @@ struct SoftBusView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Eyebrow(text: "Bus service", t: t)
                 Text("Towards \(service?.dest ?? "—")")
-                    .font(t.sans(15.5, weight: .semibold))
+                    .font(t.sans(24, weight: .bold))
                     .foregroundStyle(t.fg)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.7)
             }
             Spacer(minLength: 8)
-            ConfidenceStatusPill(confidence: confidence, t: t)
+            ConfidenceStatusPill(confidence: pillConfidence, t: t)
         }
     }
 
@@ -170,9 +224,6 @@ struct SoftBusView: View {
         VStack(alignment: .leading, spacing: 16) {
             Divider().overlay(t.line)
             heroETA
-            if confidence == .stale || confidence == .unconfirmed {
-                honestNote
-            }
             alertsSection
             routeSection
             Color.clear.frame(height: 8)
@@ -180,139 +231,89 @@ struct SoftBusView: View {
         .padding(.top, 12)
     }
 
-    /// The hero answer: ARRIVES IN → big confidence-treated numeral, then a
-    /// single quiet line tying it to the stop + crowd. No "N stops away" —
-    /// that needs a live bus position LTA doesn't give us.
+    /// The hero answer: ARRIVING AT <stop> → big confidence-treated numeral,
+    /// the next two arrivals to its side, then a quiet stop + crowd line.
     private var heroETA: some View {
         let service = liveService()
         let eta = service.map { fmtETA($0.etaSec) }
-        let next = service.map { fmtETA($0.followingSec) }
-        let third = service?.thirdDate.map { d -> ETA in
-            fmtETA(max(0, Int(d.timeIntervalSinceNow)))
-        }
         let arriving = (eta?.big == "Arr")
         let imminent = confidence == .live && (eta?.live ?? false)
 
-        return VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Eyebrow(text: arriving ? "Arriving" : "Arrives in", t: t)
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(arriving
-                         ? "Now"
-                         : "\(confidence.etaPrefix)\(eta?.big ?? "—")")
-                        .font(t.mono(56))
-                        .tracking(-2)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .foregroundStyle(confidence.numeralColor(imminent: imminent, t: t))
-                        .opacity(confidence.numeralOpacity())
-                    if !arriving {
-                        Text(eta?.small ?? "")
-                            .font(t.mono(18))
-                            .foregroundStyle(imminent ? t.accent : t.dim)
-                    }
-                    Spacer()
-                    // The next two real arrivals, kept small to the side.
-                    if let next {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Eyebrow(text: "Then", t: t)
-                            HStack(spacing: 6) {
-                                Text(next.big + next.small)
-                                    .font(t.mono(13, weight: .semibold))
-                                    .foregroundStyle(t.fg)
-                                if let third {
-                                    Text("·").foregroundStyle(t.faint)
-                                    Text(third.big + third.small)
-                                        .font(t.mono(13, weight: .semibold))
-                                        .foregroundStyle(t.fg)
-                                }
-                            }
-                        }
-                    }
+        return VStack(alignment: .leading, spacing: 12) {
+            Eyebrow(text: "Arriving at \(ds.stopName(stopCode))", t: t)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                // Always a confident, full-ink number — never dimmed or
+                // "~"-prefixed. Timeliness is the promise; the estimate tell is
+                // the whisper below, not the hero.
+                Text(arriving ? "Now" : (eta?.big ?? "—"))
+                    .font(t.mono(64))
+                    .tracking(-2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .foregroundStyle(confidence == .none ? t.faint : (imminent ? t.accent : t.fg))
+                if !arriving {
+                    Text(eta?.small ?? "")
+                        .font(t.mono(20))
+                        .foregroundStyle(imminent ? t.accent : t.dim)
+                }
+                // Whisper-quiet estimate tell: a faint "~" only a careful eye
+                // catches. No banner, no recolour — just enough to be honest.
+                if showWhisper {
+                    Text("~")
+                        .font(t.mono(15))
+                        .foregroundStyle(t.faint)
+                        .opacity(0.7)
+                        .accessibilityHidden(true)
+                }
+                Spacer(minLength: 0)
+                if let next = nextTwoLabel {
+                    Text(next)
+                        .font(t.mono(14, weight: .semibold))
+                        .foregroundStyle(t.dim)
+                        .padding(.bottom, 6)
                 }
             }
 
-            // Stop + crowd: "to <stop> (<code>)"  ·  crowd glyph.
+            // Stop + distance · crowd.
             HStack(spacing: 10) {
-                Text("to ")
+                (Text("Stop ")
                     .font(t.sans(13)).foregroundStyle(t.dim)
-                + Text(ds.stopName(stopCode))
-                    .font(t.sans(13, weight: .semibold)).foregroundStyle(t.fg)
-                + Text(" (\(stopCode))")
-                    .font(t.mono(12)).foregroundStyle(t.dim)
+                 + Text(stopCode)
+                    .font(t.mono(13, weight: .bold)).foregroundStyle(t.fg)
+                 + Text(stopDistanceSuffix)
+                    .font(t.sans(13)).foregroundStyle(t.dim))
                 Spacer(minLength: 8)
-                if let load = service?.load {
-                    HStack(spacing: 5) {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 11)).foregroundStyle(t.dim)
-                        CrowdMeter(load: load, t: t, showLabel: false)
-                    }
-                }
+                CrowdMeter(load: service?.load, t: t, showLabel: true)
             }
             .lineLimit(1)
         }
     }
 
-    /// One honest sentence explaining a softened/dashed hero, so the rider
-    /// understands the dimming is a truth signal, not a glitch.
-    private var honestNote: some View {
-        HStack(alignment: .top, spacing: 8) {
-            ConfidenceDot(confidence: confidence, t: t, size: 7)
-                .padding(.top, 3)
-            Group {
-                if confidence == .stale {
-                    Text("Estimated. ").font(t.sans(12, weight: .semibold)).foregroundStyle(t.fg)
-                    + Text("The live signal has aged — shown, not faked.")
-                        .font(t.sans(12)).foregroundStyle(t.dim)
-                } else {
-                    Text("Ghost bus. ").font(t.sans(12, weight: .semibold)).foregroundStyle(t.fg)
-                    + Text("Timetabled but not transmitting GPS right now.")
-                        .font(t.sans(12)).foregroundStyle(t.dim)
-                }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    // MARK: Route (revealed on pull-up)
-
-    private var routeSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.dim)
-                Eyebrow(text: timelineStops.isEmpty
-                        ? "Full route"
-                        : "Full route · \(timelineStops.count) stops", t: t)
-                Rectangle().fill(t.line).frame(height: 1)
-            }
-
-            // Honest about the map: monitored buses are plotted at their real
-            // LTA GPS position; ghost/scheduled buses have none, so we say so
-            // rather than faking a marker.
-            HStack(spacing: 7) {
-                ConfidenceDot(confidence: busHasLivePosition ? .live : .unconfirmed, t: t, size: 6)
-                Text(busHasLivePosition
-                     ? "Bus \(svc) is plotted live above (dark pin); your stop is the green pin."
-                     : "This bus isn’t transmitting GPS — no live position to map; your stop is the green pin.")
-                    .font(t.mono(10)).foregroundStyle(t.faint)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-
-            if !timelineStops.isEmpty {
-                RouteTimeline(t: t, svc: svc, stops: timelineStops, alightId: $alightId)
-                    .onChange(of: alightId) { _, new in scheduleAlight(stopCode: new) }
+    /// "then 18 · 24 min" — the next two real arrivals after the hero.
+    private var nextTwoLabel: String? {
+        guard let s = liveService() else { return nil }
+        let next = fmtETA(s.followingSec)
+        guard next.big != "Arr", !next.big.isEmpty else { return nil }
+        if let d = s.thirdDate {
+            let third = fmtETA(max(0, Int(d.timeIntervalSinceNow)))
+            if third.big != "Arr", !third.big.isEmpty {
+                return "then \(next.big) · \(third.big) min"
             }
         }
+        return "then \(next.big) min"
     }
 
-    // MARK: Alerts (notify + Live Activity) — unchanged wiring
+    /// " · 60 m away" appended after the stop code, or empty when location
+    /// is unknown.
+    private var stopDistanceSuffix: String {
+        guard let here = loc.location, let stop = ds.stopByCode[stopCode] else { return "" }
+        let d = haversine(here.coordinate.latitude, here.coordinate.longitude,
+                          stop.Latitude, stop.Longitude)
+        return " · \(fmtDistance(Int(d.rounded()))) away"
+    }
+
+    // MARK: Alerts (notify + Live Activity)
 
     private var alertsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -328,17 +329,16 @@ struct SoftBusView: View {
             fb.select()
             m.toggleTracked(code: stopCode, busNo: svc, allNos: allServiceNos)
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: on ? "bell.fill" : "bell")
-                    .font(.system(size: 14, weight: .semibold))
+            HStack(spacing: 10) {
+                Image(systemName: on ? "bell.fill" : "dot.radiowaves.left.and.right")
+                    .font(.system(size: 16, weight: .semibold))
                 Text(on ? "Alert on — tap to cancel" : "Notify me before it arrives")
-                    .font(t.sans(14, weight: .semibold))
+                    .font(t.sans(15, weight: .bold))
             }
-            .foregroundStyle(on ? t.onAccent : t.accent)
+            .foregroundStyle(on ? t.onAccent : t.contrastFg)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(on ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.liveBg), in: Capsule())
-            .overlay(Capsule().stroke(on ? Color.clear : t.accent.opacity(0.35), lineWidth: 1))
+            .padding(.vertical, 15)
+            .background(on ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.contrast), in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(on
@@ -358,18 +358,18 @@ struct SoftBusView: View {
                                      stopCode: stopCode)
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: liveOn ? "stop.fill" : "lock.fill")
+                    Image(systemName: liveOn ? "stop.fill" : "clock")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(liveOn ? t.onAccent : t.accent)
+                        .foregroundStyle(liveOn ? t.onAccent : t.dim)
                         .frame(width: 40, height: 40)
-                        .background(liveOn ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.liveBg),
+                        .background(liveOn ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.surface),
                                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(liveOn ? "Stop Live Activity" : "Start Live Activity")
                             .font(t.sans(14, weight: .semibold))
                             .foregroundStyle(t.fg)
                         Text(liveOn ? "Bus \(svc) is on your lock screen"
-                                    : "Follow Bus \(svc) from your lock screen")
+                                    : "Follow on your lock screen")
                             .font(t.sans(12))
                             .foregroundStyle(t.dim)
                     }
@@ -390,6 +390,29 @@ struct SoftBusView: View {
         }
     }
 
+    // MARK: Route (revealed on pull-up)
+
+    private var routeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                Eyebrow(text: timelineStops.isEmpty
+                        ? "Full route"
+                        : "Full route · \(timelineStops.count) stops", t: t)
+                Rectangle().fill(t.line).frame(height: 1)
+            }
+
+            if !timelineStops.isEmpty {
+                Text("Tap a stop to set an arrival alert.")
+                    .font(t.sans(13)).foregroundStyle(t.dim)
+                RouteTimeline(t: t, svc: svc, stops: timelineStops, alightId: $alightId)
+                    .onChange(of: alightId) { _, new in scheduleAlight(stopCode: new) }
+            }
+        }
+    }
+
     // MARK: Map background
 
     private var mapBackground: some View {
@@ -404,8 +427,8 @@ struct SoftBusView: View {
                         .accessibilityLabel("Bus stop \(stop.Description)")
                 }
             }
-            // Other stops on the journey — faint dots, so the three primary
-            // markers stay the focus.
+            // Other stops on the journey — faint dots, so the primary markers
+            // stay the focus.
             if let r = route {
                 ForEach(journeySegment(r).filter { $0.code != stopCode }, id: \.code) { rs in
                     Annotation(rs.name,
@@ -415,20 +438,17 @@ struct SoftBusView: View {
                     }
                 }
             }
-            // Live bus — dark pill + bus glyph + number, at its real GPS
-            // position. Only for monitored arrivals (ghost buses have no
-            // coordinate, so none is drawn rather than faking one).
-            if let s = liveService(), let lat = s.busLat, let lon = s.busLon {
-                Annotation("Bus \(svc)",
-                           coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-                           anchor: .center) {
+            // The bus — always shown, always a confident solid pin (the map
+            // never advertises that a position is estimated). The tier only
+            // survives in the accessibility label, for screen-reader honesty.
+            if let p = plot, let d = displayCoord {
+                Annotation("Bus \(svc)", coordinate: d, anchor: .center) {
                     MapBusMarker(t: t, svc: svc)
-                        .accessibilityLabel("Bus \(svc), live position")
+                        .accessibilityLabel("Bus \(svc), \(positionA11y(p.tier))")
                 }
             }
             // You — a blue person marker, unmistakably distinct from the green
-            // stop pin (the system dot inherited the green accent tint and
-            // looked identical to the stop).
+            // stop pin.
             if let here = loc.location {
                 Annotation("You", coordinate: here.coordinate, anchor: .center) {
                     MapUserMarker().accessibilityLabel("Your location")
@@ -436,17 +456,123 @@ struct SoftBusView: View {
             }
         }
         .mapStyle(.standard(elevation: .realistic))
-        // No `.mapControls { MapUserLocationButton() }`: on a full-bleed map
-        // MapKit anchors its controls to the map's edges, so the location
-        // button rode up under the status bar / battery. We provide our own
-        // recenter button in `floatingTopControls`, which sits in the safe area.
         .onChange(of: ds.stopByCode[stopCode]) { _, stop in
             guard let s = stop, !didCenterOnStop else { return }
             centerOnStop(s)
         }
     }
 
-    // MARK: Data helpers (unchanged)
+    private func positionA11y(_ tier: BusTier) -> String {
+        switch tier {
+        case .live:      return "live position"
+        case .recent:    return "last-known position"
+        case .estimated: return "estimated position, en route"
+        }
+    }
+
+    // MARK: Bus-position resolution (live → recent → estimated) + glide
+
+    /// Recompute the bus's plotted position. Called on appear, on data
+    /// changes, and on every ticker beat (so the estimate creeps toward the
+    /// stop and the recency age advances).
+    private func recomputePlot() {
+        let now = Date()
+
+        // 1) Real GPS fix this poll → live. Remember it for the recent tier.
+        if let s = liveService(), let lat = s.busLat, let lon = s.busLon {
+            let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            lastFix = (c, now)
+            setTarget(BusPlot(coord: c, tier: .live, ageSec: 0))
+            return
+        }
+
+        // 2) Had a fix recently (< 150s) → keep it, dimmed, labelled "last seen".
+        if let f = lastFix, now.timeIntervalSince(f.at) < 150 {
+            setTarget(BusPlot(coord: f.coord, tier: .recent,
+                              ageSec: Int(now.timeIntervalSince(f.at))))
+            return
+        }
+
+        // 3) No usable fix → estimate the position from route geometry + ETA.
+        if let c = estimatedCoord() {
+            setTarget(BusPlot(coord: c, tier: .estimated, ageSec: 0))
+            return
+        }
+
+        // 4) Nothing to go on (route not loaded / no arrival).
+        setTarget(nil)
+    }
+
+    /// Estimate where the bus is by walking back up the route from your stop
+    /// by ETA-worth of travel (≈90s/stop), interpolating between the two
+    /// bracketing stops. Decrements the ETA by time since the last refresh so
+    /// the pin creeps forward smoothly between LTA polls.
+    private func estimatedCoord() -> CLLocationCoordinate2D? {
+        guard let r = route, !r.stops.isEmpty, let s = liveService() else { return nil }
+        let you = min(max(r.youIndex, 0), r.stops.count - 1)
+        guard you > 0 else {
+            return CLLocationCoordinate2D(latitude: r.stops[you].lat, longitude: r.stops[you].lon)
+        }
+        let elapsed = ds.lastRefresh(stopCode).map { Date().timeIntervalSince($0) } ?? 0
+        let eta = max(0, Double(s.etaSec) - elapsed)
+        let perStop = 90.0
+        let back = min(Double(you), eta / perStop)   // stops upstream of you
+        let idxF = Double(you) - back                 // fractional index along the route
+        let lo = max(0, Int(floor(idxF)))
+        let hi = min(lo + 1, you)
+        let frac = idxF - Double(lo)
+        let a = r.stops[lo], b = r.stops[hi]
+        return CLLocationCoordinate2D(
+            latitude: a.lat + (b.lat - a.lat) * frac,
+            longitude: a.lon + (b.lon - a.lon) * frac)
+    }
+
+    /// Move the plotted pin toward a new target. Glides (animates) when the
+    /// pin is already on-screen; the first placement snaps. Skips no-op
+    /// updates so we don't animate a stationary pin every tick.
+    private func setTarget(_ p: BusPlot?) {
+        guard let p else {
+            if plot != nil { plot = nil; displayCoord = nil }
+            return
+        }
+        let moved = displayCoord.map {
+            abs($0.latitude - p.coord.latitude) > 1e-7 ||
+            abs($0.longitude - p.coord.longitude) > 1e-7
+        } ?? true
+        plot = p
+        if displayCoord == nil {
+            displayCoord = p.coord
+            frameSceneIfNeeded()
+        } else if moved {
+            withAnimation(.linear(duration: 1.5)) { displayCoord = p.coord }
+        }
+    }
+
+    // MARK: Camera
+
+    /// On first plot, frame the camera to fit both the bus and the stop (with
+    /// padding) so the tether is fully visible. Runs once; the user's
+    /// recenter button opts out of further auto-framing.
+    private func frameSceneIfNeeded() {
+        guard !didAutoFrame,
+              let stop = ds.stopByCode[stopCode],
+              let d = displayCoord else { return }
+        didAutoFrame = true
+        let lats = [stop.Latitude, d.latitude]
+        let lons = [stop.Longitude, d.longitude]
+        let center = CLLocationCoordinate2D(
+            latitude: (lats.min()! + lats.max()!) / 2,
+            longitude: (lons.min()! + lons.max()!) / 2)
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.005, (lats.max()! - lats.min()!) * 1.8),
+            longitudeDelta: max(0.005, (lons.max()! - lons.min()!) * 1.8))
+        withAnimation(.easeInOut(duration: 0.45)) {
+            camera = .region(MKCoordinateRegion(center: center, span: span))
+        }
+        didCenterOnStop = true
+    }
+
+    // MARK: Data helpers
 
     private var allServiceNos: [String] {
         if case .loaded(let s) = ds.arrivals[stopCode] { return s.map(\.no) }
@@ -479,7 +605,7 @@ struct SoftBusView: View {
     private func loadRoute() {
         Task {
             let r = await ds.route(service: svc, stopCode: stopCode)
-            await MainActor.run { self.route = r }
+            await MainActor.run { self.route = r; recomputePlot() }
         }
     }
 
@@ -600,9 +726,7 @@ struct DraggableSheet<Handle: View, Content: View>: View {
 
 // MARK: - Map markers (shared icon language with the Android map)
 
-/// Stop marker — a green teardrop pin carrying a mappin glyph. A *bus* glyph
-/// here read as the bus's live location, contradicting the "position isn't
-/// shared yet" honesty; a mappin states plainly that this marks the stop.
+/// Stop marker — a green teardrop pin carrying a mappin glyph.
 struct MapStopMarker: View {
     let t: Theme
     var body: some View {
@@ -624,8 +748,7 @@ struct MapStopMarker: View {
 }
 
 /// "You" — the user's live position. Blue + person glyph so it can never be
-/// confused with the green stop pin (the system location dot inherited the
-/// app's green accent tint and looked identical to the stop).
+/// confused with the green stop pin.
 struct MapUserMarker: View {
     var body: some View {
         ZStack {
@@ -641,23 +764,38 @@ struct MapUserMarker: View {
     }
 }
 
-/// Live bus — a dark capsule carrying a bus glyph + the service number, so a
-/// moving vehicle reads distinctly from the stationary stop pin and the
-/// blue "you" marker.
+/// The bus — a capsule carrying a bus glyph + service number, styled by
+/// position tier so its certainty reads at a glance and is never disguised:
+///   • live      — solid dark capsule (exact GPS)
+///   • recent    — dark capsule dimmed (last-known, signal dropped)
+///   • estimated — light capsule, dashed border, "≈" prefix (derived position)
 struct MapBusMarker: View {
     let t: Theme
     let svc: String
+    var tier: BusTier = .live
+
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "bus.fill").font(.system(size: 12, weight: .bold))
-            Text(svc).font(t.mono(13, weight: .bold))
+            Text(tier == .estimated ? "≈ \(svc)" : svc)
+                .font(t.mono(13, weight: .bold))
         }
-        .foregroundStyle(t.contrastFg)
+        .foregroundStyle(tier == .estimated ? t.fg : t.contrastFg)
         .padding(.horizontal, 9)
         .frame(height: 28)
-        .background(t.contrast, in: Capsule())
-        .overlay(Capsule().stroke(.white, lineWidth: 2))
+        .background(capsuleFill, in: Capsule())
+        .overlay(
+            Capsule().strokeBorder(
+                tier == .estimated ? t.fg.opacity(0.55) : .white,
+                style: StrokeStyle(lineWidth: 2,
+                                   dash: tier == .estimated ? [3, 3] : []))
+        )
+        .opacity(tier == .recent ? 0.6 : 1)
         .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+    }
+
+    private var capsuleFill: AnyShapeStyle {
+        tier == .estimated ? AnyShapeStyle(t.surface) : AnyShapeStyle(t.contrast)
     }
 }
 

@@ -787,9 +787,11 @@ final class AppModel: ObservableObject {
         -> LeyneActivityAttributes.ContentState {
         let arrived = etaSec <= 0
         let mins = max(0, Int(ceil(Double(etaSec) / 60)))
+        // Whisper-quiet: the status reads confidently regardless of `monitored`
+        // (no "Scheduled ·" banner). The estimate tell is the "~" in the widget
+        // / Live Activity numeral; `monitored` still flows through for that.
         let status: String
         if arrived { status = "Bus is here" }
-        else if !monitored { status = "Scheduled · \(mins) min" }
         else if etaSec <= 30 { status = "Now" }
         else if etaSec <= 90 { status = "Arrives in 1 min" }
         else { status = "Arrives in \(mins) min" }

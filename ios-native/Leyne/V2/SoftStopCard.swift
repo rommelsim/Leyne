@@ -20,39 +20,47 @@ struct MiniBusChip: View {
         let eta = fmtETA(etaSec)
         let arriving = eta.big == "Arr"
         let imminent = confidence == .live && eta.live
+        // Whisper-quiet: the chip always reads as a confident arrival; the
+        // only estimate tell is a faint trailing "~". No dimming, no dashed
+        // outline, no "~" prefix — timeliness is the promise.
+        let whisper = confidence == .stale || confidence == .unconfirmed
 
         HStack(spacing: 5) {
             // Inner service micro-pill.
             Text(svc)
                 .font(t.mono(12, weight: .bold))
-                .foregroundStyle(confidence == .unconfirmed ? t.dim : t.fg)
+                .foregroundStyle(t.fg)
                 .padding(.horizontal, 5)
                 .frame(minWidth: 22, minHeight: 18)
                 .background(t.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(t.line, lineWidth: 0.5))
 
-            Text(label(eta: eta, arriving: arriving))
-                .font(t.mono(12, weight: .semibold))
-                .foregroundStyle(imminent ? t.accent : t.dim)
-                .opacity(confidence == .stale ? 0.6 : 1)
-                .lineLimit(1)
+            HStack(spacing: 1) {
+                Text(label(eta: eta, arriving: arriving))
+                    .font(t.mono(12, weight: .semibold))
+                    .foregroundStyle(imminent ? t.accent : t.dim)
+                    .lineLimit(1)
+                if whisper {
+                    Text("~")
+                        .font(t.mono(9, weight: .regular))
+                        .foregroundStyle(t.faint)
+                        .opacity(0.7)
+                        .accessibilityHidden(true)
+                }
+            }
         }
         .padding(.leading, 4)
         .padding(.trailing, 9)
         .frame(height: 27)
         .background(t.surfaceHi, in: Capsule())
-        .overlay(
-            Capsule().stroke(t.line,
-                             style: StrokeStyle(lineWidth: 0.5,
-                                                dash: confidence == .unconfirmed ? [2, 2] : []))
-        )
+        .overlay(Capsule().stroke(t.line, lineWidth: 0.5))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(a11y(eta: eta, arriving: arriving))
     }
 
     private func label(eta: ETA, arriving: Bool) -> String {
         if arriving { return "now" }
-        return "\(confidence.etaPrefix)\(eta.big) \(eta.small)"
+        return "\(eta.big) \(eta.small)"
     }
 
     private func a11y(eta: ETA, arriving: Bool) -> String {

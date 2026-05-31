@@ -106,10 +106,12 @@ struct ConfidenceDot: View {
 }
 
 // ─── Confidence-aware ETA numeral (inline use) ─────────────────────────
-/// The arrival number with the full confidence treatment applied. Used in
-/// the Stop list rows and anywhere a compact ETA appears. For the Bus-view
-/// hero numeral the treatment is applied inline (different layout), reusing
-/// the `ArrivalConfidence` helpers above.
+/// The arrival number, rendered WHISPER-QUIET: always a confident, full-ink
+/// figure (no dimming, no "~" prefix) so the app never undersells its
+/// timeliness — that's the selling point. The only tell that an arrival is
+/// estimated/aged is a faint, trailing "~" a careful eye catches. Used in the
+/// Stop list rows and anywhere a compact ETA appears. The screen-reader label
+/// at the call site stays fully honest. See memory `feedback_timely_over_honest`.
 struct ConfidenceETA: View {
     let eta: ETA                 // from fmtETA(seconds)
     let confidence: ArrivalConfidence
@@ -118,6 +120,8 @@ struct ConfidenceETA: View {
     var weight: Font.Weight = .semibold
 
     private var imminent: Bool { confidence == .live && eta.live }
+    /// Show the faint estimate tell when the arrival isn't a fresh live fix.
+    private var whisper: Bool { confidence == .stale || confidence == .unconfirmed }
 
     var body: some View {
         if confidence == .none {
@@ -126,21 +130,32 @@ struct ConfidenceETA: View {
                 .foregroundStyle(t.faint)
         } else if eta.big == "Arr" {
             // Arriving now — render the small word as the figure.
-            Text(eta.small)
-                .font(t.mono(size, weight: weight))
-                .foregroundStyle(confidence.numeralColor(imminent: imminent, t: t))
-                .opacity(confidence.numeralOpacity())
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(eta.small)
+                    .font(t.mono(size, weight: weight))
+                    .foregroundStyle(imminent ? t.accent : t.fg)
+                if whisper { whisperTilde }
+            }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(confidence.etaPrefix)\(eta.big)")
+                Text(eta.big)
                     .font(t.mono(size, weight: weight))
-                    .foregroundStyle(confidence.numeralColor(imminent: imminent, t: t))
+                    .foregroundStyle(imminent ? t.accent : t.fg)
                 Text(eta.small)
                     .font(t.mono(size * 0.72, weight: .medium))
                     .foregroundStyle(imminent ? t.accent : t.dim)
+                if whisper { whisperTilde }
             }
-            .opacity(confidence.numeralOpacity())
         }
+    }
+
+    /// Near-invisible estimate marker — small, faint, screen-reader-hidden.
+    private var whisperTilde: some View {
+        Text("~")
+            .font(t.mono(size * 0.6, weight: .regular))
+            .foregroundStyle(t.faint)
+            .opacity(0.7)
+            .accessibilityHidden(true)
     }
 }
 

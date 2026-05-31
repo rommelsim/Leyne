@@ -33,9 +33,10 @@ private func etaText(_ s: LeyneActivityAttributes.ContentState) -> String {
     s.arrived ? "Now" : (s.etaMinutes <= 0 ? "Arr" : "\(s.etaMinutes)")
 }
 
-/// "~" before a scheduled-only ETA so a timetable guess never reads as a
-/// confident live number; pairs with a dimmed colour at the call site. The
-/// status line already spells out "Scheduled · N min".
+/// Whisper-quiet estimate tell: a single faint "~" before a scheduled-only
+/// ETA. The numeral is otherwise shown confidently (no dimming, no "sched"
+/// unit) — timeliness is the selling point, so the Live Activity never
+/// advertises a data gap. See memory `feedback_timely_over_honest`.
 private func confPrefix(_ s: LeyneActivityAttributes.ContentState) -> String {
     (!s.monitored && !s.arrived && s.etaMinutes > 0) ? "~" : ""
 }
@@ -74,12 +75,11 @@ struct LeyneLiveActivity: Widget {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text(confPrefix(context.state) + etaText(context.state))
                             .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(context.state.arrived ? green
-                                             : (context.state.monitored ? paper : dim))
+                            .foregroundStyle(context.state.arrived ? green : paper)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                         if !context.state.arrived && context.state.etaMinutes > 0 {
-                            Text(context.state.monitored ? "min" : "sched")
+                            Text("min")
                                 .font(.system(size: 10)).foregroundStyle(dim)
                         }
                     }
@@ -121,8 +121,7 @@ struct LeyneLiveActivity: Widget {
                 Text(confPrefix(context.state) + etaText(context.state)
                      + (context.state.arrived || context.state.etaMinutes <= 0 ? "" : "m"))
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(context.state.arrived ? green
-                                     : (context.state.monitored ? paper : dim))
+                    .foregroundStyle(context.state.arrived ? green : paper)
                     .widgetURL(busURL(context.attributes))
             } minimal: {
                 Text(context.attributes.busNo)
@@ -169,10 +168,10 @@ private struct LockScreenView: View {
             VStack(spacing: 0) {
                 Text(confPrefix(state) + etaText(state))
                     .font(.system(size: state.arrived ? 22 : 40, weight: .light, design: .monospaced))
-                    .foregroundStyle(state.arrived ? green : (state.monitored ? paper : dim))
+                    .foregroundStyle(state.arrived ? green : paper)
                     .contentTransition(.numericText(countsDown: true))
                 if !state.arrived && state.etaMinutes > 0 {
-                    Text(state.monitored ? "min" : "sched")
+                    Text("min")
                         .font(.system(size: 11, design: .monospaced)).foregroundStyle(dim)
                 }
             }
