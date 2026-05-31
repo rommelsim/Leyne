@@ -671,7 +671,7 @@ struct RouteMapView: View {
                 // stop coordinate isn't known yet (DataStore.stopByCode
                 // still loading on a cold launch with no network cache).
                 ZStack {
-                    (dark ? Color(hex: "0f0f0d") : Color(hex: "EEEBE4"))
+                    (dark ? Color(hex: "0f0f0d") : Color(hex: "E9E9E9"))
                     VStack(spacing: 8) {
                         ProgressView().tint(t.dim)
                         Text("Loading map…")

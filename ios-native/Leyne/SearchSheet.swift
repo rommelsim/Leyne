@@ -445,7 +445,7 @@ struct SearchSheetB: View {
             ScrollView { if q.isEmpty { emptyStateB } else { resultsB } }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background((dark ? Color(hex: "0a0907") : Color(hex: "FBF8F0")).ignoresSafeArea())
+        .background((dark ? Color(hex: "0a0907") : Color(hex: "F2F2F2")).ignoresSafeArea())
         .onAppear { focused = true }
     }
 

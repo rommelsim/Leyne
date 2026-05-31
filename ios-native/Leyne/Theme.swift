@@ -1,7 +1,8 @@
 // Theme — Leyne 2.0 "Soft" tokens.
-// Warm dark (#15201C) / warm light (#F4EFE7) with mint accent. Property
-// names are preserved from the v1 theme so call sites compile unchanged;
-// only the values move to the Soft palette per specs/leyne-2.0-plan.md.
+// Warm dark (#15201C, mint accent) / white & black light (mirrors the
+// bus-view card — white surfaces, black ink, black accent, amber+red alerts).
+// Property names are preserved from the v1 theme so call sites compile
+// unchanged; only the values move to the Soft palette per specs/leyne-2.0-plan.md.
 
 import SwiftUI
 import UIKit  // UIFontMetrics — Dynamic Type scaling for sans()/mono()
@@ -108,22 +109,27 @@ struct Theme: Equatable {
         onAccent: Color(hex: "0E2218")
     )
 
+    // White & black light mode — mirrors the bus-view card (white surface,
+    // black ink). Monochrome: the accent (LIVE / arriving / pin) is pure black
+    // ink rather than the old mint green. Warning amber + critical red are kept
+    // so disruptions still read at a glance. `bg` is a hair off-white so white
+    // `surface` cards lift off it (some cards carry no hairline border).
     static let light = Theme(
         isDark: false,
-        bg: Color(hex: "F4EFE7"),
+        bg: Color(hex: "F2F2F2"),
         surface: Color(hex: "FFFFFF"),
-        surfaceHi: Color(hex: "EAE3D6"),
-        contrast: Color(hex: "1A201D"),
+        surfaceHi: Color(hex: "E9E9E9"),
+        contrast: Color(hex: "111111"),
         contrastFg: Color(hex: "FFFFFF"),
-        contrastSurface: Color(hex: "2A2925"),
-        fg: Color(hex: "1A201D"),
-        dim: Color(hex: "1A201D").opacity(0.6),
-        faint: Color(hex: "1A201D").opacity(0.35),
-        line: Color(hex: "1A201D").opacity(0.10),
-        lineHi: Color(hex: "1A201D").opacity(0.16),
-        accent: Color(hex: "2D7A5A"),
-        live: Color(hex: "2D7A5A"),
-        liveBg: Color(hex: "E8F5EE"),
+        contrastSurface: Color(hex: "2A2A2A"),
+        fg: Color(hex: "111111"),
+        dim: Color(hex: "111111").opacity(0.6),
+        faint: Color(hex: "111111").opacity(0.35),
+        line: Color(hex: "111111").opacity(0.10),
+        lineHi: Color(hex: "111111").opacity(0.16),
+        accent: Color(hex: "111111"),
+        live: Color(hex: "111111"),
+        liveBg: Color(hex: "EDEDED"),
         warn: Color(hex: "A0631A"),
         warnBg: Color(hex: "A0631A").opacity(0.14),
         crit: Color(hex: "A4422F"),
