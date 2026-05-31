@@ -730,8 +730,8 @@ struct DraggableSheet<Handle: View, Content: View>: View {
 struct MapStopMarker: View {
     let t: Theme
     var body: some View {
-        Image(systemName: "mappin.fill")
-            .font(.system(size: 11, weight: .bold))
+        Image(systemName: "mappin")
+            .font(.system(size: 12, weight: .bold))
             .foregroundStyle(t.onAccent)
             .frame(width: 28, height: 28)
             .background(
