@@ -8,7 +8,7 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Unreleased — Leyne 2.3.1 · iOS (15) · 2026-06-02
+## Unreleased — Leyne 2.3.1 · iOS (15) · Android (26) · 2026-06-02
 
 **2026-06-02 — AdMob account migration + version bump (iOS):**
 
@@ -31,6 +31,10 @@ entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
   `LYNE_ADS_TEST`) unchanged — still Google's sample units.
 - The personal `rommelsim` publisher `ca-app-pub-6816620800052795` is retired
   from ads; AdMob + Play Console now both live under `leyne0000@gmail.com`.
+- **Android (26) is a CLOSED-TESTING AAB** — built via
+  `build-android-closed-test.sh` (`LYNE_ADS_TEST=true`), so it serves Google's
+  reserved test unit `…/6300978111`, not the real `/6513878972`. Promote to
+  production by rebuilding with `build-android-prod.sh` before the public release.
 - **Action still required:** publish a GDPR + IDFA consent message for the new
   iOS app `~6330743279` in AdMob → Privacy & messaging, or UMP consent will
   error in the EEA/UK.
