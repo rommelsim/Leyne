@@ -8,7 +8,34 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Unreleased — Leyne 2.3.0 · iOS (14) · Android (25) · 2026-05-31
+## Unreleased — Leyne 2.3.1 · iOS (15) · 2026-06-02
+
+**2026-06-02 — AdMob account migration + version bump (iOS):**
+
+> The `leyne0000@gmail.com` Google account was approved/verified, so ads were
+> moved off the personal `rommelsim` stopgap publisher and back onto the project
+> publisher `ca-app-pub-5864511655536507`. Marketing version bumped 2.3.0 → 2.3.1
+> (build 15) because App Store Connect closed the 2.3.0 train for new submissions
+> once 2.3.0 was approved and released. Also surfaces the 3.0 visual overhaul in
+> What's New — it shipped in 2.3.0 but was never called out to users there.
+
+- **What's New (user-facing):** added a `kChangelog["2.3.1"]` entry announcing
+  the redesign — the calmer Soft-mint look, at-a-glance live/estimated/scheduled
+  confidence (freshness dot + status pill), and the immersive full-screen bus
+  map with draggable sheet. (The design itself shipped in 2.3.0; this is the
+  first build to announce it.)
+- AdMob publisher swapped to `leyne0000`'s `ca-app-pub-5864511655536507` across
+  both platforms: iOS app ID `~6330743279` + banner `/9782205994`
+  (`LeyneInfo.plist`, `AdBanner.swift`); Android app ID `~5685985257` + banner
+  `/6513878972` (`AndroidManifest.xml`, `ad_banner.dart`). Test units (DEBUG /
+  `LYNE_ADS_TEST`) unchanged — still Google's sample units.
+- The personal `rommelsim` publisher `ca-app-pub-6816620800052795` is retired
+  from ads; AdMob + Play Console now both live under `leyne0000@gmail.com`.
+- **Action still required:** publish a GDPR + IDFA consent message for the new
+  iOS app `~6330743279` in AdMob → Privacy & messaging, or UMP consent will
+  error in the EEA/UK.
+
+## Leyne 2.3.0 · iOS (14) · Android (25) · 2026-05-31 · released
 
 **2026-05-31 — Leyne 3.0 design alignment: the data-confidence system (iOS):**
 

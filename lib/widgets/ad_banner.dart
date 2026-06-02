@@ -59,13 +59,13 @@ const bool kLyneAdsEnabled = true;
 /// Resolve the banner ad unit ID at runtime. Flutter powers the Android
 /// build only — iOS ships via the SwiftUI app at `ios-native/`.
 ///   • DEBUG or LYNE_ADS_TEST=true: Google's universal Android test unit
-///   • RELEASE (public Play Store): production banner unit (verified
-///     personal Google AdMob account, ca-app-pub-6816620800052795)
+///   • RELEASE (public Play Store): production banner unit (Leyne
+///     Google AdMob account, leyne0000@gmail.com, ca-app-pub-5864511655536507)
 String _bannerUnitId() {
   if (kDebugMode || kLyneAdsTest) {
     return 'ca-app-pub-3940256099942544/6300978111';
   }
-  return 'ca-app-pub-6816620800052795/4134673394';
+  return 'ca-app-pub-5864511655536507/6513878972';
 }
 
 class AdBanner extends StatefulWidget {

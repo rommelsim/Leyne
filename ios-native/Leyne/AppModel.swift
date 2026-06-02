@@ -62,6 +62,32 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.3.1": WhatsNewEntry(
+        headline: "A fresh new look.",
+        items: [
+            WhatsNewItem(
+                icon: "sparkles",
+                title: "A cleaner, calmer design",
+                body: "Leyne's been redrawn around a soft, focused look that "
+                    + "puts your next arrival front and centre — less clutter, "
+                    + "easier to read at a glance on the move."
+            ),
+            WhatsNewItem(
+                icon: "dot.radiowaves.up.forward",
+                title: "See which times are live at a glance",
+                body: "Live arrivals read crisp and bold, with a quiet "
+                    + "freshness dot and a LIVE / ESTIMATED / SCHEDULED tag, so "
+                    + "you instantly know how much to trust each time."
+            ),
+            WhatsNewItem(
+                icon: "map.fill",
+                title: "An immersive bus view",
+                body: "Tap any bus for a full-screen map with a draggable "
+                    + "sheet — peek for your ETA and how busy it is, or pull up "
+                    + "for alerts and the full route timeline."
+            ),
+        ]
+    ),
     "2.3.0": WhatsNewEntry(
         headline: "Smarter alerts, quicker taps.",
         items: [

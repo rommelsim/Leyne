@@ -2,7 +2,7 @@
 //
 // CONFIG:
 //  • App ID lives in `LeyneInfo.plist` as `GADApplicationIdentifier`
-//    (the real AdMob App ID — ca-app-pub-6816620800052795~4249846169).
+//    (the real AdMob App ID — ca-app-pub-5864511655536507~6330743279).
 //  • The ad UNIT is gated by build configuration (see `AdConfig`): DEBUG
 //    uses Google's always-test banner unit (zero policy risk anywhere);
 //    RELEASE uses the real production unit.
@@ -59,16 +59,16 @@ enum AdConfig {
     // Ad unit selection. DEBUG always serves the test unit (Xcode Run).
     // RELEASE serves either the test unit or the real production unit
     // depending on `forceTestUnitForRelease` (the toggle above).
-    // Production unit lives in the verified personal Google AdMob account
-    // (ca-app-pub-6816620800052795), matching the
+    // Production unit lives in the Leyne Google AdMob account
+    // (leyne0000@gmail.com, ca-app-pub-5864511655536507), matching the
     // GADApplicationIdentifier in LeyneInfo.plist
-    // (ca-app-pub-6816620800052795~4249846169).
+    // (ca-app-pub-5864511655536507~6330743279).
     #if DEBUG
     static let bannerUnitID = "ca-app-pub-3940256099942544/2934735716"
     #else
     static let bannerUnitID = forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/2934735716"  // Google test unit
-        : "ca-app-pub-6816620800052795/8532706109"  // personal-acct prod
+        : "ca-app-pub-5864511655536507/9782205994"  // leyne-acct prod
     #endif
 
     /// Extra devices to force into TEST ads even in a RELEASE build (rarely
