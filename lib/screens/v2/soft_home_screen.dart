@@ -311,16 +311,21 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     };
   }
 
-  /// Pinned-stop card — the unified iOS-style SoftStopCard. Name is the stop's
-  /// real name (matching iOS, which doesn't surface the nickname here); trailing
-  /// shows walk-minutes.
+  /// Pinned-stop card — the unified SoftStopCard. When the pin has a custom
+  /// nickname it becomes the card title (the name the user gave it), with the
+  /// real stop name kept in the subline so context isn't lost. Without a
+  /// nickname the title is the stop's own name + "code · road" subline.
   Widget _pinStopCard(Pin pin) {
     final dsName = DataStore.shared.stopName(pin.code);
+    final stopName = dsName.isEmpty ? pin.code : dsName;
+    final nick = pin.nickname.trim();
+    final hasNick = nick.isNotEmpty && nick.toLowerCase() != stopName.toLowerCase();
     final walk = _walkMinutes(pin.code);
     return _SoftStopCard(
-      name: dsName.isEmpty ? pin.code : dsName,
+      name: hasNick ? nick : stopName,
       code: pin.code,
-      desc: DataStore.shared.roadName(pin.code),
+      // Nicknamed → show the real stop name in the subline; otherwise the road.
+      desc: hasNick ? stopName : DataStore.shared.roadName(pin.code),
       trailing: walk != null ? '$walk min' : null,
       services: _filteredServices(pin),
       feed: Freshness.from(DataStore.shared.lastRefresh(pin.code)),

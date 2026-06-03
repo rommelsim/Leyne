@@ -8,14 +8,29 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Unreleased — Leyne 2.3.1 · iOS (15) · Android (27) · 2026-06-03
+## Leyne 2.3.2 · iOS (16) · 2026-06-03
 
-**2026-06-03 — Android performance + design/parity review pass (Android, not yet built):**
+**2026-06-03 — iOS version bump 2.3.1 → 2.3.2 (build 16):** the 2.3.1 train was
+already approved/closed on App Store Connect (upload rejected: codes 90186 /
+90062 — `CFBundleShortVersionString` must exceed the approved 2.3.1). Bumped
+`MARKETING_VERSION` 2.3.1 → 2.3.2 and `CURRENT_PROJECT_VERSION` 15 → 16 across
+all configs in `ios-native/Leyne.xcodeproj/project.pbxproj`. Ships this session's
+iOS work (two-direction routes, search→route + keyboard dismiss, long-route
+collapse, monochrome dark mode). Added a `kChangelog["2.3.2"]` What's New entry.
+Re-Archive in Xcode to upload.
+
+## Leyne 2.3.1 · iOS (15) · Android (28) · 2026-06-03
+
+**2026-06-03 — Closed-alpha build 28 (Android):** rebuilt the closed-testing AAB
+(`build-android-closed-test.sh`, `LYNE_ADS_TEST=true` → Google test ad unit) at
+versionCode 28, folding in every fix below. Supersedes the never-finalised build
+27. `flutter analyze` clean · 127 tests pass.
+
+**2026-06-03 — Android performance + design/parity review pass:**
 
 > Full-team review of the Android build after reports of frame drops while
 > navigating and design drift from iOS. Findings fixed across performance,
-> Material consistency, iOS parity, and test coverage. All changes are
-> on-device only (no version bump); they land in the next AAB.
+> Material consistency, iOS parity, and test coverage. Shipped in build 28.
 >
 > **Performance (the FPS drops):**
 > - **Bus view** (`soft_bus_screen.dart`): the bus-pin glide drove `setState` on
