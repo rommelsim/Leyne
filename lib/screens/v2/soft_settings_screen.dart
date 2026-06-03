@@ -33,53 +33,68 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      bottomNavigationBar:
-          SoftBottomBar(selection: SoftTab.settings, onSelect: widget.onTab),
+      bottomNavigationBar: SoftBottomBar(
+        selection: SoftTab.settings,
+        onSelect: widget.onTab,
+      ),
       body: SafeArea(
         child: ListenableBuilder(
           listenable: AppModel.shared,
           builder: (context, _) => ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
-              Text('Settings',
-                  style: t.sans(28, weight: FontWeight.w400, color: t.fg)),
+              Text(
+                'Settings',
+                style: t.sans(28, weight: FontWeight.w400, color: t.fg),
+              ),
               const SizedBox(height: 16),
               _section(context, 'Personalize', [
-                _row(context,
-                    icon: Icons.notifications_outlined,
-                    title: 'Notifications',
-                    detail: AppModel.shared.notificationsEnabled ? 'On' : 'Off',
-                    onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const NotificationsScreen()),
-                        )),
+                _row(
+                  context,
+                  icon: Icons.notifications_outlined,
+                  title: 'Notifications',
+                  detail: AppModel.shared.notificationsEnabled ? 'On' : 'Off',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen(),
+                    ),
+                  ),
+                ),
                 _divider(context),
                 _appearanceRow(context),
                 _divider(context),
-                _toggleRow(context,
-                    icon: Icons.access_time,
-                    title: '24-hour time',
-                    value: AppModel.shared.use24h,
-                    onChanged: (v) => AppModel.shared.setUse24h(v)),
+                _toggleRow(
+                  context,
+                  icon: Icons.access_time,
+                  title: '24-hour time',
+                  value: AppModel.shared.use24h,
+                  onChanged: (v) => AppModel.shared.setUse24h(v),
+                ),
               ]),
               const SizedBox(height: 24),
               // [GAP-M] Feedback section — Sound + Haptics toggles.
               _section(context, 'Feedback', [
-                _toggleRow(context,
-                    icon: Icons.volume_up_outlined,
-                    title: 'Sound',
-                    value: AppModel.shared.soundEnabled,
-                    onChanged: (v) => AppModel.shared.setSound(v)),
+                _toggleRow(
+                  context,
+                  icon: Icons.volume_up_outlined,
+                  title: 'Sound',
+                  value: AppModel.shared.soundEnabled,
+                  onChanged: (v) => AppModel.shared.setSound(v),
+                ),
                 _divider(context),
-                _toggleRow(context,
-                    icon: Icons.vibration,
-                    title: 'Haptics',
-                    value: AppModel.shared.hapticsEnabled,
-                    onChanged: (v) => AppModel.shared.setHaptics(v)),
+                _toggleRow(
+                  context,
+                  icon: Icons.vibration,
+                  title: 'Haptics',
+                  value: AppModel.shared.hapticsEnabled,
+                  onChanged: (v) => AppModel.shared.setHaptics(v),
+                ),
               ]),
               const SizedBox(height: 24),
-              Text('Leyne v$_version · Data from LTA DataMall.',
-                  style: t.mono(10, color: t.faint)),
+              Text(
+                'Leyne v$_version · Data from LTA DataMall.',
+                style: t.mono(10, color: t.faint),
+              ),
             ],
           ),
         ),
@@ -92,75 +107,96 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title,
-            style: t.sans(13, weight: FontWeight.w600, color: t.dim)),
+        Text(
+          title,
+          style: t.sans(13, weight: FontWeight.w600, color: t.dim),
+        ),
         const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-              color: t.surface, borderRadius: BorderRadius.circular(22)),
+        // Material + clipBehavior clips InkWell ripples to the rounded
+        // corners — fixes ink overflow on tappable rows.
+        Material(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(LyneRadius.lg),
+          clipBehavior: Clip.antiAlias,
           child: Column(children: children),
         ),
       ],
     );
   }
 
-  Widget _row(BuildContext context,
-      {required IconData icon,
-      required String title,
-      String? detail,
-      required VoidCallback onTap}) {
+  Widget _row(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    String? detail,
+    required VoidCallback onTap,
+  }) {
     final t = context.t;
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(LyneRadius.lg),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(children: [
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: t.surfaceHi,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 16, color: t.fg),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: t.sans(14, weight: FontWeight.w500, color: t.fg),
+              ),
+            ),
+            if (detail != null) Text(detail, style: t.sans(13, color: t.dim)),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right, color: t.faint, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _toggleRow(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final t = context.t;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
           Container(
             width: 32,
             height: 32,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-                color: t.surfaceHi, borderRadius: BorderRadius.circular(8)),
+              color: t.surfaceHi,
+              borderRadius: BorderRadius.circular(8),
+            ),
             child: Icon(icon, size: 16, color: t.fg),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(title,
-                style: t.sans(14, weight: FontWeight.w500, color: t.fg)),
+            child: Text(
+              title,
+              style: t.sans(14, weight: FontWeight.w500, color: t.fg),
+            ),
           ),
-          if (detail != null)
-            Text(detail, style: t.sans(13, color: t.dim)),
-          const SizedBox(width: 6),
-          Icon(Icons.chevron_right, color: t.faint, size: 18),
-        ]),
+          SoftToggle(value: value, onChanged: onChanged),
+        ],
       ),
-    );
-  }
-
-  Widget _toggleRow(BuildContext context,
-      {required IconData icon,
-      required String title,
-      required bool value,
-      required ValueChanged<bool> onChanged}) {
-    final t = context.t;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(children: [
-        Container(
-          width: 32,
-          height: 32,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-              color: t.surfaceHi, borderRadius: BorderRadius.circular(8)),
-          child: Icon(icon, size: 16, color: t.fg),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(title,
-              style: t.sans(14, weight: FontWeight.w500, color: t.fg)),
-        ),
-        SoftToggle(value: value, onChanged: onChanged),
-      ]),
     );
   }
 
@@ -168,30 +204,36 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     final t = context.t;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(children: [
-        Container(
-          width: 32,
-          height: 32,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-              color: t.surfaceHi, borderRadius: BorderRadius.circular(8)),
-          child: Icon(Icons.brightness_4_outlined, size: 16, color: t.fg),
-        ),
-        const SizedBox(width: 12),
-        Text('Appearance',
-            style: t.sans(14, weight: FontWeight.w500, color: t.fg)),
-        const Spacer(),
-        SegmentedButton<ThemeMode>(
-          segments: const [
-            ButtonSegment(value: ThemeMode.system, label: Text('Auto')),
-            ButtonSegment(value: ThemeMode.light, label: Text('Light')),
-            ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
-          ],
-          selected: {AppModel.shared.themeMode},
-          onSelectionChanged: (s) => AppModel.shared.setThemeMode(s.first),
-          showSelectedIcon: false,
-        ),
-      ]),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: t.surfaceHi,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.brightness_4_outlined, size: 16, color: t.fg),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            'Appearance',
+            style: t.sans(14, weight: FontWeight.w500, color: t.fg),
+          ),
+          const Spacer(),
+          SegmentedButton<ThemeMode>(
+            segments: const [
+              ButtonSegment(value: ThemeMode.system, label: Text('Auto')),
+              ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+              ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+            ],
+            selected: {AppModel.shared.themeMode},
+            onSelectionChanged: (s) => AppModel.shared.setThemeMode(s.first),
+            showSelectedIcon: false,
+          ),
+        ],
+      ),
     );
   }
 

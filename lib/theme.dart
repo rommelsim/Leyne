@@ -128,30 +128,35 @@ class LyneTheme {
     critBg: const Color.fromRGBO(240, 143, 124, 0.16),
   );
 
+  // White & black light mode — mirrors iOS (ios-native/Leyne/Theme.swift).
+  // Monochrome: the accent (LIVE / arriving / pin) is pure black ink rather
+  // than the old mint green; confidence reads from opacity/shape, never hue.
+  // Warning amber + critical red are kept so disruptions still read at a
+  // glance. `bg` is a hair off-white so white `surface` cards lift off it.
   static final LyneTheme light = LyneTheme(
     isDark: false,
-    bg: _hex('F4EFE7'),
+    bg: _hex('F2F2F2'),
     surface: _hex('FFFFFF'),
-    surfaceHi: _hex('EAE3D6'),
-    contrast: _hex('1A201D'),
+    surfaceHi: _hex('E9E9E9'),
+    contrast: _hex('111111'),
     contrastFg: _hex('FFFFFF'),
-    contrastSurface: _hex('2A2925'),
-    fg: _hex('1A201D'),
-    dim: const Color.fromRGBO(26, 32, 29, 0.6),
-    faint: const Color.fromRGBO(26, 32, 29, 0.35),
-    line: const Color.fromRGBO(26, 32, 29, 0.1),
-    lineHi: const Color.fromRGBO(26, 32, 29, 0.16),
-    accent: _hex('2D7A5A'),
-    live: _hex('2D7A5A'),
-    liveBg: _hex('E8F5EE'),
+    contrastSurface: _hex('2A2A2A'),
+    fg: _hex('111111'),
+    dim: const Color.fromRGBO(17, 17, 17, 0.6),
+    faint: const Color.fromRGBO(17, 17, 17, 0.35),
+    line: const Color.fromRGBO(17, 17, 17, 0.1),
+    lineHi: const Color.fromRGBO(17, 17, 17, 0.16),
+    accent: _hex('111111'),
+    live: _hex('111111'),
+    liveBg: _hex('EDEDED'),
     warn: _hex('A0631A'),
     warnBg: const Color.fromRGBO(160, 99, 26, 0.14),
     crit: _hex('A4422F'),
     critBg: const Color.fromRGBO(164, 66, 47, 0.14),
   );
 
-  /// Foreground used on top of `accent` fills. White in light mode,
-  /// near-black mint-tinted in dark.
+  /// Foreground used on top of `accent` fills. White in light mode (black
+  /// accent), near-black mint-tinted in dark (mint accent).
   Color get onAccent => isDark ? _hex('0E2218') : _hex('FFFFFF');
 
   /// Material ThemeData built from this palette — wires bg/surface/accent
@@ -250,6 +255,24 @@ extension LyneThemeContext on BuildContext {
       ? LyneTheme.dark
       : LyneTheme.light;
 }
+
+/// Shared corner-radius scale. Before this, screens used ad-hoc radii
+/// (10/14/16/18/20/22/24/26) so cards of the same kind looked different
+/// across screens. Three steps cover every surface; pills use [full].
+///   md  → list-item cards, search results, row containers, leading tiles
+///   lg  → hero/primary cards, empty states, settings sections, sheet edge
+///   full→ pills, chips, toggle tracks
+class LyneRadius {
+  const LyneRadius._();
+  static const double md = 16;
+  static const double lg = 24;
+  static const double full = 99;
+}
+
+/// Standard vertical gap between a screen header and its first content
+/// section, and between stacked sections. Use instead of one-off SizedBox
+/// heights so rhythm is consistent across screens.
+const double kSectionGap = 16;
 
 /// Cross-mode signal colours that don't change between dark and light.
 /// Use for transit-specific overlays (MRT line indicators, "ME" dots).

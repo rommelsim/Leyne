@@ -22,6 +22,15 @@ import '../../widgets/v2/soft_components.dart';
 
 enum SoftSearchFilter { postal, stopID, busNo, place }
 
+// Example chips shown in the empty state — value fills the field, kind
+// maps to the matching filter. Mirrors SoftSearchView.swift:28-30.
+const _examples = [
+  (value: '17179', filter: SoftSearchFilter.stopID),
+  (value: '120338', filter: SoftSearchFilter.postal),
+  (value: 'Clementi', filter: SoftSearchFilter.place),
+  (value: '96', filter: SoftSearchFilter.busNo),
+];
+
 class SoftSearchScreen extends StatefulWidget {
   const SoftSearchScreen(
       {super.key, required this.onClose, required this.onOpenStop});
@@ -165,7 +174,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   Widget _results(BuildContext context) {
     final q = _ctrl.text.trim();
     if (q.isEmpty) {
-      return _centerNote(context, 'Search stops, services, or postal codes');
+      return _emptyState(context);
     }
     switch (_filter) {
       case SoftSearchFilter.postal:
@@ -178,7 +187,74 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     }
   }
 
-  // ─── Stop / Place ─────────────────────────────────────────────
+  // ─── Empty state: recents + example chips ─────────────────
+  Widget _emptyState(BuildContext context) {
+    final t = context.t;
+    final recents = AppModel.shared.recents;
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Recent searches — shown only when the list is non-empty.
+          if (recents.isNotEmpty) ...[
+            Text('Recent',
+                style: t.mono(11, color: t.dim)
+                    .copyWith(letterSpacing: 0.8)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final r in recents)
+                  InputChip(
+                    avatar: Icon(Icons.history, size: 15, color: t.dim),
+                    label: Text(r,
+                        style: t.sans(12, weight: FontWeight.w500, color: t.fg)),
+                    onPressed: () {
+                      setState(() => _ctrl.text = r);
+                      _onQueryChanged();
+                    },
+                    backgroundColor: t.surface,
+                    side: BorderSide(color: t.dim.withValues(alpha: 0.2)),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
+          // Example chips — always shown in empty state so the field
+          // has obvious tap-to-fill affordances. Mirrors
+          // SoftSearchView.swift:92-114.
+          Text('Examples',
+              style: t.mono(11, color: t.dim)
+                  .copyWith(letterSpacing: 0.8)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final ex in _examples)
+                ActionChip(
+                  label: Text(ex.value,
+                      style: t.mono(12, weight: FontWeight.w600, color: t.fg)),
+                  backgroundColor: t.surface,
+                  side: BorderSide(color: t.dim.withValues(alpha: 0.2)),
+                  onPressed: () {
+                    setState(() {
+                      _ctrl.text = ex.value;
+                      _filter = ex.filter;
+                    });
+                    _onQueryChanged();
+                  },
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Stop / Place ─────────────────────────────────────────
   Widget _stopResults(BuildContext context, String q) {
     final stops = DataStore.shared.searchStops(q);
     if (stops.isEmpty) return _centerNote(context, 'No results');
@@ -195,6 +271,17 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       context,
       onTap: () => _pickStop(stop.busStopCode),
       child: Row(children: [
+        // Leading stop-pin tile — mirrors stopTile in SoftSearchView.swift:178-186.
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: t.surfaceHi,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(Icons.location_on, size: 18, color: t.fg),
+        ),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -215,11 +302,11 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  // ─── Bus # ────────────────────────────────────────────────────
+  // ─── Bus # ────────────────────────────────────────────────
   Widget _busResults(BuildContext context, String q) {
     final t = context.t;
     final buses = DataStore.shared.searchServices(q);
-    if (buses.isEmpty) return _centerNote(context, 'No services match “$q”');
+    if (buses.isEmpty) return _centerNote(context, 'No services match "$q"');
     return ListView.separated(
       itemCount: buses.length,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
@@ -259,7 +346,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  // ─── Postal ───────────────────────────────────────────────────
+  // ─── Postal ───────────────────────────────────────────────
   Widget _postalResults(BuildContext context, String q) {
     final t = context.t;
     if (!RegExp(r'^\d{6}$').hasMatch(q)) {
@@ -278,14 +365,19 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       return _centerNote(context, 'Finding postal code $q…', spinner: true);
     }
     final geo = _geo;
-    if (_geoFailed || geo == null) {
-      return _centerNote(context, 'Couldn’t find postal code $q');
+    // Geo failed or not yet resolved — show distinct copy + retry button.
+    if (geo == null) {
+      return _postalFailState(context, q);
     }
     final radius = AppModel.shared.searchRadiusM;
     final stops = DataStore.shared.stopsWithin(geo.lat, geo.lon, radius);
     if (stops.isEmpty) {
-      return _centerNote(context,
-          'No bus stops within ${_radiusLabel(radius)} of ${geo.label}');
+      // Empty-radius case: append Settings guidance (SoftSearchView.swift:234-236).
+      return _centerNote(
+        context,
+        'No bus stops within ${_radiusLabel(radius)} of ${geo.label}.\n'
+        'Widen the search radius in Settings.',
+      );
     }
     return ListView.separated(
       itemCount: stops.length + 1,
@@ -302,6 +394,43 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
         }
         return _postalCard(context, stops[i - 1]);
       },
+    );
+  }
+
+  /// Shown when geo == null after loading completes: distinguishes a network
+  /// failure (_geoFailed == true) from a genuine not-found. Adds a Retry
+  /// button that forces a fresh geocode. Mirrors SearchSheet.swift:238-267.
+  Widget _postalFailState(BuildContext context, String q) {
+    final t = context.t;
+    final isNetworkError = _geoFailed;
+    final title = isNetworkError
+        ? "Can't look up postal codes right now."
+        : "Couldn't find postal code $q.";
+    final sub = isNetworkError
+        ? 'Check your connection and try again.'
+        : 'Check the 6-digit code and try again.';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(title,
+                style: t.sans(13, weight: FontWeight.w600, color: t.fg),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(sub,
+                style: t.sans(11, color: t.dim),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Retry'),
+              onPressed: () => _maybeGeocode(_ctrl.text, force: true),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -343,7 +472,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  // ─── Shared ───────────────────────────────────────────────────
+  // ─── Shared ───────────────────────────────────────────────
   Widget _card(BuildContext context,
       {required VoidCallback onTap, required Widget child}) {
     final t = context.t;

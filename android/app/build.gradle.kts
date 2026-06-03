@@ -40,10 +40,8 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // Detail-screen map on Android is OpenStreetMap via flutter_map
-        // (no key needed). The MAPS_API_KEY manifestPlaceholder that used
-        // to be wired here was removed when we switched off
-        // google_maps_flutter.
+        // Maps use flutter_map with free CartoDB tiles — no API key, no
+        // billing, no manifest placeholder needed.
     }
 
     signingConfigs {

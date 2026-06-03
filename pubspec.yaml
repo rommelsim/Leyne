@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.3.1+26
+version: 2.3.1+27
 
 environment:
   sdk: ^3.12.0
@@ -38,6 +38,10 @@ dependencies:
   shared_preferences: ^2.5.5
   google_mobile_ads: ^8.0.0
   app_links: ^7.0.0
+  # Maps use flutter_map with free CartoDB basemap tiles (no API key, no
+  # billing) — a modern style, not the dated default OSM raster. iOS uses
+  # native MapKit; a hosted commercial map on Android (Google) would require
+  # billing, so we render free CartoDB raster tiles instead.
   flutter_map: ^8.3.0
   latlong2: ^0.9.1
   package_info_plus: ^9.0.1

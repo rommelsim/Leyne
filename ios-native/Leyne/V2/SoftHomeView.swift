@@ -78,7 +78,7 @@ struct SoftHomeView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Eyebrow(text: "\(greeting), Rommel", t: t)
+            Eyebrow(text: "\(greeting)", t: t)
             Text("Stops near you")
                 .font(t.sans(30, weight: .semibold))
                 .foregroundStyle(t.fg)

@@ -126,7 +126,15 @@
       "Bash(grep -iE \"^\\\\s{6,8}[A-Za-z0-9].*:$\")",
       "Bash(cp Leyne.xcodeproj/project.pbxproj /tmp/project.pbxproj.bak)",
       "Bash(sed -i '' 's/MARKETING_VERSION = 2\\\\.3\\\\.0;/MARKETING_VERSION = 2.3.1;/g; s/CURRENT_PROJECT_VERSION = 14;/CURRENT_PROJECT_VERSION = 15;/g' Leyne.xcodeproj/project.pbxproj)",
-      "Bash(./scripts/build-android-prod.sh *)"
+      "Bash(./scripts/build-android-prod.sh *)",
+      "Bash(gh run *)",
+      "Bash(grep -nA40 \"iOS\\\\|ios\")",
+      "Bash(xcodebuild build *)",
+      "Bash(cd /Users/rommel/Documents/Leyne)",
+      "Bash(grep -rniE \"confidence|freshness|unconfirmed|ghost|scheduled.*estimate|monitored\" lib --include=*.dart -l)",
+      "Bash(grep -rniE \"crowd|CrowdMeter|Load\\\\b|whisper|tilde\" lib --include=*.dart -l)",
+      "Bash(grep -rniE \"StatusPill|ConfidenceDot|ConfidenceETA\" lib --include=*.dart)",
+      "Bash(grep -rln '\\\\b__TRACKED_VAR__\\\\b' lib/)"
     ]
   }
 }

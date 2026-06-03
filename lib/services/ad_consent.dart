@@ -42,7 +42,7 @@ import '../widgets/ad_banner.dart' show kLyneAdsEnabled;
 /// their hash here. That's why the existing simulator screenshots
 /// show "Test Ad" overlays even with the production unit ID.
 const List<String> kTestDeviceIdentifiers = <String>[
-  // Rommel's iPhone — hash printed to the console on first ad request
+  // Developer test iPhone — hash printed to the console on first ad request
   // (see Xcode log: "To get test ads on this device, set: ...").
   // With this hash listed, the device serves test creatives against the
   // production unit ID — useful for validating ad slot rendering on

@@ -9,8 +9,9 @@ metadata:
 - Test runner: `flutter test --no-pub` from repo root
 - Test files: `test/` directory, named `*_test.dart`
 - Framework: `flutter_test` + `shared_preferences` mock (SharedPreferences.setMockInitialValues)
-- Files: `app_model_test.dart`, `data_layer_test.dart`, `eta_pill_test.dart`, `onboarding_test.dart`, `ongoing_tracking_test.dart`, `pinned_card_test.dart`, `screens_test.dart`, `settings_features_test.dart`, `widget_test.dart`
-- Total tests as of 2026-05-30: **91 pass, 0 fail** (ongoing_tracking_test.dart added this session with 5 new tests)
+- Files: `app_model_test.dart`, `confidence_test.dart`, `data_layer_test.dart`, `data_store_arrivals_test.dart`, `data_store_coldstart_test.dart`, `eta_pill_test.dart`, `onboarding_test.dart`, `ongoing_tracking_test.dart`, `pinned_card_test.dart`, `screens_test.dart`, `settings_features_test.dart`, `widget_test.dart`
+- Total tests as of 2026-06-03: **91 + 36 new = ~127 pass** (confidence_test: 21, data_store_arrivals_test: 8, data_store_coldstart_test: 7 added this session)
+- Fake pattern for DataStore tests: extend `LtaService` with `super(client: _NullHttpClient())`, override `busStops/busServices/busArrival` — no mockito needed. Use a `Completer<void>` gate in `busStops/busServices` to control bootstrap timing in cold-start tests. See `test/data_store_arrivals_test.dart` and `test/data_store_coldstart_test.dart`.
 
 **iOS Native (SwiftUI)**
 - Test target: `ios-native/LeyneTests/`
@@ -30,6 +31,8 @@ metadata:
 - No lifecycle observer (`WidgetsBindingObserver`) — permission-revoked-while-backgrounded is only caught when user opens `NotificationsScreen`. If the user revokes while app is alive on a different screen, the ongoing tracker + scheduled alerts remain active until they navigate to Settings.
 - No test for `track.` notification tap routing path in `main.dart`. Correctly parsed (same format as `arrival.`) but untested.
 - `SoftNearbyScreen` has no `RefreshIndicator` — cannot manually force a refresh of nearby stops.
+
+**Watch out:** The Edit tool renders Unicode "smart quotes" (U+2018/U+2019) when writing Dart string literals if the source text contained them. Always verify with `python3 -c "... f.read().hex()"` after any edit to a .dart file that touches string literals. The original `data_store.dart` used U+2019 as an *apostrophe* inside a straight-quoted string (valid); the Edit tool accidentally promoted U+2018 to a *string delimiter* (invalid). Fix with a binary-level `bytes.replace()` Python one-liner.
 
 **Why:** Reference for future test additions, runner invocation, and coverage gaps.
 **How to apply:** Match existing test file naming and framework. Run `flutter test --no-pub` to validate Flutter changes. iOS tests require Xcode.

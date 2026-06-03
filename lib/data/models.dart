@@ -40,6 +40,8 @@ class Service {
     required this.wab,
     required this.deck,
     this.monitored = true,
+    this.busLat,
+    this.busLon,
     this.arrivalDate,
     this.followingDate,
     this.thirdDate,
@@ -67,6 +69,12 @@ class Service {
   /// True when the ETA comes from the bus's live GPS fix; false when LTA
   /// fell back to the static timetable (shown as an "≈ scheduled" estimate).
   final bool monitored;
+
+  /// The next bus's live GPS position from LTA's NextBus feed, when present.
+  /// Null when LTA reports no coordinate (timetable-only / no signal). Used
+  /// to plot the bus on the map and to sort a stop's arrivals by distance.
+  final double? busLat;
+  final double? busLon;
 
   /// Absolute arrival instants — UI ticks use these to recompute etaSec
   /// against `DateTime.now()` for a smooth countdown.

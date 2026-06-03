@@ -14,7 +14,11 @@ import '../ad_banner.dart';
 enum SoftTab { home, nearby, settings, search }
 
 class SoftTabBar extends StatelessWidget {
-  const SoftTabBar({super.key, required this.selection, required this.onSelect});
+  const SoftTabBar({
+    super.key,
+    required this.selection,
+    required this.onSelect,
+  });
 
   final SoftTab selection;
   final ValueChanged<SoftTab> onSelect;
@@ -26,24 +30,33 @@ class SoftTabBar extends StatelessWidget {
       selectedIndex: SoftTab.values.indexOf(selection),
       onDestinationSelected: (i) => onSelect(SoftTab.values[i]),
       backgroundColor: t.bg,
-      indicatorColor: t.liveBg,
+      // Fix 1: removed indicatorColor override — was t.liveBg (#EDEDED in light
+      // mode) which is nearly identical to the bg (#F2F2F2), making the
+      // selected-tab pill invisible. The navigationBarTheme in theme.dart sets
+      // a proper accent@12% (light) / white@6% (dark) that is always visible.
       surfaceTintColor: Colors.transparent,
       destinations: const [
         NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: 'Home'),
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home_rounded),
+          label: 'Home',
+        ),
         NavigationDestination(
-            icon: Icon(Icons.near_me_outlined),
-            selectedIcon: Icon(Icons.near_me_rounded),
-            label: 'Nearby'),
+          icon: Icon(Icons.near_me_outlined),
+          selectedIcon: Icon(Icons.near_me_rounded),
+          label: 'Nearby',
+        ),
         NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings_rounded),
-            label: 'Settings'),
+          icon: Icon(Icons.settings_outlined),
+          selectedIcon: Icon(Icons.settings_rounded),
+          label: 'Settings',
+        ),
+        // Fix 2: added selectedIcon for consistency with other destinations.
         NavigationDestination(
-            icon: Icon(Icons.search_rounded),
-            label: 'Search'),
+          icon: Icon(Icons.search_rounded),
+          selectedIcon: Icon(Icons.search_rounded),
+          label: 'Search',
+        ),
       ],
     );
   }
@@ -54,8 +67,11 @@ class SoftTabBar extends StatelessWidget {
 /// ads are disabled or in screenshot mode, so the tab bar sits flush
 /// in those builds.
 class SoftBottomBar extends StatelessWidget {
-  const SoftBottomBar(
-      {super.key, required this.selection, required this.onSelect});
+  const SoftBottomBar({
+    super.key,
+    required this.selection,
+    required this.onSelect,
+  });
 
   final SoftTab selection;
   final ValueChanged<SoftTab> onSelect;

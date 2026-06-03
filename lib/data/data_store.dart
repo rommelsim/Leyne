@@ -280,7 +280,13 @@ class DataStore extends ChangeNotifier {
           ..addEntries(stops.map((s) => MapEntry(s.busStopCode, s)));
         _services = svcs;
         _referenceState = const ReferenceState.ready();
-        if (_lastLoc != null) _recomputeNearby();
+        // If a location fix arrived before reference data, the Home prefetch
+        // already ran against an empty `_nearby`. Now that stops are loaded,
+        // rank nearby and warm their arrivals so the cards populate.
+        if (_lastLoc != null) {
+          _recomputeNearby();
+          prefetchNearbyArrivals();
+        }
         notifyListeners();
         return;
       } on LtaException catch (e) {
@@ -314,6 +320,11 @@ class DataStore extends ChangeNotifier {
     _lastLoc = (lat: lat, lon: lon);
     if (_stopByCode.isEmpty) return;
     _recomputeNearby();
+    // Warm the freshly-ranked nearby stops so their cards show buses without
+    // the user opening each one. (Before this, the Home prefetch could fire
+    // against an empty `_nearby` while bootstrap was still loading, leaving
+    // nearby cards perpetually empty until a stop was opened.)
+    prefetchNearbyArrivals();
     notifyListeners();
   }
 
@@ -338,6 +349,28 @@ class DataStore extends ChangeNotifier {
         services: servicesFor(s.busStopCode),
       );
     }).toList(growable: false);
+  }
+
+  /// Refresh only the live-`services` snapshot on the already-ranked nearby
+  /// stops, leaving the haversine ranking untouched. O(nearby) — no sort, no
+  /// scan of the full stop index — so it's cheap enough to run on every
+  /// arrival poll. Use [_recomputeNearby] instead only when the location
+  /// (and thus the ranking) actually changes.
+  void _refreshNearbyServices() {
+    if (_nearby.isEmpty) return;
+    _nearby = [
+      for (final n in _nearby)
+        NearbyStop(
+          id: n.id,
+          stopName: n.stopName,
+          stopCode: n.stopCode,
+          lat: n.lat,
+          lon: n.lon,
+          distanceM: n.distanceM,
+          walkMin: n.walkMin,
+          services: servicesFor(n.stopCode),
+        ),
+    ];
   }
 
   /// Bus stops within [radiusM] metres of (lat, lon), nearest first.
@@ -373,6 +406,12 @@ class DataStore extends ChangeNotifier {
     if (a != null && a.kind == ArrivalStateKind.loaded) return a.services;
     return const [];
   }
+
+  /// When this stop's arrivals were last successfully pulled from LTA, or
+  /// null if never fetched / still erroring. Drives the confidence/freshness
+  /// system (see `Freshness.from` in widgets/v2/confidence.dart) so an arrival
+  /// can be honestly tagged live / estimated / scheduled.
+  DateTime? lastRefresh(String code) => _lastFetched[code];
 
   /// `silent: true` warms data without publishing a `loading` state (used
   /// by prefetch so entering Nearby doesn't burst-republish the whole list).
@@ -410,8 +449,11 @@ class DataStore extends ChangeNotifier {
 
   /// Shared network body for [ensureArrivals] / [refreshArrivals]. The caller
   /// owns the `_inflight` add; this clears it in `finally`. On error an
-  /// existing `.loaded` result is preserved (we don't blank good data).
+  /// existing `.loaded` result is preserved (we don’t blank good data).
   Future<void> _fetchArrivals(String code) async {
+    // Snapshot the state BEFORE the async gap so the equality guard below
+    // can compare "what the UI last saw" against "what just came in".
+    final prevState = _arrivals[code];
     try {
       final resp = await _api.busArrival(code);
       final mapped = resp.services
@@ -436,18 +478,62 @@ class DataStore extends ChangeNotifier {
       }
     } finally {
       _inflight.remove(code);
-      // Nearby rows hold their own service lists; refresh them so any
-      // newly-loaded arrivals propagate.
-      if (_lastLoc != null) _recomputeNearby();
-      notifyListeners();
+      // Nearby rows hold their own service lists; refresh those snapshots so
+      // newly-loaded arrivals propagate — but WITHOUT re-ranking. A full
+      // _recomputeNearby() here re-sorts the entire ~5000-stop dataset on
+      // every arrival poll (12 nearby prefetches + the 1 s pin ticker), a
+      // needless main-thread hit that dropped frames while scrolling. The
+      // ranking only changes when the user moves — see updateNearby().
+      if (_lastLoc != null) _refreshNearbyServices();
+
+      // ── Value-equality guard (mirrors the trainAlerts diff pattern) ─────
+      // With 12 nearby prefetches + the 1 s pin ticker, _fetchArrivals fires
+      // very frequently. Calling notifyListeners() on every completion —
+      // even when the stored ArrivalState is identical to what was there
+      // before — triggers whole-tree rebuilds for zero visual delta, a
+      // significant perf cost flagged in code review.
+      //
+      // Rule: notify if and only if something the UI cares about changed:
+      //   • kind changed (loading→loaded, error→loaded, etc.)
+      //   • services list changed in any meaningful way (count, service no,
+      //     ETA seconds, or load level on any bus)
+      //
+      // When in doubt we notify (e.g. prevState was null). We NEVER suppress
+      // a transition that the UI needs. The awaitable refreshArrivals path is
+      // unaffected: it relies on the Future completing, not on a notify.
+      final nextState = _arrivals[code];
+      final changed = _arrivalStateChanged(prevState, nextState);
+      if (changed) notifyListeners();
     }
   }
 
-  /// Warm arrivals for the visible nearby stops so expanding is instant.
-  /// Only the closest five so a user-tapped expand isn't queued behind a
-  /// 12-request prefetch wave.
+  /// Returns true when [next] represents a meaningful change over [prev] that
+  /// warrants a UI rebuild. Conservative: unknown / null prev → always true.
+  static bool _arrivalStateChanged(ArrivalState? prev, ArrivalState? next) {
+    if (prev == null || next == null) return true;
+    if (prev.kind != next.kind) return true;
+    // Both same kind — only loaded states carry service lists worth diffing.
+    if (next.kind != ArrivalStateKind.loaded) return false;
+    final ps = prev.services;
+    final ns = next.services;
+    if (ps.length != ns.length) return true;
+    for (var i = 0; i < ns.length; i++) {
+      final p = ps[i];
+      final n = ns[i];
+      if (p.no != n.no || p.etaSec != n.etaSec || p.load != n.load) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Warm arrivals for the visible nearby stops so their cards show live
+  /// buses without the user having to open each one. Covers the whole visible
+  /// list (`_nearby` is already capped at 12); `ensureArrivals` de-dupes
+  /// in-flight/fresh requests so repeat calls are cheap. Fired whenever
+  /// `_nearby` is (re)populated — see `updateNearby` and `bootstrap`.
   void prefetchNearbyArrivals() {
-    for (final s in _nearby.take(5)) {
+    for (final s in _nearby) {
       ensureArrivals(s.stopCode, silent: true);
     }
   }

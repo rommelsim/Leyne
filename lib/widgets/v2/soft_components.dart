@@ -7,14 +7,32 @@ import 'package:flutter/material.dart';
 import '../../theme.dart';
 
 /// Service-number badge — accent-filled rounded square showing a bus
-/// service number ("80", "158", "21A"). Three sizes per the Soft spec:
-/// sm (40), md (48), lg (56).
+/// service number ("80", "158", "21A"). Three sizes per the Soft spec,
+/// matched to iOS ServiceBadge.swift: sm (36), md (48), lg (52).
 enum ServiceBadgeSize { sm, md, lg }
 
 extension on ServiceBadgeSize {
-  double get dim => switch (this) { ServiceBadgeSize.sm => 40, ServiceBadgeSize.md => 48, ServiceBadgeSize.lg => 56 };
-  double get radius => switch (this) { ServiceBadgeSize.sm => 12, ServiceBadgeSize.md => 16, ServiceBadgeSize.lg => 18 };
-  double get fontSize => switch (this) { ServiceBadgeSize.sm => 14, ServiceBadgeSize.md => 18, ServiceBadgeSize.lg => 22 };
+  double get dim => switch (this) {
+    ServiceBadgeSize.sm => 36,
+    ServiceBadgeSize.md => 48,
+    ServiceBadgeSize.lg => 52,
+  };
+  // Fix 5: map badge corner radii to LyneRadius scale.
+  // sm (36dp badge) → md(16) is too large; nearest spec-correct value is 10 for
+  // the small badge, but the LyneRadius scale bottoms out at md(16). The badge
+  // is a specialised component whose radius is derived from its own size, so we
+  // keep the size-proportional values here (10/14/16) — the lg value already
+  // equals LyneRadius.md, and the others intentionally under-round a small pill.
+  double get radius => switch (this) {
+    ServiceBadgeSize.sm => 10,
+    ServiceBadgeSize.md => 14,
+    ServiceBadgeSize.lg => LyneRadius.md,
+  };
+  double get fontSize => switch (this) {
+    ServiceBadgeSize.sm => 14,
+    ServiceBadgeSize.md => 18,
+    ServiceBadgeSize.lg => 22,
+  };
 }
 
 class ServiceBadge extends StatelessWidget {
@@ -42,15 +60,21 @@ class ServiceBadge extends StatelessWidget {
         color: fill,
         borderRadius: BorderRadius.circular(size.radius),
       ),
-      child: Text(svc,
-          style: t.sans(size.fontSize, weight: FontWeight.w600, color: fg)),
+      child: Text(
+        svc,
+        style: t.sans(size.fontSize, weight: FontWeight.w600, color: fg),
+      ),
     );
   }
 }
 
 /// Small label pill ("Home" / "Work" / "Gym" / "Class") on pinned stop cards.
 class LabelPill extends StatelessWidget {
-  const LabelPill({super.key, required this.text, this.variant = LabelPillVariant.solid});
+  const LabelPill({
+    super.key,
+    required this.text,
+    this.variant = LabelPillVariant.solid,
+  });
 
   final String text;
   final LabelPillVariant variant;
@@ -63,12 +87,20 @@ class LabelPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: solid ? t.accent : t.liveBg,
-        borderRadius: BorderRadius.circular(99),
+        // Fix 5: pill → LyneRadius.full
+        borderRadius: BorderRadius.circular(LyneRadius.full),
       ),
-      child: Text(text.toUpperCase(),
-          style: t.mono(10, weight: FontWeight.w600,
-              color: solid ? t.onAccent : t.accent)
-            .copyWith(letterSpacing: 1.0)),
+      child: Text(
+        text.toUpperCase(),
+        style: t
+            .mono(
+              10,
+              weight: FontWeight.w600,
+              color: solid ? t.onAccent : t.accent,
+            )
+            // Fix 6: standardise all-caps tracking to 0.8 (was 1.0)
+            .copyWith(letterSpacing: 0.8),
+      ),
     );
   }
 }
@@ -91,22 +123,44 @@ class SortChipRow<V> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
+    // Fix 4: replaced GestureDetector+AnimatedContainer with ChoiceChip so
+    // each chip gets Material bounded ripple, "selected" semantics announced by
+    // TalkBack, and a ≥48dp implicit touch target from Material's chip layout.
+    // The pill look is preserved via shape + selected/unselected colours.
     return Wrap(
       spacing: 8,
       children: [
         for (final opt in options)
-          GestureDetector(
-            onTap: () => onSelect(opt.value),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              decoration: BoxDecoration(
-                color: opt.value == selection ? t.accent : t.surface,
-                borderRadius: BorderRadius.circular(99),
+          Theme(
+            // Scope the chip theme so the pill colours come from LyneTheme
+            // without touching the global theme used by other widgets.
+            data: Theme.of(context).copyWith(
+              chipTheme: ChipThemeData(
+                shape: const StadiumBorder(),
+                // Fix 5: pill → LyneRadius.full is already expressed by
+                // StadiumBorder; no hardcoded radius needed here.
+                selectedColor: t.accent,
+                backgroundColor: t.surface,
+                labelStyle: t.sans(13, weight: FontWeight.w500),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
+                side: BorderSide.none,
               ),
-              child: Text(opt.label,
-                  style: t.sans(13, weight: FontWeight.w500,
-                      color: opt.value == selection ? t.onAccent : t.fg)),
+            ),
+            child: ChoiceChip(
+              label: Text(
+                opt.label,
+                style: t.sans(
+                  13,
+                  weight: FontWeight.w500,
+                  color: opt.value == selection ? t.onAccent : t.fg,
+                ),
+              ),
+              selected: opt.value == selection,
+              onSelected: (_) => onSelect(opt.value),
+              // Fix 7: ChoiceChip min-touch is enforced by Material (≥48dp).
             ),
           ),
       ],
@@ -129,13 +183,16 @@ class WalkTile extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: t.liveBg,
-        borderRadius: BorderRadius.circular(16),
+        // Fix 5: 16 → LyneRadius.md (same value, now token-bound)
+        borderRadius: BorderRadius.circular(LyneRadius.md),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('$minutes',
-              style: t.sans(18, weight: FontWeight.w600, color: t.accent)),
+          Text(
+            '$minutes',
+            style: t.sans(18, weight: FontWeight.w600, color: t.accent),
+          ),
           Text('min', style: t.mono(9, color: t.dim)),
         ],
       ),
@@ -153,36 +210,39 @@ class SoftToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 44,
-        height: 26,
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: value ? t.accent : t.surfaceHi,
-          borderRadius: BorderRadius.circular(99),
-        ),
-        child: AnimatedAlign(
-          duration: const Duration(milliseconds: 180),
-          alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 2,
-                    offset: const Offset(0, 1)),
-              ],
-            ),
+    // Fix 3: replaced custom GestureDetector paint with Flutter's Switch.
+    //
+    // Problems with the old approach:
+    //   • Touch target was 44×26dp — well under the 48dp Android minimum.
+    //   • No TalkBack semantics (no Semantics widget, no role=switch).
+    //   • No Material ripple feedback.
+    //
+    // Flutter's Switch provides:
+    //   • A ≥48dp tap area via MaterialTapTargetSize.padded (default).
+    //   • Built-in Semantics with role=switch and "on"/"off" state.
+    //   • Material ripple on press.
+    //
+    // Visual style preserved via SwitchTheme scoped to this widget:
+    //   • Track on  → t.accent (matches old animated track colour).
+    //   • Track off → t.surfaceHi (matches old resting track colour).
+    //   • Thumb     → white in both states (matches the old white circle).
+    //
+    // The Switch renders slightly larger than the old 44×26 custom widget
+    // (which is correct — it now meets the 48dp minimum). Call sites pass
+    // only `value` and `onChanged`, so the public API is unchanged.
+    return Theme(
+      data: Theme.of(context).copyWith(
+        switchTheme: SwitchThemeData(
+          trackColor: WidgetStateProperty.resolveWith(
+            (states) =>
+                states.contains(WidgetState.selected) ? t.accent : t.surfaceHi,
           ),
+          thumbColor: WidgetStateProperty.all(Colors.white),
+          trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+          materialTapTargetSize: MaterialTapTargetSize.padded,
         ),
       ),
+      child: Switch(value: value, onChanged: onChanged),
     );
   }
 }
@@ -195,9 +255,13 @@ class Eyebrow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    return Text(text.toUpperCase(),
-        style: t.mono(10, weight: FontWeight.w600, color: t.dim)
-            .copyWith(letterSpacing: 1.5));
+    // Fix 6: standardise all-caps tracking to 0.8 (was 1.5; LabelPill was 1.0).
+    return Text(
+      text.toUpperCase(),
+      style: t
+          .mono(10, weight: FontWeight.w600, color: t.dim)
+          .copyWith(letterSpacing: 0.8),
+    );
   }
 }
 
@@ -210,11 +274,23 @@ class LegendDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      const SizedBox(width: 4),
-      Text(label, style: t.mono(9, weight: FontWeight.w600, color: t.dim).copyWith(letterSpacing: 1)),
-    ]);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: t
+              .mono(9, weight: FontWeight.w600, color: t.dim)
+              .copyWith(letterSpacing: 1),
+        ),
+      ],
+    );
   }
 }
 
@@ -225,8 +301,15 @@ class MRTLineBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 4,
-        height: 28,
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
-      );
+    width: 4,
+    height: 28,
+    // Fix 5: this 4×28 bar is a specialised indicator — a 2dp radius is
+    // intentional (fully rounding a 4dp-wide bar). LyneRadius.md(16) would
+    // over-round it into a capsule shape that departs from the design intent.
+    // Keeping radius:2 here and noting it is not a card/tile/chip surface.
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(2),
+    ),
+  );
 }

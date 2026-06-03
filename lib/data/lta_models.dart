@@ -79,6 +79,8 @@ class LtaArrivalService {
       // the "app said 30 min, bus came in 3" complaints). Treat an absent
       // value as monitored so we never cry wolf on missing data.
       monitored: (nextBus.monitored ?? 1) != 0,
+      busLat: nextBus.lat,
+      busLon: nextBus.lon,
       arrivalDate: nextBus.arrivalDate,
       followingDate: nextBus2.arrivalDate,
       thirdDate: nextBus3.arrivalDate,

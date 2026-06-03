@@ -1,6 +1,6 @@
 ---
 name: project-android-v2-audit
-description: Full Android V2 Soft UI/UX quality audit findings — Material 3 violations, accessibility failures, missing platform idioms, prioritized P0–P3 — 2026-05-30
+description: Full Android V2 Soft UI/UX quality audit findings — Material 3 violations, accessibility failures, missing platform idioms, prioritized P0–P3 — updated 2026-06-03
 metadata:
   type: project
 ---
@@ -40,6 +40,15 @@ Comprehensive audit of `lib/screens/v2/` and `lib/widgets/v2/` conducted 2026-05
 20. **No `Nearby` pull-to-refresh** — `soft_nearby_screen.dart` has no `RefreshIndicator`. The other three content screens (Home, Stop, Bus) all have it. Nearby is the most location-sensitive screen and the most likely to be stale.
 21. **`SoftTabBar` Navigation indicator color is `t.liveBg`** — `soft_tab_bar.dart:29`. `t.liveBg` in dark mode is the deep forest-green `#0F2A20`. The M3 NavigationBar indicator is supposed to use `secondaryContainer` / a tonal color derived from `primary`. The current liveBg pill looks like a random "arriving" state tint, not a selected-tab indicator.
 22. **Settings `_row` `InkWell` has no `borderRadius` clip** — `soft_settings_screen.dart:98`. The `InkWell` wraps `Padding` without matching the parent `Container`'s 22dp corner radius, so the ink ripple square-corners on the first and last rows of a section card.
+
+## Additional findings from 2026-06-03 re-audit
+
+23. **NavigationBar indicatorColor override in SoftTabBar overrides the correct theme token** — `soft_tab_bar.dart:29` uses `t.liveBg` directly, cancelling the correct `accent.withValues(alpha:0.12)` set in `theme.dart:224`. Remove the override on line 29.
+24. **RefreshIndicator uses raw accent token (black in light mode) instead of colorScheme.primary** — `soft_home_screen.dart:89`, `soft_stop_screen.dart:75`. On Material You devices the harmonised primary may differ from the raw token.
+25. **_busRow InkWell lacks borderRadius for correct ripple clipping** — `soft_stop_screen.dart:407`. Confirmed from this audit; first and last rows overflow the card's corner radius.
+26. **Eight distinct corner radii (10, 14, 16, 18, 20, 22, 24, 26, 28, 99) with no system** — expanded list confirmed: search cards=14, nearby=20, stop-otherBuses=20, settings section=22, pin card=22, empty state=24, primary card=24, draggable sheet=26. Recommend Material 3 shape tokens: Large=16 for list rows, ExtraLarge=28 for hero cards.
+27. **_DraggableSheet snaps without spring animation and lacks DraggableScrollableSheet coordination** — `soft_bus_screen.dart:1001–1128`. Snaps are instant setState with no AnimationController. Replace with DraggableScrollableSheet.
+28. **RouteTimeline emoji in chip** — `route_timeline.dart:146` confirmed; also noted that the chip Container tap area is only ~20dp tall, below the 48dp minimum.
 
 ## Root cause summary
 

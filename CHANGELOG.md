@@ -8,7 +8,88 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Unreleased — Leyne 2.3.1 · iOS (15) · Android (26) · 2026-06-02
+## Unreleased — Leyne 2.3.1 · iOS (15) · Android (27) · 2026-06-03
+
+**2026-06-03 — Android performance + design/parity review pass (Android, not yet built):**
+
+> Full-team review of the Android build after reports of frame drops while
+> navigating and design drift from iOS. Findings fixed across performance,
+> Material consistency, iOS parity, and test coverage. All changes are
+> on-device only (no version bump); they land in the next AAB.
+>
+> **Performance (the FPS drops):**
+> - **Bus view** (`soft_bus_screen.dart`): the bus-pin glide drove `setState` on
+>   the whole screen every animation frame, rebuilding the full map `Stack`
+>   (tiles + all markers + sheet) at 60fps for 1.5s per move. Now scoped to a
+>   `ValueNotifier` + `AnimatedBuilder` that rebuilds only the marker layer; the
+>   draggable sheet drag likewise moved to a `ValueListenable` (no per-pointer
+>   `setState`); `_timelineStops()` computed once per build instead of 4×.
+> - **Home + Nearby** (`soft_home_screen.dart`, `soft_nearby_screen.dart`): the
+>   whole list rebuilt every 1s tick. Split into a structural outer listener with
+>   the per-second ETA wrapped in its own narrow `ListenableBuilder`; converted to
+>   `ListView.builder` + `RepaintBoundary`; memoised walk-distance per location
+>   fix; compute confidence once per card; dropped a redundant per-rebuild sort.
+> - **DataStore** (`data_store.dart`): earlier per-poll full re-sort of ~5000
+>   stops was already removed; now `notifyListeners()` also fires only when an
+>   arrival state actually changes (value-equality guard), killing redundant
+>   rebuild storms from the 12 nearby prefetches + 1s pin ticker.
+>
+> **Material design consistency:** shared `LyneRadius` (md/lg/full) + `kSectionGap`
+> tokens replace ad-hoc radii; `SoftToggle`→Material `Switch` and `SortChipRow`→
+> `ChoiceChip` (48dp targets, ripple, TalkBack); fixed the invisible light-mode
+> nav-bar indicator; fixed InkWell ripple overflowing rounded card/section corners
+> (Stop, Settings, MRT alerts); unified all-caps label tracking; map controls →
+> Material ripple with 48dp tap targets.
+>
+> **iOS parity:** added the missing Pin/Unpin button to the Bus view; moved MRT
+> disruption alerts above the stop list (was buried below Nearby); added the
+> imminent-bus accent stroke+glow on Stop detail; aligned Stop detail to iOS
+> uniform cards; "recent" bus tier promoted to a first-class state with its own
+> a11y label; route-timeline emoji→icon, "THIS STOP" label, suppressed the
+> misleading "N stops away" badge, added stop-code subline; title → "Stops near
+> you". (Decision: Home pinned cards keep Android's ETA-row layout rather than
+> porting the iOS bus-number chip-grid — for a favourite stop, "when" beats
+> "which", so the rows that show next-arrival ETAs are the stronger call. The
+> greeting carries no user name on either platform, by design.)
+>
+> **Tests:** +36 (now 127 total) covering `Freshness.from` boundaries, the
+> `ArrivalConfidence.of` matrix, `_refreshNearbyServices` semantics, the notify
+> guard, and both cold-start prefetch orderings.
+
+**2026-06-03 — Android parity pass + closed-alpha build 27 (Android):**
+
+> Brought the Android (Flutter) app up to design + feature parity with the iOS
+> 3.0 rewrite, staying Material-native (no cross-platform idiom bleed). Android
+> had drifted behind — it lacked the data-confidence system entirely and still
+> used the old binary `monitored` treatment with a loud "~ scheduled" label and
+> a colour-dot crowd indicator. Build 26 → 27 for the first closed-alpha upload.
+
+- **Confidence/freshness system** ported to Flutter (`lib/widgets/v2/confidence.dart`):
+  four-state `ArrivalConfidence` (live / stale / unconfirmed / none) + `Freshness`
+  derived from a new `DataStore.lastRefresh`, with `ConfidenceEta` (whisper-quiet
+  trailing "~"), `ConfidenceDot` (filled / hollow / dashed via `CustomPainter`),
+  `ConfidenceStatusPill`, and a bar `CrowdMeter`. Wired into Home, Stop and Bus —
+  nothing fabricated, honoring the "timely but quietly honest" rule.
+- **Light theme → monochrome** black ink accent on `#F2F2F2`, matching iOS
+  (was the green mint). Dark mode already matched.
+- **Home**: added the Nearby section (Pinned + Nearby, de-duped) and a
+  live-location status row; empty state gated on both being empty.
+- **Stop**: added a Distance sort — `Service.busLat/busLon` are now plumbed
+  through from LTA's NextBus feed (previously parsed but dropped in the mapper) —
+  plus a header walk-distance chip.
+- **Search**: recents now surface as tappable chips, example/suggestion chips,
+  and postal retry + "widen the radius in Settings" guidance.
+- **Bus**: rebuilt as an immersive full-bleed map + draggable bottom sheet with
+  a three-tier bus pin (live GPS → recent/dimmed → estimated-from-route-geometry),
+  gliding between positions.
+- **Map now uses free CartoDB tiles** (Positron in light / Dark Matter in dark,
+  theme-aware) via `flutter_map` — a modern basemap with no API key and no
+  billing, replacing the dated default OSM raster. (Native Google Maps was
+  trialled then reverted to avoid Maps SDK billing.)
+- `ServiceBadge` sizes aligned to the iOS spec.
+- **Closed-alpha AAB** built via `build-android-closed-test.sh`
+  (`LYNE_ADS_TEST=true`), so it serves Google's reserved test unit, not the real
+  `/6513878972` banner. Promote with `build-android-prod.sh` for production.
 
 **2026-06-02 — AdMob account migration + version bump (iOS):**
 
@@ -31,7 +112,7 @@ entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
   `LYNE_ADS_TEST`) unchanged — still Google's sample units.
 - The personal `rommelsim` publisher `ca-app-pub-6816620800052795` is retired
   from ads; AdMob + Play Console now both live under `leyne0000@gmail.com`.
-- **Android (26) is a CLOSED-TESTING AAB** — built via
+- **The Android closed-testing AAB (now build 27, see above)** is built via
   `build-android-closed-test.sh` (`LYNE_ADS_TEST=true`), so it serves Google's
   reserved test unit `…/6300978111`, not the real `/6513878972`. Promote to
   production by rebuilding with `build-android-prod.sh` before the public release.
