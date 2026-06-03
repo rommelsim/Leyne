@@ -55,6 +55,85 @@ entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 > **Tests:** +36 (now 127 total) covering `Freshness.from` boundaries, the
 > `ArrivalConfidence.of` matrix, `_refreshNearbyServices` semantics, the notify
 > guard, and both cold-start prefetch orderings.
+>
+> **Follow-ups (same day):**
+> - **Bus-sheet physics** (`soft_bus_screen.dart`): the draggable sheet snapped
+>   to its peek/expanded position instantly on release. Replaced the zero-anim
+>   snap with a velocity-aware `SpringSimulation` (unbounded `AnimationController`)
+>   so a flick flings it open/closed and a slow release eases with momentum —
+>   still scoped to the `Transform.translate` only, so no perf regression.
+> - **Bus search opened the wrong screen** (`soft_search_screen.dart`,
+>   `soft_bus_screen.dart`, `soft_root.dart`): tapping a bus result (e.g. "156")
+>   resolved the service origin and opened that *bus stop's* arrivals instead of
+>   the bus's route. Now it opens the bus **route view** anchored at the origin
+>   with a new `fullRoute` flag so the whole route is listed (the long-route
+>   collapse keeps it scannable). iOS `SoftSearchView` has the same gap — mirror
+>   pending.
+> - **Long route timelines** (`route_timeline.dart` + iOS `RouteTimeline.swift`):
+>   routes longer than 8 stops now fold the lead-in (everything >2 stops before
+>   the boarding/bus focal stop) into an expandable "Show N earlier stops" node,
+>   keeping the actionable boarding + upcoming area visible. Implemented
+>   identically on both platforms (shared `maxVisible = 8`, same focal/keepFrom
+>   logic, collapse node drawn as part of the connector line).
+> - **Two-direction routes (both platforms):** the Bus view now shows BOTH
+>   directions of a service (origin→terminus and back) with a "To {destination}"
+>   segmented toggle. New `serviceRoute()` data API (`data_store.dart` +
+>   iOS `DataStore.swift`) returns all directions with the anchor-stop direction
+>   preselected; `SoftBusScreen`/`SoftBusView` gained a `fullRoute` flag and the
+>   toggle. The non-anchor direction shows its full route and never mis-labels a
+>   "THIS STOP" boarding badge.
+> - **Android search rebuilt to the iOS auto-detect model** (`soft_search_screen.dart`):
+>   dropped the explicit Postal/Stop ID/Bus #/Place filter chips; input kind is
+>   now auto-detected (6-digit → postal geocode; otherwise combined **Services**
+>   + **Bus stops** result sections), mirroring `SoftSearchView`. Kept the
+>   Android-only Recent chips and example chips. Search routing verified on both
+>   platforms: **Bus # → bus route view**; **Stop ID / Place / Postal → stop
+>   detail**.
+> - **iOS search keyboard couldn't be dismissed** (`SoftSearchView.swift`): a
+>   plain `TextField` has no Done bar, so once focused the keyboard was stuck.
+>   Added `.scrollDismissesKeyboard(.interactively)` (drag results down to hide)
+>   and tap-empty-space-to-dismiss. (Android already dismisses via the back
+>   button.)
+> - **Dark mode → monochrome black-and-white (both platforms)** (`theme.dart` +
+>   iOS `Theme.swift`): removed the brand-green dark palette (warm-green bg/surface,
+>   mint accent, green liveBg). Dark is now neutral — `#0F0F0F` bg, white `fg`,
+>   white accent (LIVE/arriving/pin), neutral grey surfaces — mirroring the light
+>   mode's black-ink monochrome. Amber/red disruption colours and the real MRT
+>   line hues are kept.
+> - **Home cards rebuilt to mirror iOS** (`soft_home_screen.dart`): replaced the
+>   two bespoke Android cards (Pinned = ETA rows; Nearby = distance-tile + rows)
+>   with a single unified `_SoftStopCard` + `_MiniBusChip`, a direct port of iOS
+>   `SoftStopCard` — map-pin tile · name · "code · road" · trailing distance/walk
+>   · chevron, then a wrapping grid of bus-number chips (sorted by number, 4 +
+>   "+N", whisper-`~` confidence tell). Used for BOTH Pinned and Nearby so the
+>   page reads as one language, matching iOS. Material-native (Material surface +
+>   InkWell ripple) and keeps the per-second ETA refresh scoped to the chip row.
+> - **Removed the Android Nearby tab** (`soft_tab_bar.dart`, `soft_root.dart`,
+>   deleted `soft_nearby_screen.dart`): iOS has no standalone Nearby tab — it
+>   folds Nearby into the Home page — so the Android 4th tab duplicated the Home
+>   "Nearby" section. Bottom bar is now Home / Settings / Search, matching iOS.
+> - **Two search buttons on Android home** (`soft_home_screen.dart`): the home
+>   header had a search IconButton *and* the bottom bar has a Search tab. iOS's
+>   home header has no search button (search lives in the tab bar), so the
+>   redundant header button was removed — search is now reached via the
+>   bottom-bar Search tab (and the empty-state Search button), matching iOS.
+> - **Slow open of the bus view from search** (`soft_search_screen.dart` +
+>   `SoftSearchView.swift`): tapping a bus result blocked on a cold load of the
+>   large BusRoutes dataset (needed by `originStop` + the route view). Now the
+>   dataset is warmed via `ensureRoutes()` when Search opens, so the tap opens
+>   the route view immediately.
+> - **Inconsistent "Show N earlier stops" on the route** (`soft_bus_screen.dart`
+>   + `SoftBusView.swift`): in full-route (bus-search) mode the anchored origin
+>   often reappears late on the *return* direction and got badged as the boarding
+>   stop, pushing the collapse focal point to ~index 53 → "Show 51 earlier stops"
+>   on one direction but not the other. Fixed by not marking any "THIS STOP" in
+>   full-route mode (there's no boarding stop when browsing a route), so both
+>   directions render the whole route cleanly with no spurious collapse.
+> - **Back from a search result jumped to Home** (`soft_root.dart` + iOS
+>   `SoftRoot.swift` legacy route): the search screen was popped *before* pushing
+>   the tapped stop/bus, so the stack lost search and Back landed on Home. Now
+>   the result is pushed on top of search → Back returns to the results, Back
+>   again returns Home. (The first-class iOS search tab already behaved correctly.)
 
 **2026-06-03 — Android parity pass + closed-alpha build 27 (Android):**
 

@@ -102,26 +102,28 @@ class LyneTheme {
     return Color(int.parse('FF$s', radix: 16));
   }
 
-  // Leyne 2.0 "Soft" palette — warm dark (#15201C) / warm light
-  // (#F4EFE7) with mint accent. Property names preserved from v1 so
-  // call sites compile unchanged. Cross-mode colours (MRT NE purple,
-  // ME-dot blue) live on the static `LyneSignal` helper below.
+  // Monochrome dark — clean black-and-white, no brand green. The accent
+  // (LIVE / arriving / pin) is pure white ink rather than the old mint, so
+  // confidence reads from opacity/shape, not hue (mirrors the light mode's
+  // black-ink accent). Warning amber + critical red are kept for disruption
+  // severity. Cross-mode colours (MRT line hues, ME-dot blue) live on the
+  // static `LyneSignal` helper / MRTLine enum below.
   static final LyneTheme dark = LyneTheme(
     isDark: true,
-    bg: _hex('15201C'),
-    surface: _hex('1F2C28'),
-    surfaceHi: _hex('293732'),
-    contrast: _hex('F1EDE7'),
-    contrastFg: _hex('0E2218'),
-    contrastSurface: _hex('293732'),
-    fg: _hex('F1EDE7'),
-    dim: const Color.fromRGBO(241, 237, 231, 0.6),
-    faint: const Color.fromRGBO(241, 237, 231, 0.35),
-    line: const Color.fromRGBO(241, 237, 231, 0.08),
-    lineHi: const Color.fromRGBO(241, 237, 231, 0.14),
-    accent: _hex('8EE6C0'),
-    live: _hex('8EE6C0'),
-    liveBg: _hex('0F2A20'),
+    bg: _hex('0F0F0F'),
+    surface: _hex('1A1A1A'),
+    surfaceHi: _hex('262626'),
+    contrast: _hex('FFFFFF'),
+    contrastFg: _hex('0F0F0F'),
+    contrastSurface: _hex('2E2E2E'),
+    fg: _hex('FFFFFF'),
+    dim: const Color.fromRGBO(255, 255, 255, 0.6),
+    faint: const Color.fromRGBO(255, 255, 255, 0.35),
+    line: const Color.fromRGBO(255, 255, 255, 0.1),
+    lineHi: const Color.fromRGBO(255, 255, 255, 0.16),
+    accent: _hex('FFFFFF'),
+    live: _hex('FFFFFF'),
+    liveBg: _hex('242424'),
     warn: _hex('F4B870'),
     warnBg: const Color.fromRGBO(244, 184, 112, 0.16),
     crit: _hex('F08F7C'),
@@ -156,8 +158,8 @@ class LyneTheme {
   );
 
   /// Foreground used on top of `accent` fills. White in light mode (black
-  /// accent), near-black mint-tinted in dark (mint accent).
-  Color get onAccent => isDark ? _hex('0E2218') : _hex('FFFFFF');
+  /// accent), black in dark mode (white accent) — monochrome both ways.
+  Color get onAccent => isDark ? _hex('111111') : _hex('FFFFFF');
 
   /// Material ThemeData built from this palette — wires bg/surface/accent
   /// into the Material 3 colour scheme so stock widgets (AppBar,
@@ -181,7 +183,7 @@ class LyneTheme {
       surface: surface,
       onSurface: fg,
       surfaceContainerHighest: bg,
-      outline: isDark ? _hex('2A2820') : line,
+      outline: isDark ? _hex('2A2A2A') : line,
       error: crit,
       onError: contrastFg,
     );

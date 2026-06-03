@@ -1,17 +1,19 @@
 // SoftTabBar (Material 3) — bottom NavigationBar with pill-indicator
-// behind the active icon. Mirrors the iOS SoftTabBar's tab order:
-// Home / Nearby / Settings / Search.
+// behind the active icon. Mirrors the iOS tab set exactly:
+// Home / Settings / Search. There is NO standalone Nearby tab — iOS folds
+// Nearby into the Home page (the "Nearby" section), so a separate tab would
+// duplicate it.
 //
 // SoftBottomBar stacks the AdMob banner above SoftTabBar for the
-// tabbed screens (Home / Nearby / Settings) — this is what those
-// Scaffolds mount as bottomNavigationBar.
+// tabbed screens (Home / Settings) — this is what those Scaffolds mount
+// as bottomNavigationBar.
 
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
 import '../ad_banner.dart';
 
-enum SoftTab { home, nearby, settings, search }
+enum SoftTab { home, settings, search }
 
 class SoftTabBar extends StatelessWidget {
   const SoftTabBar({
@@ -40,11 +42,6 @@ class SoftTabBar extends StatelessWidget {
           icon: Icon(Icons.home_outlined),
           selectedIcon: Icon(Icons.home_rounded),
           label: 'Home',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.near_me_outlined),
-          selectedIcon: Icon(Icons.near_me_rounded),
-          label: 'Nearby',
         ),
         NavigationDestination(
           icon: Icon(Icons.settings_outlined),

@@ -29,6 +29,32 @@ struct RouteTimeline: View {
     let stops: [RouteStop]
     @Binding var alightId: String?
 
+    // Beyond this many stops the leading run is collapsed behind a "show
+    // earlier stops" node so a long route stays scannable. Kept in sync with
+    // the Android RouteTimeline (`maxVisible`).
+    private static let maxVisible = 8
+
+    // Whether the collapsed leading stops are revealed. Long routes start
+    // collapsed so the boarding/upcoming area is what you see first.
+    @State private var expanded = false
+
+    /// Focal stop: the boarding stop, else the live bus, else the start.
+    private var focalIdx: Int {
+        if let i = stops.firstIndex(where: { $0.state == .board }) { return i }
+        if let i = stops.firstIndex(where: { $0.state == .here }) { return i }
+        return 0
+    }
+
+    /// First stop kept visible when collapsed — 2 stops of lead-in before the
+    /// focal stop. Everything before it folds into the collapse node.
+    private var keepFrom: Int { min(max(0, focalIdx - 2), stops.count) }
+
+    private var canCollapse: Bool {
+        stops.count > Self.maxVisible && keepFrom >= 2
+    }
+
+    private var startIdx: Int { (canCollapse && !expanded) ? keepFrom : 0 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -54,15 +80,59 @@ struct RouteTimeline: View {
             }
 
             VStack(spacing: 0) {
-                ForEach(Array(stops.enumerated()), id: \.element.id) { idx, stop in
+                // The collapse node sits at the visual top when active; the
+                // first rendered stop then keeps its top connector so the line
+                // stays unbroken.
+                if canCollapse {
+                    collapseNode(hiddenCount: keepFrom)
+                }
+                ForEach(Array(stops.enumerated()).filter { $0.offset >= startIdx },
+                        id: \.element.id) { idx, stop in
                     routeRow(stop: stop,
-                             isFirst: idx == 0,
+                             isFirst: !canCollapse && idx == startIdx,
                              isLast: idx == stops.count - 1)
                 }
             }
         }
         .padding(16)
         .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    /// Expandable node standing in for the collapsed leading stops. Tapping it
+    /// toggles the full list. Drawn like a route row (connector + glyph) so it
+    /// reads as part of the line, not a detached button.
+    @ViewBuilder
+    private func collapseNode(hiddenCount: Int) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    VStack(spacing: 0) {
+                        // Node is the visual top — no connector above it.
+                        Rectangle().fill(Color.clear).frame(width: 2)
+                        Rectangle().fill(t.line).frame(width: 2)
+                    }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(t.dim)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(t.surface))
+                }
+                .frame(width: 24)
+
+                Text(expanded
+                     ? "Hide earlier stops"
+                     : "Show \(hiddenCount) earlier stop\(hiddenCount == 1 ? "" : "s")")
+                    .font(t.sans(13, weight: .medium))
+                    .foregroundStyle(t.dim)
+                    .padding(.bottom, 14)
+                    .padding(.top, 2)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

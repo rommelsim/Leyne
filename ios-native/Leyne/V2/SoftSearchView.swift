@@ -14,6 +14,9 @@ struct SoftSearchView: View {
     @State private var query = ""
     let onClose: () -> Void
     let onOpenStop: (String) -> Void
+    /// Called when the user taps a service result. Receives (originStopCode, serviceNo)
+    /// so the root can push SoftBusView directly with fullRoute: true.
+    var onOpenBus: ((String, String) -> Void)?
 
     @FocusState private var focused: Bool
 
@@ -34,7 +37,11 @@ struct SoftSearchView: View {
 
     var body: some View {
         ZStack {
+            // Tapping empty space dismisses the keyboard (there's no Done bar
+            // on a plain TextField, so this + scroll-to-dismiss are the ways out).
             t.bg.ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { focused = false }
 
             VStack(alignment: .leading, spacing: 14) {
                 Eyebrow(text: "Find", t: t).padding(.leading, 2)
@@ -44,12 +51,21 @@ struct SoftSearchView: View {
                 ScrollView {
                     resultsContent.padding(.top, 2)
                 }
+                // Dragging the results list down sweeps the keyboard away as it
+                // goes — the expected "scroll to see more, keyboard hides" gesture.
+                .scrollDismissesKeyboard(.interactively)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
         }
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            // Warm the large, lazy BusRoutes dataset while the user types, so
+            // tapping a bus result opens the route view immediately instead of
+            // blocking on a cold fetch (originStop + serviceRoute both need it).
+            ds.ensureRoutes()
+        }
         .onChange(of: query) { _, _ in maybeGeocode() }
     }
 
@@ -190,7 +206,16 @@ struct SoftSearchView: View {
             fb.select()
             Task {
                 if let s = await ds.originStop(ofService: svc.ServiceNo) {
-                    await MainActor.run { m.addRecent(svc.ServiceNo); onOpenStop(s.BusStopCode) }
+                    await MainActor.run {
+                        m.addRecent(svc.ServiceNo)
+                        if let openBus = onOpenBus {
+                            openBus(s.BusStopCode, svc.ServiceNo)
+                        } else {
+                            // Fallback: open the origin stop (legacy behaviour for
+                            // callers that haven't wired onOpenBus yet).
+                            onOpenStop(s.BusStopCode)
+                        }
+                    }
                 }
             }
         } label: {

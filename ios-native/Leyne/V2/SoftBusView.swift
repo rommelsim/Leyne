@@ -40,6 +40,9 @@ struct BusPlot: Equatable {
 struct SoftBusView: View {
     let stopCode: String
     let svc: String
+    /// When true the route timeline shows the ENTIRE route (opened from a bus
+    /// search — no "your stop" context). Matches Android's `fullRoute` flag.
+    var fullRoute: Bool = false
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
     @EnvironmentObject var ds: DataStore
@@ -47,7 +50,8 @@ struct SoftBusView: View {
     let onBack: () -> Void
 
     @State private var alightId: String? = nil
-    @State private var route: RouteInfo?
+    @State private var serviceRouteData: ServiceRoute?
+    @State private var selectedDirIndex: Int = 0
     @State private var camera: MapCameraPosition = .automatic
     @State private var didCenterOnStop = false
     @StateObject private var loc = LocationManager.shared
@@ -61,6 +65,21 @@ struct SoftBusView: View {
     /// Drives the glide/creep + recency aging. App code, so wall-clock Date()
     /// is fine here (the no-Date rule applies only to workflow scripts).
     private let ticker = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+
+    /// The currently-selected direction, or nil while the route is loading.
+    private var currentDirection: RouteDirection? {
+        guard let sr = serviceRouteData,
+              selectedDirIndex < sr.directions.count else { return nil }
+        return sr.directions[selectedDirIndex]
+    }
+
+    /// A `RouteInfo` view over the selected direction, for map + estimation
+    /// helpers that predate the multi-direction model.
+    private var route: RouteInfo? {
+        guard let dir = currentDirection else { return nil }
+        return RouteInfo(stops: dir.stops, youIndex: dir.youIndex,
+                         busIndex: nil, busCoord: nil)
+    }
 
     private var t: Theme { m.t }
     private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
@@ -122,7 +141,8 @@ struct SoftBusView: View {
             recomputePlot()
         }
         .onReceive(ticker) { _ in recomputePlot() }
-        .onChange(of: route) { _, _ in recomputePlot() }
+        .onChange(of: serviceRouteData) { _, _ in recomputePlot() }
+        .onChange(of: selectedDirIndex) { _, _ in recomputePlot() }
         .onChange(of: ds.arrivals[stopCode]) { _, _ in recomputePlot() }
     }
 
@@ -393,24 +413,45 @@ struct SoftBusView: View {
     // MARK: Route (revealed on pull-up)
 
     private var routeSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let computed = timelineStops
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(t.dim)
-                Eyebrow(text: timelineStops.isEmpty
+                Eyebrow(text: computed.isEmpty
                         ? "Full route"
-                        : "Full route · \(timelineStops.count) stops", t: t)
+                        : "Full route · \(computed.count) stops", t: t)
                 Rectangle().fill(t.line).frame(height: 1)
             }
 
-            if !timelineStops.isEmpty {
+            // Direction toggle — show only when there are 2+ directions.
+            if let sr = serviceRouteData, sr.directions.count >= 2 {
+                directionPicker(sr)
+            }
+
+            if !computed.isEmpty {
                 Text("Tap a stop to set an arrival alert.")
                     .font(t.sans(13)).foregroundStyle(t.dim)
-                RouteTimeline(t: t, svc: svc, stops: timelineStops, alightId: $alightId)
+                RouteTimeline(t: t, svc: svc, stops: computed, alightId: $alightId)
                     .onChange(of: alightId) { _, new in scheduleAlight(stopCode: new) }
             }
         }
+    }
+
+    /// Segmented direction picker — "To {destinationName}" per direction.
+    /// Uses a native SwiftUI Picker in segmented style to stay platform-native.
+    @ViewBuilder
+    private func directionPicker(_ sr: ServiceRoute) -> some View {
+        Picker("Direction", selection: $selectedDirIndex) {
+            ForEach(sr.directions.indices, id: \.self) { i in
+                let dest = sr.directions[i].destinationName
+                Text("To \(dest.isEmpty ? "Direction \(i + 1)" : dest)")
+                    .tag(i)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Route direction")
     }
 
     // MARK: Map background
@@ -580,15 +621,27 @@ struct SoftBusView: View {
     }
 
     private var timelineStops: [RouteStop] {
-        guard let r = route else { return [] }
-        let segment = journeySegment(r)
+        guard let r = route, let dir = currentDirection else { return [] }
+        // Show the full route when:
+        //   • fullRoute == true (opened from bus search — no anchor stop context)
+        //   • the current direction does not contain the anchor stop; showing
+        //     only an approach window in that case would be meaningless.
+        let showFull = fullRoute || !dir.anchorPresent
+        let segment = showFull ? r.stops : journeySegment(r)
         let busSeq = r.busIndex
         let youSeq = r.youIndex
+        // Only mark a "THIS STOP" boarding stop in the per-stop flow AND when the
+        // anchor is in this direction. In fullRoute mode (bus search) there's no
+        // boarding stop, so mark none — otherwise the anchor's origin can reappear
+        // late on the return leg and get badged as the boarding stop, which made
+        // the collapse node show a spurious "Show N earlier stops" on one
+        // direction but not the other.
+        let canMarkBoard = !fullRoute && dir.anchorPresent
         return segment.map { stop -> RouteStop in
             let idx = r.stops.firstIndex(where: { $0.code == stop.code }) ?? -1
             let state: RouteStopState
             if let b = busSeq, idx == b { state = .here }
-            else if idx == youSeq { state = .board }
+            else if canMarkBoard && idx == youSeq { state = .board }
             else if idx < (busSeq ?? -1) { state = .past }
             else { state = .next }
             return RouteStop(id: stop.code, name: stop.name, state: state)
@@ -604,8 +657,12 @@ struct SoftBusView: View {
 
     private func loadRoute() {
         Task {
-            let r = await ds.route(service: svc, stopCode: stopCode)
-            await MainActor.run { self.route = r; recomputePlot() }
+            let sr = await ds.serviceRoute(service: svc, stopCode: stopCode)
+            await MainActor.run {
+                self.serviceRouteData = sr
+                self.selectedDirIndex = sr?.initialIndex ?? 0
+                recomputePlot()
+            }
         }
     }
 

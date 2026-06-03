@@ -129,6 +129,48 @@ class RouteInfo {
   final GeoPoint? busCoord;
 }
 
+/// One direction of a service (LTA Direction 1 or 2): the full ordered stop
+/// list, where the anchor stop sits in it, and whether the anchor is in this
+/// direction at all. A bus service almost always runs two directions
+/// (origin→terminus and back), so the Bus view offers a toggle between them.
+class RouteDirection {
+  RouteDirection({
+    required this.direction,
+    required this.stops,
+    required this.youIndex,
+    required this.anchorPresent,
+  });
+
+  /// LTA `Direction` value (1 or 2).
+  final int direction;
+  final List<RouteStopLive> stops;
+
+  /// Index of the anchor stop in [stops] (0 when the anchor isn't in this
+  /// direction — see [anchorPresent]).
+  final int youIndex;
+
+  /// Whether the anchor stopCode actually appears in this direction. False for
+  /// the "other" direction when the view was opened from a specific stop.
+  final bool anchorPresent;
+
+  String get originName => stops.isEmpty ? '' : stops.first.name;
+  String get destinationName => stops.isEmpty ? '' : stops.last.name;
+}
+
+/// A service's complete route across all directions. [initialIndex] is the
+/// direction whose stop list contains the anchor stop (so opening from a stop
+/// preselects the right way round); falls back to 0.
+class ServiceRoute {
+  ServiceRoute({
+    required this.serviceNo,
+    required this.directions,
+    required this.initialIndex,
+  });
+  final String serviceNo;
+  final List<RouteDirection> directions;
+  final int initialIndex;
+}
+
 /// The relevant slice of the route to draw on the map: from the bus's
 /// current position (or an approach window if it's passed/unknown) to just
 /// past your stop. Drawing the whole route would connect 40–60 stops with
@@ -672,6 +714,56 @@ class DataStore extends ChangeNotifier {
     return RouteInfo(
       stops: stops,
       youIndex: youIdx < 0 ? 0 : youIdx,
+    );
+  }
+
+  /// All directions of `serviceNo` (typically two — there and back), each with
+  /// its ordered stops. When `stopCode` is given, the matching direction is
+  /// flagged `anchorPresent` and chosen as `initialIndex`. Drives the Bus
+  /// view's direction toggle. Null when routes can't load or the service is
+  /// unknown.
+  Future<ServiceRoute?> serviceRoute({
+    required String serviceNo,
+    String? stopCode,
+  }) async {
+    final all = await _loadRoutes();
+    if (all == null) return null;
+    final forSvc = all.where((r) => r.serviceNo == serviceNo).toList();
+    if (forSvc.isEmpty) return null;
+    final dirs = forSvc.map((r) => r.direction).toSet().toList()..sort();
+    final directions = <RouteDirection>[];
+    for (final d in dirs) {
+      final seq = forSvc.where((r) => r.direction == d).toList()
+        ..sort((a, b) => a.stopSequence.compareTo(b.stopSequence));
+      final stops = <RouteStopLive>[];
+      for (final r in seq) {
+        final s = _stopByCode[r.busStopCode];
+        if (s == null) continue;
+        stops.add(RouteStopLive(
+          code: s.busStopCode,
+          name: s.description,
+          lat: s.latitude,
+          lon: s.longitude,
+          seq: r.stopSequence,
+        ));
+      }
+      if (stops.isEmpty) continue;
+      final youIdx =
+          stopCode == null ? -1 : stops.indexWhere((s) => s.code == stopCode);
+      directions.add(RouteDirection(
+        direction: d,
+        stops: stops,
+        youIndex: youIdx < 0 ? 0 : youIdx,
+        anchorPresent: youIdx >= 0,
+      ));
+    }
+    if (directions.isEmpty) return null;
+    var initial = directions.indexWhere((dir) => dir.anchorPresent);
+    if (initial < 0) initial = 0;
+    return ServiceRoute(
+      serviceNo: serviceNo,
+      directions: directions,
+      initialIndex: initial,
     );
   }
 

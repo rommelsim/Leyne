@@ -1,1 +1,2 @@
 - [User role](user-role.md) — iOS and Android owner, judges Android quality against iOS native rewrite; wants concrete file-level diffs
+- [iOS architecture](project-ios-architecture.md) — navigation (SoftRoute enum + per-tab stacks), DataStore patterns, ServiceRoute multi-direction model added 2026-06-03

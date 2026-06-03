@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import 'soft_bus_screen.dart';
 import 'soft_home_screen.dart';
-import 'soft_nearby_screen.dart';
 import 'soft_search_screen.dart';
 import 'soft_settings_screen.dart';
 import 'soft_stop_screen.dart';
@@ -28,10 +27,12 @@ class _SoftRootState extends State<SoftRoot> {
       _navKey.currentState?.push(MaterialPageRoute(
         builder: (_) => SoftSearchScreen(
           onClose: () => _navKey.currentState?.pop(),
-          onOpenStop: (code) {
-            _navKey.currentState?.pop();
-            _pushStop(code);
-          },
+          // Push the result ON TOP of search (don't pop search first) so
+          // Back from the stop/bus returns to the search results, then Back
+          // again returns Home — instead of jumping straight to Home.
+          onOpenStop: (code) => _pushStop(code),
+          onOpenBus: (stopCode, svc) =>
+              _pushBus(stopCode, svc, fullRoute: true),
         ),
       ));
       return;
@@ -40,30 +41,32 @@ class _SoftRootState extends State<SoftRoot> {
     _navKey.currentState?.popUntil((r) => r.isFirst);
   }
 
+  /// Push the bus route view for [svc] anchored at [stopCode]. [fullRoute]
+  /// shows the entire route (used for bus search, which has no boarding stop);
+  /// the per-stop arrival flow leaves it false for the narrow approach window.
+  void _pushBus(String stopCode, String svc, {bool fullRoute = false}) {
+    _navKey.currentState?.push(MaterialPageRoute(
+      builder: (_) => SoftBusScreen(
+        stopCode: stopCode,
+        svc: svc,
+        fullRoute: fullRoute,
+        onBack: () => _navKey.currentState?.pop(),
+      ),
+    ));
+  }
+
   void _pushStop(String code) {
     _navKey.currentState?.push(MaterialPageRoute(
       builder: (_) => SoftStopScreen(
         stopCode: code,
         onBack: () => _navKey.currentState?.pop(),
-        onOpenBus: (svc) => _navKey.currentState?.push(MaterialPageRoute(
-          builder: (_) => SoftBusScreen(
-            stopCode: code,
-            svc: svc,
-            onBack: () => _navKey.currentState?.pop(),
-          ),
-        )),
+        onOpenBus: (svc) => _pushBus(code, svc),
         onSeeAll: () => _navKey.currentState?.push(MaterialPageRoute(
           builder: (_) => SoftStopScreen(
             stopCode: code,
             showAll: true,
             onBack: () => _navKey.currentState?.pop(),
-            onOpenBus: (svc) => _navKey.currentState?.push(MaterialPageRoute(
-              builder: (_) => SoftBusScreen(
-                stopCode: code,
-                svc: svc,
-                onBack: () => _navKey.currentState?.pop(),
-              ),
-            )),
+            onOpenBus: (svc) => _pushBus(code, svc),
             onSeeAll: () {},
           ),
         )),
@@ -104,8 +107,6 @@ class _SoftRootState extends State<SoftRoot> {
           onOpenStop: _pushStop,
           onOpenSearch: () => _handleTab(SoftTab.search),
         );
-      case SoftTab.nearby:
-        return SoftNearbyScreen(onTab: _handleTab, onOpenStop: _pushStop);
       case SoftTab.settings:
         return SoftSettingsScreen(onTab: _handleTab);
       case SoftTab.search:

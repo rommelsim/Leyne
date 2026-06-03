@@ -1,6 +1,7 @@
 // Theme — Leyne 2.0 "Soft" tokens.
-// Warm dark (#15201C, mint accent) / white & black light (mirrors the
-// bus-view card — white surfaces, black ink, black accent, amber+red alerts).
+// Monochrome both ways: black-and-white dark (#0F0F0F, white accent) and
+// white & black light (#F2F2F2, black accent) — clean, no brand green;
+// confidence reads from opacity/shape, with amber+red kept for alerts.
 // Property names are preserved from the v1 theme so call sites compile
 // unchanged; only the values move to the Soft palette per specs/leyne-2.0-plan.md.
 
@@ -86,27 +87,31 @@ struct Theme: Equatable {
                 weight: weight, design: .monospaced)
     }
 
+    // Monochrome dark — clean black-and-white, no brand green. Accent (LIVE /
+    // arriving / pin) is pure white ink, mirroring the light mode's black-ink
+    // accent; confidence reads from opacity/shape, not hue. Amber + red are
+    // kept for disruption severity.
     static let dark = Theme(
         isDark: true,
-        bg: Color(hex: "15201C"),
-        surface: Color(hex: "1F2C28"),
-        surfaceHi: Color(hex: "293732"),
-        contrast: Color(hex: "F1EDE7"),
-        contrastFg: Color(hex: "0E2218"),
-        contrastSurface: Color(hex: "293732"),
-        fg: Color(hex: "F1EDE7"),
-        dim: Color(hex: "F1EDE7").opacity(0.6),
-        faint: Color(hex: "F1EDE7").opacity(0.35),
-        line: Color(hex: "F1EDE7").opacity(0.08),
-        lineHi: Color(hex: "F1EDE7").opacity(0.14),
-        accent: Color(hex: "8EE6C0"),
-        live: Color(hex: "8EE6C0"),
-        liveBg: Color(hex: "0F2A20"),
+        bg: Color(hex: "0F0F0F"),
+        surface: Color(hex: "1A1A1A"),
+        surfaceHi: Color(hex: "262626"),
+        contrast: Color(hex: "FFFFFF"),
+        contrastFg: Color(hex: "0F0F0F"),
+        contrastSurface: Color(hex: "2E2E2E"),
+        fg: Color(hex: "FFFFFF"),
+        dim: Color(hex: "FFFFFF").opacity(0.6),
+        faint: Color(hex: "FFFFFF").opacity(0.35),
+        line: Color(hex: "FFFFFF").opacity(0.1),
+        lineHi: Color(hex: "FFFFFF").opacity(0.16),
+        accent: Color(hex: "FFFFFF"),
+        live: Color(hex: "FFFFFF"),
+        liveBg: Color(hex: "242424"),
         warn: Color(hex: "F4B870"),
         warnBg: Color(hex: "F4B870").opacity(0.16),
         crit: Color(hex: "F08F7C"),
         critBg: Color(hex: "F08F7C").opacity(0.16),
-        onAccent: Color(hex: "0E2218")
+        onAccent: Color(hex: "111111")
     )
 
     // White & black light mode — mirrors the bus-view card (white surface,

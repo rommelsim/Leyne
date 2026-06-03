@@ -39,7 +39,9 @@ extension View {
 
 enum SoftRoute: Hashable {
     case stop(String)
-    case bus(stopCode: String, svc: String)
+    /// `fullRoute` is true when opened from a bus search (no anchor stop
+    /// context), so the route timeline shows the whole route from origin.
+    case bus(stopCode: String, svc: String, fullRoute: Bool = false)
     case search
 }
 
@@ -86,7 +88,12 @@ struct SoftRoot: View {
                     navStack($searchStack) {
                         SoftSearchView(
                             onClose: { tab = .home },
-                            onOpenStop: { searchStack.append(.stop($0)) }
+                            onOpenStop: { searchStack.append(.stop($0)) },
+                            onOpenBus: { stopCode, svcNo in
+                                searchStack.append(.bus(stopCode: stopCode,
+                                                        svc: svcNo,
+                                                        fullRoute: true))
+                            }
                         )
                     }
                 }
@@ -147,16 +154,23 @@ struct SoftRoot: View {
             SoftStopView(stopCode: code,
                          onBack: pop,
                          onOpenBus: { svc in path.wrappedValue.append(.bus(stopCode: code, svc: svc)) })
-        case .bus(let code, let svc):
-            SoftBusView(stopCode: code, svc: svc, onBack: pop)
+        case .bus(let code, let svc, let fullRoute):
+            SoftBusView(stopCode: code, svc: svc, fullRoute: fullRoute, onBack: pop)
         case .search:
             // Legacy route — Search is now a first-class tab. Kept so any
             // stale path still resolves; route taps into the same stack.
             SoftSearchView(
                 onClose: pop,
+                // Append on top of search (don't pop it first) so Back returns
+                // to the results, then Back again leaves search — matching the
+                // first-class search tab's behavior.
                 onOpenStop: { code in
-                    pop()
                     path.wrappedValue.append(.stop(code))
+                },
+                onOpenBus: { stopCode, svcNo in
+                    path.wrappedValue.append(.bus(stopCode: stopCode,
+                                                   svc: svcNo,
+                                                   fullRoute: true))
                 }
             )
         }

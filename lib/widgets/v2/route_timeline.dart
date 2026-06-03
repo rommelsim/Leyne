@@ -19,7 +19,7 @@ class SoftRouteStop {
   final int? etaMin;
 }
 
-class RouteTimeline extends StatelessWidget {
+class RouteTimeline extends StatefulWidget {
   const RouteTimeline({
     super.key,
     required this.svc,
@@ -35,9 +35,24 @@ class RouteTimeline extends StatelessWidget {
   final ValueChanged<String?> onAlight;
   final DateTime? now;
 
+  /// Beyond this many stops the leading run is collapsed behind a "show
+  /// earlier stops" node so a long route stays scannable. Kept in sync with
+  /// the iOS RouteTimeline (`maxVisible`).
+  static const int maxVisible = 8;
+
+  @override
+  State<RouteTimeline> createState() => _RouteTimelineState();
+}
+
+class _RouteTimelineState extends State<RouteTimeline> {
+  // Whether the collapsed leading stops are revealed. Long routes start
+  // collapsed so the boarding/upcoming area is what you see first.
+  bool _expanded = false;
+
   @override
   Widget build(BuildContext context) {
     final t = context.t;
+    final stops = widget.stops;
 
     // "N STOPS AWAY" badge: iOS deliberately suppresses this because busIndex
     // is always nil today (DataStore hard-codes it to null — RouteTimeline.swift
@@ -51,14 +66,25 @@ class RouteTimeline extends StatelessWidget {
     final aheadCount = showAhead ? stops.length - hereIdx - 1 : 0;
 
     final showHint =
-        alightId == null &&
+        widget.alightId == null &&
         stops.any((s) => s.state == SoftRouteStopState.next);
+
+    // Long-route collapse: fold the lead-in (everything more than 2 stops
+    // before the focal stop — the boarding stop, else the live bus, else the
+    // start) into one expandable node, keeping the actionable tail visible.
+    int focalIdx =
+        stops.indexWhere((s) => s.state == SoftRouteStopState.board);
+    if (focalIdx < 0) focalIdx = hereIdx;
+    if (focalIdx < 0) focalIdx = 0;
+    final keepFrom = (focalIdx - 2).clamp(0, stops.length);
+    final canCollapse = stops.length > RouteTimeline.maxVisible && keepFrom >= 2;
+    final startIdx = (canCollapse && !_expanded) ? keepFrom : 0;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: t.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(LyneRadius.md),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -66,7 +92,7 @@ class RouteTimeline extends StatelessWidget {
           Row(
             children: [
               Text(
-                'ROUTE · BUS $svc',
+                'ROUTE · BUS ${widget.svc}',
                 style: t
                     .mono(10, weight: FontWeight.w600, color: t.dim)
                     .copyWith(letterSpacing: 1),
@@ -92,9 +118,71 @@ class RouteTimeline extends StatelessWidget {
                 style: t.sans(12, color: t.dim),
               ),
             ),
-          for (var i = 0; i < stops.length; i++)
-            _row(context, stops[i], i == 0, i == stops.length - 1),
+          // The collapse node sits at the visual top when active; the first
+          // rendered stop then keeps its top connector so the line is unbroken.
+          if (canCollapse) _collapseNode(context, hiddenCount: keepFrom),
+          for (var i = startIdx; i < stops.length; i++)
+            _row(
+              context,
+              stops[i],
+              !canCollapse && i == startIdx,
+              i == stops.length - 1,
+            ),
         ],
+      ),
+    );
+  }
+
+  /// Expandable node standing in for the collapsed leading stops. Tapping it
+  /// toggles the full list. Drawn like a route row (connector + glyph) so it
+  /// reads as part of the line, not a detached button.
+  Widget _collapseNode(BuildContext context, {required int hiddenCount}) {
+    final t = context.t;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () => setState(() => _expanded = !_expanded),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 24,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Column(
+                    children: [
+                      // Node is the visual top — no connector above it.
+                      const Expanded(child: SizedBox()),
+                      Expanded(
+                        child: Center(
+                          child: Container(width: 2, color: t.line),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 16,
+                    color: t.dim,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14, top: 2),
+              child: Text(
+                _expanded
+                    ? 'Hide earlier stops'
+                    : 'Show $hiddenCount earlier stop${hiddenCount == 1 ? "" : "s"}',
+                style: t.sans(13, weight: FontWeight.w500, color: t.dim),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -104,7 +192,7 @@ class RouteTimeline extends StatelessWidget {
     final upcoming =
         stop.state == SoftRouteStopState.next ||
         stop.state == SoftRouteStopState.alight;
-    final resolved = (alightId == stop.id && upcoming)
+    final resolved = (widget.alightId == stop.id && upcoming)
         ? SoftRouteStopState.alight
         : (stop.state == SoftRouteStopState.alight
               ? SoftRouteStopState.next
@@ -113,7 +201,7 @@ class RouteTimeline extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(6),
       onTap: upcoming
-          ? () => onAlight(alightId == stop.id ? null : stop.id)
+          ? () => widget.onAlight(widget.alightId == stop.id ? null : stop.id)
           : null,
       child: IntrinsicHeight(
         child: Row(
@@ -314,7 +402,7 @@ class RouteTimeline extends StatelessWidget {
   }
 
   String _clockETA(int mins) {
-    final target = (now ?? DateTime.now()).add(Duration(minutes: mins));
+    final target = (widget.now ?? DateTime.now()).add(Duration(minutes: mins));
     final h = target.hour.toString().padLeft(2, '0');
     final m = target.minute.toString().padLeft(2, '0');
     return '$h:$m';

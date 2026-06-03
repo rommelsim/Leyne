@@ -19,6 +19,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -61,10 +62,16 @@ class SoftBusScreen extends StatefulWidget {
     required this.stopCode,
     required this.svc,
     required this.onBack,
+    this.fullRoute = false,
   });
   final String stopCode;
   final String svc;
   final VoidCallback onBack;
+
+  /// When opened from a bus search there's no "your stop" context, so the
+  /// route timeline shows the WHOLE route (anchored at the service origin)
+  /// instead of the narrow approach window used when arriving at a real stop.
+  final bool fullRoute;
 
   @override
   State<SoftBusScreen> createState() => _SoftBusScreenState();
@@ -74,6 +81,8 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     with TickerProviderStateMixin {
   // ── Route data ──────────────────────────────────────────────────────
   RouteInfo? _route;
+  ServiceRoute? _serviceRoute;
+  int _dirIndex = 0;
 
   // ── Alight pick ─────────────────────────────────────────────────────
   String? get _alightId {
@@ -129,14 +138,34 @@ class _SoftBusScreenState extends State<SoftBusScreen>
 
   // ── Route loading ────────────────────────────────────────────────────
   Future<void> _loadRoute() async {
-    final r = await DataStore.shared.route(
+    final sr = await DataStore.shared.serviceRoute(
       serviceNo: widget.svc,
       stopCode: widget.stopCode,
     );
     if (mounted) {
-      setState(() => _route = r);
+      setState(() {
+        _serviceRoute = sr;
+        if (sr != null) {
+          _dirIndex = sr.initialIndex;
+          _route = _routeFromDir(sr.directions[_dirIndex]);
+        }
+      });
       _recomputePlot();
     }
+  }
+
+  /// Derive a RouteInfo from a RouteDirection so the rest of the screen
+  /// (map dots, estimated coord, alight scheduling) keeps using the same
+  /// RouteInfo type unchanged.
+  RouteInfo _routeFromDir(RouteDirection dir) {
+    return RouteInfo(stops: dir.stops, youIndex: dir.youIndex);
+  }
+
+  /// Current direction, or null when the service route hasn't loaded yet.
+  RouteDirection? get _currentDir {
+    final sr = _serviceRoute;
+    if (sr == null || _dirIndex >= sr.directions.length) return null;
+    return sr.directions[_dirIndex];
   }
 
   // ── Alight scheduling ────────────────────────────────────────────────
@@ -358,15 +387,29 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   List<SoftRouteStop> _timelineStops() {
     final r = _route;
     if (r == null) return const [];
-    final seg = journeySegment(r);
+    final dir = _currentDir;
+    // Show the full route when:
+    //   • widget.fullRoute (opened from bus search — no anchor stop context)
+    //   • the currently-shown direction does not contain the anchor stop;
+    //     showing only an approach window in that case would be meaningless.
+    final showFull = widget.fullRoute || (dir != null && !dir.anchorPresent);
+    final seg = showFull ? r.stops : journeySegment(r);
     final youSeq = r.youIndex;
     final busSeq = r.busIndex;
+    // Only mark a "THIS STOP" boarding stop when this is the per-stop flow AND
+    // the anchor is actually present in this direction. In fullRoute mode (bus
+    // search) there's no boarding stop, so mark none — otherwise the anchor's
+    // origin can reappear late on the return leg and get badged as the boarding
+    // stop, which made the collapse node show a spurious "Show N earlier stops"
+    // on one direction but not the other.
+    final canMarkBoard =
+        !widget.fullRoute && (dir == null || dir.anchorPresent);
     return seg.map((stop) {
       final idx = r.stops.indexWhere((s) => s.code == stop.code);
       SoftRouteStopState state;
       if (busSeq != null && idx == busSeq) {
         state = SoftRouteStopState.here;
-      } else if (idx == youSeq) {
+      } else if (canMarkBoard && idx == youSeq) {
         state = SoftRouteStopState.board;
       } else if (idx < (busSeq ?? -1)) {
         state = SoftRouteStopState.past;
@@ -637,6 +680,56 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
+  // ── Direction toggle ─────────────────────────────────────────────────
+  /// Pill-row toggle between the service's two directions.  Uses Material 3
+  /// SegmentedButton so selection, focus ring, and accessibility come for
+  /// free.  Labels are truncated gracefully to 18 chars; the chip intrinsically
+  /// shrinks to fit the available width via Flexible children.
+  Widget _buildDirectionToggle(BuildContext context, LyneTheme t) {
+    final sr = _serviceRoute!;
+    return SegmentedButton<int>(
+      showSelectedIcon: false,
+      style: SegmentedButton.styleFrom(
+        backgroundColor: t.liveBg,
+        foregroundColor: t.dim,
+        selectedForegroundColor: t.contrastFg,
+        selectedBackgroundColor: t.contrast,
+        side: BorderSide.none,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(LyneRadius.full),
+        ),
+        textStyle: t.sans(13, weight: FontWeight.w600),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+      ),
+      segments: [
+        for (var i = 0; i < sr.directions.length; i++)
+          ButtonSegment<int>(
+            value: i,
+            label: Text(
+              _truncate('To ${sr.directions[i].destinationName}', 22),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+      ],
+      selected: {_dirIndex},
+      onSelectionChanged: (selection) {
+        final newIdx = selection.first;
+        if (newIdx == _dirIndex) return;
+        setState(() {
+          _dirIndex = newIdx;
+          _route = _routeFromDir(sr.directions[_dirIndex]);
+        });
+        _recomputePlot();
+      },
+    );
+  }
+
+  /// Truncate [s] to [max] chars, appending "…" only when needed.
+  static String _truncate(String s, int max) =>
+      s.length <= max ? s : '${s.substring(0, max - 1)}…';
+
   // ── Sheet body ───────────────────────────────────────────────────────
   Widget _buildSheetBody(BuildContext context, Service? live) {
     final t = context.t;
@@ -667,6 +760,13 @@ class _SoftBusScreenState extends State<SoftBusScreen>
         const SizedBox(height: 20),
         // ── Route timeline ──────────────────────────────────────────
         if (_route != null) ...[
+          // Direction toggle — only shown when the service has more than one
+          // direction (virtually all routes).  Uses a SegmentedButton so
+          // Material handles selection, focus, and accessibility states.
+          if ((_serviceRoute?.directions.length ?? 0) > 1) ...[
+            _buildDirectionToggle(context, t),
+            const SizedBox(height: 12),
+          ],
           Row(
             children: [
               Icon(Icons.route_rounded, size: 14, color: t.dim),
@@ -1237,24 +1337,72 @@ class _DraggableSheet extends StatefulWidget {
   State<_DraggableSheet> createState() => _DraggableSheetState();
 }
 
-class _DraggableSheetState extends State<_DraggableSheet> {
+class _DraggableSheetState extends State<_DraggableSheet>
+    with SingleTickerProviderStateMixin {
   bool _expanded = false;
-  // Performance: drag offset stored in a ValueNotifier so only the
-  // Transform.translate (and its child) rebuild on pointer-move events,
-  // not the entire sheet body subtree.
+
+  // Drag offset (delta from the current snap base) stored in a ValueNotifier
+  // so only the Transform.translate — not the whole sheet body — rebuilds on
+  // pointer-move and during the settle animation.
   final ValueNotifier<double> _dragNotifier = ValueNotifier(0);
+
+  // Spring-driven settle so the sheet flings/eases to its snap point with
+  // real physics instead of teleporting. Unbounded because the simulation
+  // drives the offset directly (it may briefly overshoot before settling).
+  late final AnimationController _settleCtrl;
+
+  // Latest collapsed translation (sheetH - peekH), refreshed each layout so
+  // the gesture math uses the live value.
+  double _collapsedY = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _settleCtrl = AnimationController.unbounded(vsync: this)
+      ..addListener(() => _dragNotifier.value = _settleCtrl.value);
+  }
 
   @override
   void dispose() {
+    _settleCtrl.dispose();
     _dragNotifier.dispose();
     super.dispose();
   }
 
-  void _snap(bool expand) {
-    setState(() {
-      _expanded = expand;
-      _dragNotifier.value = 0;
-    });
+  /// Current absolute translateY (0 = fully expanded, _collapsedY = peek),
+  /// clamped to the travel range.
+  double get _absolute {
+    final base = _expanded ? 0.0 : _collapsedY;
+    return (base + _dragNotifier.value).clamp(0.0, _collapsedY);
+  }
+
+  /// Hand the current absolute position to the new snap base without a visual
+  /// jump, then spring the offset back to rest — carrying [velocity] (px/s)
+  /// so a flick flings naturally.
+  void _settleTo(bool expand, double velocity) {
+    final absolute = _absolute;
+    final newBase = expand ? 0.0 : _collapsedY;
+    setState(() => _expanded = expand);
+    _dragNotifier.value = absolute - newBase; // continuous across the flip
+    final spring = SpringDescription.withDampingRatio(
+      mass: 1,
+      stiffness: 480,
+      ratio: 1,
+    );
+    _settleCtrl.animateWith(
+      SpringSimulation(spring, _dragNotifier.value, 0, velocity),
+    );
+  }
+
+  /// Pick the snap target from fling velocity, falling back to nearest edge.
+  void _onDragEnd(double velocity) {
+    if (velocity < -300) {
+      _settleTo(true, velocity); // fling up → expand
+    } else if (velocity > 300) {
+      _settleTo(false, velocity); // fling down → collapse
+    } else {
+      _settleTo(_absolute < _collapsedY / 2, velocity); // snap to nearest
+    }
   }
 
   @override
@@ -1267,6 +1415,7 @@ class _DraggableSheetState extends State<_DraggableSheet> {
         final maxH = screenH * widget.maxFraction;
         final sheetH = maxH;
         final collapsedY = sheetH - peekH;
+        _collapsedY = collapsedY; // keep gesture math in sync with layout
 
         // The sheet content (Material + Column) is built once here and
         // passed as the non-rebuilding `child` of ValueListenableBuilder.
@@ -1281,24 +1430,12 @@ class _DraggableSheetState extends State<_DraggableSheet> {
               // Handle + header (always visible in peek).
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                onVerticalDragStart: (_) => _settleCtrl.stop(),
                 onVerticalDragUpdate: (d) {
                   _dragNotifier.value += d.delta.dy;
                 },
-                onVerticalDragEnd: (d) {
-                  final v = d.primaryVelocity ?? 0;
-                  final drag = _dragNotifier.value;
-                  if (v < -200 || drag < -40) {
-                    _snap(true);
-                  } else if (v > 200 || drag > 40) {
-                    _snap(false);
-                  } else {
-                    setState(() => _dragNotifier.value = 0);
-                  }
-                },
-                onTap: () => setState(() {
-                  _expanded = !_expanded;
-                  _dragNotifier.value = 0;
-                }),
+                onVerticalDragEnd: (d) => _onDragEnd(d.primaryVelocity ?? 0),
+                onTap: () => _settleTo(!_expanded, 0),
                 child: Semantics(
                   label: _expanded
                       ? 'Collapse details'

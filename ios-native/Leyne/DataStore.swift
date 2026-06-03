@@ -37,6 +37,36 @@ struct RouteInfo: Equatable {
     }
 }
 
+/// One direction of a service (LTA Direction 1 or 2): the full ordered stop
+/// list, where the anchor stop sits in it, and whether the anchor is in this
+/// direction at all. A bus service almost always runs two directions
+/// (origin→terminus and back), so the Bus view offers a toggle between them.
+struct RouteDirection: Equatable {
+    /// LTA `Direction` value (1 or 2).
+    let direction: Int
+    let stops: [RouteStopLive]
+
+    /// Index of the anchor stop in `stops` (0 when the anchor isn't in this
+    /// direction — see `anchorPresent`).
+    let youIndex: Int
+
+    /// Whether the anchor stopCode actually appears in this direction. False for
+    /// the "other" direction when the view was opened from a specific stop.
+    let anchorPresent: Bool
+
+    var originName: String { stops.first?.name ?? "" }
+    var destinationName: String { stops.last?.name ?? "" }
+}
+
+/// A service's complete route across all directions. `initialIndex` is the
+/// direction whose stop list contains the anchor stop (so opening from a stop
+/// preselects the right way round); falls back to 0.
+struct ServiceRoute: Equatable {
+    let serviceNo: String
+    let directions: [RouteDirection]
+    let initialIndex: Int
+}
+
 /// MRT/LRT line disruption surfaced on the Home screen. Built from LTA's
 /// TrainServiceAlerts response — one entry per affected segment so a
 /// multi-line incident renders as multiple cards.
@@ -363,6 +393,44 @@ final class DataStore: ObservableObject {
         }
         let youIdx = stops.firstIndex { $0.code == stopCode } ?? 0
         return RouteInfo(stops: stops, youIndex: youIdx, busIndex: nil, busCoord: nil)
+    }
+
+    /// All directions of `service` (typically two — there and back), each with
+    /// its ordered stops. When `stopCode` is given, the matching direction is
+    /// flagged `anchorPresent` and chosen as `initialIndex`. Drives the Bus
+    /// view's direction toggle. Nil when routes can't load or the service is
+    /// unknown.
+    func serviceRoute(service no: String, stopCode: String?) async -> ServiceRoute? {
+        guard let all = await loadRoutes() else { return nil }
+        let forSvc = all.filter { $0.ServiceNo == no }
+        guard !forSvc.isEmpty else { return nil }
+        let dirs = Set(forSvc.map { $0.Direction }).sorted()
+        var directions: [RouteDirection] = []
+        for d in dirs {
+            let seq = forSvc.filter { $0.Direction == d }
+                .sorted { $0.StopSequence < $1.StopSequence }
+            let stops: [RouteStopLive] = seq.compactMap { r in
+                guard let s = stopByCode[r.BusStopCode] else { return nil }
+                return RouteStopLive(code: s.BusStopCode, name: s.Description,
+                                     lat: s.Latitude, lon: s.Longitude, seq: r.StopSequence)
+            }
+            guard !stops.isEmpty else { continue }
+            let youIdx: Int
+            if let code = stopCode {
+                youIdx = stops.firstIndex(where: { $0.code == code }) ?? -1
+            } else {
+                youIdx = -1
+            }
+            directions.append(RouteDirection(
+                direction: d,
+                stops: stops,
+                youIndex: youIdx < 0 ? 0 : youIdx,
+                anchorPresent: youIdx >= 0
+            ))
+        }
+        guard !directions.isEmpty else { return nil }
+        let initial = directions.firstIndex(where: { $0.anchorPresent }) ?? 0
+        return ServiceRoute(serviceNo: no, directions: directions, initialIndex: initial)
     }
 
     /// Live position of the next bus of `service` approaching `stopCode`.

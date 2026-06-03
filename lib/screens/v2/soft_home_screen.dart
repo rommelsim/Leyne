@@ -292,20 +292,10 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
       _LiveRowItem() => _liveRow(context),
       _GapItem(:final height) => SizedBox(height: height),
       _EyebrowItem(:final label) => Eyebrow(label),
-      _PinCardItem(:final pin) => RepaintBoundary(
-        child: _PinCard(
-          pin: pin,
-          services: _filteredServices(pin),
-          walkMinutes: _walkMinutes(pin.code),
-          onTap: () => widget.onOpenStop(pin.code),
-        ),
-      ),
-      _NearbyCardItem(:final stop) => RepaintBoundary(
-        child: _NearbyCard(
-          stop: stop,
-          onTap: () => widget.onOpenStop(stop.stopCode),
-        ),
-      ),
+      _PinCardItem(:final pin) =>
+        RepaintBoundary(child: _pinStopCard(pin)),
+      _NearbyCardItem(:final stop) =>
+        RepaintBoundary(child: _nearbyStopCard(stop)),
       _AlertItem(:final alert) => _mrtAlertCard(context, alert),
       _EmptyItem() => _EmptyState(
         onNearby: () async {
@@ -321,27 +311,49 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     };
   }
 
+  /// Pinned-stop card — the unified iOS-style SoftStopCard. Name is the stop's
+  /// real name (matching iOS, which doesn't surface the nickname here); trailing
+  /// shows walk-minutes.
+  Widget _pinStopCard(Pin pin) {
+    final dsName = DataStore.shared.stopName(pin.code);
+    final walk = _walkMinutes(pin.code);
+    return _SoftStopCard(
+      name: dsName.isEmpty ? pin.code : dsName,
+      code: pin.code,
+      desc: DataStore.shared.roadName(pin.code),
+      trailing: walk != null ? '$walk min' : null,
+      services: _filteredServices(pin),
+      feed: Freshness.from(DataStore.shared.lastRefresh(pin.code)),
+      onTap: () => widget.onOpenStop(pin.code),
+    );
+  }
+
+  /// Nearby-stop card — same unified card, trailing shows distance.
+  Widget _nearbyStopCard(NearbyStop stop) {
+    return _SoftStopCard(
+      name: stop.stopName,
+      code: stop.stopCode,
+      desc: DataStore.shared.roadName(stop.stopCode),
+      trailing: fmtDistance(stop.distanceM),
+      services: DataStore.shared.servicesFor(stop.stopCode),
+      feed: Freshness.from(DataStore.shared.lastRefresh(stop.stopCode)),
+      onTap: () => widget.onOpenStop(stop.stopCode),
+    );
+  }
+
   Widget _header(BuildContext context) {
     final t = context.t;
-    return Row(
+    // Greeting + title only — no search icon here. Search is reached via the
+    // bottom-bar Search tab (matching iOS, whose home header has no search
+    // button either); a second header button was redundant.
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Eyebrow(_greeting()),
-              const SizedBox(height: 2),
-              Text(
-                'Stops near you',
-                style: t.sans(28, weight: FontWeight.w600, color: t.fg),
-              ),
-            ],
-          ),
-        ),
-        IconButton.filledTonal(
-          onPressed: widget.onOpenSearch,
-          icon: const Icon(Icons.search_rounded),
+        Eyebrow(_greeting()),
+        const SizedBox(height: 2),
+        Text(
+          'Stops near you',
+          style: t.sans(28, weight: FontWeight.w600, color: t.fg),
         ),
       ],
     );
@@ -434,82 +446,68 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   }
 }
 
-// ─── Pinned stop card ───────────────────────────────────────────────────────
+// ─── Unified stop card (mirrors iOS SoftStopCard) ───────────────────────────
 
-/// Pinned-stop card matching the Soft 2.0 prototype: pin-chip + stop-name
-/// + walk-time header row, up to 3 services sorted by next arrival with
-/// right-aligned ETA ("now" in accent, otherwise mono), an overflow
-/// "+N more arrivals →" link, and a quiet state when no live arrivals.
-///
-/// Services are already ETA-sorted by DataStore._fetchArrivals and
-/// AppModel.liveServices. No re-sort here — that was waste on every rebuild.
-/// The narrow ListenableBuilder(AppModel.shared) makes only the ETA text
-/// rebuild each second, not the card's layout/chrome.
-class _PinCard extends StatelessWidget {
-  const _PinCard({
-    required this.pin,
+/// Natural service-number order ('7' < '91' < '107M' < '191') so a stop's
+/// chips read like its panel — leading integer first, then lexical.
+int _compareServiceNo(Service a, Service b) {
+  int lead(String s) =>
+      int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), '')) ?? 1 << 30;
+  final c = lead(a.no).compareTo(lead(b.no));
+  return c != 0 ? c : a.no.compareTo(b.no);
+}
+
+/// The Leyne 3.0 Home card — a stop's identity (pin tile · name · code · road)
+/// + a trailing distance/walk, then a wrapping row of mini bus-number chips.
+/// Used for BOTH the Pinned and Nearby sections so the page reads as one
+/// language — a direct port of iOS `SoftStopCard`. Material-native (Material
+/// surface + InkWell ripple). The chip row's ETAs refresh each second via a
+/// narrow ListenableBuilder(AppModel) so only the chips — not the card chrome —
+/// rebuild on the tick.
+class _SoftStopCard extends StatelessWidget {
+  const _SoftStopCard({
+    required this.name,
+    required this.code,
+    required this.desc,
+    required this.trailing,
     required this.services,
-    required this.walkMinutes,
+    required this.feed,
     required this.onTap,
   });
 
-  static const int _maxVisible = 3;
+  static const int _maxChips = 4;
 
-  final Pin pin;
+  final String name;
+  final String code;
+  final String desc; // road name / "opp Blk 445"; may be empty
+  final String? trailing; // distance ("80m") or walk ("3 min"); may be null
   final List<Service> services;
-  final int? walkMinutes;
+  final Freshness feed;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    // Services are already ETA-sorted upstream (DataStore._fetchArrivals sorts
-    // on load; AppModel.liveServices re-sorts after ETA recomputation). No
-    // re-sort needed here — it was wasted work on every rebuild.
-    final visible = services.take(_maxVisible).toList();
-    final overflow = services.length > _maxVisible
-        ? services.length - _maxVisible
-        : 0;
-    final dsName = DataStore.shared.stopName(pin.code);
-    final stopName = dsName.isEmpty ? pin.code : dsName;
-    final nick = pin.nickname.trim();
-    // Empty when there's no real nickname — the card then shows no chip
-    // rather than a redundant "PIN" label. Matches iOS SoftPinCard.
-    final chip = (nick.isEmpty || nick.toLowerCase() == stopName.toLowerCase())
-        ? ''
-        : nick.toUpperCase();
-
-    // Compute Freshness once per card, not once per service row.
-    final feed = Freshness.from(DataStore.shared.lastRefresh(pin.code));
+    // Chips order by bus number (matching iOS), capped at 4 + "+N".
+    final sorted = [...services]..sort(_compareServiceNo);
 
     return Material(
       color: t.surface,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(LyneRadius.md),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _header(context, chip: chip, stopName: stopName),
-              const SizedBox(height: 12),
-              if (visible.isEmpty)
+              _headerRow(context),
+              const SizedBox(height: 11),
+              if (sorted.isEmpty)
                 _quietRow(context)
-              else ...[
-                for (var i = 0; i < visible.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 10),
-                  _serviceRow(context, visible[i], feed: feed),
-                ],
-                if (overflow > 0) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    '+$overflow more arrivals →',
-                    style: t.sans(12, weight: FontWeight.w500, color: t.dim),
-                  ),
-                ],
-              ],
+              else
+                _chipRow(context, sorted),
             ],
           ),
         ),
@@ -517,107 +515,96 @@ class _PinCard extends StatelessWidget {
     );
   }
 
-  Widget _header(
-    BuildContext context, {
-    required String chip,
-    required String stopName,
-  }) {
+  Widget _headerRow(BuildContext context) {
     final t = context.t;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        if (chip.isNotEmpty) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: t.liveBg,
-              borderRadius: BorderRadius.circular(99),
-            ),
-            child: Text(
-              chip,
-              style: t
-                  .mono(10, weight: FontWeight.w600, color: t.accent)
-                  .copyWith(letterSpacing: 0.8),
-            ),
+        // Leading map-pin tile — distinguishes a stop card at a glance.
+        Container(
+          width: 38,
+          height: 38,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: t.surfaceHi,
+            borderRadius: BorderRadius.circular(11),
           ),
-          const SizedBox(width: 8),
-        ],
+          child: Icon(Icons.location_on, size: 18, color: t.fg),
+        ),
+        const SizedBox(width: 11),
         Expanded(
-          child: Text(
-            stopName,
-            style: t.sans(17, weight: FontWeight.w600, color: t.fg),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: t.sans(16, weight: FontWeight.w600, color: t.fg),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                desc.isEmpty ? code : '$code · $desc',
+                style: t.mono(11.5, color: t.dim),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
         ),
-        if (walkMinutes != null) ...[
+        if (trailing != null) ...[
           const SizedBox(width: 8),
-          _walkChip(context, walkMinutes!),
-        ],
-      ],
-    );
-  }
-
-  Widget _walkChip(BuildContext context, int minutes) {
-    final t = context.t;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: t.liveBg.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.directions_walk, size: 12, color: t.dim),
-          const SizedBox(width: 4),
           Text(
-            '$minutes m',
-            style: t.mono(11, weight: FontWeight.w600, color: t.dim),
+            trailing!,
+            style: t.mono(12, weight: FontWeight.w600, color: t.dim),
           ),
         ],
-      ),
+        const SizedBox(width: 6),
+        Icon(Icons.chevron_right, size: 18, color: t.faint),
+      ],
     );
   }
 
-  /// Service row with a narrow ListenableBuilder so ONLY the ETA text
-  /// rebuilds each second when AppModel ticks — the badge, destination
-  /// text, and layout stay untouched.
-  Widget _serviceRow(
-    BuildContext context,
-    Service s, {
-    required Freshness feed,
-  }) {
+  /// Wrapping mini-chip row. Wrapped in a narrow AppModel listener so only the
+  /// chips re-render each second (the header/tile stay put).
+  Widget _chipRow(BuildContext context, List<Service> sorted) {
     final t = context.t;
-    final conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        ServiceBadge(svc: s.no, size: ServiceBadgeSize.sm),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            '→ ${s.dest}',
-            style: t.sans(13, color: t.dim),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        const SizedBox(width: 8),
-        // Narrow rebuild: only this Text re-renders each second.
-        ListenableBuilder(
-          listenable: AppModel.shared,
-          builder: (context, _) {
-            // Re-derive etaSec from the live arrivalDate so the countdown
-            // is smooth between LTA polls (same logic as AppModel.liveServices).
-            final now = DateTime.now();
-            final etaSec = s.arrivalDate != null
-                ? s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
-                : s.etaSec;
-            return ConfidenceEta(etaSec: etaSec, confidence: conf, size: 13);
-          },
-        ),
-      ],
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) {
+        final now = DateTime.now();
+        final visible = sorted.take(_maxChips).toList();
+        final overflow = sorted.length > _maxChips
+            ? sorted.length - _maxChips
+            : 0;
+        return Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final s in visible)
+              _MiniBusChip(
+                svc: s.no,
+                // Re-derive ETA from the live arrivalDate for a smooth
+                // countdown between LTA polls (as AppModel.liveServices does).
+                etaSec: s.arrivalDate != null
+                    ? s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
+                    : s.etaSec,
+                confidence: ArrivalConfidence.of(
+                  monitored: s.monitored,
+                  feed: feed,
+                ),
+              ),
+            if (overflow > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  '+$overflow',
+                  style: t.mono(12, weight: FontWeight.w600, color: t.faint),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -625,160 +612,88 @@ class _PinCard extends StatelessWidget {
     final t = context.t;
     return Row(
       children: [
-        Container(
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(
-            color: t.dim.withValues(alpha: 0.6),
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text('Quiet · no live arrivals', style: t.sans(13, color: t.dim)),
+        const ConfidenceDot(confidence: ArrivalConfidence.stale, size: 6),
+        const SizedBox(width: 7),
+        Text('No live arrivals right now', style: t.mono(11, color: t.faint)),
       ],
     );
   }
 }
 
-// ─── Nearby stop card ───────────────────────────────────────────────────────
+/// Compact next-bus chip: a service micro-pill + confidence-treated ETA, in a
+/// rounded capsule. Port of iOS `MiniBusChip`. Whisper-quiet: the ETA reads as
+/// a confident arrival; the only estimate tell is a faint trailing "~".
+class _MiniBusChip extends StatelessWidget {
+  const _MiniBusChip({
+    required this.svc,
+    required this.etaSec,
+    required this.confidence,
+  });
 
-/// Compact card for stops in the Nearby section. Shows stop name, road name,
-/// distance chip, and up to 2 live service previews with confidence treatment.
-/// Tapping opens the stop detail screen.
-///
-/// The narrow ListenableBuilder(AppModel.shared) makes only the ETA text
-/// rebuild each second, not the card's layout/chrome.
-class _NearbyCard extends StatelessWidget {
-  const _NearbyCard({required this.stop, required this.onTap});
-
-  static const int _maxServices = 2;
-
-  final NearbyStop stop;
-  final VoidCallback onTap;
+  final String svc;
+  final int etaSec;
+  final ArrivalConfidence confidence;
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    final arrival = DataStore.shared.arrivals[stop.stopCode];
-    final services =
-        (arrival != null && arrival.kind == ArrivalStateKind.loaded)
-        ? arrival.services
-        : const <Service>[];
-    final road = DataStore.shared.roadName(stop.stopCode);
-    final visible = services.take(_maxServices).toList();
+    final eta = fmtEta(etaSec);
+    final arriving = eta.big == 'Arr';
+    final imminent = confidence == ArrivalConfidence.live && eta.live;
+    final whisper = confidence == ArrivalConfidence.stale ||
+        confidence == ArrivalConfidence.unconfirmed;
+    final label = arriving ? 'now' : '${eta.big} ${eta.small}';
 
-    // Compute Freshness once per card, not once per service row.
-    final feed = Freshness.from(DataStore.shared.lastRefresh(stop.stopCode));
-
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(20),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Distance tile
-              _distanceTile(context),
-              const SizedBox(width: 12),
-              // Stop info + service rows
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      stop.stopName,
-                      style: t.sans(15, weight: FontWeight.w600, color: t.fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (road.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        road,
-                        style: t.sans(12, color: t.dim),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    if (visible.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      for (var i = 0; i < visible.length; i++) ...[
-                        if (i > 0) const SizedBox(height: 6),
-                        _serviceRow(context, visible[i], feed: feed),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right, size: 18, color: t.dim),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _distanceTile(BuildContext context) {
-    final t = context.t;
     return Container(
-      width: 52,
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      height: 27,
+      padding: const EdgeInsets.only(left: 4, right: 9),
       decoration: BoxDecoration(
-        color: t.liveBg,
-        borderRadius: BorderRadius.circular(14),
+        color: t.surfaceHi,
+        borderRadius: BorderRadius.circular(LyneRadius.full),
+        border: Border.all(color: t.line, width: 0.5),
       ),
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            fmtDistance(stop.distanceM),
-            style: t.mono(11, weight: FontWeight.w700, color: t.accent),
+          // Inner service micro-pill.
+          Container(
+            constraints: const BoxConstraints(minWidth: 22),
+            height: 18,
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            decoration: BoxDecoration(
+              color: t.surface,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: t.line, width: 0.5),
+            ),
+            child: Text(
+              svc,
+              style: t.mono(12, weight: FontWeight.w700, color: t.fg),
+            ),
           ),
-          Text('away', style: t.mono(9, color: t.dim)),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: t.mono(
+              12,
+              weight: FontWeight.w600,
+              color: imminent ? t.accent : t.dim,
+            ),
+          ),
+          if (whisper) ...[
+            const SizedBox(width: 1),
+            ExcludeSemantics(
+              child: Opacity(
+                opacity: 0.7,
+                child: Text(
+                  '~',
+                  style: t.mono(9, weight: FontWeight.w400, color: t.faint),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
-    );
-  }
-
-  Widget _serviceRow(
-    BuildContext context,
-    Service s, {
-    required Freshness feed,
-  }) {
-    final t = context.t;
-    final conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        ServiceBadge(svc: s.no, size: ServiceBadgeSize.sm),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            '→ ${s.dest}',
-            style: t.sans(12, color: t.dim),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        const SizedBox(width: 6),
-        // Narrow rebuild: only this ETA widget re-renders each second.
-        ListenableBuilder(
-          listenable: AppModel.shared,
-          builder: (context, _) {
-            final now = DateTime.now();
-            final etaSec = s.arrivalDate != null
-                ? s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
-                : s.etaSec;
-            return ConfidenceEta(etaSec: etaSec, confidence: conf, size: 12);
-          },
-        ),
-      ],
     );
   }
 }
