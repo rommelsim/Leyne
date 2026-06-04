@@ -8,6 +8,26 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.3.3 · iOS (17) · 2026-06-04
+
+**2026-06-04 — iOS version bump 2.3.2 → 2.3.3 (build 17):** 2.3.2 (build 16) was
+already uploaded/approved and is live on TestFlight, so the ad-banner fix ships
+as a new version. Bumped `MARKETING_VERSION` 2.3.2 → 2.3.3 and
+`CURRENT_PROJECT_VERSION` 16 → 17 across all configs in
+`ios-native/Leyne.xcodeproj/project.pbxproj`. Added a `kChangelog["2.3.3"]`
+What's New entry. Re-Archive in Xcode to upload.
+
+**AdBanner.swift — banner blank-after-a-while fix:** the bottom-accessory banner
+loaded exactly once per session then went blank and never recovered. Root causes:
+(1) the `rootViewController` was captured once and went stale when
+`tabViewBottomAccessory` re-parented the banner; (2) `didLoad`/`fired` latches
+meant no reload or retry ever happened. Fix: `didMoveToWindow()` now refreshes
+`rootViewController` on every window re-entry and re-attempts a load (45s debounce
+via `kAdRefreshDebounce`); load failures retry with exponential backoff
+(`kAdRetryDelays` = 5 → 10 → 30s), reset on a successful `didReceiveAd`. Release
+ad config unchanged (prod unit `ca-app-pub-5864511655536507/9782205994`). Builds
+clean in Release.
+
 ## Leyne 2.3.2 · iOS (16) · 2026-06-03
 
 **2026-06-03 — iOS version bump 2.3.1 → 2.3.2 (build 16):** the 2.3.1 train was

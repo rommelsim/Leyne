@@ -153,14 +153,18 @@ struct SoftStopCard: View {
     private var chipRow: some View {
         // Wrap (never compress) so a chip's service number + ETA always read
         // in full — matching the prototype's flex-wrap. Each chip takes its
-        // intrinsic width via .fixedSize.
-        FlowLayout(spacing: 6, lineSpacing: 6) {
+        // intrinsic width via .fixedSize. `stickyLast` glues the "+N" badge to
+        // the last chip so the overflow count can never wrap onto a line by
+        // itself (which read as dead space); it pulls the last chip down with
+        // it instead, giving a clean trailing "[chip] +N".
+        let hasOverflow = sorted.count > Self.maxChips
+        return FlowLayout(spacing: 6, lineSpacing: 6, stickyLast: hasOverflow) {
             ForEach(Array(sorted.prefix(Self.maxChips)), id: \.no) { s in
                 MiniBusChip(t: t, svc: s.no, etaSec: s.etaSec,
                             confidence: ArrivalConfidence.of(monitored: s.monitored, feed: feed))
                     .fixedSize()
             }
-            if sorted.count > Self.maxChips {
+            if hasOverflow {
                 Text("+\(sorted.count - Self.maxChips)")
                     .font(t.mono(12, weight: .semibold))
                     .foregroundStyle(t.faint)
@@ -189,31 +193,60 @@ struct SoftStopCard: View {
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6
     var lineSpacing: CGFloat = 6
+    /// When true, the final subview is glued to the one before it: the pair
+    /// wraps together so the last subview can never start a line alone. Used
+    /// for the "+N" overflow badge so it always trails a chip, never floats on
+    /// an otherwise-empty line.
+    var stickyLast: Bool = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let maxW = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, lineH: CGFloat = 0, widest: CGFloat = 0
-        for sv in subviews {
-            let s = sv.sizeThatFits(.unspecified)
-            if x > 0, x + s.width > maxW { x = 0; y += lineH + lineSpacing; lineH = 0 }
-            x += s.width + spacing
-            lineH = max(lineH, s.height)
-            widest = max(widest, x - spacing)
-        }
-        return CGSize(width: min(maxW, widest), height: y + lineH)
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let (_, size) = resolve(sizes: sizes, maxW: proposal.width ?? .infinity)
+        return size
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let maxW = bounds.width
-        var x: CGFloat = bounds.minX, y: CGFloat = bounds.minY, lineH: CGFloat = 0
-        for sv in subviews {
-            let s = sv.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + s.width > bounds.minX + maxW {
-                x = bounds.minX; y += lineH + lineSpacing; lineH = 0
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let (origins, _) = resolve(sizes: sizes, maxW: bounds.width)
+        for (i, sv) in subviews.enumerated() {
+            let p = CGPoint(x: bounds.minX + origins[i].x, y: bounds.minY + origins[i].y)
+            sv.place(at: p, anchor: .topLeading, proposal: ProposedViewSize(sizes[i]))
+        }
+    }
+
+    /// Single line-breaking pass shared by sizing and placement so the
+    /// reserved height always matches where subviews actually land. Returns
+    /// each subview's origin (relative to the layout's top-leading) and the
+    /// total content size.
+    private func resolve(sizes: [CGSize], maxW: CGFloat) -> ([CGPoint], CGSize) {
+        var origins = [CGPoint](repeating: .zero, count: sizes.count)
+        var x: CGFloat = 0, y: CGFloat = 0, lineH: CGFloat = 0, widest: CGFloat = 0
+        let n = sizes.count
+        var i = 0
+        while i < n {
+            // The last chip + sticky badge form one unbreakable group: wrap
+            // them together when the group won't fit on the current line.
+            if stickyLast, n >= 2, i == n - 2 {
+                let chip = sizes[n - 2], badge = sizes[n - 1]
+                let groupW = chip.width + spacing + badge.width
+                if x > 0, x + groupW > maxW { x = 0; y += lineH + lineSpacing; lineH = 0 }
+                origins[n - 2] = CGPoint(x: x, y: y)
+                x += chip.width + spacing
+                lineH = max(lineH, chip.height)
+                origins[n - 1] = CGPoint(x: x, y: y)
+                x += badge.width + spacing
+                lineH = max(lineH, badge.height)
+                widest = max(widest, x - spacing)
+                break
             }
-            sv.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(s))
+            let s = sizes[i]
+            if x > 0, x + s.width > maxW { x = 0; y += lineH + lineSpacing; lineH = 0 }
+            origins[i] = CGPoint(x: x, y: y)
             x += s.width + spacing
             lineH = max(lineH, s.height)
+            widest = max(widest, x - spacing)
+            i += 1
         }
+        return (origins, CGSize(width: min(maxW, widest), height: y + lineH))
     }
 }
