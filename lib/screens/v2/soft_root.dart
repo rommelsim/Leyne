@@ -1,10 +1,11 @@
 // SoftRoot — Leyne 2.0 Android root composition. Manages a simple stack
-// (Home / Nearby / Settings tabs; Search / Stop / Bus / AllArrivals
+// (Home / Favourites / Settings tabs; Search / Stop / Bus / AllArrivals
 // pushed) using a Navigator.
 
 import 'package:flutter/material.dart';
 
 import 'soft_bus_screen.dart';
+import 'soft_favourites_screen.dart';
 import 'soft_home_screen.dart';
 import 'soft_search_screen.dart';
 import 'soft_settings_screen.dart';
@@ -105,6 +106,13 @@ class _SoftRootState extends State<SoftRoot> {
         return SoftHomeScreen(
           onTab: _handleTab,
           onOpenStop: _pushStop,
+          onOpenSearch: () => _handleTab(SoftTab.search),
+        );
+      case SoftTab.favourites:
+        return SoftFavouritesScreen(
+          onTab: _handleTab,
+          onOpenStop: _pushStop,
+          onOpenBus: (stopCode, svc) => _pushBus(stopCode, svc),
           onOpenSearch: () => _handleTab(SoftTab.search),
         );
       case SoftTab.settings:

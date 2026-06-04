@@ -50,6 +50,8 @@ struct SoftBusView: View {
     let onBack: () -> Void
 
     @State private var alightId: String? = nil
+    @State private var showSave = false
+    @State private var saveSel = 1
     @State private var serviceRouteData: ServiceRoute?
     @State private var selectedDirIndex: Int = 0
     @State private var camera: MapCameraPosition = .automatic
@@ -83,6 +85,10 @@ struct SoftBusView: View {
 
     private var t: Theme { m.t }
     private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
+    /// This service is a favourite — either anywhere or at this stop.
+    private var serviceSaved: Bool {
+        m.isFavService(no: svc, stop: nil) || m.isFavService(no: svc, stop: stopCode)
+    }
 
     /// Stop-level feed freshness — feeds the per-arrival confidence below.
     private var feed: Freshness { Freshness.from(ds.lastRefresh(stopCode)) }
@@ -144,6 +150,27 @@ struct SoftBusView: View {
         .onChange(of: serviceRouteData) { _, _ in recomputePlot() }
         .onChange(of: selectedDirIndex) { _, _ in recomputePlot() }
         .onChange(of: ds.arrivals[stopCode]) { _, _ in recomputePlot() }
+        .sheet(isPresented: $showSave) {
+            SaveSheet(
+                t: t,
+                title: "Save this service",
+                subtitle: "Choose how you want to save it.",
+                options: [
+                    SaveOption(icon: "bus", title: "Save service",
+                               subtitle: "See next arrival for Bus \(svc) anywhere"),
+                    SaveOption(icon: "mappin.and.ellipse", title: "Save Bus \(svc) at this stop",
+                               subtitle: "Quick access from Favourites here"),
+                ],
+                selection: $saveSel
+            ) { applyServiceSave() }
+            .presentationDetents([.height(400)])
+        }
+    }
+
+    private func applyServiceSave() {
+        showSave = false
+        let stop: String? = saveSel == 0 ? nil : stopCode
+        if !m.isFavService(no: svc, stop: stop) { m.toggleFavService(no: svc, stop: stop) }
     }
 
     // MARK: Floating controls
@@ -198,25 +225,25 @@ struct SoftBusView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Center on my location")
 
-            // Pin — preserves the existing pin-to-Home affordance.
+            // Save this service — opens the "Save this service" sheet
+            // (anywhere / at this stop). Green-filled when already a favourite.
             Button {
-                fb.select(); togglePin()
+                fb.select()
+                saveSel = m.isFavService(no: svc, stop: nil) ? 0 : 1
+                showSave = true
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: isPinned ? "pin.fill" : "pin")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text(isPinned ? "Pinned" : "Pin")
-                        .font(t.sans(13, weight: .semibold))
-                }
-                .foregroundStyle(isPinned ? t.onAccent : t.fg)
-                .padding(.horizontal, 13)
-                .frame(height: 40)
-                .background(isPinned ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.surface),
-                            in: Capsule())
-                .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
+                Image(systemName: "mappin")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(serviceSaved ? t.contrastFg : t.soon)
+                    .frame(width: 40, height: 40)
+                    .background(serviceSaved ? AnyShapeStyle(t.soon) : AnyShapeStyle(t.surface),
+                                in: Circle())
+                    .overlay(Circle().stroke(serviceSaved ? Color.clear : t.soon, lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isPinned ? "Unpin this stop" : "Pin this stop to Home")
+            .accessibilityLabel(serviceSaved ? "Bus \(svc) saved — edit favourite"
+                                             : "Save bus \(svc) to favourites")
         }
     }
 
@@ -271,11 +298,16 @@ struct SoftBusView: View {
                     .tracking(-2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
-                    .foregroundStyle(confidence == .none ? t.faint : (imminent ? t.accent : t.fg))
-                if !arriving {
+                    .foregroundStyle(confidence == .none ? t.faint : (imminent ? t.soon : t.fg))
+                if arriving {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(t.soon)
+                        .accessibilityHidden(true)
+                } else {
                     Text(eta?.small ?? "")
                         .font(t.mono(20))
-                        .foregroundStyle(imminent ? t.accent : t.dim)
+                        .foregroundStyle(imminent ? t.soon : t.dim)
                 }
                 // Whisper-quiet estimate tell: a faint "~" only a careful eye
                 // catches. No banner, no recolour — just enough to be honest.
@@ -414,15 +446,11 @@ struct SoftBusView: View {
 
     private var routeSection: some View {
         let computed = timelineStops
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.dim)
-                Eyebrow(text: computed.isEmpty
-                        ? "Full route"
-                        : "Full route · \(computed.count) stops", t: t)
-                Rectangle().fill(t.line).frame(height: 1)
+        let progress = progressNodes
+        return VStack(alignment: .leading, spacing: 12) {
+            // Compact horizontal summary — bus position → your stop.
+            if !progress.isEmpty {
+                RouteProgressBar(t: t, nodes: progress, remaining: stopsRemaining)
             }
 
             // Direction toggle — show only when there are 2+ directions.
@@ -430,9 +458,8 @@ struct SoftBusView: View {
                 directionPicker(sr)
             }
 
+            // FULL ROUTE list (owns its own "FULL ROUTE" header + times).
             if !computed.isEmpty {
-                Text("Tap a stop to set an arrival alert.")
-                    .font(t.sans(13)).foregroundStyle(t.dim)
                 RouteTimeline(t: t, svc: svc, stops: computed, alightId: $alightId)
                     .onChange(of: alightId) { _, new in scheduleAlight(stopCode: new) }
             }
@@ -620,6 +647,60 @@ struct SoftBusView: View {
         return [svc]
     }
 
+    /// Approximate index of the bus along the current direction's stop list,
+    /// derived from the ETA the same way the map pin's position is (≈90s/stop,
+    /// decremented since the last poll). nil when there's no "your stop"
+    /// context (full-route / bus-search) or no live arrival — we don't guess a
+    /// position with nothing to anchor it. This is an *estimate*, consistent
+    /// with the estimated map pin, not a fabricated GPS-on-route fix.
+    private var estimatedBusIndex: Int? {
+        guard !fullRoute, let dir = currentDirection, dir.anchorPresent,
+              !dir.stops.isEmpty, let s = liveService() else { return nil }
+        let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        guard you > 0 else { return 0 }
+        let elapsed = ds.lastRefresh(stopCode).map { Date().timeIntervalSince($0) } ?? 0
+        let eta = max(0, Double(s.etaSec) - elapsed)
+        let back = min(Double(you), eta / 90.0)
+        return min(max(0, Int((Double(you) - back).rounded())), you)
+    }
+
+    /// Stops between the (estimated) bus and your stop.
+    private var stopsRemaining: Int? {
+        guard let dir = currentDirection, let busIdx = estimatedBusIndex else { return nil }
+        let youIdx = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        return max(0, youIdx - busIdx)
+    }
+
+    /// A compact window for the horizontal ROUTE PROGRESS bar: up to two stops
+    /// before the bus, the bus, the run to your stop (collapsed to bus→your
+    /// stop when far). Empty without a your-stop context.
+    private var progressNodes: [RouteStop] {
+        guard let dir = currentDirection, let busIdx = estimatedBusIndex else { return [] }
+        let youIdx = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        guard youIdx >= busIdx, youIdx < dir.stops.count else { return [] }
+        let lo = max(0, busIdx - 2)
+        var idxs = Array(lo...youIdx)
+        if idxs.count > 5 { idxs = Array(lo...busIdx) + [youIdx] }
+        return idxs.map { i in
+            let st: RouteStopState = i < busIdx ? .past
+                : (i == busIdx ? .here : (i == youIdx ? .board : .next))
+            return RouteStop(id: dir.stops[i].code, name: dir.stops[i].name, state: st)
+        }
+    }
+
+    /// Estimated wall-clock for the stop at full-direction index `i`. Passed
+    /// stops (and no-context routes) return nil — we never recorded when the
+    /// bus went by, so we show nothing rather than invent a past time. The
+    /// bus's own stop reads the plain clock; later stops are prefixed "ETA".
+    private func etaClock(forIndex i: Int, busIdx: Int?, youIdx: Int, youEtaSec: Int) -> String? {
+        guard let b = busIdx, youIdx > b, i >= b else { return nil }
+        let secs: Double = i <= youIdx
+            ? Double(youEtaSec) * Double(i - b) / Double(youIdx - b)
+            : Double(youEtaSec) + Double(i - youIdx) * 90
+        let clock = fmtClock(Date().addingTimeInterval(secs), use24h: m.use24h)
+        return i == b ? clock : "ETA \(clock)"
+    }
+
     private var timelineStops: [RouteStop] {
         guard let r = route, let dir = currentDirection else { return [] }
         // Show the full route when:
@@ -628,8 +709,12 @@ struct SoftBusView: View {
         //     only an approach window in that case would be meaningless.
         let showFull = fullRoute || !dir.anchorPresent
         let segment = showFull ? r.stops : journeySegment(r)
-        let busSeq = r.busIndex
+        // Bus position on the route is the same estimate that drives the map
+        // pin (nil for full-route / bus-search). Lets the timeline show passed
+        // stops, the bus's current stop, and per-stop ETAs.
+        let busSeq = estimatedBusIndex
         let youSeq = r.youIndex
+        let youEta = liveService()?.etaSec ?? 0
         // Only mark a "THIS STOP" boarding stop in the per-stop flow AND when the
         // anchor is in this direction. In fullRoute mode (bus search) there's no
         // boarding stop, so mark none — otherwise the anchor's origin can reappear
@@ -644,7 +729,8 @@ struct SoftBusView: View {
             else if canMarkBoard && idx == youSeq { state = .board }
             else if idx < (busSeq ?? -1) { state = .past }
             else { state = .next }
-            return RouteStop(id: stop.code, name: stop.name, state: state)
+            let time = etaClock(forIndex: idx, busIdx: busSeq, youIdx: youSeq, youEtaSec: youEta)
+            return RouteStop(id: stop.code, name: stop.name, state: state, time: time)
         }
     }
 
@@ -789,15 +875,15 @@ struct MapStopMarker: View {
     var body: some View {
         Image(systemName: "mappin")
             .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(t.onAccent)
+            .foregroundStyle(t.contrastFg)
             .frame(width: 28, height: 28)
             .background(
-                Circle().fill(t.accent).overlay(Circle().stroke(.white, lineWidth: 2))
+                Circle().fill(t.soon).overlay(Circle().stroke(.white, lineWidth: 2))
             )
             .background(
                 Image(systemName: "arrowtriangle.down.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(t.accent)
+                    .foregroundStyle(t.soon)
                     .offset(y: 12)
             )
             .shadow(color: .black.opacity(0.3), radius: 3, y: 1)

@@ -93,7 +93,7 @@ struct ConfidenceDot: View {
     var body: some View {
         switch confidence {
         case .live:
-            Circle().fill(t.fg).frame(width: size, height: size)
+            Circle().fill(t.soon).frame(width: size, height: size)
         case .stale, .none:
             Circle().stroke(t.faint, lineWidth: 1.5).frame(width: size, height: size)
         case .unconfirmed:
@@ -201,7 +201,7 @@ struct ConfidenceStatusPill: View {
     @ViewBuilder private var dot: some View {
         switch confidence {
         case .live:
-            Circle().fill(t.accent).frame(width: 6, height: 6)
+            Circle().fill(t.soon).frame(width: 6, height: 6)
         case .stale, .none:
             Circle().stroke(t.dim, lineWidth: 1.5).frame(width: 6, height: 6)
         case .unconfirmed:
@@ -239,7 +239,16 @@ struct CrowdMeter: View {
         case .none: return 0
         }
     }
-    private var label: String { load?.label ?? "Crowd —" }
+    /// Fuller phrasing than `Load.label` so the bus-view hero reads
+    /// "Seats available" rather than just "Seats".
+    private var label: String {
+        switch load {
+        case .sea:        return "Seats available"
+        case .sda:        return "Standing available"
+        case .lsd:        return "Limited standing"
+        case .none:       return "Crowd unknown"
+        }
+    }
     private let heights: [CGFloat] = [8, 11, 14]
 
     var body: some View {
@@ -253,11 +262,11 @@ struct CrowdMeter: View {
             if showLabel {
                 Text(label)
                     .font(t.mono(10, weight: .medium))
-                    .foregroundStyle(load == nil ? t.faint : t.dim)
+                    .foregroundStyle(load == nil ? t.faint : occupancyColor(load, t: t))
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(load == nil ? "Crowd unknown" : "Crowd: \(label)")
+        .accessibilityLabel(load == nil ? "Crowd unknown" : label)
     }
 
     @ViewBuilder
@@ -267,7 +276,7 @@ struct CrowdMeter: View {
                 .strokeBorder(t.faint, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
                 .frame(width: 4, height: height)
         } else if filled {
-            RoundedRectangle(cornerRadius: 1.5).fill(t.fg)
+            RoundedRectangle(cornerRadius: 1.5).fill(occupancyColor(load, t: t))
                 .frame(width: 4, height: height)
         } else {
             RoundedRectangle(cornerRadius: 1.5).stroke(t.line, lineWidth: 1)

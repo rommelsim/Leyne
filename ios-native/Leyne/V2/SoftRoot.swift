@@ -54,6 +54,7 @@ struct SoftRoot: View {
     // the user over to Nearby or Search. The native TabView preserves each
     // path across tab switches, matching iOS's standard tab behaviour.
     @State private var homeStack: [SoftRoute] = []
+    @State private var favouritesStack: [SoftRoute] = []
     @State private var settingsStack: [SoftRoute] = []
     @State private var searchStack: [SoftRoute] = []
     @State private var mapHandoff: MapHandoffKind = .none
@@ -64,11 +65,13 @@ struct SoftRoot: View {
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            // Native iOS 26 TabView — the system renders the floating
-            // Liquid Glass tab bar, handles selection switching, and
-            // detaches the `.search` role into its own trailing circle
-            // for free. Each tab owns a NavigationStack so child pushes
-            // (Stop / Bus) keep the native slide + edge-swipe-back.
+            // Native TabView with four inline labelled tabs — Home ·
+            // Favourites · Settings · Search — matching the 2.4.0 mockup's
+            // standard bottom bar. Search is a normal tab (not the detached
+            // `.search` role circle) so it reads as the fourth labelled item.
+            // Each tab owns a NavigationStack so child pushes (Stop / Bus)
+            // keep the native slide + edge-swipe-back. Selection tint is the
+            // location blue used across the redesign.
             TabView(selection: $tab) {
                 Tab("Home", systemImage: "house.fill", value: SoftTab.home) {
                     navStack($homeStack) {
@@ -79,12 +82,23 @@ struct SoftRoot: View {
                         )
                     }
                 }
+                Tab("Favourites", systemImage: "star.fill", value: SoftTab.favourites) {
+                    navStack($favouritesStack) {
+                        SoftFavouritesView(
+                            onOpenStop: { favouritesStack.append(.stop($0)) },
+                            onOpenBus: { code, svc in
+                                favouritesStack.append(.bus(stopCode: code, svc: svc))
+                            },
+                            onOpenSearch: { tab = .search }
+                        )
+                    }
+                }
                 Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
                     navStack($settingsStack) {
                         SoftSettingsView(onTab: { tab = $0 })
                     }
                 }
-                Tab(value: SoftTab.search, role: .search) {
+                Tab("Search", systemImage: "magnifyingglass", value: SoftTab.search) {
                     navStack($searchStack) {
                         SoftSearchView(
                             onClose: { tab = .home },
@@ -98,7 +112,7 @@ struct SoftRoot: View {
                     }
                 }
             }
-            .tint(t.accent)
+            .tint(t.meBlue)
 
             // Map handoff toast overlays the whole stack.
             VStack {

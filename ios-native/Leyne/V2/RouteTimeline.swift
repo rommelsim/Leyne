@@ -21,6 +21,10 @@ struct RouteStop: Identifiable, Equatable {
     let id: String        // stop code
     let name: String
     let state: RouteStopState
+    /// Per-stop time label, e.g. "8:18 AM" / "ETA 8:20 AM". nil = unknown
+    /// (passed stops: we never recorded when the bus went by, so we show
+    /// none rather than invent one).
+    var time: String? = nil
 }
 
 struct RouteTimeline: View {
@@ -58,17 +62,27 @@ struct RouteTimeline: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text("ROUTE · BUS \(svc)")
+                Text("FULL ROUTE")
                     .font(t.mono(10, weight: .semibold))
                     .tracking(1)
                     .foregroundStyle(t.dim)
                 Spacer()
-                // No "N STOPS AWAY" badge: it requires the bus's live route
-                // position (RouteInfo.busIndex), which is always nil today —
-                // DataStore.route hard-codes busIndex/busCoord to nil. A count
-                // derived without it would be fabricated. Restore this badge
-                // (count of stops between `.here` and the boarding stop) once
-                // real live bus coordinates land.
+                if canCollapse {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(expanded ? "Show less" : "View all stops")
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .font(t.sans(12, weight: .medium))
+                        .foregroundStyle(t.dim)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(t.surfaceHi, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.bottom, 8)
 
@@ -192,6 +206,19 @@ struct RouteTimeline: View {
                 }
                 .padding(.bottom, isLast ? 0 : 14)
                 .padding(.top, 2)
+
+                Spacer(minLength: 8)
+                if let time = stop.time {
+                    Text(time)
+                        .font(t.mono(12, weight: resolved == .next ? .regular : .semibold))
+                        .foregroundStyle(timeColor(resolved))
+                        .lineLimit(1)
+                        .padding(.top, 1)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(t.faint)
+                    .padding(.top, 2)
             }
             .contentShape(Rectangle())
         }
@@ -203,11 +230,33 @@ struct RouteTimeline: View {
     private func dotView(state: RouteStopState) -> some View {
         switch state {
         case .past:
-            Circle().fill(t.faint).frame(width: 8, height: 8)
-        case .here, .board, .alight:
+            // Traversed — a completed green check.
             ZStack {
-                Circle().fill(t.accent.opacity(0.25)).frame(width: 18, height: 18)
-                Circle().fill(t.accent).frame(width: 10, height: 10)
+                Circle().fill(t.soon).frame(width: 16, height: 16)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(t.contrastFg)
+            }
+        case .here:
+            // The bus, right now — green with a bus glyph.
+            ZStack {
+                Circle().fill(t.soon.opacity(0.25)).frame(width: 22, height: 22)
+                Circle().fill(t.soon).frame(width: 18, height: 18)
+                Image(systemName: "bus.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(t.contrastFg)
+            }
+        case .board:
+            // Your stop — a green ring.
+            ZStack {
+                Circle().fill(t.soon.opacity(0.18)).frame(width: 18, height: 18)
+                Circle().strokeBorder(t.soon, lineWidth: 2.5).frame(width: 13, height: 13)
+                    .background(Circle().fill(t.surface))
+            }
+        case .alight:
+            ZStack {
+                Circle().fill(t.soon.opacity(0.25)).frame(width: 18, height: 18)
+                Circle().fill(t.soon).frame(width: 10, height: 10)
             }
         case .next:
             Circle()
@@ -219,9 +268,16 @@ struct RouteTimeline: View {
 
     private func connectorColor(for state: RouteStopState) -> Color {
         switch state {
-        case .past: return t.line
-        case .here, .board, .alight: return t.accent.opacity(0.5)
+        case .past, .here, .board, .alight: return t.soon
         case .next: return t.line
+        }
+    }
+
+    private func timeColor(_ state: RouteStopState) -> Color {
+        switch state {
+        case .past:  return t.faint
+        case .here:  return t.soon
+        default:     return t.dim
         }
     }
 
@@ -230,12 +286,112 @@ struct RouteTimeline: View {
         Text(text)
             .font(t.mono(9, weight: .semibold))
             .tracking(1)
-            .foregroundStyle(filled ? t.onAccent : t.accent)
+            .foregroundStyle(filled ? t.contrastFg : t.soon)
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(
-                filled ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.liveBg),
+                filled ? AnyShapeStyle(t.soon) : AnyShapeStyle(t.soonBg),
                 in: Capsule()
             )
-            .overlay(Capsule().stroke(filled ? Color.clear : t.accent.opacity(0.4), lineWidth: 1))
+            .overlay(Capsule().stroke(filled ? Color.clear : t.soon.opacity(0.4), lineWidth: 1))
+    }
+}
+
+// MARK: - Route progress (compact horizontal summary)
+
+/// A few stops around the bus → your stop, laid out horizontally with the
+/// line green up to the bus and grey after. Driven by the same estimated bus
+/// position as the map pin (so it's honest about being an estimate, not a
+/// fabricated GPS-on-route fix). Sits above the FULL ROUTE list.
+struct RouteProgressBar: View {
+    let t: Theme
+    let nodes: [RouteStop]
+    let remaining: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("ROUTE PROGRESS")
+                    .font(t.mono(10, weight: .semibold)).tracking(1)
+                    .foregroundStyle(t.dim)
+                Spacer()
+                if let r = remaining {
+                    Text(r == 0 ? "Arriving" : "\(r) stop\(r == 1 ? "" : "s") remaining")
+                        .font(t.sans(12, weight: .semibold))
+                        .foregroundStyle(t.soon)
+                }
+            }
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(Array(nodes.enumerated()), id: \.element.id) { i, n in
+                    VStack(spacing: 6) {
+                        ZStack {
+                            HStack(spacing: 0) {
+                                Rectangle()
+                                    .fill(i == 0 ? Color.clear : segColor(nodes[i - 1].state))
+                                    .frame(height: 2)
+                                Rectangle()
+                                    .fill(i == nodes.count - 1 ? Color.clear : segColor(n.state))
+                                    .frame(height: 2)
+                            }
+                            dot(n.state)
+                        }
+                        .frame(height: 24)
+                        Text(n.name)
+                            .font(t.sans(10, weight: n.state == .next ? .regular : .medium))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .foregroundStyle(n.state == .next ? t.dim : t.fg)
+                        chip(for: n.state)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(16)
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func segColor(_ s: RouteStopState) -> Color {
+        (s == .past || s == .here) ? t.soon : t.line
+    }
+
+    @ViewBuilder private func dot(_ s: RouteStopState) -> some View {
+        switch s {
+        case .past:
+            ZStack {
+                Circle().fill(t.soon).frame(width: 18, height: 18)
+                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(t.contrastFg)
+            }
+        case .here:
+            ZStack {
+                Circle().fill(t.soon).frame(width: 24, height: 24)
+                Image(systemName: "bus.fill").font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(t.contrastFg)
+            }
+        case .board, .alight:
+            Circle().strokeBorder(t.soon, lineWidth: 2.5).frame(width: 20, height: 20)
+                .background(Circle().fill(t.surface))
+        case .next:
+            Circle().strokeBorder(t.dim, lineWidth: 2).frame(width: 18, height: 18)
+                .background(Circle().fill(t.surface))
+        }
+    }
+
+    @ViewBuilder private func chip(for s: RouteStopState) -> some View {
+        switch s {
+        case .here:  tag("Bus is here")
+        case .board: tag("Your stop")
+        default:     EmptyView()
+        }
+    }
+
+    private func tag(_ text: String) -> some View {
+        Text(text)
+            .font(t.sans(9.5, weight: .semibold))
+            .foregroundStyle(t.soon)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(t.soonBg, in: Capsule())
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
     }
 }

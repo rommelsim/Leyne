@@ -8,6 +8,60 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.4.0 · iOS (18) · 2026-06-04
+
+**2026-06-04 — iOS UI overhaul (2.4.0, build 18):** the redesign from the June
+mockups, built on branch `ui-overhaul-2.4.0` (worktree) so 2.3.3 stayed
+shippable. Tracking doc: `docs/UI_OVERHAUL_2.4.0.md`.
+
+- **Semantic colour returns** (`Theme.swift` `soon`/`mid` tokens, both light &
+  dark): green = arriving soon / seats, amber = mid-wait / standing, neutral =
+  far / scheduled. `V2/Proximity.swift` adds `ETATier`, `etaColor`,
+  `serviceBadgeColors`, `occupancyColor`, `OccupancyLabel`. Confidence stays
+  shape/opacity + the whisper "~" — colour is proximity + crowding only; a
+  scheduled/ghost arrival is never painted a confident green.
+- **Home** (`SoftStopCard`/`SoftHomeView`): card-style ETA-ordered chips, lead
+  chip green "Arriving soon"; distance on its own row; "NEAR YOU" blue + green
+  LIVE dot; "Nearby stops" header. Pinned section moved to Favourites.
+- **Tab bar** (`SoftRoot`/`SoftTabBar`): four inline labelled tabs — Home ·
+  Favourites · Settings · Search (Search is no longer the detached `.search`
+  circle); selection tint = location blue. New `SoftFavouritesView` (pinned
+  stops). Ad banner re-anchors above the bar via the existing gutter inset.
+- **Stop view** (`SoftStopView`): proximity-coloured service badges,
+  destination + occupancy, big coloured ETA + dot, "Arriving soon" lead row,
+  "Updated N ago" line, ETA/Bus no./Distance sort, LTA-estimates footer.
+- **Bus view** (`SoftBusView`/`RouteTimeline`/`CrowdMeter`): green hero when
+  imminent, coloured occupancy bars + fuller labels, green route progress
+  (checked past · green bus-here · green your-stop ring), green map stop pin.
+- **Bus view route bottom** (`RouteProgressBar` + `RouteTimeline`): compact
+  horizontal **ROUTE PROGRESS** summary with "N stops remaining"; **FULL ROUTE**
+  list with per-stop times + "View all stops" toggle. The bus's position on the
+  route (`estimatedBusIndex`) is derived from the ETA the same way the map pin
+  is — upcoming stops show "ETA H:MM", the bus's stop shows the plain clock, and
+  passed stops show a check but **no fabricated past time** (`etaClock` /
+  `fmtClock`, honours the 24-hour setting).
+
+- **Favourites** (`SoftFavouritesView`): rebuilt to the FavouriteView mockup —
+  header (+ / gear), **Favourite stops** (enriched cards: gold star, distance +
+  walk, chips, "Updated N ago" + crowd footer) and **Favourite services**
+  (derived from pins' `tracked` buses: badge + "To {dest}" + anchor stop + ETA),
+  per-section Edit/remove. No new model — favourite stop = pin without
+  `tracked`, favourite service = pin with `tracked`.
+
+- **Pin flow + favourite services** (`FavService` model, `SaveSheet`): new
+  persisted `FavService { no, stop? }` (`leyne.favServices`) — `stop == nil` =
+  "anywhere" (next arrival on the route near you), set = "at this stop". Stop
+  view gains a pin button → "Save this stop" sheet; Bus view's stop-pin pill is
+  replaced by a favourite button → "Save this service" sheet (anywhere / at this
+  stop). Favourites gains All/Stops/Services/Bus+Stop filter chips. Favourite
+  stops = `m.pins`; favourite services = `m.favServices` (independent of
+  `Pin.tracked`, which stays alerts-only).
+
+**Known remaining (Phase E/F polish):** green map route **polyline** not drawn
+(markers are green, the connecting line isn't). Dark-mode colour is on by
+default (revert = `Theme.dark` `soon`/`mid` tokens). On-device visual QA still
+needed (no simulator was run during the build).
+
 ## Leyne 2.3.3 · iOS (17) · 2026-06-04
 
 **2026-06-04 — iOS version bump 2.3.2 → 2.3.3 (build 17):** 2.3.2 (build 16) was

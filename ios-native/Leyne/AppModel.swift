@@ -62,6 +62,31 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.4.0": WhatsNewEntry(
+        headline: "A brighter, clearer Leyne.",
+        items: [
+            WhatsNewItem(
+                icon: "paintpalette",
+                title: "Arrivals you can read at a glance",
+                body: "A fresh, colourful look — green means a bus is close, "
+                    + "amber means a little wait — so you can see what's coming "
+                    + "without reading a single number."
+            ),
+            WhatsNewItem(
+                icon: "person.2.fill",
+                title: "See how full the bus is",
+                body: "Every arrival now shows whether there are seats, standing "
+                    + "room, or it's filling up — so you can decide whether to "
+                    + "wait for the next one."
+            ),
+            WhatsNewItem(
+                icon: "star.fill",
+                title: "Your favourite stops, one tap away",
+                body: "Pinned stops now live in their own Favourites tab, so the "
+                    + "places you ride from most are always right there."
+            ),
+        ]
+    ),
     "2.3.3": WhatsNewEntry(
         headline: "Smoother and steadier.",
         items: [
@@ -209,6 +234,18 @@ struct Pin: Codable, Equatable {
     }
 }
 
+/// A favourited bus *service* (distinct from a pinned stop). `stop == nil`
+/// means "anywhere" — the next arrival on the service's route near you;
+/// `stop` set means that bus at that specific stop (with arrival alerts).
+/// Drives the Favourites "services" section + the Stops/Services/Bus+Stop
+/// filters. Persisted alongside pins.
+struct FavService: Codable, Equatable, Identifiable {
+    var no: String
+    var stop: String?   // nil = anywhere
+    var id: String { stop.map { "\(no)#\($0)" } ?? "\(no)#*" }
+    var isAnywhere: Bool { stop == nil }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     // Sound / haptic feedback (v1.0 carry-over).
@@ -329,6 +366,10 @@ final class AppModel: ObservableObject {
     @Published var pins: [Pin] = [] {
         didSet { persistPins() }
     }
+    // Persisted favourite services (a bus anywhere, or a bus at a stop).
+    @Published var favServices: [FavService] = [] {
+        didSet { persistFavServices() }
+    }
     // Persisted recent searches
     @Published var recents: [String] = []
 
@@ -338,6 +379,7 @@ final class AppModel: ObservableObject {
 
     init() {
         loadPins()
+        loadFavServices()
         loadRecents()
         timer = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
@@ -380,6 +422,32 @@ final class AppModel: ObservableObject {
     private func loadPins() {
         if let d = UserDefaults.standard.data(forKey: "leyne.pins"),
            let p = try? JSONDecoder().decode([Pin].self, from: d) { pins = p }
+    }
+    private func loadFavServices() {
+        if let d = UserDefaults.standard.data(forKey: "leyne.favServices"),
+           let f = try? JSONDecoder().decode([FavService].self, from: d) { favServices = f }
+    }
+    private func persistFavServices() {
+        if let d = try? JSONEncoder().encode(favServices) {
+            UserDefaults.standard.set(d, forKey: "leyne.favServices")
+        }
+    }
+
+    // ─── Favourite-service helpers ─────────────────────────
+    /// Is this exact (bus, stop?) saved? `stop == nil` checks the anywhere one.
+    func isFavService(no: String, stop: String?) -> Bool {
+        favServices.contains { $0.no == no && $0.stop == stop }
+    }
+    /// Toggle a favourite service on/off.
+    func toggleFavService(no: String, stop: String?) {
+        if let i = favServices.firstIndex(where: { $0.no == no && $0.stop == stop }) {
+            favServices.remove(at: i)
+        } else {
+            favServices.append(FavService(no: no, stop: stop))
+        }
+    }
+    func removeFavService(_ fav: FavService) {
+        favServices.removeAll { $0.id == fav.id }
     }
     private func persistPins() {
         if let d = try? JSONEncoder().encode(pins) {

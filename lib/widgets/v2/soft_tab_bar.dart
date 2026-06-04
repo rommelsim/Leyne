@@ -13,7 +13,9 @@ import 'package:flutter/material.dart';
 import '../../theme.dart';
 import '../ad_banner.dart';
 
-enum SoftTab { home, settings, search }
+// 2.4.0: Added `favourites` tab — mirrors iOS SoftRoot 4-tab layout:
+// Home · Favourites · Settings · Search
+enum SoftTab { home, favourites, settings, search }
 
 class SoftTabBar extends StatelessWidget {
   const SoftTabBar({
@@ -29,13 +31,10 @@ class SoftTabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.t;
     return NavigationBar(
-      selectedIndex: SoftTab.values.indexOf(selection),
-      onDestinationSelected: (i) => onSelect(SoftTab.values[i]),
+      // Search is a pushed route — not a real tab index. Map visible tabs only.
+      selectedIndex: _visibleIndex(selection),
+      onDestinationSelected: (i) => onSelect(_visibleTabs[i]),
       backgroundColor: t.bg,
-      // Fix 1: removed indicatorColor override — was t.liveBg (#EDEDED in light
-      // mode) which is nearly identical to the bg (#F2F2F2), making the
-      // selected-tab pill invisible. The navigationBarTheme in theme.dart sets
-      // a proper accent@12% (light) / white@6% (dark) that is always visible.
       surfaceTintColor: Colors.transparent,
       destinations: const [
         NavigationDestination(
@@ -44,11 +43,15 @@ class SoftTabBar extends StatelessWidget {
           label: 'Home',
         ),
         NavigationDestination(
+          icon: Icon(Icons.star_outline_rounded),
+          selectedIcon: Icon(Icons.star_rounded),
+          label: 'Favourites',
+        ),
+        NavigationDestination(
           icon: Icon(Icons.settings_outlined),
           selectedIcon: Icon(Icons.settings_rounded),
           label: 'Settings',
         ),
-        // Fix 2: added selectedIcon for consistency with other destinations.
         NavigationDestination(
           icon: Icon(Icons.search_rounded),
           selectedIcon: Icon(Icons.search_rounded),
@@ -56,6 +59,19 @@ class SoftTabBar extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  // Search is always pushed as a route, so all 4 tabs map 1:1.
+  static const _visibleTabs = [
+    SoftTab.home,
+    SoftTab.favourites,
+    SoftTab.settings,
+    SoftTab.search,
+  ];
+
+  static int _visibleIndex(SoftTab t) {
+    final i = _visibleTabs.indexOf(t);
+    return i < 0 ? 0 : i;
   }
 }
 

@@ -30,6 +30,31 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.4.0': WhatsNewEntry(
+    headline: 'A brighter, clearer Leyne.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.palette_outlined,
+        title: 'Arrivals you can read at a glance',
+        body: 'A fresh, colourful look — green means a bus is close, '
+            'amber means a little wait — so you can see what\'s coming '
+            'without reading a single number.',
+      ),
+      WhatsNewItem(
+        icon: Icons.people_outline_rounded,
+        title: 'See how full the bus is',
+        body: 'Every arrival now shows whether there are seats, standing '
+            'room, or it\'s filling up — so you can decide whether to '
+            'wait for the next one.',
+      ),
+      WhatsNewItem(
+        icon: Icons.star_rounded,
+        title: 'Your favourite stops, one tap away',
+        body: 'Pinned stops now live in their own Favourites tab, so the '
+            'places you ride from most are always right there.',
+      ),
+    ],
+  ),
   '2.3.0': WhatsNewEntry(
     headline: 'Smarter alerts, quicker taps.',
     items: [

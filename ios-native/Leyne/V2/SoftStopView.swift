@@ -1,9 +1,9 @@
-// SoftStopView — Leyne 3.0 Stop detail (per Flow Prototype.html): a clean
-// header (back · name · code·road · distance), an ETA / Distance / Bus-no.
-// sort, and a stack of minimal arrival cards — neutral service badge + a
-// big confidence-treated ETA. Tapping a card opens the Bus view, where the
-// destination, crowd, route and alert controls live. The honest footer
-// appears when any arrival is aging or scheduled-only.
+// SoftStopView — Leyne 2.4.0 Stop detail: a clean header (back · name ·
+// code·road · distance), a freshness line, an ETA / Bus-no. / Distance sort,
+// and a stack of arrival cards — a proximity-coloured service badge, the
+// destination + occupancy, and a big proximity-coloured ETA. Tapping a card
+// opens the Bus view. Colour carries proximity + crowding only; confidence
+// stays the whisper "~". An honest footer notes LTA estimates.
 
 import SwiftUI
 
@@ -25,9 +25,13 @@ struct SoftStopView: View {
     let onOpenBus: (String) -> Void
 
     @State private var sort: StopSort = .arrival
+    @State private var showSave = false
+    @State private var saveSel = 0
+    @State private var hint: String? = nil
 
     private var t: Theme { m.t }
     private var feed: Freshness { Freshness.from(ds.lastRefresh(stopCode)) }
+    private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -36,6 +40,7 @@ struct SoftStopView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header
+                    updatedRow
                     arrivalContent
                     Color.clear.frame(height: 40)
                 }
@@ -45,6 +50,62 @@ struct SoftStopView: View {
             .refreshable { await ds.refreshArrivals(stop: stopCode) }
         }
         .onAppear { ds.ensureArrivals(stop: stopCode) }
+        .overlay(alignment: .bottom) {
+            if let hint {
+                Text(hint)
+                    .font(t.sans(13, weight: .medium))
+                    .foregroundStyle(t.contrastFg)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(t.contrast, in: Capsule())
+                    .padding(.bottom, 100)
+                    .transition(.opacity)
+            }
+        }
+        .sheet(isPresented: $showSave) {
+            SaveSheet(
+                t: t,
+                title: "Save this stop",
+                subtitle: "Choose how you want to save it.",
+                options: [
+                    SaveOption(icon: "mappin.and.ellipse", title: "Save stop",
+                               subtitle: "See all arriving buses at this stop"),
+                    SaveOption(icon: "bus", title: "Save a bus here",
+                               subtitle: "Track a specific bus at this stop"),
+                ],
+                selection: $saveSel
+            ) { applyStopSave() }
+            .presentationDetents([.height(380)])
+        }
+    }
+
+    private var pinButton: some View {
+        Button { fb.select(); showSave = true } label: {
+            Image(systemName: "mappin")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(isPinned ? t.contrastFg : t.soon)
+                .frame(width: 38, height: 38)
+                .background(isPinned ? AnyShapeStyle(t.soon) : AnyShapeStyle(t.surface), in: Circle())
+                .overlay(Circle().stroke(isPinned ? Color.clear : t.soon, lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isPinned ? "\(stopName) saved — edit favourite" : "Save \(stopName) to favourites")
+    }
+
+    private func applyStopSave() {
+        showSave = false
+        if saveSel == 0 {
+            if !isPinned { m.pins.append(Pin(code: stopCode, nickname: "")) }
+        } else {
+            showHint("Tap a bus below to track it here")
+        }
+    }
+
+    private func showHint(_ s: String) {
+        withAnimation { hint = s }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            await MainActor.run { withAnimation { hint = nil } }
+        }
     }
 
     // MARK: Header
@@ -75,13 +136,38 @@ struct SoftStopView: View {
             }
             Spacer(minLength: 4)
             if let d = stopDistanceLabel {
-                Text(d)
+                Text("\(d) away")
                     .font(t.mono(12, weight: .semibold))
                     .foregroundStyle(t.dim)
                     .padding(.top, 9)
             }
         }
         .padding(.top, 4)
+    }
+
+    /// Freshness line — "Updated N ago" with a refresh glyph, so the user can
+    /// see how live the list is at a glance (matches the mockup).
+    @ViewBuilder
+    private var updatedRow: some View {
+        if let label = updatedLabel {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(label)
+                    .font(t.mono(11.5))
+            }
+            .foregroundStyle(t.dim)
+            .padding(.leading, 2)
+        }
+    }
+
+    private var updatedLabel: String? {
+        guard let last = ds.lastRefresh(stopCode) else { return nil }
+        let s = Int(Date().timeIntervalSince(last))
+        if s < 5  { return "Updated just now" }
+        if s < 60 { return "Updated \(s) sec ago" }
+        let m = s / 60
+        return "Updated \(m) min ago"
     }
 
     private var stopName: String {
@@ -109,13 +195,18 @@ struct SoftStopView: View {
     private var arrivalContent: some View {
         switch ds.arrivals[stopCode] {
         case .some(.loaded(let services)) where !services.isEmpty:
-            sortControl
+            HStack(spacing: 10) {
+                sortControl
+                Spacer(minLength: 8)
+                pinButton
+            }
             let sorted = sortedServices(services)
             VStack(spacing: 10) {
-                ForEach(sorted, id: \.no) { bus in
-                    arrivalCard(bus)
+                ForEach(Array(sorted.enumerated()), id: \.element.no) { i, bus in
+                    arrivalCard(bus, lead: i == 0)
                 }
             }
+            footer
         case .some(.empty):
             emptyArrivals(message: "No buses in operation right now.")
         case .some(.error(let e)):
@@ -130,8 +221,8 @@ struct SoftStopView: View {
     private var sortControl: some View {
         SortChipRow(t: t, selection: $sort, options: [
             (.arrival, "ETA"),
-            (.distance, "Distance"),
             (.service, "Bus no."),
+            (.distance, "Distance"),
         ])
     }
 
@@ -156,34 +247,84 @@ struct SoftStopView: View {
         return haversine(lat, lon, stop.Latitude, stop.Longitude)
     }
 
-    private func arrivalCard(_ bus: Service) -> some View {
+    private func arrivalCard(_ bus: Service, lead: Bool) -> some View {
         let conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed)
-        let imminent = conf == .live && bus.etaSec <= 60
+        let tier = ETATier.of(etaSec: bus.etaSec)
+        let imminent = conf == .live && tier.isImminent
+        let highlight = lead && imminent
+        let badge = serviceBadgeColors(etaSec: bus.etaSec, confidence: conf, t: t)
         return Button {
             fb.select()
             onOpenBus(bus.no)
         } label: {
-            HStack(spacing: 14) {
-                Text(bus.no)
-                    .font(t.mono(17, weight: .bold))
-                    .foregroundStyle(t.fg)
-                    .frame(minWidth: 50, minHeight: 44)
-                    .padding(.horizontal, 8)
-                    .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                Spacer(minLength: 0)
-                ConfidenceETA(eta: fmtETA(bus.etaSec), confidence: conf, t: t, size: 22, weight: .bold)
+            HStack(spacing: 12) {
+                ServiceBadge(svc: bus.no, t: t, size: .lg,
+                             fillOverride: badge.fill, fgOverride: badge.fg)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(destLabel(bus))
+                        .font(t.sans(15, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                    OccupancyLabel(load: bus.load, t: t, size: 11.5)
+                }
+                Spacer(minLength: 6)
+                etaDisplay(bus, conf: conf, imminent: imminent)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(highlight ? t.soonBg : t.surface,
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(imminent ? t.accent.opacity(0.5) : t.line,
-                        lineWidth: imminent ? 1.5 : 1))
-            .shadow(color: imminent ? t.accent.opacity(0.12) : .clear, radius: 10, y: 4)
+                .stroke(highlight ? t.soon.opacity(0.5) : t.line, lineWidth: 1))
         }
         .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("Bus \(bus.no), \(arrivalA11y(bus, conf))")
+        .accessibilityLabel("Bus \(bus.no) to \(bus.dest), \(arrivalA11y(bus, conf)), \(bus.load.label.lowercased())")
         .accessibilityHint("Opens bus \(bus.no)")
+    }
+
+    private func destLabel(_ bus: Service) -> String {
+        bus.dest.isEmpty ? "Bus \(bus.no)" : "To \(bus.dest)"
+    }
+
+    /// Big proximity-coloured ETA with a matching dot, plus "Arriving soon"
+    /// under an imminent live arrival. The whisper "~" still tells when the
+    /// time is an estimate/scheduled.
+    private func etaDisplay(_ bus: Service, conf: ArrivalConfidence, imminent: Bool) -> some View {
+        let eta = fmtETA(bus.etaSec)
+        let arriving = eta.big == "Arr"
+        let color = etaColor(etaSec: bus.etaSec, confidence: conf, t: t)
+        let whisper = conf == .stale || conf == .unconfirmed
+        return VStack(alignment: .trailing, spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                if arriving {
+                    Text(eta.small)
+                        .font(t.mono(20, weight: .bold))
+                        .foregroundStyle(color)
+                } else {
+                    Text(eta.big)
+                        .font(t.mono(24, weight: .bold))
+                        .foregroundStyle(color)
+                    Text(eta.small)
+                        .font(t.mono(13, weight: .semibold))
+                        .foregroundStyle(color.opacity(0.85))
+                }
+                if whisper {
+                    Text("~")
+                        .font(t.mono(12, weight: .regular))
+                        .foregroundStyle(t.faint)
+                        .accessibilityHidden(true)
+                }
+                Circle().fill(color).frame(width: 7, height: 7)
+            }
+            if imminent {
+                Text("Arriving soon")
+                    .font(t.sans(11, weight: .semibold))
+                    .foregroundStyle(t.soon)
+            }
+        }
     }
 
     private func arrivalA11y(_ bus: Service, _ conf: ArrivalConfidence) -> String {
@@ -195,6 +336,18 @@ struct SoftStopView: View {
         case .unconfirmed: return "\(when), scheduled only"
         case .none: return "no service"
         }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11))
+            Text("Bus arrival times are estimates from LTA and may vary.")
+                .font(t.sans(11))
+        }
+        .foregroundStyle(t.faint)
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private func emptyArrivals(message: String) -> some View {

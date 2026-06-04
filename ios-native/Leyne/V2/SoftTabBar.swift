@@ -7,7 +7,7 @@
 import SwiftUI
 
 enum SoftTab: String, CaseIterable {
-    case home, nearby, settings, search
+    case home, favourites, nearby, settings, search
 }
 
 // MARK: - Top scroll-edge blur

@@ -62,6 +62,19 @@ struct Theme: Equatable {
     /// Foreground to use on `accent` fills.
     let onAccent: Color
 
+    // ── Proximity / status colour (2.4.0 overhaul) ───────────────────
+    // Semantic green/amber used by the redesign for ETA *proximity* and
+    // *occupancy* (NOT confidence — that stays shape/opacity + "~"). Both
+    // modes carry real hues; dark uses brighter shades tuned for the near-
+    // black surfaces. To revert dark to the shipped monochrome look, set
+    // `soon`/`mid` to ink/grey in `Theme.dark`.
+    /// Imminent / good — green. "Arriving soon", seats-available.
+    let soon: Color
+    let soonBg: Color
+    /// Medium / caution — amber. Mid-range ETA, standing-only.
+    let mid: Color
+    let midBg: Color
+
     // ── Cross-mode signal colours ────────────────────────────────────
     /// MRT NE-line purple — used for MRT alert cards / dots.
     let mrtNE: Color = Color(hex: "9B26B6")
@@ -82,9 +95,14 @@ struct Theme: Equatable {
         .system(size: UIFontMetrics.default.scaledValue(for: size),
                 weight: weight, design: .default)
     }
+    /// Despite the name (kept so call sites don't churn), this is now **SF Pro
+    /// with monospaced _digits_**, not SF Mono — matching the SF Pro typography
+    /// of the 2.4.0 mockups while keeping ticking ETAs/countdowns from
+    /// jittering as digit widths change (the Apple-native approach for timers).
+    /// Used for numbers, codes, ETAs and tracked eyebrow labels.
     func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: UIFontMetrics.default.scaledValue(for: size),
-                weight: weight, design: .monospaced)
+                weight: weight, design: .default).monospacedDigit()
     }
 
     // Monochrome dark — clean black-and-white, no brand green. Accent (LIVE /
@@ -111,7 +129,11 @@ struct Theme: Equatable {
         warnBg: Color(hex: "F4B870").opacity(0.16),
         crit: Color(hex: "F08F7C"),
         critBg: Color(hex: "F08F7C").opacity(0.16),
-        onAccent: Color(hex: "111111")
+        onAccent: Color(hex: "111111"),
+        soon: Color(hex: "3DD68C"),
+        soonBg: Color(hex: "3DD68C").opacity(0.16),
+        mid: Color(hex: "F4B870"),
+        midBg: Color(hex: "F4B870").opacity(0.16)
     )
 
     // White & black light mode — mirrors the bus-view card (white surface,
@@ -139,7 +161,11 @@ struct Theme: Equatable {
         warnBg: Color(hex: "A0631A").opacity(0.14),
         crit: Color(hex: "A4422F"),
         critBg: Color(hex: "A4422F").opacity(0.14),
-        onAccent: Color(hex: "FFFFFF")
+        onAccent: Color(hex: "FFFFFF"),
+        soon: Color(hex: "1AA251"),
+        soonBg: Color(hex: "1AA251").opacity(0.12),
+        mid: Color(hex: "C2740A"),
+        midBg: Color(hex: "C2740A").opacity(0.12)
     )
 
     /// iOS 26 Liquid Glass surface used for the floating tab bar and

@@ -1,111 +1,119 @@
-// SoftStopCard — the Leyne 3.0 Home card: a stop, its identity, and a
-// compact rundown of the next few buses as mini-chips. Used for both the
-// Pinned and Nearby sections of Home so the two read as one language.
+// SoftStopCard — Leyne 2.4.0 Home card: a stop's identity (pin tile · name ·
+// "Stop {code} · road" · distance row) and a row of card-style next-bus chips.
 //
-// Each mini-chip carries the confidence treatment (live solid · stale
-// dimmed · ghost "~" + dashed), so even the glance-level preview is honest
-// about which arrivals it trusts. Caps at 4 chips + "+N", matching the
-// prototype's StopCard (it doesn't wrap — keeps the card a fixed rhythm).
+// Chips preview the soonest buses (sorted by ETA). The lead chip is filled
+// green with an "Arriving soon" tag when it's an imminent *live* arrival; the
+// rest are bordered tiles with a proximity-coloured ETA. Colour carries only
+// proximity — confidence still reads from the whisper "~" (see fmtETA /
+// Confidence.swift). Caps at 4 chips + a "+N more" tile, all equal-width.
 
 import SwiftUI
 
-/// Compact next-bus chip: service badge + confidence-treated ETA.
+/// Compact next-bus chip: service number over a proximity-coloured ETA.
 struct MiniBusChip: View {
     let t: Theme
     let svc: String
     let etaSec: Int
     let confidence: ArrivalConfidence
+    /// The lead/imminent chip — filled green with an "Arriving soon" tag.
+    var highlight: Bool = false
 
     var body: some View {
         let eta = fmtETA(etaSec)
         let arriving = eta.big == "Arr"
-        let imminent = confidence == .live && eta.live
-        // Whisper-quiet: the chip always reads as a confident arrival; the
-        // only estimate tell is a faint trailing "~". No dimming, no dashed
-        // outline, no "~" prefix — timeliness is the promise.
+        let color = etaColor(etaSec: etaSec, confidence: confidence, t: t)
         let whisper = confidence == .stale || confidence == .unconfirmed
 
-        HStack(spacing: 5) {
-            // Inner service micro-pill.
+        VStack(alignment: .leading, spacing: 3) {
             Text(svc)
-                .font(t.mono(12, weight: .bold))
+                .font(t.sans(15, weight: .bold))
                 .foregroundStyle(t.fg)
-                .padding(.horizontal, 5)
-                .frame(minWidth: 22, minHeight: 18)
-                .background(t.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(t.line, lineWidth: 0.5))
-
-            HStack(spacing: 1) {
-                Text(label(eta: eta, arriving: arriving))
-                    .font(t.mono(12, weight: .semibold))
-                    .foregroundStyle(imminent ? t.accent : t.dim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(arriving ? eta.small : "\(eta.big) \(eta.small)")
+                    .font(t.mono(11, weight: .semibold))
+                    .foregroundStyle(color)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 if whisper {
                     Text("~")
-                        .font(t.mono(9, weight: .regular))
+                        .font(t.mono(8, weight: .regular))
                         .foregroundStyle(t.faint)
                         .opacity(0.7)
                         .accessibilityHidden(true)
                 }
             }
+            if highlight {
+                Text("Arriving soon")
+                    .font(t.sans(9.5, weight: .semibold))
+                    .foregroundStyle(t.soon)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
         }
-        .padding(.leading, 4)
-        .padding(.trailing, 9)
-        .frame(height: 27)
-        .background(t.surfaceHi, in: Capsule())
-        .overlay(Capsule().stroke(t.line, lineWidth: 0.5))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+        .background(highlight ? t.soonBg : t.surface,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(highlight ? t.soon.opacity(0.55) : t.line, lineWidth: 1))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11y(eta: eta, arriving: arriving))
+        .accessibilityLabel(a11yLabel(eta: eta, arriving: arriving))
     }
 
-    private func label(eta: ETA, arriving: Bool) -> String {
-        if arriving { return "now" }
-        return "\(eta.big) \(eta.small)"
-    }
-
-    private func a11y(eta: ETA, arriving: Bool) -> String {
-        let word: String
-        switch confidence {
-        case .live: word = ""
-        case .stale: word = ", estimated"
-        case .unconfirmed: word = ", scheduled"
-        case .none: word = ""
-        }
+    private func a11yLabel(eta: ETA, arriving: Bool) -> String {
         let when = arriving ? "arriving now" : "\(eta.big) \(eta.small)"
-        return "Bus \(svc), \(when)\(word)"
+        let conf: String
+        switch confidence {
+        case .live:        conf = ""
+        case .stale:       conf = ", estimated"
+        case .unconfirmed: conf = ", scheduled"
+        case .none:        conf = ""
+        }
+        return "Bus \(svc), \(when)\(conf)"
     }
 }
 
-/// A stop card: identity (pin tile · name · code · road) + distance, then a
-/// row of mini-bus chips. Tapping opens the stop.
+/// A stop card: identity + distance row, then a row of card-style bus chips.
+/// Tapping opens the stop.
 struct SoftStopCard: View {
     let t: Theme
     let name: String
     let code: String
     let desc: String          // road name / "opp Blk 445"; may be empty
-    let trailing: String?     // distance ("80 m") or walk ("3 min"); may be nil
+    let trailing: String?     // distance ("69 m") or walk ("3 min"); may be nil
     let services: [Service]
     let feed: Freshness
     let onTap: () -> Void
+    /// Favourites: a gold star on the pin tile.
+    var favourite: Bool = false
+    /// Walk time appended to the distance row ("· 1 min walk").
+    var walk: String? = nil
+    /// When set, shows an in-card footer: "Updated N ago" + the soonest bus's
+    /// occupancy. Used on the Favourites screen.
+    var updatedLabel: String? = nil
 
     private static let maxChips = 4
 
-    /// Chips are ordered by bus number (natural numeric, so 1 < 2 < 5 < 78 <
-    /// 103 and "21A" sorts beside 21), then the first 4 are shown. So a stop
-    /// serving {2,103,5,78,1} previews {1,2,5,78} with a "+1". `localized­
-    /// StandardCompare` handles the numeric ordering + lettered variants.
+    /// Soonest buses first, so the lead chip is the most imminent arrival —
+    /// matching the mockup's ETA-ordered preview.
     private var sorted: [Service] {
-        services.sorted { $0.no.localizedStandardCompare($1.no) == .orderedAscending }
+        services.sorted { $0.etaSec < $1.etaSec }
     }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 11) {
+            VStack(alignment: .leading, spacing: 12) {
                 headerRow
                 if !sorted.isEmpty {
                     chipRow
                 } else {
                     quietRow
+                }
+                if let updatedLabel {
+                    footer(updatedLabel)
                 }
             }
             .padding(14)
@@ -118,60 +126,108 @@ struct SoftStopCard: View {
     }
 
     private var headerRow: some View {
-        HStack(spacing: 11) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous).fill(t.surfaceHi)
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(t.fg)
-            }
-            .frame(width: 38, height: 38)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 11) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous).fill(t.surfaceHi)
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                }
+                .frame(width: 38, height: 38)
+                .overlay(alignment: .topTrailing) {
+                    if favourite {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color(hex: "F5B500"))
+                            .padding(2)
+                            .background(t.surface, in: Circle())
+                            .offset(x: 5, y: -5)
+                    }
+                }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(t.sans(16, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(desc.isEmpty ? code : "\(code) · \(desc)")
-                    .font(t.mono(11.5))
-                    .foregroundStyle(t.dim)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(t.sans(16, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(subtitle)
+                        .font(t.mono(11.5))
+                        .foregroundStyle(t.dim)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
             }
-            Spacer(minLength: 4)
             if let trailing {
-                Text(trailing)
-                    .font(t.mono(12, weight: .semibold))
-                    .foregroundStyle(t.dim)
+                HStack(spacing: 4) {
+                    Image(systemName: "mappin")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(walk.map { "\(trailing) away · \($0) walk" } ?? "\(trailing) away")
+                        .font(t.mono(11.5))
+                }
+                .foregroundStyle(t.dim)
+                .padding(.leading, 2)
             }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(t.faint)
+        }
+    }
+
+    private var subtitle: String {
+        desc.isEmpty ? "Stop \(code)" : "Stop \(code) · \(desc)"
+    }
+
+    /// In-card footer (Favourites): freshness on the left, the soonest bus's
+    /// crowd on the right.
+    private func footer(_ updatedLabel: String) -> some View {
+        VStack(spacing: 10) {
+            Rectangle().fill(t.line).frame(height: 1)
+            HStack(spacing: 6) {
+                Image(systemName: "clock")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                Text(updatedLabel)
+                    .font(t.mono(11))
+                    .foregroundStyle(t.dim)
+                Spacer(minLength: 8)
+                if let lead = sorted.first {
+                    CrowdMeter(load: lead.load, t: t)
+                }
+            }
         }
     }
 
     private var chipRow: some View {
-        // Wrap (never compress) so a chip's service number + ETA always read
-        // in full — matching the prototype's flex-wrap. Each chip takes its
-        // intrinsic width via .fixedSize. `stickyLast` glues the "+N" badge to
-        // the last chip so the overflow count can never wrap onto a line by
-        // itself (which read as dead space); it pulls the last chip down with
-        // it instead, giving a clean trailing "[chip] +N".
-        let hasOverflow = sorted.count > Self.maxChips
-        return FlowLayout(spacing: 6, lineSpacing: 6, stickyLast: hasOverflow) {
-            ForEach(Array(sorted.prefix(Self.maxChips)), id: \.no) { s in
-                MiniBusChip(t: t, svc: s.no, etaSec: s.etaSec,
-                            confidence: ArrivalConfidence.of(monitored: s.monitored, feed: feed))
-                    .fixedSize()
+        let shown = Array(sorted.prefix(Self.maxChips))
+        return HStack(alignment: .top, spacing: 7) {
+            ForEach(Array(shown.enumerated()), id: \.element.no) { i, s in
+                let conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed)
+                MiniBusChip(t: t, svc: s.no, etaSec: s.etaSec, confidence: conf,
+                            highlight: i == 0 && conf == .live
+                                       && ETATier.of(etaSec: s.etaSec).isImminent)
             }
-            if hasOverflow {
-                Text("+\(sorted.count - Self.maxChips)")
-                    .font(t.mono(12, weight: .semibold))
-                    .foregroundStyle(t.faint)
-                    .fixedSize()
-                    .frame(height: 27)
+            if sorted.count > Self.maxChips {
+                moreChip(count: sorted.count - Self.maxChips)
             }
         }
+    }
+
+    private func moreChip(count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("+\(count)")
+                .font(t.sans(15, weight: .bold))
+                .foregroundStyle(t.dim)
+            Text("more")
+                .font(t.mono(11, weight: .medium))
+                .foregroundStyle(t.faint)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+        .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityLabel("\(count) more buses")
     }
 
     private var quietRow: some View {
@@ -182,71 +238,5 @@ struct SoftStopCard: View {
                 .foregroundStyle(t.faint)
             Spacer(minLength: 0)
         }
-    }
-}
-
-// MARK: - FlowLayout
-
-/// Minimal wrapping layout (iOS 16+ `Layout`): lays children left-to-right,
-/// wrapping to a new line when the next child would overflow the proposed
-/// width. Used for the wrapping mini-bus chips so nothing truncates.
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
-    var lineSpacing: CGFloat = 6
-    /// When true, the final subview is glued to the one before it: the pair
-    /// wraps together so the last subview can never start a line alone. Used
-    /// for the "+N" overflow badge so it always trails a chip, never floats on
-    /// an otherwise-empty line.
-    var stickyLast: Bool = false
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
-        let (_, size) = resolve(sizes: sizes, maxW: proposal.width ?? .infinity)
-        return size
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
-        let (origins, _) = resolve(sizes: sizes, maxW: bounds.width)
-        for (i, sv) in subviews.enumerated() {
-            let p = CGPoint(x: bounds.minX + origins[i].x, y: bounds.minY + origins[i].y)
-            sv.place(at: p, anchor: .topLeading, proposal: ProposedViewSize(sizes[i]))
-        }
-    }
-
-    /// Single line-breaking pass shared by sizing and placement so the
-    /// reserved height always matches where subviews actually land. Returns
-    /// each subview's origin (relative to the layout's top-leading) and the
-    /// total content size.
-    private func resolve(sizes: [CGSize], maxW: CGFloat) -> ([CGPoint], CGSize) {
-        var origins = [CGPoint](repeating: .zero, count: sizes.count)
-        var x: CGFloat = 0, y: CGFloat = 0, lineH: CGFloat = 0, widest: CGFloat = 0
-        let n = sizes.count
-        var i = 0
-        while i < n {
-            // The last chip + sticky badge form one unbreakable group: wrap
-            // them together when the group won't fit on the current line.
-            if stickyLast, n >= 2, i == n - 2 {
-                let chip = sizes[n - 2], badge = sizes[n - 1]
-                let groupW = chip.width + spacing + badge.width
-                if x > 0, x + groupW > maxW { x = 0; y += lineH + lineSpacing; lineH = 0 }
-                origins[n - 2] = CGPoint(x: x, y: y)
-                x += chip.width + spacing
-                lineH = max(lineH, chip.height)
-                origins[n - 1] = CGPoint(x: x, y: y)
-                x += badge.width + spacing
-                lineH = max(lineH, badge.height)
-                widest = max(widest, x - spacing)
-                break
-            }
-            let s = sizes[i]
-            if x > 0, x + s.width > maxW { x = 0; y += lineH + lineSpacing; lineH = 0 }
-            origins[i] = CGPoint(x: x, y: y)
-            x += s.width + spacing
-            lineH = max(lineH, s.height)
-            widest = max(widest, x - spacing)
-            i += 1
-        }
-        return (origins, CGSize(width: min(maxW, widest), height: y + lineH))
     }
 }

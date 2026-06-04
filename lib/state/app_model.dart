@@ -31,6 +31,7 @@ final GlobalKey<ScaffoldMessengerState> lyneMessengerKey =
 // Persistence keys — kept identical to the legacy ones in case a future
 // data-portability tool needs to reconcile across platforms.
 const _kPinsKey = 'lyne.pins';
+const _kFavServicesKey = 'lyne.favServices'; // 2.4.0 service favourites
 const _kRecentsKey = 'lyne.recents';
 const _kOnboardingDoneKey = 'lyne.onboardingDone';
 const _kUse24hKey = 'lyne.use24h';
@@ -70,6 +71,44 @@ class ActiveAlight {
         stopName: j['stopName'] as String,
         fireAt: DateTime.fromMillisecondsSinceEpoch(j['fireAt'] as int),
       );
+}
+
+// ─── FavService (2.4.0) ────────────────────────────────────────────────────
+/// A favourite service — a bus number the user wants to follow.
+/// `stop == null` means "anywhere" (next arrival near the user);
+/// `stop != null` means "at this specific stop".
+/// Mirrors ios-native/Leyne/AppModel.swift FavService.
+class FavService {
+  FavService({required this.no, this.stop});
+
+  /// Service number e.g. "88", "158", "21A".
+  final String no;
+
+  /// Stop code when saved "at stop"; null = "anywhere".
+  final String? stop;
+
+  /// Stable identity — matches iOS `id` computed var.
+  String get id => stop != null ? '$no#$stop' : '$no#*';
+
+  /// True when saved as "next arrival near me" (not stop-specific).
+  bool get isAnywhere => stop == null;
+
+  factory FavService.fromJson(Map<String, dynamic> j) => FavService(
+        no: j['no'] as String,
+        stop: j['stop'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'no': no,
+        if (stop != null) 'stop': stop,
+      };
+
+  @override
+  bool operator ==(Object other) =>
+      other is FavService && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 /// One user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
@@ -376,6 +415,40 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── FavServices (persisted, 2.4.0) ──────────────────────────
+  List<FavService> _favServices = const [];
+  List<FavService> get favServices => List.unmodifiable(_favServices);
+
+  void _persistFavServices() {
+    _prefs?.setString(
+      _kFavServicesKey,
+      jsonEncode(_favServices.map((f) => f.toJson()).toList()),
+    );
+  }
+
+  /// True if this (no, stop) pair is already saved.
+  bool isFavService({required String no, String? stop}) =>
+      _favServices.any((f) => f.no == no && f.stop == stop);
+
+  /// Add or remove the favourite. Call with stop=null for "anywhere",
+  /// stop=code for "at this stop".
+  void toggleFavService({required String no, String? stop}) {
+    final idx = _favServices.indexWhere((f) => f.no == no && f.stop == stop);
+    if (idx >= 0) {
+      _favServices = [..._favServices]..removeAt(idx);
+    } else {
+      _favServices = [..._favServices, FavService(no: no, stop: stop)];
+    }
+    _persistFavServices();
+    notifyListeners();
+  }
+
+  void removeFavService(FavService fav) {
+    _favServices = _favServices.where((f) => f.id != fav.id).toList();
+    _persistFavServices();
+    notifyListeners();
+  }
+
   // ─── Pins / recents (persisted) ───────────────────────────
   List<Pin> _pins = const [];
   List<Pin> get pins => List.unmodifiable(_pins);
@@ -417,6 +490,14 @@ class AppModel extends ChangeNotifier {
       } catch (_) {/* corrupt — start empty */}
     }
     _recents = _prefs!.getStringList(_kRecentsKey) ?? const [];
+    // Load favourite services (2.4.0).
+    final favRaw = _prefs!.getString(_kFavServicesKey);
+    if (favRaw != null) {
+      try {
+        final list = (jsonDecode(favRaw) as List).cast<Map<String, dynamic>>();
+        _favServices = list.map(FavService.fromJson).toList();
+      } catch (_) {/* corrupt — start empty */}
+    }
     // Restore any in-flight alight ride so the picker still shows the
     // armed stop on reopen. We don't re-schedule the notification — the
     // system already holds the AlarmManager registration from when we

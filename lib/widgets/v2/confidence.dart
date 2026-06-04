@@ -136,10 +136,12 @@ class ConfidenceDot extends StatelessWidget {
     final t = context.t;
     switch (confidence) {
       case ArrivalConfidence.live:
+        // Green dot for live confidence — mirrors iOS Confidence.swift
+        // ConfidenceDot which fills with t.soon.
         return Container(
           width: size,
           height: size,
-          decoration: BoxDecoration(color: t.fg, shape: BoxShape.circle),
+          decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
         );
       case ArrivalConfidence.stale:
       case ArrivalConfidence.none:
@@ -279,10 +281,11 @@ class ConfidenceStatusPill extends StatelessWidget {
   Widget _dot(LyneTheme t) {
     switch (confidence) {
       case ArrivalConfidence.live:
+        // Green dot in the LIVE status pill — mirrors iOS ConfidenceStatusPill.
         return Container(
           width: 6,
           height: 6,
-          decoration: BoxDecoration(color: t.accent, shape: BoxShape.circle),
+          decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
         );
       case ArrivalConfidence.stale:
       case ArrivalConfidence.none:
@@ -331,10 +334,9 @@ class ConfidenceStatusPill extends StatelessWidget {
 
 // ─── Crowd meter glyph ─────────────────────────────────────────────────
 /// Three ascending bars filled by load (Seats=1, Standing=2, Crowded=3),
-/// with an unknown state rendered as dashed outlines. Replaces the
-/// colour-dot + word so crowding reads as a small pictogram — and "unknown"
-/// is shown honestly rather than hidden. Bars are monochrome ink; this is a
-/// data signal, not a place to spend the accent.
+/// with an unknown state rendered as dashed outlines. Bar colour follows
+/// the occupancy: green for seats, amber for standing, grey for limited/
+/// unknown — matching ios-native/Leyne/V2/Confidence.swift CrowdMeter.
 class CrowdMeter extends StatelessWidget {
   const CrowdMeter({super.key, required this.load, this.showLabel = true});
 
@@ -356,13 +358,27 @@ class CrowdMeter extends StatelessWidget {
     }
   }
 
-  String get _label => load?.label ?? 'Crowd —';
+  /// Fuller phrasing so rows read "Seats available" rather than just "Seats".
+  String get _label {
+    switch (load) {
+      case Load.sea:
+        return 'Seats available';
+      case Load.sda:
+        return 'Standing available';
+      case Load.lsd:
+        return 'Limited standing';
+      case null:
+        return 'Crowd unknown';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
+    // Bar colour follows occupancy: green/amber/grey (from proximity.dart).
+    final barColor = _occupancyColor(load, t);
     return Semantics(
-      label: load == null ? 'Crowd unknown' : 'Crowd: $_label',
+      label: load == null ? 'Crowd unknown' : _label,
       excludeSemantics: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -375,7 +391,8 @@ class CrowdMeter extends StatelessWidget {
               children: [
                 for (var i = 0; i < _heights.length; i++) ...[
                   if (i > 0) const SizedBox(width: 2.5),
-                  _bar(t, filled: load != null && i < _fill, height: _heights[i]),
+                  _bar(t, filled: load != null && i < _fill,
+                      height: _heights[i], barColor: barColor),
                 ],
               ],
             ),
@@ -385,14 +402,32 @@ class CrowdMeter extends StatelessWidget {
             Text(_label,
                 style: t.mono(10,
                     weight: FontWeight.w500,
-                    color: load == null ? t.faint : t.dim)),
+                    color: load == null ? t.faint : barColor)),
           ],
         ],
       ),
     );
   }
 
-  Widget _bar(LyneTheme t, {required bool filled, required double height}) {
+  /// Inline version of occupancyColor to avoid a circular import with
+  /// proximity.dart (which imports confidence.dart). The logic is
+  /// identical to occupancyColor() in proximity.dart.
+  static Color _occupancyColor(Load? load, LyneTheme t) {
+    switch (load) {
+      case Load.sea:
+        return t.soon;
+      case Load.sda:
+        return t.mid;
+      case Load.lsd:
+      case null:
+        return t.dim;
+    }
+  }
+
+  Widget _bar(LyneTheme t,
+      {required bool filled,
+      required double height,
+      required Color barColor}) {
     if (load == null) {
       return CustomPaint(
         size: Size(4, height),
@@ -403,7 +438,7 @@ class CrowdMeter extends StatelessWidget {
       width: 4,
       height: height,
       decoration: BoxDecoration(
-        color: filled ? t.fg : null,
+        color: filled ? barColor : null,
         borderRadius: BorderRadius.circular(1.5),
         border: filled ? null : Border.all(color: t.line, width: 1),
       ),

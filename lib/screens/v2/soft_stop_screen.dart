@@ -9,6 +9,8 @@ import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
+import '../../widgets/v2/proximity.dart';
+import '../../widgets/v2/save_sheet.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../notifications_screen.dart';
 
@@ -33,6 +35,7 @@ class SoftStopScreen extends StatefulWidget {
 
 class _SoftStopScreenState extends State<SoftStopScreen> {
   _StopSort _sort = _StopSort.arrival;
+
 
   @override
   void initState() {
@@ -228,15 +231,97 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
   }
 
   Widget _sortChips(BuildContext context) {
-    return SegmentedButton<_StopSort>(
-      segments: const [
-        ButtonSegment(value: _StopSort.arrival, label: Text('ETA')),
-        ButtonSegment(value: _StopSort.distance, label: Text('Distance')),
-        ButtonSegment(value: _StopSort.busNo, label: Text('Bus no.')),
+    return Row(
+      children: [
+        Expanded(
+          child: SegmentedButton<_StopSort>(
+            segments: const [
+              ButtonSegment(value: _StopSort.arrival, label: Text('ETA')),
+              ButtonSegment(value: _StopSort.distance, label: Text('Distance')),
+              ButtonSegment(value: _StopSort.busNo, label: Text('Bus no.')),
+            ],
+            selected: {_sort},
+            showSelectedIcon: false,
+            onSelectionChanged: (s) => setState(() => _sort = s.first),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _pinButton(context),
       ],
-      selected: {_sort},
-      showSelectedIcon: false,
-      onSelectionChanged: (s) => setState(() => _sort = s.first),
+    );
+  }
+
+  /// Pin button — green-filled circle when pinned, green-outlined when not.
+  /// Tapping opens the Material save sheet (save stop / save a bus here).
+  Widget _pinButton(BuildContext context) {
+    final t = context.t;
+    final isPinned = AppModel.shared.isPinned(widget.stopCode);
+    return Tooltip(
+      message: isPinned ? 'Edit saved stop' : 'Save this stop',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: () => _showSaveSheet(context),
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isPinned ? t.soon : t.surface,
+            border: Border.all(
+              color: isPinned ? Colors.transparent : t.soon,
+              width: 1.5,
+            ),
+          ),
+          child: Icon(
+            Icons.push_pin_rounded,
+            size: 16,
+            color: isPinned ? t.contrastFg : t.soon,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSaveSheet(BuildContext context) {
+    // Capture the context scaffold messenger before the async gap.
+    final messenger = ScaffoldMessenger.of(context);
+    int sel = 0;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SaveSheetBody(
+        title: 'Save this stop',
+        subtitle: 'Choose how you want to save it.',
+        options: const [
+          SaveOption(
+            icon: Icons.push_pin_rounded,
+            title: 'Save stop',
+            subtitle: 'See all arriving buses at this stop',
+          ),
+          SaveOption(
+            icon: Icons.directions_bus_rounded,
+            title: 'Save a bus here',
+            subtitle: 'Track a specific bus at this stop',
+          ),
+        ],
+        initialSel: sel,
+        onSave: (chosen) {
+          Navigator.pop(ctx);
+          if (chosen == 0) {
+            if (!AppModel.shared.isPinned(widget.stopCode)) {
+              AppModel.shared.togglePin(widget.stopCode);
+            }
+          } else {
+            messenger.showSnackBar(
+              const SnackBar(
+                  content: Text('Tap a bus below to track it here')),
+            );
+          }
+        },
+      ),
     );
   }
 
@@ -363,13 +448,15 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  /// Single arrival card. All services share the same container shape/size
-  /// (uniform weight). The first card shows the crowd row and then-ETA;
-  /// subsequent cards omit them to keep the list scannable without the
-  /// old "hero vs supporting cast" hierarchy.
+  /// Single arrival card with 2.4.0 proximity colours.
   ///
-  /// Imminent (etaSec <= 60 && live) cards gain an accent stroke border
-  /// and a soft accent glow — parity with iOS SoftStopView ~line 180.
+  /// Badge fill + ETA colour follow etaTier×confidence (via proximity.dart):
+  ///   live + imminent/soon → green badge + green ETA + soonBg card tint
+  ///   live + medium        → amber badge + amber ETA
+  ///   far / stale / ghost  → neutral surface badge + dim ETA
+  ///
+  /// Confidence is whisper-only ("~") per the timeliness spec — colour carries
+  /// ONLY proximity+occupancy, never confidence state.
   Widget _arrivalCard(
     BuildContext context,
     Service bus,
@@ -379,97 +466,174 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     final t = context.t;
     final feed = Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
     final conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed);
-    final imminent = conf == ArrivalConfidence.live && bus.etaSec <= 60;
+    final tier = EtaTier.of(bus.etaSec);
+    final imminent = conf == ArrivalConfidence.live && tier.isImminent;
+    final isLiveGreen = conf == ArrivalConfidence.live &&
+        (tier == EtaTier.imminent || tier == EtaTier.soon);
+    final badge = serviceBadgeColors(
+        etaSec: bus.etaSec, confidence: conf, t: t);
+    final arrivalEtaColor =
+        etaColor(etaSec: bus.etaSec, confidence: conf, t: t);
     final on = AppModel.shared.isTracked(code: widget.stopCode, busNo: bus.no);
     final eta = fmtEta(bus.etaSec);
+    final whisper = conf == ArrivalConfidence.stale ||
+        conf == ArrivalConfidence.unconfirmed;
 
-    // Imminent: accent stroke @ 0.5 alpha + soft accent glow.
-    // Tracked: left-rule border (accent, width 3).
-    // Default: t.line hairline.
+    // Card bg: soonBg tint for imminent live arrivals; liveBg when tracked.
+    final cardBg = imminent ? t.soonBg : (on ? t.liveBg : t.surface);
+
+    // Border: green stroke for imminent live; accent left-rule when tracked.
     final Border? border = on
         ? Border(left: BorderSide(color: t.accent, width: 3))
-        : imminent
-        ? Border.all(color: t.accent.withValues(alpha: 0.5), width: 1.5)
-        : null;
+        : isLiveGreen
+            ? Border.all(
+                color: t.soon.withValues(alpha: 0.5), width: 1.5)
+            : null;
 
     final List<BoxShadow> shadows = imminent
         ? [
             BoxShadow(
-              color: t.accent.withValues(alpha: 0.12),
+              color: t.soon.withValues(alpha: 0.12),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
           ]
         : const [];
 
-    // Clip the InkWell ripple inside the card's rounded corners.
-    // Canonical pattern: Material + clipBehavior wraps the tappable group.
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(LyneRadius.lg),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => widget.onOpenBus(bus.no),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: on ? t.liveBg : t.surface,
-            borderRadius: BorderRadius.circular(LyneRadius.lg),
-            border: border,
-            boxShadow: shadows,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  ServiceBadge(svc: bus.no, size: ServiceBadgeSize.lg),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '→ ${bus.dest}',
-                          style: t
-                              .mono(10, weight: FontWeight.w600, color: t.dim)
-                              .copyWith(letterSpacing: 1),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          eta.live
-                              ? 'Arriving now'
-                              : 'In ${eta.big} ${eta.small}',
-                          style: t.sans(
-                            22,
-                            weight: FontWeight.w600,
-                            color: t.fg,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _bell(context, bus.no, allNos),
-                ],
-              ),
-              if (isFirst) ...[
-                const SizedBox(height: 10),
+    return Semantics(
+      label: 'Bus ${bus.no} to ${bus.dest}, ${eta.big} ${eta.small}',
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => widget.onOpenBus(bus.no),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(LyneRadius.lg),
+              border: border,
+              boxShadow: shadows,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Row(
                   children: [
-                    CrowdMeter(load: bus.load),
-                    const SizedBox(width: 8),
-                    Text(
-                      '· Then ${fmtEta(bus.followingSec).big}'
-                      '${fmtEta(bus.followingSec).small}',
-                      style: t.mono(11, color: t.dim),
+                    // Proximity-coloured badge (fill from serviceBadgeColors).
+                    _coloredBadge(bus.no, badge.fill, badge.fg, t),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // "To {dest}" — matches iOS SoftStopView destLabel.
+                          Text(
+                            bus.dest.isEmpty ? 'Bus ${bus.no}' : 'To ${bus.dest}',
+                            style: t.sans(15,
+                                weight: FontWeight.w600, color: t.fg),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 3),
+                          OccupancyLabel(load: bus.load),
+                        ],
+                      ),
                     ),
+                    // Big proximity-coloured ETA + dot + whisper tilde.
+                    _etaColumn(eta, arrivalEtaColor, whisper, imminent, t),
+                    _bell(context, bus.no, allNos),
                   ],
                 ),
+                if (isFirst && bus.followingSec > bus.etaSec + 60) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'then ${fmtEta(bus.followingSec).big}'
+                    ' ${fmtEta(bus.followingSec).small}',
+                    style: t.mono(11, color: t.dim),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  /// Service badge with explicit fill/fg — proximity-coloured (soon → green,
+  /// medium → amber, far → neutral), mirroring iOS ServiceBadge fillOverride.
+  /// Sizes mirror ServiceBadgeSize.lg: 52dp, radius 16, font 22.
+  Widget _coloredBadge(
+      String svc, Color fill, Color fg, LyneTheme t) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 52, minHeight: 52),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(LyneRadius.md), // 16
+      ),
+      child: Text(
+        svc,
+        style: t.sans(22, weight: FontWeight.w600, color: fg),
+      ),
+    );
+  }
+
+  /// Right-aligned ETA column: big numeral (proximity-coloured) + colour dot +
+  /// "Arriving soon" tag under imminent live arrivals.
+  Widget _etaColumn(Eta eta, Color color, bool whisper, bool imminent,
+      LyneTheme t) {
+    final arriving = eta.big == 'Arr';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (arriving)
+              Text(eta.small,
+                  style: t.mono(20, weight: FontWeight.w700, color: color))
+            else ...[
+              Text(eta.big,
+                  style: t.mono(24, weight: FontWeight.w700, color: color)),
+              const SizedBox(width: 2),
+              Text(eta.small,
+                  style: t.mono(13, weight: FontWeight.w600,
+                      color: color.withValues(alpha: 0.85))),
+            ],
+            if (whisper) ...[
+              const SizedBox(width: 2),
+              ExcludeSemantics(
+                child: Opacity(
+                  opacity: 0.7,
+                  child: Text('~',
+                      style:
+                          t.mono(12, weight: FontWeight.w400, color: t.faint)),
+                ),
+              ),
+            ],
+            const SizedBox(width: 4),
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                  color: color, shape: BoxShape.circle),
+            ),
+          ],
+        ),
+        if (imminent) ...[
+          const SizedBox(height: 2),
+          Text('Arriving soon',
+              style: t.sans(11, weight: FontWeight.w600, color: t.soon)),
+        ],
+      ],
     );
   }
 
@@ -495,3 +659,4 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
 }
 
 enum _StopSort { arrival, distance, busNo }
+

@@ -297,13 +297,60 @@ class _RouteTimelineState extends State<RouteTimeline> {
   Widget _dot(LyneTheme t, SoftRouteStopState state) {
     switch (state) {
       case SoftRouteStopState.past:
+        // Traversed — a completed green check.
         return Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: t.faint, shape: BoxShape.circle),
+          width: 16,
+          height: 16,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
+          child: Icon(Icons.check_rounded, size: 10, color: t.contrastFg),
         );
       case SoftRouteStopState.here:
+        // The bus, right now — green with a bus glyph.
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: t.soon.withValues(alpha: 0.25),
+                shape: BoxShape.circle,
+              ),
+            ),
+            Container(
+              width: 18,
+              height: 18,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
+              child: Icon(Icons.directions_bus_rounded, size: 11, color: t.contrastFg),
+            ),
+          ],
+        );
       case SoftRouteStopState.board:
+        // Your stop — a green ring.
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: t.soon.withValues(alpha: 0.18),
+                shape: BoxShape.circle,
+              ),
+            ),
+            Container(
+              width: 13,
+              height: 13,
+              decoration: BoxDecoration(
+                color: t.surface,
+                shape: BoxShape.circle,
+                border: Border.all(color: t.soon, width: 2.5),
+              ),
+            ),
+          ],
+        );
       case SoftRouteStopState.alight:
         return Stack(
           alignment: Alignment.center,
@@ -312,17 +359,14 @@ class _RouteTimelineState extends State<RouteTimeline> {
               width: 18,
               height: 18,
               decoration: BoxDecoration(
-                color: t.accent.withValues(alpha: 0.25),
+                color: t.soon.withValues(alpha: 0.25),
                 shape: BoxShape.circle,
               ),
             ),
             Container(
               width: 10,
               height: 10,
-              decoration: BoxDecoration(
-                color: t.accent,
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
             ),
           ],
         );
@@ -341,13 +385,13 @@ class _RouteTimelineState extends State<RouteTimeline> {
 
   Color _connector(LyneTheme t, SoftRouteStopState state) {
     switch (state) {
-      case SoftRouteStopState.past:
       case SoftRouteStopState.next:
         return t.line;
+      case SoftRouteStopState.past:
       case SoftRouteStopState.here:
       case SoftRouteStopState.board:
       case SoftRouteStopState.alight:
-        return t.accent.withValues(alpha: 0.5);
+        return t.soon;
     }
   }
 
@@ -355,10 +399,10 @@ class _RouteTimelineState extends State<RouteTimeline> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: filled ? t.accent : t.liveBg,
+        color: filled ? t.soon : t.soonBg,
         borderRadius: BorderRadius.circular(99),
         border: Border.all(
-          color: filled ? Colors.transparent : t.accent.withValues(alpha: 0.4),
+          color: filled ? Colors.transparent : t.soon.withValues(alpha: 0.4),
           width: 1,
         ),
       ),
@@ -368,7 +412,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
             .mono(
               9,
               weight: FontWeight.w600,
-              color: filled ? t.onAccent : t.accent,
+              color: filled ? t.contrastFg : t.soon,
             )
             .copyWith(letterSpacing: 1),
       ),
@@ -382,18 +426,18 @@ class _RouteTimelineState extends State<RouteTimeline> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: t.accent,
+        color: t.soon,
         borderRadius: BorderRadius.circular(99),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.notifications_active_rounded, size: 10, color: t.onAccent),
+          Icon(Icons.notifications_active_rounded, size: 10, color: t.contrastFg),
           const SizedBox(width: 3),
           Text(
             'ALIGHT',
             style: t
-                .mono(9, weight: FontWeight.w600, color: t.onAccent)
+                .mono(9, weight: FontWeight.w600, color: t.contrastFg)
                 .copyWith(letterSpacing: 1),
           ),
         ],

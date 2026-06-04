@@ -31,6 +31,7 @@ import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/route_timeline.dart';
+import '../../widgets/v2/save_sheet.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../notifications_screen.dart';
 
@@ -438,13 +439,18 @@ class _SoftBusScreenState extends State<SoftBusScreen>
               // ── Full-bleed map backdrop ──────────────────────────────
               Positioned.fill(child: _buildMap(context)),
 
-              // ── Floating top controls (back + bus badge + pin + recenter)
+              // ── Floating top controls (back + bus badge + recenter + save)
               _FloatingTopBar(
                 svc: widget.svc,
                 onBack: widget.onBack,
                 onRecenter: _recenterOnUser,
                 isPinned: isPinned,
                 onPin: () => AppModel.shared.togglePin(widget.stopCode),
+                serviceSaved: AppModel.shared.isFavService(
+                    no: widget.svc, stop: null) ||
+                    AppModel.shared.isFavService(
+                        no: widget.svc, stop: widget.stopCode),
+                onSaveService: () => _showSaveServiceSheet(context),
               ),
 
               // ── Draggable bottom sheet ───────────────────────────────
@@ -468,6 +474,47 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     if (u != null) {
       _mapCtrl.move(LatLng(u.lat, u.lon), 16.0);
     }
+  }
+
+  /// Save-service bottom sheet (2.4.0). Two options:
+  ///   0 = anywhere (next arrival on this route near the user)
+  ///   1 = at this stop
+  /// Mirrors ios-native/Leyne/V2/SoftBusView.swift applyServiceSave.
+  void _showSaveServiceSheet(BuildContext ctx) {
+    final alreadySaved = AppModel.shared.isFavService(no: widget.svc, stop: null)
+        ? 0
+        : 1;
+    showModalBottomSheet<void>(
+      context: ctx,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) => SaveSheetBody(
+        title: 'Save this service',
+        subtitle: 'Choose how you want to save it.',
+        options: [
+          SaveOption(
+            icon: Icons.directions_bus_rounded,
+            title: 'Save service',
+            subtitle: 'See next arrival for Bus ${widget.svc} anywhere',
+          ),
+          SaveOption(
+            icon: Icons.push_pin_rounded,
+            title: 'Save Bus ${widget.svc} at this stop',
+            subtitle: 'Quick access from Favourites here',
+          ),
+        ],
+        initialSel: alreadySaved,
+        onSave: (chosen) {
+          Navigator.pop(sheetCtx);
+          final stop = chosen == 0 ? null : widget.stopCode;
+          if (!AppModel.shared.isFavService(no: widget.svc, stop: stop)) {
+            AppModel.shared.toggleFavService(no: widget.svc, stop: stop);
+          }
+        },
+      ),
+    );
   }
 
   // ── Map ──────────────────────────────────────────────────────────────
@@ -1128,6 +1175,8 @@ class _FloatingTopBar extends StatelessWidget {
     required this.onRecenter,
     required this.isPinned,
     required this.onPin,
+    required this.serviceSaved,
+    required this.onSaveService,
   });
 
   final String svc;
@@ -1135,6 +1184,9 @@ class _FloatingTopBar extends StatelessWidget {
   final VoidCallback onRecenter;
   final bool isPinned;
   final VoidCallback onPin;
+  /// True when this service is already in favServices (anywhere or at stop).
+  final bool serviceSaved;
+  final VoidCallback onSaveService;
 
   @override
   Widget build(BuildContext context) {
@@ -1251,6 +1303,21 @@ class _FloatingTopBar extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(width: 8),
+            // Save-service button — green when already saved (mirrors iOS pin).
+            _MapControl(
+              onTap: onSaveService,
+              semanticsLabel: serviceSaved
+                  ? 'Service saved — edit'
+                  : 'Save this service to Favourites',
+              filled: serviceSaved,
+              fillColor: t.soon,
+              child: Icon(
+                Icons.push_pin_rounded,
+                size: 16,
+                color: serviceSaved ? t.contrastFg : t.soon,
+              ),
+            ),
           ],
         ),
       ),
@@ -1266,14 +1333,20 @@ class _MapControl extends StatelessWidget {
     required this.child,
     required this.onTap,
     this.semanticsLabel,
+    this.filled = false,
+    this.fillColor,
   });
   final Widget child;
   final VoidCallback onTap;
   final String? semanticsLabel;
+  /// When true, the circle background uses [fillColor] (for save/pin active state).
+  final bool filled;
+  final Color? fillColor;
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
+    final bg = filled ? (fillColor ?? t.soon) : t.surface;
     // 48dp touch target wraps a 40dp visual circle.
     return Semantics(
       label: semanticsLabel,
@@ -1283,7 +1356,7 @@ class _MapControl extends StatelessWidget {
         height: 48,
         child: Center(
           child: Material(
-            color: t.surface,
+            color: bg,
             shape: const CircleBorder(),
             elevation: 0,
             child: InkWell(
@@ -1294,6 +1367,9 @@ class _MapControl extends StatelessWidget {
                 height: 40,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
+                  border: filled
+                      ? null
+                      : Border.all(color: t.soon, width: 1.5),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.18),
@@ -1560,16 +1636,14 @@ class _BusPillMarker extends StatelessWidget {
           children: [
             Icon(Icons.directions_bus_rounded, size: 11, color: textFg),
             const SizedBox(width: 4),
-            Text(
-              estimated ? '≈ $busNo' : busNo,
-              // Use LyneTheme.monoBase so the font matches the rest of the
-              // app's mono styling rather than a hard-coded 'monospace'.
-              style: LyneTheme.monoBase.copyWith(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: textFg,
-              ),
-            ),
+            Builder(builder: (ctx) {
+              final tt = ctx.t;
+              return Text(
+                estimated ? '≈ $busNo' : busNo,
+                style: tt.mono(11,
+                    weight: FontWeight.w700, color: textFg),
+              );
+            }),
           ],
         ),
       ),

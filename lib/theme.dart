@@ -8,6 +8,8 @@
 // factory so stock widgets (AppBar, NavigationBar, ListTile, etc.) inherit
 // the look without per-widget styling.
 
+import 'dart:ui' as ui;
+
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
@@ -33,6 +35,10 @@ class LyneTheme {
     required this.warnBg,
     required this.crit,
     required this.critBg,
+    required this.soon,
+    required this.soonBg,
+    required this.mid,
+    required this.midBg,
   });
 
   final bool isDark;
@@ -87,12 +93,33 @@ class LyneTheme {
   final Color crit;
   final Color critBg;
 
-  /// SF Mono on iOS, Roboto Mono on Android (Flutter's monospace fallback).
-  static const TextStyle monoBase =
-      TextStyle(fontFamily: 'monospace', fontFamilyFallback: ['Menlo', 'Courier']);
+  // ── Proximity / status colour (2.4.0 overhaul) ──────────────────────
+  // Semantic green/amber used for ETA *proximity* and *occupancy* only.
+  // Confidence (live/stale/scheduled) stays shape + opacity + "~" whisper —
+  // never colour. Dark uses brighter shades tuned for near-black surfaces.
 
+  /// Imminent / good — green. "Arriving soon", seats available.
+  final Color soon;
+  final Color soonBg;
+
+  /// Medium / caution — amber. Mid-range ETA, standing-only.
+  final Color mid;
+  final Color midBg;
+
+  // ── Typography ───────────────────────────────────────────────────────
+  // `mono()` uses the system (Roboto/default) font with tabular figures
+  // (`FontFeature.tabularFigures`) — proportional letters, fixed-width
+  // digits. This mirrors iOS's `.monospacedDigit()` so ticking ETAs /
+  // countdowns don't jitter as digit widths change, while keeping the
+  // same letterform as the rest of the UI. The old `fontFamily:'monospace'`
+  // was replaced in 2.4.0; see `sans()` for the regular font factory.
   TextStyle mono(double size, {FontWeight weight = FontWeight.w400, Color? color}) =>
-      monoBase.copyWith(fontSize: size, fontWeight: weight, color: color ?? fg);
+      TextStyle(
+        fontSize: size,
+        fontWeight: weight,
+        color: color ?? fg,
+        fontFeatures: const [ui.FontFeature.tabularFigures()],
+      );
 
   TextStyle sans(double size, {FontWeight weight = FontWeight.w400, Color? color}) =>
       TextStyle(fontSize: size, fontWeight: weight, color: color ?? fg);
@@ -128,6 +155,11 @@ class LyneTheme {
     warnBg: const Color.fromRGBO(244, 184, 112, 0.16),
     crit: _hex('F08F7C'),
     critBg: const Color.fromRGBO(240, 143, 124, 0.16),
+    // 2.4.0 proximity tokens — brighter shades for near-black dark surfaces.
+    soon: _hex('3DD68C'),
+    soonBg: const Color.fromRGBO(61, 214, 140, 0.16),
+    mid: _hex('F4B870'),
+    midBg: const Color.fromRGBO(244, 184, 112, 0.16),
   );
 
   // White & black light mode — mirrors iOS (ios-native/Leyne/Theme.swift).
@@ -155,6 +187,11 @@ class LyneTheme {
     warnBg: const Color.fromRGBO(160, 99, 26, 0.14),
     crit: _hex('A4422F'),
     critBg: const Color.fromRGBO(164, 66, 47, 0.14),
+    // 2.4.0 proximity tokens — darker shades for legibility on white surfaces.
+    soon: _hex('1AA251'),
+    soonBg: const Color.fromRGBO(26, 162, 81, 0.12),
+    mid: _hex('C2740A'),
+    midBg: const Color.fromRGBO(194, 116, 10, 0.12),
   );
 
   /// Foreground used on top of `accent` fills. White in light mode (black

@@ -17,6 +17,7 @@ import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
+import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
@@ -644,7 +645,6 @@ class _MiniBusChip extends StatelessWidget {
     final t = context.t;
     final eta = fmtEta(etaSec);
     final arriving = eta.big == 'Arr';
-    final imminent = confidence == ArrivalConfidence.live && eta.live;
     final whisper = confidence == ArrivalConfidence.stale ||
         confidence == ArrivalConfidence.unconfirmed;
     final label = arriving ? 'now' : '${eta.big} ${eta.small}';
@@ -682,7 +682,7 @@ class _MiniBusChip extends StatelessWidget {
             style: t.mono(
               12,
               weight: FontWeight.w600,
-              color: imminent ? t.accent : t.dim,
+              color: etaColor(etaSec: etaSec, confidence: confidence, t: t),
             ),
           ),
           if (whisper) ...[

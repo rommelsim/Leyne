@@ -32,23 +32,17 @@ struct SoftHomeView: View {
                     liveRow
                     mrtAlertCards
 
-                    if !m.pins.isEmpty {
-                        section(label: "Pinned") {
-                            ForEach(m.pins, id: \.code) { pin in
-                                pinnedCard(pin)
-                            }
-                        }
-                    }
-
+                    // Pinned stops now live on the Favourites tab; Home is
+                    // purely Nearby (matching the 2.4.0 mockup).
                     if !nearbyStops.isEmpty {
-                        section(label: "Nearby") {
+                        section(label: "Nearby stops") {
                             ForEach(nearbyStops.prefix(12), id: \.id) { stop in
                                 nearbyCard(stop)
                             }
                         }
                     }
 
-                    if m.pins.isEmpty && nearbyStops.isEmpty {
+                    if nearbyStops.isEmpty {
                         SoftEmptyState(t: t,
                                        onNearby: { loc.requestAndStart() },
                                        onSearch: { onOpenSearch() })
@@ -80,7 +74,7 @@ struct SoftHomeView: View {
         VStack(alignment: .leading, spacing: 2) {
             Eyebrow(text: "\(greeting)", t: t)
             Text("Stops near you")
-                .font(t.sans(30, weight: .semibold))
+                .font(t.sans(33, weight: .bold))
                 .foregroundStyle(t.fg)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,16 +82,17 @@ struct SoftHomeView: View {
     }
 
     private var liveRow: some View {
-        HStack(spacing: 7) {
+        let located = loc.location != nil
+        return HStack(spacing: 7) {
             Image(systemName: "location.fill")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(t.dim)
-            Text(loc.location != nil ? "NEAR YOU" : "LOCATION OFF")
+                .foregroundStyle(located ? t.meBlue : t.dim)
+            Text(located ? "NEAR YOU" : "LOCATION OFF")
                 .font(t.mono(10, weight: .bold))
                 .tracking(0.8)
-                .foregroundStyle(t.dim)
-            if loc.location != nil {
-                Circle().fill(t.accent).frame(width: 6, height: 6)
+                .foregroundStyle(located ? t.meBlue : t.dim)
+            if located {
+                Circle().fill(t.soon).frame(width: 6, height: 6)
                 Text("LIVE")
                     .font(t.mono(10, weight: .bold))
                     .tracking(0.8)
@@ -114,7 +109,10 @@ struct SoftHomeView: View {
     private func section<Content: View>(label: String,
                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Eyebrow(text: label, t: t).padding(.leading, 2)
+            Text(label)
+                .font(t.sans(15, weight: .semibold))
+                .foregroundStyle(t.dim)
+                .padding(.leading, 2)
             content()
         }
     }
