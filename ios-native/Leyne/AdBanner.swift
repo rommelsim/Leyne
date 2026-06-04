@@ -156,7 +156,7 @@ enum AdConsent {
             }
         }
 
-        // 2. Apple ATT — required for IDFA-based personalized ads. Only
+        // 2. Apple ATT — required for IDFA-based personalization. Only
         //    actually presents while the app is active (the caller's
         //    `.task` runs after the scene is active).
         let status: ATTrackingManager.AuthorizationStatus =
@@ -172,16 +172,45 @@ enum AdConsent {
     }
 }
 
-/// Fixed-size 320×50 host. The `BannerView` and one ad request are bound to
-/// this view's lifetime: the request fires from `layoutSubviews` the first
-/// time the view is actually on screen with a real size. `layoutSubviews`
-/// (not `updateUIView`) is the trigger because SwiftUI does not reliably
-/// re-run `updateUIView` once the view lands in a window.
+// MARK: - Banner refresh / retry constants
+
+/// Minimum seconds between consecutive ad load() calls on the same view.
+/// AdMob's default server-side refresh is 30–60 s. Using 45 s as the
+/// debounce floor means tick-driven re-parents (which fire many times per
+/// second) are collapsed into a single reload, while a legitimate recovery
+/// attempt after the refresh interval fires promptly.
+private let kAdRefreshDebounce: TimeInterval = 45
+
+/// Retry delays (seconds) after a failed load: 5 → 10 → 30, then held at
+/// 30 s. Three levels are sufficient; beyond 30 s AdMob's own retry logic
+/// also starts kicking in, so aggressive retries would only compete with it.
+private let kAdRetryDelays: [TimeInterval] = [5, 10, 30]
+
+// MARK: - BannerHostView
+
+/// Fixed-size 320×50 host. The `BannerView` lives here for the app's
+/// lifetime. Ad requests are gated by the SDK-started signal, window
+/// attachment, and a debounce timer so constant `tabViewBottomAccessory`
+/// rebuilds never spam load(). On failure, exponential back-off retries
+/// are scheduled. The rootViewController is refreshed every time the view
+/// re-enters a window so stale captures don't confuse AdMob's presentation
+/// layer after a re-parent.
 private final class BannerHostView: UIView {
     let banner = BannerView(adSize: AdSizeBanner)   // 320 × 50
     var onReady: (() -> Void)?
-    private var fired = false
     private var sdkObserver: NSObjectProtocol?
+
+    // ------------------------------------------------------------------
+    // Debounce: tracks the last time load() was successfully dispatched so
+    // rapid re-parent/rebuild cycles collapse into a single request.
+    private var lastLoadTime: Date = .distantPast
+
+    // Retry state: index into kAdRetryDelays; reset to 0 on success.
+    private var retryIndex = 0
+    private var retryWorkItem: DispatchWorkItem?
+
+    // One-shot layout logger (unchanged from original).
+    private var loggedLayoutOnce = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -195,7 +224,7 @@ private final class BannerHostView: UIView {
             banner.centerXAnchor.constraint(equalTo: centerXAnchor),
             banner.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        // If layoutSubviews fires before the SDK has finished initializing,
+        // If tryLoad fires before the SDK has finished initializing,
         // we hold the ad request until the start completion posts. Without
         // this, returning-user launches race load() ahead of MobileAds.start
         // and silently get nothing back.
@@ -203,21 +232,35 @@ private final class BannerHostView: UIView {
             forName: AdConfig.didStartName, object: nil, queue: .main
         ) { [weak self] _ in
             adLog.notice("BannerHostView got SDK didStart notification")
-            self?.tryFire()
+            self?.tryLoad(reason: "sdkDidStart")
         }
     }
 
     deinit {
+        retryWorkItem?.cancel()
         if let o = sdkObserver { NotificationCenter.default.removeObserver(o) }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
 
+    // ------------------------------------------------------------------
+    // MARK: UIView overrides
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         adLog.notice("BannerHostView didMoveToWindow window=\(self.window != nil) bounds=\(NSCoder.string(for: self.bounds))")
-        tryFire()
+
+        // Refresh rootViewController every time we (re-)enter a window.
+        // tabViewBottomAccessory re-parents the view frequently; the VC
+        // captured at first load can go stale and confuse AdMob's presentation
+        // layer, causing the creative to clear and never recover.
+        if window != nil, let vc = BannerAdView.rootVC() {
+            banner.rootViewController = vc
+            adLog.debug("BannerHostView refreshed rootViewController: \(String(describing: type(of: vc)))")
+        }
+
+        tryLoad(reason: "didMoveToWindow")
     }
 
     override func layoutSubviews() {
@@ -226,24 +269,101 @@ private final class BannerHostView: UIView {
             loggedLayoutOnce = true
             adLog.notice("BannerHostView layoutSubviews bounds=\(NSCoder.string(for: self.bounds)) window=\(self.window != nil)")
         }
-        tryFire()
+        tryLoad(reason: "layoutSubviews")
     }
-    private var loggedLayoutOnce = false
 
-    private func tryFire() {
-        if fired { return }
+    // ------------------------------------------------------------------
+    // MARK: Load orchestration
+
+    /// Central gate for all ad load attempts.
+    ///
+    /// Conditions required before calling load():
+    ///   1. View is attached to a window (not mid-re-parent).
+    ///   2. Banner has a non-zero width (layout is settled).
+    ///   3. SDK has finished initializing (AdConfig.started).
+    ///   4. At least `kAdRefreshDebounce` seconds have passed since the
+    ///      last successful load() dispatch — collapses tick-driven
+    ///      re-parents into a single request.
+    ///
+    /// `reason` is logged so Console.app clearly shows which code path
+    /// triggered each load attempt.
+    func tryLoad(reason: String) {
         let hasWindow = window != nil
-        let hasWidth = banner.bounds.width > 0
+        let hasWidth = banner.bounds.width > 0 || bounds.width > 0
         let sdkStarted = AdConfig.started
+        let elapsed = Date().timeIntervalSince(lastLoadTime)
+        let debounced = elapsed >= kAdRefreshDebounce
+
         guard hasWindow, hasWidth, sdkStarted else {
-            adLog.debug("BannerHostView tryFire skipped: window=\(hasWindow) width=\(hasWidth) sdk=\(sdkStarted)")
+            adLog.debug("BannerHostView tryLoad(\(reason, privacy: .public)) skipped: window=\(hasWindow) width=\(hasWidth) sdk=\(sdkStarted)")
             return
         }
-        adLog.notice("BannerHostView tryFire → load()")
-        fired = true
+        guard debounced else {
+            adLog.debug("BannerHostView tryLoad(\(reason, privacy: .public)) debounced: \(String(format: "%.1f", elapsed), privacy: .public)s < \(kAdRefreshDebounce, privacy: .public)s since last load")
+            return
+        }
+
+        dispatchLoad(reason: reason)
+    }
+
+    /// Unconditionally fires a new ad request and resets retry state.
+    /// Call only after all guards in `tryLoad` have passed, or from the
+    /// retry work item (which has its own elapsed-time check).
+    private func dispatchLoad(reason: String) {
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
+        lastLoadTime = Date()
+
+        // Always re-resolve rootViewController immediately before load()
+        // so we never hand AdMob a stale hierarchy.
+        if let vc = BannerAdView.rootVC() {
+            banner.rootViewController = vc
+        }
+
+        adLog.notice("BannerHostView dispatchLoad(\(reason, privacy: .public)) → load()")
         onReady?()
     }
+
+    // ------------------------------------------------------------------
+    // MARK: Delegate callbacks (called by BannerHostHolder)
+
+    /// Called by `BannerHostHolder.bannerViewDidReceiveAd`. Resets retry
+    /// state so the next failure starts the back-off sequence fresh.
+    func didReceiveAd() {
+        retryIndex = 0
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
+        adLog.notice("BannerHostView didReceiveAd — retry state reset")
+    }
+
+    /// Called by `BannerHostHolder.bannerView(_:didFailToReceiveAdWithError:)`.
+    /// Schedules a retry after exponential back-off. Each successive failure
+    /// advances the index (5 s → 10 s → 30 s, then stays at 30 s).
+    func didFailWithError(_ error: Error) {
+        retryWorkItem?.cancel()
+
+        let delay = kAdRetryDelays[min(retryIndex, kAdRetryDelays.count - 1)]
+        retryIndex = min(retryIndex + 1, kAdRetryDelays.count - 1)
+
+        adLog.error("BannerHostView didFail: \(error.localizedDescription) — retrying in \(delay, privacy: .public)s (retryIndex now \(self.retryIndex, privacy: .public))")
+
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.window != nil else {
+                adLog.debug("BannerHostView retry fired but no window — skipping")
+                return
+            }
+            // Bypass the debounce: the failure handler already waited long
+            // enough, and the point of the retry is to recover, not to wait
+            // again for kAdRefreshDebounce.
+            adLog.notice("BannerHostView retry firing after \(delay, privacy: .public)s back-off")
+            self.dispatchLoad(reason: "retry")
+        }
+        retryWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
 }
+
+// MARK: - BannerHostHolder
 
 /// Process-singleton owner of the banner UIView + ad delegate. SwiftUI's
 /// `tabViewBottomAccessory` re-evaluates its content closure many times
@@ -258,24 +378,27 @@ private final class BannerHostView: UIView {
 private final class BannerHostHolder: NSObject, BannerViewDelegate {
     static let shared = BannerHostHolder()
     let host = BannerHostView(frame: .zero)
-    var didLoad = false
 
     func bannerViewDidReceiveAd(_ bannerView: BannerView) {
-        adLog.notice("Banner loaded (test) \(bannerView.adUnitID ?? "?")")
+        adLog.notice("Banner loaded \(bannerView.adUnitID ?? "?")")
+        host.didReceiveAd()
     }
     func bannerView(_ bannerView: BannerView,
                     didFailToReceiveAdWithError error: Error) {
         adLog.error("Banner failed: \(error.localizedDescription)")
+        host.didFailWithError(error)
     }
 }
+
+// MARK: - BannerAdView
 
 /// Standard fixed 320×50 banner — the smallest, least-intrusive size.
 ///
 /// The host view + delegate live in `BannerHostHolder.shared` so a single
 /// pair survives every SwiftUI rebuild of the accessory. `makeUIView`
 /// re-applies the configuration each time (idempotent) and returns the
-/// same `BannerHostView`. The `didLoad` flag on the holder ensures the
-/// banner load fires exactly once per app session.
+/// same `BannerHostView`. Load orchestration (debounce, retry, rootVC
+/// refresh) is owned entirely by `BannerHostView`.
 private struct BannerAdView: UIViewRepresentable {
     func makeUIView(context: Context) -> BannerHostView {
         let holder = BannerHostHolder.shared
@@ -283,10 +406,10 @@ private struct BannerAdView: UIViewRepresentable {
         let banner = host.banner
         banner.adUnitID = AdConfig.bannerUnitID
         banner.delegate = holder
+        // Wire the onReady closure: called by dispatchLoad() each time a
+        // fresh request should go out. rootViewController is set immediately
+        // before load() inside dispatchLoad, so it's always current.
         host.onReady = {
-            guard !holder.didLoad else { return }
-            holder.didLoad = true
-            banner.rootViewController = Self.rootVC()
             banner.load(Request())
         }
         return host
@@ -294,7 +417,10 @@ private struct BannerAdView: UIViewRepresentable {
 
     func updateUIView(_ uiView: BannerHostView, context: Context) {}
 
-    private static func rootVC() -> UIViewController? {
+    /// Resolves the current key-window rootViewController. Called from
+    /// BannerHostView so the VC is refreshed on every re-parent, not just
+    /// the first load.
+    static func rootVC() -> UIViewController? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
@@ -302,6 +428,8 @@ private struct BannerAdView: UIViewRepresentable {
             .rootViewController
     }
 }
+
+// MARK: - Probes (unchanged)
 
 /// One-shot logger for the bottomAdBanner branch + screenshot flag state.
 /// The presence of `-screenshots` in `ProcessInfo.arguments` is a frequent
@@ -357,6 +485,8 @@ private enum AdBannerProbe {
         adLog.notice("AdBanner.body evaluated for first time")
     }
 }
+
+// MARK: - View extensions
 
 extension View {
     /// Banner for the main `TabView`.

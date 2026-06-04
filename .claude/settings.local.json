@@ -134,7 +134,13 @@
       "Bash(grep -rniE \"confidence|freshness|unconfirmed|ghost|scheduled.*estimate|monitored\" lib --include=*.dart -l)",
       "Bash(grep -rniE \"crowd|CrowdMeter|Load\\\\b|whisper|tilde\" lib --include=*.dart -l)",
       "Bash(grep -rniE \"StatusPill|ConfidenceDot|ConfidenceETA\" lib --include=*.dart)",
-      "Bash(grep -rln '\\\\b__TRACKED_VAR__\\\\b' lib/)"
+      "Bash(grep -rln '\\\\b__TRACKED_VAR__\\\\b' lib/)",
+      "Bash(security find-identity *)",
+      "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -configuration Release -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rommelsim.github.io/app-ads.txt)",
+      "Bash(curl -s https://rommelsim.github.io/app-ads.txt)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rommelsim.github.io/Leyne/app-ads.txt)",
+      "Bash(curl -s https://rommelsim.github.io/Leyne/app-ads.txt)"
     ]
   }
 }
