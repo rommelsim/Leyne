@@ -8,6 +8,29 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.4.0 · Android (30) · 2026-06-05
+
+**2026-06-05 — Android closed-alpha AAB (2.4.0, build 30):** the 9-screen
+Material redesign brought to parity with iOS, plus bug fixes from on-device
+testing. Build artifact: `build/app/outputs/bundle/release/app-release.aab`.
+
+- **9-screen redesign (Material):** Home ("Stops near you" — Closest/Other
+  sections, new nearby card with 3-ETA columns, live-updates banner), Stop
+  Detail, Bus tracking (contained map card + live-position callout + route
+  progress; next-buses moved to Stop Detail), Saved tab, Search (recents list
+  + Browse grid), Settings (grouped rows). Tab bar is now Home · Saved ·
+  Search · Settings.
+- **Search:** tokenised + synonym matching (mrt/station→stn, interchange→int)
+  so "yio chu kang mrt" resolves; recents list with per-row remove + Clear.
+- **Saved:** shows only saved stops + saved bus services (no nearby bleed-in);
+  All / Stops / Buses segments; swipe-left to delete.
+- **Fixes:** Home filter/map header buttons removed; nearby-card "Arr" wrap
+  fixed; Search keeps the bottom tab bar visible after the keyboard closes.
+- **Ads:** re-enabled for closed testing via **Google test ad units**
+  (`kLyneAdsTest` defaults `true`) to protect the AdMob account from invalid
+  traffic. ⚠️ Flip to production ads (`--dart-define=LYNE_ADS_TEST=false` or
+  reset the default) before the public Play Store release.
+
 ## Leyne 2.4.0 · iOS (18) · 2026-06-04
 
 **2026-06-04 — iOS UI overhaul (2.4.0, build 18):** the redesign from the June
