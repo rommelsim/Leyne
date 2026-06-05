@@ -14,6 +14,8 @@ import os
 enum AppGroup {
     static let id = "group.com.leyne"        // must match *.entitlements
     static let pinsKey = "leyne.pins.shared"
+    static let nearbyKey = "leyne.nearby.shared"
+    static let favsKey = "leyne.favs.shared"
     static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
 }
 
@@ -22,6 +24,26 @@ enum AppGroup {
 struct SharedPinnedStop: Codable, Identifiable, Hashable {
     let id: String      // bus stop code
     let name: String    // nickname or resolved stop name
+}
+
+/// Last-known nearby stop the Nearby widget reads. The widget refetches live
+/// arrivals itself; this carries only what it can't compute without the stop
+/// database (name + walking distance). Mirrors WNearbyStop in the extension.
+struct SharedNearbyStop: Codable, Identifiable, Hashable {
+    let id: String      // bus stop code
+    let name: String
+    let walkMin: Int
+}
+
+/// A favourited service, pre-resolved to a concrete stop + the route's
+/// destination so the extension (which has no route/stop DB) can render the
+/// Favourite Service widget. Mirrors WFavService in the extension.
+struct SharedFavService: Codable, Identifiable, Hashable {
+    let no: String
+    let stopCode: String
+    let stopName: String
+    let dest: String
+    var id: String { "\(no)#\(stopCode)" }
 }
 
 private let laLog = Logger(subsystem: "com.leyne.Leyne", category: "LiveActivity")
@@ -430,6 +452,30 @@ final class AppModel: ObservableObject {
         if let d = try? JSONEncoder().encode(favServices) {
             UserDefaults.standard.set(d, forKey: "leyne.favServices")
         }
+        mirrorFavServicesToWidget()
+    }
+
+    /// Re-publish the favourite-service snapshot. Called after reference data
+    /// finishes loading, when stop names + destinations finally resolve.
+    func republishFavServicesToWidget() { mirrorFavServicesToWidget() }
+
+    /// Publishes favourite *services* to the App Group so the Favourite
+    /// Service widget can offer them. Only favs anchored to a concrete stop
+    /// are widget-eligible — an "anywhere" fav has no stop the extension can
+    /// fetch without location, so it stays in-app only. Destination is
+    /// resolved here from live route data (the extension can't resolve a
+    /// DestinationCode → name).
+    private func mirrorFavServicesToWidget() {
+        let shared: [SharedFavService] = favServices.compactMap { fav in
+            guard let stop = fav.stop else { return nil }       // skip "anywhere"
+            let name = { let n = ds.stopName(stop); return n.isEmpty ? stop : n }()
+            let dest = ds.servicesFor(stop).first { $0.no == fav.no }?.dest ?? ""
+            return SharedFavService(no: fav.no, stopCode: stop, stopName: name, dest: dest)
+        }
+        if let d = try? JSONEncoder().encode(shared) {
+            AppGroup.defaults?.set(d, forKey: AppGroup.favsKey)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     // ─── Favourite-service helpers ─────────────────────────
@@ -1017,16 +1063,27 @@ final class NotificationsManager {
 
     private let center = UNUserNotificationCenter.current()
 
-    /// Fire offset before arrival — matches the design's "1 min" framing.
-    private let leadSec: TimeInterval = 60
+    /// Two arrival tiers, mirroring the design: an early heads-up while the
+    /// bus is still a few minutes out, then the imminent "arriving soon" nudge
+    /// for the final approach. The displayed minutes are derived from these
+    /// leads (lead/60), so the copy and the fire time can never drift apart.
+    private let imminentLeadSec: TimeInterval = 60     // "arriving soon"
+    private let headsUpLeadSec: TimeInterval = 300     // "5 min away"
+    /// Don't bother with a heads-up if it would land within this gap of the
+    /// imminent nudge — two pings seconds apart is noise, not signal.
+    private let minTierGapSec: TimeInterval = 120
 
-    /// Notifications with an identifier prefixed this way belong to us; lets
-    /// the orphan-sweep ignore unrelated requests that may live in the
-    /// system's pending queue.
-    private let idPrefix = "arrival."
+    /// Notifications whose identifier carries one of these prefixes belong to
+    /// us; the orphan-sweep / clearAll only touch our own requests.
+    private let imminentPrefix = "arrival."
+    private let headsUpPrefix  = "headsup."
+    private var arrivalPrefixes: [String] { [imminentPrefix, headsUpPrefix] }
 
-    private func id(stopCode: String, busNo: String) -> String {
-        "\(idPrefix)\(stopCode).\(busNo)"
+    private func imminentId(stopCode: String, busNo: String) -> String {
+        "\(imminentPrefix)\(stopCode).\(busNo)"
+    }
+    private func headsUpId(stopCode: String, busNo: String) -> String {
+        "\(headsUpPrefix)\(stopCode).\(busNo)"
     }
 
     func currentStatus() async -> UNAuthorizationStatus {
@@ -1052,10 +1109,13 @@ final class NotificationsManager {
         }
     }
 
-    /// Cancels every pending arrival alert we own.
+    /// Cancels every pending arrival alert we own (both tiers).
     func clearAll() {
+        let prefixes = arrivalPrefixes
         center.getPendingNotificationRequests { reqs in
-            let ids = reqs.map(\.identifier).filter { $0.hasPrefix(self.idPrefix) }
+            let ids = reqs.map(\.identifier).filter { id in
+                prefixes.contains { id.hasPrefix($0) }
+            }
             self.center.removePendingNotificationRequests(withIdentifiers: ids)
         }
     }
@@ -1150,45 +1210,44 @@ final class NotificationsManager {
         for card in cards {
             guard let pin = pins.first(where: { $0.code == card.stopCode }) else { continue }
             let tracked: Set<String>? = pin.tracked.map(Set.init)
+            let stopLabel = card.stopName.isEmpty ? card.label : card.stopName
 
             for s in card.services {
                 // Only tracked services are eligible.
                 if let tr = tracked, !tr.contains(s.no) { continue }
                 guard let arrives = s.arrivalDate else { continue }
 
-                // Fire 60 s before arrival. If we're already inside the
-                // 60 s window or past it, skip — too late to warn ahead.
-                let fireAt = arrives.addingTimeInterval(-leadSec)
-                let interval = fireAt.timeIntervalSince(now)
-                guard interval > 1 else { continue }
-
-                let content = UNMutableNotificationContent()
-                content.title = "Bus \(s.no) arriving in 1 min"
-                // walkMin == 0 means "no location fix yet", not "user is
-                // already at the stop". The old "head down" suffix
-                // assumed the latter and read wrong when location was
-                // unknown — drop it and just show the label.
-                content.body = card.walkMin > 0
-                    ? "\(card.label) · \(card.walkMin) min walk"
-                    : card.label
-                content.threadIdentifier = card.stopCode
-                content.sound = .default
-                // userInfo drives the tap-to-open deep link: LeyneAppDelegate
-                // .didReceive reads these and posts a NotificationCenter event
-                // that RootView consumes to open the stop's DetailView.
-                content.userInfo = [
-                    "kind": "arrival",
-                    "stopCode": card.stopCode,
-                    "busNo": s.no,
-                ]
-                if #available(iOS 15.0, *) {
-                    content.interruptionLevel = .timeSensitive
+                // Imminent "arriving soon" nudge — fires `imminentLeadSec`
+                // before arrival. Inside that window already → too late.
+                let imminentFire = arrives.addingTimeInterval(-imminentLeadSec)
+                let imminentInterval = imminentFire.timeIntervalSince(now)
+                if imminentInterval > 1 {
+                    let mins = max(1, Int((imminentLeadSec / 60).rounded()))
+                    desired.append((
+                        id: imminentId(stopCode: card.stopCode, busNo: s.no),
+                        content: arrivalContent(
+                            busNo: s.no, stopCode: card.stopCode, stopName: stopLabel,
+                            title: "Bus \(s.no) is arriving soon", mins: mins),
+                        trigger: UNTimeIntervalNotificationTrigger(
+                            timeInterval: imminentInterval, repeats: false)))
                 }
 
-                let trigger = UNTimeIntervalNotificationTrigger(
-                    timeInterval: interval, repeats: false)
-                desired.append((id: id(stopCode: card.stopCode, busNo: s.no),
-                                content: content, trigger: trigger))
+                // Early heads-up — fires `headsUpLeadSec` before arrival, but
+                // only if it lands a sensible gap before the imminent nudge
+                // (no double-ping for a bus that's already close).
+                let headsUpFire = arrives.addingTimeInterval(-headsUpLeadSec)
+                let headsUpInterval = headsUpFire.timeIntervalSince(now)
+                if headsUpInterval > 1,
+                   imminentFire.timeIntervalSince(headsUpFire) >= minTierGapSec {
+                    let mins = max(1, Int((headsUpLeadSec / 60).rounded()))
+                    desired.append((
+                        id: headsUpId(stopCode: card.stopCode, busNo: s.no),
+                        content: arrivalContent(
+                            busNo: s.no, stopCode: card.stopCode, stopName: stopLabel,
+                            title: "Bus \(s.no) is \(mins) min away", mins: mins),
+                        trigger: UNTimeIntervalNotificationTrigger(
+                            timeInterval: headsUpInterval, repeats: false)))
+                }
             }
         }
 
@@ -1196,9 +1255,10 @@ final class NotificationsManager {
         // then (re)add the desired set. UN replaces requests with the same
         // identifier, so add-after-add is safe.
         let desiredIds = Set(desired.map(\.id))
+        let prefixes = arrivalPrefixes
         center.getPendingNotificationRequests { reqs in
-            let toCancel = reqs.map(\.identifier).filter {
-                $0.hasPrefix(self.idPrefix) && !desiredIds.contains($0)
+            let toCancel = reqs.map(\.identifier).filter { id in
+                prefixes.contains { id.hasPrefix($0) } && !desiredIds.contains(id)
             }
             if !toCancel.isEmpty {
                 self.center.removePendingNotificationRequests(withIdentifiers: toCancel)
@@ -1214,6 +1274,33 @@ final class NotificationsManager {
                 }
             }
         }
+    }
+
+    /// Shared arrival-alert content. Body mirrors the design copy: "Bus {no}
+    /// will arrive at {stop} in {N} min." The displayed minutes come from the
+    /// scheduling lead, so what the banner says is what the timer does. No
+    /// stops-away parenthetical — at schedule time we can't guarantee it'll
+    /// still be true at fire time, and a wrong "(1 stop away)" reads worse
+    /// than none (see feedback_timely_over_honest).
+    private func arrivalContent(busNo: String, stopCode: String, stopName: String,
+                                title: String, mins: Int) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = "Bus \(busNo) will arrive at \(stopName) in \(mins) min."
+        content.threadIdentifier = stopCode
+        content.sound = .default
+        // userInfo drives the tap-to-open deep link: LeyneAppDelegate
+        // .didReceive reads these and posts a NotificationCenter event that
+        // RootView consumes to open the stop's DetailView.
+        content.userInfo = [
+            "kind": "arrival",
+            "stopCode": stopCode,
+            "busNo": busNo,
+        ]
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+        return content
     }
 }
 

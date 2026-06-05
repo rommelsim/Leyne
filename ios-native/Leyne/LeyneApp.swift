@@ -30,6 +30,10 @@ struct LeyneApp: App {
                     // bootstrap reference data.
                     if let v = AppModel.bootVersion { model.setCurrentVersion(v) }
                     await store.bootstrap()
+                    // Reference data is now loaded, so favourite-service stop
+                    // names / destinations resolve — re-publish the snapshot
+                    // the Favourite Service widget reads.
+                    model.republishFavServicesToWidget()
                 }
                 // Spotlight handoff — when a user taps a pinned-stop
                 // result in iOS system search, iOS launches/foregrounds

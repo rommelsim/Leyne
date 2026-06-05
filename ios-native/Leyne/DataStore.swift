@@ -3,6 +3,7 @@
 import Foundation
 import CoreLocation
 import Combine
+import WidgetKit
 
 enum LoadState: Equatable {
     case loading, ready, error(String)
@@ -234,6 +235,26 @@ final class DataStore: ObservableObject {
                 services: servicesFor(s.BusStopCode)
             )
         }
+        mirrorNearbyToWidget()
+    }
+
+    /// Publishes the closest few stops to the App Group for the Nearby widget.
+    /// Guarded by the stop set: location ticks every few metres, but the
+    /// widget only cares when the *stops* change — re-publishing (and waking
+    /// WidgetKit) on every GPS jitter would be wasteful and throttled anyway.
+    private var lastPublishedNearby: [String] = []
+    private func mirrorNearbyToWidget() {
+        let top = nearby.prefix(6)
+        let codes = top.map(\.stopCode)
+        guard codes != lastPublishedNearby else { return }
+        lastPublishedNearby = codes
+        let shared = top.map {
+            SharedNearbyStop(id: $0.stopCode, name: $0.stopName, walkMin: $0.walkMin)
+        }
+        if let d = try? JSONEncoder().encode(Array(shared)) {
+            AppGroup.defaults?.set(d, forKey: AppGroup.nearbyKey)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     // ─── Live arrivals ────────────────────────────────────

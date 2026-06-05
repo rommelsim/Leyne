@@ -140,7 +140,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rommelsim.github.io/app-ads.txt)",
       "Bash(curl -s https://rommelsim.github.io/app-ads.txt)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rommelsim.github.io/Leyne/app-ads.txt)",
-      "Bash(curl -s https://rommelsim.github.io/Leyne/app-ads.txt)"
+      "Bash(curl -s https://rommelsim.github.io/Leyne/app-ads.txt)",
+      "Bash(xcodebuild -list -project Leyne.xcodeproj)"
     ]
   }
 }
