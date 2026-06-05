@@ -1,0 +1,9 @@
+Leyne 2.4.0 — a full visual refresh!
+
+• New Home: nearest stops with the next buses at a glance
+• Live bus tracking: follow the bus on the map + route progress
+• Saved tab: pin stops & bus services, swipe to manage
+• Smarter search: find stops, buses and MRT stations faster
+• Refreshed Settings, plus polish and bug fixes
+
+Thanks for testing — send feedback to leyne0000@gmail.com
