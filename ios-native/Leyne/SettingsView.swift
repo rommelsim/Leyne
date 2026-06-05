@@ -139,11 +139,6 @@ struct SettingsView: View {
 
     private var feedbackSection: some View {
         section(label: "FEEDBACK") {
-            toggleRow(icon: "speaker.wave.2", title: "Sound",
-                      value: m.sound ? "On" : "Off",
-                      binding: Binding(get: { m.sound },
-                                       set: { m.sound = $0; m.syncFeedback() }))
-            divider
             toggleRow(icon: "iphone.radiowaves.left.and.right", title: "Haptics",
                       value: m.haptic ? "On" : "Off",
                       binding: Binding(get: { m.haptic },

@@ -1,8 +1,8 @@
-// SoftHomeView — Leyne 3.0 Home: greeting + search bar + a live-location
-// row, then two sections of StopCards — your Pinned stops, then Nearby
-// stops — each previewing the next buses as confidence-treated mini-chips.
-// The standalone Nearby tab folds in here. MRT disruption cards surface on
-// top when present.
+// SoftHomeView — Leyne Home ("Stops near you"): greeting + title with a
+// filter/map action pair, a NEAR YOU · LIVE status line, then the single
+// closest stop highlighted in its own "Closest to you" section, the rest
+// under "Other nearby stops", and a live-updates footer. Each card shows the
+// stop's identity and its soonest service's next three arrivals.
 
 import SwiftUI
 
@@ -32,17 +32,19 @@ struct SoftHomeView: View {
                     liveRow
                     mrtAlertCards
 
-                    // Pinned stops now live on the Favourites tab; Home is
-                    // purely Nearby (matching the 2.4.0 mockup).
-                    if !nearbyStops.isEmpty {
-                        section(label: "Nearby stops") {
-                            ForEach(nearbyStops.prefix(12), id: \.id) { stop in
-                                nearbyCard(stop)
+                    let stops = nearbyStops
+                    if let closest = stops.first {
+                        section(label: "Closest to you") {
+                            stopCard(closest, highlight: true)
+                        }
+                        let others = Array(stops.dropFirst().prefix(11))
+                        if !others.isEmpty {
+                            section(label: "Other nearby stops") {
+                                ForEach(others, id: \.id) { stopCard($0, highlight: false) }
                             }
                         }
-                    }
-
-                    if nearbyStops.isEmpty {
+                        liveUpdatesBanner
+                    } else {
                         SoftEmptyState(t: t,
                                        onNearby: { loc.requestAndStart() },
                                        onSearch: { onOpenSearch() })
@@ -68,14 +70,15 @@ struct SoftHomeView: View {
         }
     }
 
-    // MARK: Header / search / live row
+    // MARK: Header / live row
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Eyebrow(text: "\(greeting)", t: t)
+            Eyebrow(text: greeting, t: t)
             Text("Stops near you")
                 .font(t.sans(33, weight: .bold))
                 .foregroundStyle(t.fg)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)
@@ -117,37 +120,54 @@ struct SoftHomeView: View {
         }
     }
 
-    private func pinnedCard(_ pin: Pin) -> some View {
-        SoftStopCard(
+    private func stopCard(_ stop: NearbyStop, highlight: Bool) -> some View {
+        let code = stop.stopCode
+        return SoftNearbyStopCard(
             t: t,
-            name: stopName(pin.code),
-            code: pin.code,
-            desc: ds.roadName(pin.code),
-            trailing: walkMinutes(for: pin.code).map { "\($0) min" },
-            services: filteredServices(for: pin),
-            feed: feed(pin.code),
-            onTap: { fb.select(); onOpenStop(pin.code) }
+            name: stop.stopName.isEmpty ? code : stop.stopName,
+            code: code,
+            road: ds.roadName(code),
+            walkMin: stop.walkMin,
+            distanceM: stop.distanceM,
+            service: featured(code),
+            feed: feed(code),
+            highlight: highlight,
+            tick: m.tick,
+            onTap: { fb.select(); m.addRecent(stop.stopName.isEmpty ? code : stop.stopName)
+                     onOpenStop(code) }
         )
     }
 
-    private func nearbyCard(_ stop: NearbyStop) -> some View {
-        SoftStopCard(
-            t: t,
-            name: stop.stopName,
-            code: stop.stopCode,
-            desc: ds.roadName(stop.stopCode),
-            trailing: fmtDistance(stop.distanceM),
-            services: ds.servicesFor(stop.stopCode),
-            feed: feed(stop.stopCode),
-            onTap: { fb.select(); onOpenStop(stop.stopCode) }
-        )
+    private var liveUpdatesBanner: some View {
+        Button { fb.tap(); Task { await refreshAll() } } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(t.soon)
+                (Text("Live updates  ").font(t.sans(13, weight: .semibold)).foregroundColor(t.fg)
+                 + Text("Arrival times update every few seconds.")
+                    .font(t.sans(13)).foregroundColor(t.dim))
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("Live updates. Arrival times update every few seconds. Tap to refresh.")
     }
 
-    /// Nearby stops minus any already shown in the Pinned section, so a
-    /// stop never appears twice.
+    /// Nearby stops (closest first). Pins are excluded — they live on the
+    /// Favourites tab.
     private var nearbyStops: [NearbyStop] {
         let pinned = Set(m.pins.map(\.code))
-        return ds.nearby.filter { !pinned.contains($0.stopCode) }
+        return ds.nearby
+            .filter { !pinned.contains($0.stopCode) }
+            .sorted { $0.distanceM < $1.distanceM }
     }
 
     // MARK: MRT alerts (unchanged)
@@ -196,9 +216,9 @@ struct SoftHomeView: View {
 
     private func feed(_ code: String) -> Freshness { Freshness.from(ds.lastRefresh(code)) }
 
-    private func stopName(_ code: String) -> String {
-        let n = ds.stopName(code)
-        return n.isEmpty ? code : n
+    /// The soonest live-recomputed service at a stop — the card's featured row.
+    private func featured(_ code: String) -> Service? {
+        m.liveServices(code: code, tracked: []).first
     }
 
     private func warmArrivals() {
@@ -211,28 +231,6 @@ struct SoftHomeView: View {
         ds.prefetchNearbyArrivals()
     }
 
-    /// Walk-time (minutes) from the user to the stop. 80 m/min ≈ 5 km/h.
-    private func walkMinutes(for code: String) -> Int? {
-        guard let here = LocationManager.shared.location,
-              let stop = ds.stopByCode[code] else { return nil }
-        let d = haversine(here.coordinate.latitude, here.coordinate.longitude,
-                          stop.Latitude, stop.Longitude)
-        return max(1, Int((d / 80).rounded()))
-    }
-
-    private func filteredServices(for pin: Pin) -> [Service] {
-        let all = liveServices(for: pin.code)
-        if let tracked = pin.tracked, !tracked.isEmpty {
-            return all.filter { tracked.contains($0.no) }
-        }
-        return all
-    }
-
-    private func liveServices(for code: String) -> [Service] {
-        if case .loaded(let s) = ds.arrivals[code] { return s }
-        return []
-    }
-
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
         switch h {
@@ -241,6 +239,191 @@ struct SoftHomeView: View {
         case 17..<22: return "Good evening"
         default:      return "Good night"
         }
+    }
+}
+
+// MARK: - Nearby stop card
+
+/// A nearby-stop card: identity (pin · name · "Stop {code} · road" · walk +
+/// distance) over a divider, then the soonest service's next three arrivals in
+/// columns. The closest stop is highlighted with a green border + badge.
+struct SoftNearbyStopCard: View {
+    let t: Theme
+    let name: String
+    let code: String
+    let road: String
+    let walkMin: Int
+    let distanceM: Int
+    let service: Service?
+    let feed: Freshness
+    let highlight: Bool
+    let tick: Int            // forces a per-second live ETA recompute
+    let onTap: () -> Void
+
+    var body: some View {
+        let _ = tick
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 0) {
+                if highlight { closestBadge.padding(.bottom, 12) }
+                identityRow
+                Rectangle().fill(t.line).frame(height: 1).padding(.vertical, 12)
+                if let service { serviceRow(service) } else { quietRow }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(highlight ? t.soon : t.line, lineWidth: highlight ? 1.5 : 1))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens \(name)")
+    }
+
+    private var closestBadge: some View {
+        Text("Closest stop")
+            .font(t.sans(11, weight: .bold))
+            .foregroundStyle(t.contrastFg)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(t.soon, in: Capsule())
+    }
+
+    private var identityRow: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(t.surfaceHi)
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(t.fg)
+            }
+            .frame(width: 46, height: 46)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(t.sans(17, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(subtitle)
+                    .font(t.mono(12.5))
+                    .foregroundStyle(t.dim)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(t.soon)
+                    Text("\(max(1, walkMin)) min walk")
+                        .foregroundStyle(t.soon)
+                    Text("·").foregroundStyle(t.faint)
+                    Text(fmtDistance(distanceM)).foregroundStyle(t.dim)
+                }
+                .font(t.mono(12.5, weight: .medium))
+                .padding(.top, 1)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(t.faint)
+        }
+    }
+
+    private var subtitle: String {
+        road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)"
+    }
+
+    private func serviceRow(_ s: Service) -> some View {
+        let conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed)
+        let badge = serviceBadgeColors(etaSec: s.etaSec, confidence: conf, t: t)
+        return HStack(spacing: 12) {
+            Text(s.no)
+                .font(t.sans(17, weight: .bold))
+                .foregroundStyle(badge.fg)
+                .lineLimit(1)
+                .frame(minWidth: 46, minHeight: 40)
+                .padding(.horizontal, 8)
+                .background(badge.fill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            Text(destLabel(s.dest))
+                .font(t.sans(14, weight: .medium))
+                .foregroundStyle(t.fg)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            etaColumns(s, confidence: conf)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
+        }
+    }
+
+    /// Up to three arrival columns ("6 · 18 · 29 min") split by hairlines. The
+    /// lead column carries proximity colour + a live signal; the rest are ink.
+    private func etaColumns(_ s: Service, confidence: ArrivalConfidence) -> some View {
+        let etas = arrivalSecs(s)
+        return HStack(spacing: 0) {
+            ForEach(Array(etas.enumerated()), id: \.offset) { i, sec in
+                if i > 0 {
+                    Rectangle().fill(t.line).frame(width: 1, height: 30)
+                        .padding(.horizontal, 10)
+                }
+                etaColumn(sec, lead: i == 0, confidence: confidence)
+            }
+        }
+    }
+
+    private func etaColumn(_ sec: Int, lead: Bool, confidence: ArrivalConfidence) -> some View {
+        let eta = fmtETA(sec)
+        let arriving = eta.big == "Arr"
+        let color = lead ? etaColor(etaSec: sec, confidence: confidence, t: t) : t.fg
+        let ghost = confidence == .unconfirmed
+        return VStack(spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                if ghost {
+                    Text("~").font(t.mono(11, weight: .regular))
+                        .foregroundStyle(t.faint).accessibilityHidden(true)
+                }
+                Text(arriving ? "Arr" : eta.big)
+                    .font(t.mono(20, weight: .semibold))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                if lead && confidence == .live {
+                    Image(systemName: "dot.radiowaves.up.forward")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(t.soon)
+                        .offset(y: -7)
+                        .accessibilityHidden(true)
+                }
+            }
+            Text(arriving ? "now" : eta.small)
+                .font(t.mono(10))
+                .foregroundStyle(t.dim)
+        }
+        .frame(minWidth: 34)
+    }
+
+    private var quietRow: some View {
+        HStack(spacing: 7) {
+            ConfidenceDot(confidence: .stale, t: t, size: 6)
+            Text("No live arrivals right now")
+                .font(t.mono(12))
+                .foregroundStyle(t.faint)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// 1–3 upcoming arrival times (seconds), dropping any that aren't real.
+    private func arrivalSecs(_ s: Service) -> [Int] {
+        var out = [s.etaSec]
+        if s.followingSec > s.etaSec { out.append(s.followingSec) }
+        if let d = s.thirdDate {
+            let third = Int(d.timeIntervalSinceNow)
+            if third > (out.last ?? 0) { out.append(max(0, third)) }
+        }
+        return out
+    }
+
+    private func destLabel(_ dest: String) -> String {
+        dest.isEmpty ? "Next bus" : (dest.hasPrefix("To ") ? dest : "To \(dest)")
     }
 }
 

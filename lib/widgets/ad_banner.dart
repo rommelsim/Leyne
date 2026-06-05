@@ -33,12 +33,19 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../services/ad_consent.dart';
 import '../theme.dart';
 
-/// True when this build was compiled with `--dart-define=LYNE_ADS_TEST=true`
-/// (TestFlight / Play Internal). Defaults to `false`, so a regular
-/// `flutter build ios --release` for the App Store uses the production
-/// unit. See the file-level comment above for the full matrix.
+/// True when this build should serve Google's universal TEST ad unit instead
+/// of the production banner.
+///
+/// ⚠️ TEMPORARILY DEFAULTS TO `true` for the closed-alpha test track — real
+/// testers must NOT generate live impressions/clicks on the production unit
+/// (AdMob "invalid traffic" risks suspending the account). So the alpha AAB
+/// shows "Test Ad" banners.
+///
+/// BEFORE THE PUBLIC PRODUCTION RELEASE: set this default back to `false`
+/// (or build with `--dart-define=LYNE_ADS_TEST=false`) so the Play Store
+/// build uses the real production unit and earns revenue.
 const bool kLyneAdsTest =
-    bool.fromEnvironment('LYNE_ADS_TEST', defaultValue: false);
+    bool.fromEnvironment('LYNE_ADS_TEST', defaultValue: true);
 
 /// True when this build was compiled with
 /// `--dart-define=LYNE_SCREENSHOT_MODE=true`. Suppresses the ad banner

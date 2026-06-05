@@ -2,7 +2,7 @@
 // Skips (does not fail) if the network/LTA is unreachable in CI.
 
 import XCTest
-@testable import Lyne
+@testable import Leyne
 
 final class LiveLTATests: XCTestCase {
 

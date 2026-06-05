@@ -29,20 +29,13 @@ struct SoftToggle: View {
     let t: Theme
     @Binding var value: Bool
 
+    // Native SwiftUI Toggle so the control adopts the system (iOS 26 Liquid
+    // Glass) switch design automatically, instead of a hand-drawn capsule.
+    // Tinted with the semantic green to match the redesign's on-state.
     var body: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) { value.toggle() }
-        } label: {
-            ZStack(alignment: value ? .trailing : .leading) {
-                Capsule().fill(value ? t.accent : t.surfaceHi)
-                    .frame(width: 38, height: 22)
-                Circle().fill(.white)
-                    .frame(width: 18, height: 18)
-                    .shadow(color: .black.opacity(0.2), radius: 1.5, y: 1)
-                    .padding(.horizontal, 2)
-            }
-        }
-        .buttonStyle(.plain)
+        Toggle("", isOn: $value)
+            .labelsHidden()
+            .tint(t.soon)
     }
 }
 

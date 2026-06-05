@@ -82,7 +82,7 @@ struct SoftRoot: View {
                         )
                     }
                 }
-                Tab("Favourites", systemImage: "star.fill", value: SoftTab.favourites) {
+                Tab("Saved", systemImage: "star.fill", value: SoftTab.favourites) {
                     navStack($favouritesStack) {
                         SoftFavouritesView(
                             onOpenStop: { favouritesStack.append(.stop($0)) },
@@ -91,11 +91,6 @@ struct SoftRoot: View {
                             },
                             onOpenSearch: { tab = .search }
                         )
-                    }
-                }
-                Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
-                    navStack($settingsStack) {
-                        SoftSettingsView(onTab: { tab = $0 })
                     }
                 }
                 Tab("Search", systemImage: "magnifyingglass", value: SoftTab.search) {
@@ -109,6 +104,11 @@ struct SoftRoot: View {
                                                         fullRoute: true))
                             }
                         )
+                    }
+                }
+                Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
+                    navStack($settingsStack) {
+                        SoftSettingsView(onTab: { tab = $0 })
                     }
                 }
             }

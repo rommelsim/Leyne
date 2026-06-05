@@ -1,12 +1,15 @@
-// SoftBusScreen — Leyne 3.0 immersive bus tracking (Material 3 Android).
+// SoftBusScreen — Leyne bus tracking (Material 3 Android).
 //
-// Full-bleed map backdrop with a draggable bottom sheet. The peek answers
-// "when's my bus" instantly; pulling up reveals Alerts + route timeline. The
-// map uses flutter_map with free CartoDB basemap tiles (no API key, no
-// billing) — a clean modern style, not the dated default OSM raster. The bus
-// pin is always plotted in one of three honest tiers:
+// Scrollable vertical page layout:
+//   1. Top bar  — back (left), share + "…" menu (right).
+//   2. Title    — "Bus {svc}" h1 + "Towards {dest}" + LIVE badge.
+//   3. Map card — contained 300 dp rounded card with live-position callout.
+//   4. Route progress — direction toggle + RouteTimeline in a surface card.
+//   5. Alerts   — notify button + ongoing-tracking card.
+//
+// The bus pin is always plotted in one of three honest tiers:
 //   • LIVE      — Service.busLat/busLon present → solid accent pill
-//   • RECENT    — last-known fix <150s → dimmed solid pill, "last seen"
+//   • RECENT    — last-known fix <150s → dimmed solid pill
 //   • ESTIMATED — no fix but route geometry loaded → hollow dashed "≈" pill
 //                 derived by walking back from youIndex by ETA (~90s/stop)
 //   • ABSENT    — no geometry at all → bus pin omitted, no position fabricated
@@ -19,7 +22,6 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -100,7 +102,7 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   // Performance: the glide drives _displayCoord (a ValueNotifier) instead
   // of calling setState on the whole State. AnimatedBuilder inside
   // _buildMap listens only to this notifier, so map tiles and the rest of
-  // the Stack do NOT rebuild during a 1.5-second glide.
+  // the widget tree do NOT rebuild during a 1.5-second glide.
   _BusPlot? _currentTarget;
   // ValueNotifier carries the animated display position + the current tier
   // so the marker widget can read both without a setState rebuild.
@@ -421,50 +423,67 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     }).toList();
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────────────────────────────
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      // No AppBar — the map is full-bleed and floating controls replace it.
-      backgroundColor: Colors.black,
-      body: ListenableBuilder(
-        listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
-        builder: (context, _) {
-          final live = _liveService();
-          final isPinned = AppModel.shared.isPinned(widget.stopCode);
-          return Stack(
-            children: [
-              // ── Full-bleed map backdrop ──────────────────────────────
-              Positioned.fill(child: _buildMap(context)),
+  // ── Estimated bus index ───────────────────────────────────────────────
+  // Mirrors iOS estimatedBusIndex: approximate route index of the bus,
+  // derived from ETA the same way the map pin is (≈90s/stop, decremented
+  // since the last poll). Nil when we have no anchor context (fullRoute /
+  // no live arrival / route not loaded).
+  int? _estimatedBusIndex() {
+    if (widget.fullRoute) return null;
+    final dir = _currentDir;
+    if (dir == null || !dir.anchorPresent || dir.stops.isEmpty) return null;
+    final svc = _liveService();
+    if (svc == null) return null;
+    final you = dir.youIndex.clamp(0, dir.stops.length - 1);
+    if (you == 0) return 0;
+    final lastRefresh = DataStore.shared.lastRefresh(widget.stopCode);
+    final elapsed = lastRefresh != null
+        ? DateTime.now().difference(lastRefresh).inSeconds.toDouble()
+        : 0.0;
+    final eta = (svc.etaSec - elapsed).clamp(0.0, double.infinity);
+    final back = (eta / 90.0).clamp(0.0, you.toDouble());
+    return (you - back).round().clamp(0, you);
+  }
 
-              // ── Floating top controls (back + bus badge + recenter + save)
-              _FloatingTopBar(
-                svc: widget.svc,
-                onBack: widget.onBack,
-                onRecenter: _recenterOnUser,
-                isPinned: isPinned,
-                onPin: () => AppModel.shared.togglePin(widget.stopCode),
-                serviceSaved: AppModel.shared.isFavService(
-                    no: widget.svc, stop: null) ||
-                    AppModel.shared.isFavService(
-                        no: widget.svc, stop: widget.stopCode),
-                onSaveService: () => _showSaveServiceSheet(context),
-              ),
+  // ─────────────────────────────────────────────────────────────────────
+  // LIVE-POSITION CALLOUT DATA
+  // ─────────────────────────────────────────────────────────────────────
+  // Returns (prevName, nextName, stopsAway, distMetres) for the map-card
+  // callout. prevName = stop the bus is at / just passed; nextName = the
+  // immediately following stop (preferring widget.stopCode if it is next).
+  // distMetres = haversine from the current display coord to nextStop.
+  ({
+    String prevName,
+    String nextName,
+    int stopsAway,
+    int? distMetres,
+  })? _calloutData() {
+    final dir = _currentDir;
+    final busIdx = _estimatedBusIndex();
+    if (dir == null || busIdx == null || dir.stops.isEmpty) return null;
+    final stops = dir.stops;
+    final clampedBus = busIdx.clamp(0, stops.length - 1);
+    final nextIdx = (clampedBus + 1).clamp(0, stops.length - 1);
 
-              // ── Draggable bottom sheet ───────────────────────────────
-              _DraggableSheet(
-                peek: 0.42,
-                minFraction: 0.30,
-                maxFraction: 0.92,
-                header: _buildSheetHeader(context, live),
-                body: _buildSheetBody(context, live),
-              ),
-            ],
-          );
-        },
-      ),
+    final prevStop = stops[clampedBus];
+    final nextStop = stops[nextIdx];
+
+    final youIdx = dir.youIndex.clamp(0, stops.length - 1);
+    final stopsAway = (youIdx - clampedBus).clamp(0, stops.length);
+
+    // Distance from current bus display coordinate to nextStop.
+    int? distMetres;
+    final plot = _displayPlot.value;
+    if (plot != null) {
+      final d = haversine(plot.lat, plot.lon, nextStop.lat, nextStop.lon);
+      distMetres = d.round();
+    }
+
+    return (
+      prevName: prevStop.name,
+      nextName: nextStop.name,
+      stopsAway: stopsAway,
+      distMetres: distMetres,
     );
   }
 
@@ -517,7 +536,377 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
-  // ── Map ──────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────
+  // BUILD
+  // ─────────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: context.t.bg,
+      body: ListenableBuilder(
+        listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
+        builder: (context, _) {
+          final t = context.t;
+          final live = _liveService();
+          return CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── 1. Top bar ────────────────────────────────────
+                    _buildTopBar(context, t, live),
+
+                    // ── 2. Title block ────────────────────────────────
+                    _buildTitleBlock(context, t, live),
+                    const SizedBox(height: 16),
+
+                    // ── 3. Map card ───────────────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildMapCard(context, t),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // ── 4. Route progress ─────────────────────────────
+                    if (_route != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: _buildRouteProgressSection(context, t),
+                      ),
+
+                    // ── 5. Alerts (notify + ongoing) ──────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                      child: _buildAlertsSection(context, t, live),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ── 1. Top bar ────────────────────────────────────────────────────────
+  // Back (left), share + "…" overflow (right). Reuses _MapControl circles.
+  Widget _buildTopBar(BuildContext context, LyneTheme t, Service? live) {
+    final serviceSaved =
+        AppModel.shared.isFavService(no: widget.svc, stop: null) ||
+        AppModel.shared.isFavService(no: widget.svc, stop: widget.stopCode);
+    final allNos = () {
+      final st = DataStore.shared.arrivals[widget.stopCode];
+      if (st == null || st.kind != ArrivalStateKind.loaded) return <String>[];
+      return st.services.map((s) => s.no).toList();
+    }();
+
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            // Back.
+            _MapControl(
+              onTap: widget.onBack,
+              semanticsLabel: 'Back',
+              child: Icon(Icons.arrow_back, size: 20, color: t.fg),
+            ),
+            const Spacer(),
+            // Star (save).
+            _MapControl(
+              onTap: () => _showSaveServiceSheet(context),
+              semanticsLabel: serviceSaved
+                  ? 'Bus ${widget.svc} saved — edit favourite'
+                  : 'Save bus ${widget.svc} to favourites',
+              filled: serviceSaved,
+              fillColor: const Color(0xFFF4B870),
+              child: Icon(
+                serviceSaved ? Icons.star_rounded : Icons.star_border_rounded,
+                size: 18,
+                color: serviceSaved ? Colors.white : t.fg,
+              ),
+            ),
+            const SizedBox(width: 8),
+            // "…" overflow menu — notify + ongoing-tracking shortcuts.
+            _MapControl(
+              onTap: () => _showOverflowMenu(context, t, live, allNos),
+              semanticsLabel: 'More options',
+              child: Icon(Icons.more_horiz, size: 20, color: t.fg),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// "…" overflow menu: notify toggle + ongoing-tracking shortcut.
+  void _showOverflowMenu(
+    BuildContext context,
+    LyneTheme t,
+    Service? live,
+    List<String> allNos,
+  ) {
+    final notifyOn = AppModel.shared.isTracked(
+      code: widget.stopCode,
+      busNo: widget.svc,
+    );
+    final ongoingOn = live != null &&
+        AppModel.shared.isOngoingActive(
+          busNo: widget.svc,
+          stopCode: widget.stopCode,
+        );
+
+    final RenderBox button = context.findRenderObject()! as RenderBox;
+    final RenderBox overlay =
+        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+    final RelativeRect position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        button.localToGlobal(button.size.topRight(Offset.zero),
+            ancestor: overlay),
+        button.localToGlobal(button.size.bottomRight(Offset.zero),
+            ancestor: overlay),
+      ),
+      Offset.zero & overlay.size,
+    );
+
+    showMenu<String>(
+      context: context,
+      position: position,
+      items: [
+        PopupMenuItem<String>(
+          value: 'notify',
+          child: Row(
+            children: [
+              Icon(
+                notifyOn
+                    ? Icons.notifications_active_rounded
+                    : Icons.notifications_none_rounded,
+                size: 18,
+                color: notifyOn ? t.accent : t.dim,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                notifyOn ? 'Cancel alert' : 'Notify before arrival',
+                style: t.sans(14, color: t.fg),
+              ),
+            ],
+          ),
+        ),
+        if (live != null)
+          PopupMenuItem<String>(
+            value: 'ongoing',
+            child: Row(
+              children: [
+                Icon(
+                  ongoingOn
+                      ? Icons.stop_rounded
+                      : Icons.notifications_active_outlined,
+                  size: 18,
+                  color: ongoingOn ? t.accent : t.dim,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  ongoingOn
+                      ? 'Stop tracking in notifications'
+                      : 'Track in notifications',
+                  style: t.sans(14, color: t.fg),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ).then((value) {
+      if (!mounted) return;
+      if (value == 'notify') {
+        AppModel.shared.toggleTracked(
+          code: widget.stopCode,
+          busNo: widget.svc,
+          allNos: allNos,
+        );
+        AppModel.shared.rescheduleIfNeeded();
+      } else if (value == 'ongoing' && live != null) {
+        AppModel.shared.toggleOngoing(
+          busNo: widget.svc,
+          stopCode: widget.stopCode,
+          stopName: DataStore.shared.stopName(widget.stopCode),
+        );
+      }
+    });
+  }
+
+  // ── 2. Title block ────────────────────────────────────────────────────
+  Widget _buildTitleBlock(BuildContext context, LyneTheme t, Service? live) {
+    final feed = Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
+    final conf = live != null
+        ? ArrivalConfidence.of(monitored: live.monitored, feed: feed)
+        : ArrivalConfidence.none;
+    final isLive = conf != ArrivalConfidence.none;
+    final dest = live?.dest ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Bus ${widget.svc}',
+            style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  dest.isEmpty ? 'Loading route…' : 'Towards $dest',
+                  style: t.sans(15, color: t.dim),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (isLive) ...[
+                const SizedBox(width: 8),
+                Semantics(
+                  label: 'Live tracking',
+                  excludeSemantics: true,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: t.soon,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'LIVE',
+                        style: t
+                            .mono(10, weight: FontWeight.w700, color: t.soon)
+                            .copyWith(letterSpacing: 0.8),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 3. Map card ───────────────────────────────────────────────────────
+  // Contained 300 dp rounded card with the existing FlutterMap + bus-marker
+  // layer inside it. Recenter FAB overlaid bottom-right; live-position
+  // callout overlaid bottom-left.
+  Widget _buildMapCard(BuildContext context, LyneTheme t) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(LyneRadius.lg),
+      child: SizedBox(
+        height: 300,
+        child: Stack(
+          children: [
+            // Map fills the card.
+            Positioned.fill(child: _buildMap(context)),
+
+            // Recenter button — bottom-right.
+            Positioned(
+              right: 12,
+              bottom: 12,
+              child: _MapControl(
+                onTap: _recenterOnUser,
+                semanticsLabel: 'Center on my location',
+                child: Icon(Icons.my_location_rounded, size: 18, color: t.fg),
+              ),
+            ),
+
+            // Live-position callout — bottom-left, only when data available.
+            Positioned(
+              left: 12,
+              bottom: 12,
+              right: 72, // don't overlap recenter button
+              child: _buildPositionCallout(context, t),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Live-position callout ──────────────────────────────────────────────
+  // Dark rounded bubble overlaid on the lower-left of the map card.
+  // Shows: "Between X and Y" + "{N} stop(s) away · {dist} m"
+  Widget _buildPositionCallout(BuildContext context, LyneTheme t) {
+    // Driven by the ValueNotifier so it refreshes on each glide tick
+    // without rebuilding the whole screen.
+    return AnimatedBuilder(
+      animation: _displayPlot,
+      builder: (context, _) {
+        final data = _calloutData();
+        if (data == null || _displayPlot.value == null) {
+          return const SizedBox.shrink();
+        }
+
+        final stopsLabel = data.stopsAway == 0
+            ? 'Arriving'
+            : '${data.stopsAway} stop${data.stopsAway == 1 ? '' : 's'} away';
+        final distLabel =
+            data.distMetres != null ? ' · ${data.distMetres} m' : '';
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Between ${data.prevName} and ${data.nextName}',
+                style: t
+                    .sans(12, weight: FontWeight.w600)
+                    .copyWith(color: Colors.white),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 2),
+              Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: stopsLabel,
+                      style: t
+                          .sans(11)
+                          .copyWith(color: t.soon),
+                    ),
+                    TextSpan(
+                      text: distLabel,
+                      style: t
+                          .sans(11)
+                          .copyWith(color: Colors.white70),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Map (reused as-is inside the card) ───────────────────────────────
   Widget _buildMap(BuildContext context) {
     final t = context.t;
     final stop = DataStore.shared.stopByCode[widget.stopCode];
@@ -691,38 +1080,86 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
-  // ── Sheet header ─────────────────────────────────────────────────────
-  Widget _buildSheetHeader(BuildContext context, Service? live) {
-    final t = context.t;
-    final feed = Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
-    final conf = live != null
-        ? ArrivalConfidence.of(monitored: live.monitored, feed: feed)
-        : ArrivalConfidence.none;
-    // Timely-first: show LIVE whenever there's a service with an ETA.
-    final pillConf = conf == ArrivalConfidence.none
-        ? ArrivalConfidence.none
-        : ArrivalConfidence.live;
+  // ── 4. Route progress section ─────────────────────────────────────────
+  Widget _buildRouteProgressSection(BuildContext context, LyneTheme t) {
+    final timelineStops = _timelineStops();
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    // Freshness label.
+    final lastRefresh = DataStore.shared.lastRefresh(widget.stopCode);
+    final String freshnessLabel;
+    if (lastRefresh == null) {
+      freshnessLabel = 'Waiting for data';
+    } else {
+      final age = DateTime.now().difference(lastRefresh).inSeconds;
+      if (age < 5) {
+        freshnessLabel = 'Updated now';
+      } else if (age < 60) {
+        freshnessLabel = 'Updated ${age}s ago';
+      } else {
+        freshnessLabel = 'Updated ${age ~/ 60} min ago';
+      }
+    }
+    final feedLive =
+        Freshness.from(lastRefresh) == Freshness.live;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
+        Text(
+          'Route progress',
+          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+        ),
+        const SizedBox(height: 10),
+
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: t.surface,
+            borderRadius: BorderRadius.circular(LyneRadius.lg),
+            border: Border.all(color: t.line, width: 1),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Eyebrow('Bus service'),
-              const SizedBox(height: 2),
-              Text(
-                'Towards ${live?.dest ?? '—'}',
-                style: t.sans(22, weight: FontWeight.w700, color: t.fg),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              // Direction toggle — only shown when 2+ directions.
+              if ((_serviceRoute?.directions.length ?? 0) > 1) ...[
+                _buildDirectionToggle(context, t),
+                const SizedBox(height: 12),
+              ],
+
+              if (timelineStops.isNotEmpty) ...[
+                Text(
+                  'Tap a stop to set an arrival alert.',
+                  style: t.sans(12, color: t.dim),
+                ),
+                const SizedBox(height: 8),
+                RouteTimeline(
+                  svc: widget.svc,
+                  stops: timelineStops,
+                  alightId: _alightId,
+                  onAlight: _onAlightChanged,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // Freshness line.
+              Row(
+                children: [
+                  Icon(
+                    Icons.sensors,
+                    size: 11,
+                    color: feedLive ? t.soon : t.dim,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    freshnessLabel,
+                    style: t.mono(11, color: t.dim),
+                  ),
+                ],
               ),
             ],
           ),
         ),
-        const SizedBox(width: 10),
-        ConfidenceStatusPill(confidence: pillConf),
       ],
     );
   }
@@ -777,229 +1214,31 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   static String _truncate(String s, int max) =>
       s.length <= max ? s : '${s.substring(0, max - 1)}…';
 
-  // ── Sheet body ───────────────────────────────────────────────────────
-  Widget _buildSheetBody(BuildContext context, Service? live) {
-    final t = context.t;
+  // ── 5. Alerts section ────────────────────────────────────────────────
+  // Notify button + ongoing-tracking card, placed below route progress.
+  Widget _buildAlertsSection(
+      BuildContext context, LyneTheme t, Service? live) {
     final st = DataStore.shared.arrivals[widget.stopCode];
     final allNos = st != null && st.kind == ArrivalStateKind.loaded
         ? st.services.map((s) => s.no).toList()
         : <String>[];
 
-    // Compute timeline stops once — used for both the count label and the
-    // RouteTimeline widget. Previously called 4 times in one build pass.
-    final timelineStops = _timelineStops();
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Divider(color: t.line),
-        const SizedBox(height: 4),
-        _heroETA(context, live),
-        const SizedBox(height: 20),
-        // ── Alerts ──────────────────────────────────────────────────
         const Eyebrow('Alerts'),
         const SizedBox(height: 8),
-        _notifyButton(context, allNos),
+        _notifyButton(context, t, allNos),
         if (live != null) ...[
           const SizedBox(height: 12),
-          _ongoingCard(context, live),
+          _ongoingCard(context, t, live),
         ],
-        const SizedBox(height: 20),
-        // ── Route timeline ──────────────────────────────────────────
-        if (_route != null) ...[
-          // Direction toggle — only shown when the service has more than one
-          // direction (virtually all routes).  Uses a SegmentedButton so
-          // Material handles selection, focus, and accessibility states.
-          if ((_serviceRoute?.directions.length ?? 0) > 1) ...[
-            _buildDirectionToggle(context, t),
-            const SizedBox(height: 12),
-          ],
-          Row(
-            children: [
-              Icon(Icons.route_rounded, size: 14, color: t.dim),
-              const SizedBox(width: 6),
-              Eyebrow(
-                timelineStops.isEmpty
-                    ? 'Full route'
-                    : 'Full route · ${timelineStops.length} stops',
-              ),
-              const SizedBox(width: 8),
-              Expanded(child: Divider(color: t.line)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          if (timelineStops.isNotEmpty) ...[
-            Text(
-              'Tap a stop to set an arrival alert.',
-              style: t.sans(12, color: t.dim),
-            ),
-            const SizedBox(height: 8),
-            RouteTimeline(
-              svc: widget.svc,
-              stops: timelineStops,
-              alightId: _alightId,
-              onAlight: _onAlightChanged,
-            ),
-          ],
-        ],
-        const SizedBox(height: 16),
       ],
     );
-  }
-
-  // ── Hero ETA ─────────────────────────────────────────────────────────
-  Widget _heroETA(BuildContext context, Service? svc) {
-    final t = context.t;
-
-    if (svc == null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Eyebrow('Arriving at ${DataStore.shared.stopName(widget.stopCode)}'),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Text(
-                '—',
-                style: t
-                    .mono(64, color: t.faint)
-                    .copyWith(letterSpacing: -2, height: 1),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Bus ${widget.svc} has passed — no live data',
-            style: t.sans(13, color: t.dim),
-          ),
-        ],
-      );
-    }
-
-    final feed = Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
-    final conf = ArrivalConfidence.of(monitored: svc.monitored, feed: feed);
-    final eta = fmtEta(svc.etaSec);
-    final next = fmtEta(svc.followingSec);
-    final thirdSec = svc.thirdDate
-        ?.difference(DateTime.now())
-        .inSeconds
-        .clamp(0, 1 << 30);
-    final third = thirdSec != null ? fmtEta(thirdSec) : null;
-    final imminent = conf == ArrivalConfidence.live && eta.live;
-    final whisper =
-        conf == ArrivalConfidence.stale ||
-        conf == ArrivalConfidence.unconfirmed;
-    // Whisper when the current tier is anything other than a fresh live fix.
-    // Reads directly from the first-class tier — no re-derive of svc.busLat.
-    final currentTier = _currentTarget?.tier;
-    final pinEstimated =
-        currentTier == _BusTier.estimated || currentTier == _BusTier.recent;
-    final showWhisper = whisper || pinEstimated;
-
-    // Stop walk-distance suffix — mirroring iOS stopDistanceSuffix.
-    String distSuffix = '';
-    final here = LocationService.shared.lastLocation;
-    final stop = DataStore.shared.stopByCode[widget.stopCode];
-    if (here != null && stop != null) {
-      final d = haversine(here.lat, here.lon, stop.latitude, stop.longitude);
-      distSuffix = ' · ${fmtDistance(d.round())} away';
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Eyebrow('Arriving at ${DataStore.shared.stopName(widget.stopCode)}'),
-        const SizedBox(height: 12),
-        // Hero numeral row.
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              eta.big == 'Arr' ? 'Now' : eta.big,
-              style: t
-                  .mono(
-                    64,
-                    color: conf == ArrivalConfidence.none
-                        ? t.faint
-                        : (imminent ? t.accent : t.fg),
-                  )
-                  .copyWith(letterSpacing: -2, height: 1),
-            ),
-            if (eta.big != 'Arr') ...[
-              const SizedBox(width: 4),
-              Text(
-                eta.small,
-                style: t.mono(20, color: imminent ? t.accent : t.dim),
-              ),
-            ],
-            if (showWhisper) ...[
-              const SizedBox(width: 4),
-              ExcludeSemantics(
-                child: Opacity(
-                  opacity: 0.7,
-                  child: Text('~', style: t.mono(14, color: t.faint)),
-                ),
-              ),
-            ],
-            const Spacer(),
-            // Next-two label — right-aligned, baseline-aligned with the numeral.
-            if (_nextTwoLabel(svc, next, third) != null) ...[
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  _nextTwoLabel(svc, next, third)!,
-                  style: t.mono(13, weight: FontWeight.w600, color: t.dim),
-                ),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 10),
-        // Stop code + distance + crowd.
-        Row(
-          children: [
-            Expanded(
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(
-                      text: 'Stop ',
-                      style: t.sans(13, color: t.dim),
-                    ),
-                    TextSpan(
-                      text: widget.stopCode,
-                      style: t.mono(13, weight: FontWeight.w700, color: t.fg),
-                    ),
-                    TextSpan(
-                      text: distSuffix,
-                      style: t.sans(13, color: t.dim),
-                    ),
-                  ],
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 10),
-            CrowdMeter(load: svc.load),
-          ],
-        ),
-      ],
-    );
-  }
-
-  String? _nextTwoLabel(Service svc, Eta next, Eta? third) {
-    if (next.big == 'Arr' || next.big.isEmpty) return null;
-    if (third != null && third.big != 'Arr' && third.big.isNotEmpty) {
-      return 'then ${next.big} · ${third.big} min';
-    }
-    return 'then ${next.big} min';
   }
 
   // ── Notify button ────────────────────────────────────────────────────
-  Widget _notifyButton(BuildContext context, List<String> allNos) {
-    final t = context.t;
+  Widget _notifyButton(BuildContext context, LyneTheme t, List<String> allNos) {
     final on = AppModel.shared.isTracked(
       code: widget.stopCode,
       busNo: widget.svc,
@@ -1047,8 +1286,7 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   }
 
   // ── Ongoing tracking card ────────────────────────────────────────────
-  Widget _ongoingCard(BuildContext context, Service live) {
-    final t = context.t;
+  Widget _ongoingCard(BuildContext context, LyneTheme t, Service live) {
     final m = AppModel.shared;
 
     if (!m.notificationsEnabled) {
@@ -1165,167 +1403,8 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   }
 }
 
-// ─── Floating top bar ────────────────────────────────────────────────────────
-/// Back chevron + bus badge + pin capsule + recenter button, floating over the
-/// map. Mirrors iOS floatingTopControls: back · badge · recenter · pin.
-class _FloatingTopBar extends StatelessWidget {
-  const _FloatingTopBar({
-    required this.svc,
-    required this.onBack,
-    required this.onRecenter,
-    required this.isPinned,
-    required this.onPin,
-    required this.serviceSaved,
-    required this.onSaveService,
-  });
-
-  final String svc;
-  final VoidCallback onBack;
-  final VoidCallback onRecenter;
-  final bool isPinned;
-  final VoidCallback onPin;
-  /// True when this service is already in favServices (anywhere or at stop).
-  final bool serviceSaved;
-  final VoidCallback onSaveService;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.t;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Row(
-          children: [
-            // Back button.
-            _MapControl(
-              onTap: onBack,
-              semanticsLabel: 'Back',
-              child: Icon(Icons.chevron_left_rounded, size: 22, color: t.fg),
-            ),
-            const SizedBox(width: 10),
-            // Bus badge — identity capsule.
-            Container(
-              height: 40,
-              padding: const EdgeInsets.symmetric(horizontal: 13),
-              decoration: BoxDecoration(
-                color: t.contrast,
-                borderRadius: BorderRadius.circular(LyneRadius.full),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 5,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.directions_bus_rounded,
-                    size: 15,
-                    color: t.contrastFg,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    svc,
-                    style: t.sans(
-                      17,
-                      weight: FontWeight.w700,
-                      color: t.contrastFg,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Spacer(),
-            // Recenter on user.
-            _MapControl(
-              onTap: onRecenter,
-              semanticsLabel: 'Center on my location',
-              child: Icon(Icons.my_location_rounded, size: 18, color: t.fg),
-            ),
-            const SizedBox(width: 8),
-            // Pin / Unpin capsule — mirrors iOS pin capsule.
-            // Uses Material + InkWell for ripple; 48dp tap target, 40dp visual.
-            Semantics(
-              label: isPinned ? 'Unpin this stop' : 'Pin this stop to Home',
-              button: true,
-              child: SizedBox(
-                height: 48,
-                child: Center(
-                  child: Material(
-                    color: isPinned ? t.accent : t.surface,
-                    borderRadius: BorderRadius.circular(LyneRadius.full),
-                    elevation: 0,
-                    child: InkWell(
-                      onTap: onPin,
-                      borderRadius: BorderRadius.circular(LyneRadius.full),
-                      child: Container(
-                        height: 40,
-                        padding: const EdgeInsets.symmetric(horizontal: 13),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(LyneRadius.full),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.18),
-                              blurRadius: 5,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                        alignment: Alignment.center,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              isPinned
-                                  ? Icons.push_pin_rounded
-                                  : Icons.push_pin_outlined,
-                              size: 13,
-                              color: isPinned ? t.onAccent : t.fg,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              isPinned ? 'Pinned' : 'Pin',
-                              style: t.sans(
-                                13,
-                                weight: FontWeight.w600,
-                                color: isPinned ? t.onAccent : t.fg,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // Save-service button — green when already saved (mirrors iOS pin).
-            _MapControl(
-              onTap: onSaveService,
-              semanticsLabel: serviceSaved
-                  ? 'Service saved — edit'
-                  : 'Save this service to Favourites',
-              filled: serviceSaved,
-              fillColor: t.soon,
-              child: Icon(
-                Icons.push_pin_rounded,
-                size: 16,
-                color: serviceSaved ? t.contrastFg : t.soon,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A circular control button that floats over the map.
+// ─── Map control button ──────────────────────────────────────────────────────
+/// A circular control button that floats over the map (or lives in the top bar).
 /// Uses Material + InkWell for a proper ripple effect.
 /// The tap target is 48×48 dp; the visual circle is 40×40 dp.
 class _MapControl extends StatelessWidget {
@@ -1369,7 +1448,7 @@ class _MapControl extends StatelessWidget {
                   shape: BoxShape.circle,
                   border: filled
                       ? null
-                      : Border.all(color: t.soon, width: 1.5),
+                      : Border.all(color: t.line, width: 1.5),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.18),
@@ -1385,198 +1464,6 @@ class _MapControl extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-// ─── Draggable bottom sheet ──────────────────────────────────────────────────
-/// A bottom sheet that snaps between a peek fraction and near-full height.
-/// Mirrors iOS DraggableSheet semantics: drag the handle to move, release to
-/// snap; tap the handle to toggle. Lives in a ZStack-style Stack over the map.
-class _DraggableSheet extends StatefulWidget {
-  const _DraggableSheet({
-    required this.peek,
-    required this.minFraction,
-    required this.maxFraction,
-    required this.header,
-    required this.body,
-  });
-
-  /// Sheet peek height as a fraction of the screen (0–1).
-  final double peek;
-  final double minFraction;
-  final double maxFraction;
-  final Widget header;
-  final Widget body;
-
-  @override
-  State<_DraggableSheet> createState() => _DraggableSheetState();
-}
-
-class _DraggableSheetState extends State<_DraggableSheet>
-    with SingleTickerProviderStateMixin {
-  bool _expanded = false;
-
-  // Drag offset (delta from the current snap base) stored in a ValueNotifier
-  // so only the Transform.translate — not the whole sheet body — rebuilds on
-  // pointer-move and during the settle animation.
-  final ValueNotifier<double> _dragNotifier = ValueNotifier(0);
-
-  // Spring-driven settle so the sheet flings/eases to its snap point with
-  // real physics instead of teleporting. Unbounded because the simulation
-  // drives the offset directly (it may briefly overshoot before settling).
-  late final AnimationController _settleCtrl;
-
-  // Latest collapsed translation (sheetH - peekH), refreshed each layout so
-  // the gesture math uses the live value.
-  double _collapsedY = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _settleCtrl = AnimationController.unbounded(vsync: this)
-      ..addListener(() => _dragNotifier.value = _settleCtrl.value);
-  }
-
-  @override
-  void dispose() {
-    _settleCtrl.dispose();
-    _dragNotifier.dispose();
-    super.dispose();
-  }
-
-  /// Current absolute translateY (0 = fully expanded, _collapsedY = peek),
-  /// clamped to the travel range.
-  double get _absolute {
-    final base = _expanded ? 0.0 : _collapsedY;
-    return (base + _dragNotifier.value).clamp(0.0, _collapsedY);
-  }
-
-  /// Hand the current absolute position to the new snap base without a visual
-  /// jump, then spring the offset back to rest — carrying [velocity] (px/s)
-  /// so a flick flings naturally.
-  void _settleTo(bool expand, double velocity) {
-    final absolute = _absolute;
-    final newBase = expand ? 0.0 : _collapsedY;
-    setState(() => _expanded = expand);
-    _dragNotifier.value = absolute - newBase; // continuous across the flip
-    final spring = SpringDescription.withDampingRatio(
-      mass: 1,
-      stiffness: 480,
-      ratio: 1,
-    );
-    _settleCtrl.animateWith(
-      SpringSimulation(spring, _dragNotifier.value, 0, velocity),
-    );
-  }
-
-  /// Pick the snap target from fling velocity, falling back to nearest edge.
-  void _onDragEnd(double velocity) {
-    if (velocity < -300) {
-      _settleTo(true, velocity); // fling up → expand
-    } else if (velocity > 300) {
-      _settleTo(false, velocity); // fling down → collapse
-    } else {
-      _settleTo(_absolute < _collapsedY / 2, velocity); // snap to nearest
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.t;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenH = constraints.maxHeight;
-        final peekH = screenH * widget.peek;
-        final maxH = screenH * widget.maxFraction;
-        final sheetH = maxH;
-        final collapsedY = sheetH - peekH;
-        _collapsedY = collapsedY; // keep gesture math in sync with layout
-
-        // The sheet content (Material + Column) is built once here and
-        // passed as the non-rebuilding `child` of ValueListenableBuilder.
-        // Only the Transform.translate wrapper rebuilds on drag.
-        final sheetContent = Material(
-          color: t.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-          elevation: 12,
-          shadowColor: Colors.black.withValues(alpha: 0.2),
-          child: Column(
-            children: [
-              // Handle + header (always visible in peek).
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onVerticalDragStart: (_) => _settleCtrl.stop(),
-                onVerticalDragUpdate: (d) {
-                  _dragNotifier.value += d.delta.dy;
-                },
-                onVerticalDragEnd: (d) => _onDragEnd(d.primaryVelocity ?? 0),
-                onTap: () => _settleTo(!_expanded, 0),
-                child: Semantics(
-                  label: _expanded
-                      ? 'Collapse details'
-                      : 'Expand for alerts and full route',
-                  button: true,
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 10),
-                      Container(
-                        width: 40,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: t.faint,
-                          borderRadius: BorderRadius.circular(LyneRadius.full),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                        child: widget.header,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // Scrollable body (routes, timeline, etc.).
-              Expanded(
-                child: SingleChildScrollView(
-                  physics: _expanded
-                      ? const ClampingScrollPhysics()
-                      : const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-                  child: widget.body,
-                ),
-              ),
-            ],
-          ),
-        );
-
-        return Stack(
-          children: [
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: sheetH,
-              // ValueListenableBuilder wraps only Transform.translate.
-              // The sheet body is passed as `child` so it is NOT rebuilt
-              // on every pointer-move event — only the translate offset changes.
-              child: ValueListenableBuilder<double>(
-                valueListenable: _dragNotifier,
-                builder: (context, drag, child) {
-                  final baseY = _expanded ? 0.0 : collapsedY;
-                  final y = (baseY + drag).clamp(0.0, collapsedY);
-                  return Transform.translate(
-                    offset: Offset(0, y),
-                    child: child,
-                  );
-                },
-                child: sheetContent,
-              ),
-            ),
-          ],
-        );
-      },
     );
   }
 }

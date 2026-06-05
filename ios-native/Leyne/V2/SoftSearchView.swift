@@ -1,8 +1,8 @@
-// SoftSearchView — Leyne 3.0 Search: its own focused "Find" surface (not a
-// Home clone) — a prominent field, tap-to-fill example chips, and results
-// auto-split into Services + Bus stops. Input kind is auto-detected (no
-// mode tabs), mirroring the prototype; a 6-digit query geocodes via OneMap
-// and lists nearby stops. All the real search logic is preserved.
+// SoftSearchView — Leyne Search tab: a first-class surface with a large
+// "Search" title, a prominent field, a recent-searches list, a Browse
+// shortcut grid, and results auto-split into Services + Bus stops.
+// Input kind is auto-detected (no mode tabs); a 6-digit query geocodes
+// via OneMap and lists nearby stops. All real search logic is preserved.
 
 import SwiftUI
 
@@ -43,21 +43,28 @@ struct SoftSearchView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { focused = false }
 
-            VStack(alignment: .leading, spacing: 14) {
-                Eyebrow(text: "Find", t: t).padding(.leading, 2)
+            VStack(alignment: .leading, spacing: 0) {
+                headerRow
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 14)
+
                 fieldRow
-                exampleChips
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
 
                 ScrollView {
-                    resultsContent.padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 0) {
+                        resultsContent.padding(.top, 2)
+                    }
+                    .padding(.horizontal, 16)
                 }
                 // Dragging the results list down sweeps the keyboard away as it
                 // goes — the expected "scroll to see more, keyboard hides" gesture.
                 .scrollDismissesKeyboard(.interactively)
+
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
         }
         .onAppear {
             focused = true
@@ -69,71 +76,78 @@ struct SoftSearchView: View {
         .onChange(of: query) { _, _ in maybeGeocode() }
     }
 
-    // MARK: Field + examples
+    // MARK: Header
 
-    private var fieldRow: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(query.isEmpty ? t.dim : t.accent)
-                TextField("Stop code, postal code, or place", text: $query)
-                    .font(t.sans(15, weight: .medium))
-                    .foregroundStyle(t.fg)
-                    .focused($focused)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                if !query.isEmpty {
-                    Button { query = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 15))
-                            .foregroundStyle(t.dim)
-                    }.buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 15)
-            .frame(height: 52)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .stroke(query.isEmpty ? t.line : t.accent.opacity(0.6), lineWidth: 1))
-
-            Button { fb.select(); onClose() } label: {
-                Text("Cancel")
-                    .font(t.sans(14, weight: .medium))
-                    .foregroundStyle(t.accent)
-            }.buttonStyle(.plain)
-        }
-    }
-
-    private var exampleChips: some View {
-        HStack(spacing: 7) {
-            ForEach(examples, id: \.value) { ex in
-                Button { fb.tap(); query = ex.value } label: {
-                    HStack(spacing: 5) {
-                        Text(ex.value)
-                            .font(t.mono(12.5, weight: .semibold))
-                            .foregroundStyle(t.fg)
-                        Text(ex.kind.uppercased())
-                            .font(t.mono(9, weight: .semibold))
-                            .tracking(0.4)
-                            .foregroundStyle(t.faint)
-                    }
-                    .padding(.horizontal, 11)
-                    .frame(height: 29)
-                    .background(t.surface, in: Capsule())
-                    .overlay(Capsule().stroke(t.line, lineWidth: 0.5))
+    private var headerRow: some View {
+        HStack(alignment: .center) {
+            Text("Search")
+                .font(t.sans(30, weight: .bold))
+                .foregroundStyle(t.fg)
+            Spacer(minLength: 8)
+            // Cancel only appears while editing so the user can dismiss the
+            // keyboard without clearing the field. onClose is still reachable
+            // from Cancel — callers that wire Search as a modal can still close.
+            if focused {
+                Button {
+                    fb.select()
+                    focused = false
+                    onClose()
+                } label: {
+                    Text("Cancel")
+                        .font(t.sans(14, weight: .medium))
+                        .foregroundStyle(t.accent)
                 }
                 .buttonStyle(.plain)
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
-            Spacer(minLength: 0)
         }
+        .animation(.easeInOut(duration: 0.18), value: focused)
     }
 
-    // MARK: Results
+    // MARK: Search field
+
+    private var fieldRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(query.isEmpty ? t.dim : t.accent)
+
+            TextField("Search for stops, services or places", text: $query)
+                .font(t.sans(15, weight: .medium))
+                .foregroundStyle(t.fg)
+                .focused($focused)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(t.dim)
+                }
+                .buttonStyle(.plain)
+            } else {
+                // Mic: visual affordance only — no speech recognition is wired.
+                // Rendered as a plain Image (not a Button) so there is no dead tap target.
+                Image(systemName: "mic")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(t.faint)
+            }
+        }
+        .padding(.horizontal, 15)
+        .frame(height: 52)
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(query.isEmpty ? t.line : t.accent.opacity(0.6), lineWidth: 1)
+        )
+    }
+
+    // MARK: Results / empty state router
 
     @ViewBuilder private var resultsContent: some View {
         if trimmed.isEmpty {
-            EmptyView()
+            emptyState
         } else if isPostal {
             postalResults
         } else {
@@ -157,9 +171,189 @@ struct SoftSearchView: View {
         }
     }
 
+    // MARK: Empty state — recents + browse grid
+
+    @ViewBuilder private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if !m.recents.isEmpty {
+                recentsSection
+            }
+            browseSection
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: Recent searches — vertical list with swipe-to-remove
+
+    private var recentsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header row: "Recent searches" + "Clear" button
+            HStack {
+                Eyebrow(text: "Recent searches", t: t)
+                Spacer(minLength: 8)
+                Button {
+                    fb.tap()
+                    withAnimation(.easeOut(duration: 0.2)) { m.clearRecents() }
+                } label: {
+                    Text("Clear")
+                        .font(t.sans(13, weight: .medium))
+                        .foregroundStyle(t.meBlue)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.leading, 2)
+
+            VStack(spacing: 6) {
+                ForEach(m.recents, id: \.self) { recent in
+                    recentRow(recent)
+                }
+            }
+        }
+    }
+
+    private func recentRow(_ recent: String) -> some View {
+        let kind = detectQueryKind(recent).kind
+        let icon: String = {
+            switch kind {
+            case "bus":      return "bus.fill"
+            case "stopcode": return "mappin"
+            case "postal",
+                 "block",
+                 "text":     return "location"
+            default:         return "clock.arrow.circlepath"
+            }
+        }()
+
+        return Button {
+            fb.tap()
+            query = recent
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(t.surfaceHi)
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(t.dim)
+                }
+                .frame(width: 32, height: 32)
+
+                Text(recent)
+                    .font(t.sans(14, weight: .medium))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    fb.tap()
+                    withAnimation(.easeOut(duration: 0.18)) { m.removeRecent(recent) }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(t.faint)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+
+    // MARK: Browse grid — 2×2 shortcut tiles
+
+    private var browseSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: "Browse", t: t).padding(.leading, 2)
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 12),
+                          GridItem(.flexible(), spacing: 12)],
+                spacing: 12
+            ) {
+                browseTile(
+                    symbol: "location.fill",
+                    label: "Nearby",
+                    accent: t.meBlue
+                ) {
+                    // Nearby taps back to Home's nearby list via onClose.
+                    fb.select()
+                    onClose()
+                }
+
+                browseTile(
+                    symbol: "mappin.and.ellipse",
+                    label: "Stops",
+                    accent: t.soon
+                ) {
+                    // Seeds the field with a canonical 5-digit stop code example
+                    // and triggers the search path immediately.
+                    fb.tap()
+                    query = examples.first(where: { $0.kind == "code" })?.value ?? "17179"
+                }
+
+                browseTile(
+                    symbol: "bus.fill",
+                    label: "Services",
+                    accent: Color(hex: "E0683A")
+                ) {
+                    // Seeds with a bus service number example.
+                    fb.tap()
+                    query = examples.first(where: { $0.kind == "bus" })?.value ?? "96"
+                }
+
+                browseTile(
+                    symbol: "building.2",
+                    label: "Places",
+                    accent: t.dim
+                ) {
+                    // Seeds with a place-name example.
+                    fb.tap()
+                    query = examples.first(where: { $0.kind == "place" })?.value ?? "Clementi"
+                }
+            }
+        }
+    }
+
+    private func browseTile(
+        symbol: String,
+        label: String,
+        accent: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(accent)
+                Spacer(minLength: 0)
+                Text(label)
+                    .font(t.sans(14, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(t.line, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+
+    // MARK: Section label
+
     private func sectionLabel(_ s: String) -> some View {
         Eyebrow(text: s, t: t).padding(.leading, 2).padding(.bottom, 2)
     }
+
+    // MARK: Stop result row
 
     // Slim icon-led stop row — a square stop-pin tile distinguishes it from
     // Home's chunky StopCards.
@@ -200,6 +394,8 @@ struct SoftSearchView: View {
         }
         .frame(width: 34, height: 34)
     }
+
+    // MARK: Service result row
 
     private func svcRow(_ svc: LTABusServiceDTO) -> some View {
         Button {
@@ -269,9 +465,9 @@ struct SoftSearchView: View {
                 }
             }
         } else {
-            emptyHint(postalFailed ? "Can’t look up postal codes right now"
-                                   : "Couldn’t find postal code \(trimmed)",
-                      postalFailed ? "OneMap didn’t respond — check your connection."
+            emptyHint(postalFailed ? "Can't look up postal codes right now"
+                                   : "Couldn't find postal code \(trimmed)",
+                      postalFailed ? "OneMap didn't respond — check your connection."
                                    : "Check the 6-digit code and try again.")
         }
     }
@@ -334,6 +530,7 @@ struct SoftSearchView: View {
     }
 
     // MARK: Geocode trigger — fires when the query is a fresh 6-digit code.
+
     private func maybeGeocode() {
         guard isPostal, postalGeoFor != trimmed else { return }
         postalGeoFor = trimmed

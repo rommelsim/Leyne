@@ -319,13 +319,31 @@ final class DataStore: ObservableObject {
     func searchStops(_ q: String) -> [LTABusStop] {
         let s = q.trimmingCharacters(in: .whitespaces).lowercased()
         guard !s.isEmpty else { return [] }
-        return Array(stopByCode.values.filter {
-            $0.Description.lowercased().contains(s)
-                || $0.RoadName.lowercased().contains(s)
-                || $0.BusStopCode.contains(s)
+        // Token match: every query word must appear in the stop's text (any
+        // order), after normalising synonyms — so "yio chu kang mrt" finds
+        // "Yio Chu Kang Stn", and "clementi interchange" finds "Clementi Int".
+        let queryTokens = Self.searchTokens(s)
+        return Array(stopByCode.values.filter { stop in
+            if stop.BusStopCode.contains(s) { return true }
+            let hay = Self.searchTokens("\(stop.Description) \(stop.RoadName)")
+            return queryTokens.allSatisfy { qt in hay.contains { $0.contains(qt) } }
         }
         .sorted { $0.Description < $1.Description }
         .prefix(40))
+    }
+
+    /// Synonym-normalised search tokens. Maps the words LTA never uses in stop
+    /// names (mrt / station / interchange / lrt) onto the ones it does (stn /
+    /// int), and splits on any non-alphanumeric separator.
+    static func searchTokens(_ s: String) -> [String] {
+        let synonyms: [String: String] = [
+            "mrt": "stn", "station": "stn", "stn": "stn", "lrt": "stn",
+            "interchange": "int", "int": "int", "intg": "int",
+        ]
+        return s.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .map { synonyms[$0] ?? $0 }
     }
     /// First stop served by a service (its route origin), for bus-result taps.
     func originStop(ofService no: String) async -> LTABusStop? {

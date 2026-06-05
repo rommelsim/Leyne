@@ -30,16 +30,15 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
 
-    // All four destinations are present in the bottom navigation. Some
-    // labels (Home, Search, Settings) also appear in the active screen's
-    // AppBar title, so we look for "at least one".
+    // All four destinations are present in the bottom navigation
+    // (2.4.0 redesign: Home · Saved · Search · Settings).
     expect(find.text('Home'), findsAtLeastNWidgets(1));
-    expect(find.text('Nearby'), findsAtLeastNWidgets(1));
+    expect(find.text('Saved'), findsAtLeastNWidgets(1));
     expect(find.text('Search'), findsAtLeastNWidgets(1));
     expect(find.text('Settings'), findsAtLeastNWidgets(1));
 
     // Home is the initial tab — its empty-state copy is visible.
-    expect(find.text('No stops pinned'), findsOneWidget);
+    expect(find.text('No stops yet'), findsOneWidget);
 
     // Switch to Settings; pump one frame for the tap, one for the layout.
     await tester.tap(find.byIcon(Icons.settings_outlined));

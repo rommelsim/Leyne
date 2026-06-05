@@ -1,12 +1,15 @@
 // SoftHomeScreen — Leyne 2.0 Home (Material 3 Android variant).
 //
-// Vertical list of pinned-stop cards followed by a Nearby section (up to 12
-// stops, de-duped against pinned). A live-location status row sits under the
-// header when location is active. Empty state is gated on BOTH pins AND
-// nearby being empty, matching iOS SoftHomeView.
+// Layout (matches iOS SoftHomeView.swift exactly):
+//   header (greeting + title + filter/map buttons)
+//   → live row (NEAR YOU · LIVE)
+//   → MRT alerts
+//   → "Closest to you" section (1 highlighted card)
+//   → "Other nearby stops" section (up to 11 cards)
+//   → "Live updates" banner
+//   → empty state (when no nearby stops)
 //
-// Section order matches iOS SoftHomeView.swift:
-//   header → live row → MRT alerts → Pinned → Nearby → empty state
+// Pinned stops live on the Saved tab — NOT rendered here.
 
 import 'package:flutter/material.dart';
 
@@ -38,14 +41,12 @@ class SoftHomeScreen extends StatefulWidget {
 
 // ── Item types for the flat ListView.builder index ──────────────────────────
 
-/// Discriminated union for the items rendered by the flat ListView.builder.
 sealed class _Item {}
 
 class _HeaderItem extends _Item {}
 
 class _LiveRowItem extends _Item {}
 
-/// Gap / spacer between sections.
 class _GapItem extends _Item {
   _GapItem(this.height);
   final double height;
@@ -56,14 +57,10 @@ class _EyebrowItem extends _Item {
   final String label;
 }
 
-class _PinCardItem extends _Item {
-  _PinCardItem(this.pin);
-  final Pin pin;
-}
-
 class _NearbyCardItem extends _Item {
-  _NearbyCardItem(this.stop);
+  _NearbyCardItem(this.stop, {required this.highlight});
   final NearbyStop stop;
+  final bool highlight;
 }
 
 class _AlertItem extends _Item {
@@ -71,25 +68,21 @@ class _AlertItem extends _Item {
   final TrainAlert alert;
 }
 
+class _LiveBannerItem extends _Item {}
+
 class _EmptyItem extends _Item {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SoftHomeScreenState extends State<SoftHomeScreen> {
-  /// Line codes the user has tapped to dismiss this session. Cleared
-  /// when the app cold-starts so a new disruption surfaces again.
   final Set<String> _dismissedAlerts = {};
 
   // ── Walk-minute memoisation cache ─────────────────────────────────────────
-  // Keyed by stop code. Recomputed only when LocationService.lastLocation
-  // changes (see initState listener). Computing haversine per pin per rebuild
-  // was wasteful; pin lists change rarely and location updates are infrequent.
   final Map<String, int?> _walkCache = {};
 
   @override
   void initState() {
     super.initState();
-    // Populate walk cache when location changes (not on every 1s tick).
     LocationService.shared.addListener(_onLocationChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _warm();
@@ -133,9 +126,9 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     return walkMinutesFor(d);
   }
 
+  // ignore: unused_element
   int? _walkMinutes(String code) {
     if (_walkCache.containsKey(code)) return _walkCache[code];
-    // Not yet cached — compute on first access and store.
     final here = LocationService.shared.lastLocation;
     if (here == null) return null;
     final result = _computeWalk(code, here);
@@ -149,33 +142,28 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     }
   }
 
-  /// Nearby stops with pinned stop codes removed so a stop never appears twice.
+  /// Nearby stops sorted by distance, de-duped against pinned. Capped at 12
+  /// total (1 closest + 11 others).
   List<NearbyStop> _nearbyStops(Set<String> pinnedCodes) {
-    return DataStore.shared.nearby
+    final base = DataStore.shared.nearby
         .where((s) => !pinnedCodes.contains(s.stopCode))
-        .take(12)
-        .toList();
+        .toList()
+      ..sort((a, b) => a.distanceM.compareTo(b.distanceM));
+    return base.take(12).toList();
   }
 
-  List<Service> _filteredServices(Pin pin) {
-    final all = _liveServices(pin.code);
-    final tracked = pin.tracked;
-    if (tracked != null && tracked.isNotEmpty) {
-      return all.where((s) => tracked.contains(s.no)).toList();
+  Future<void> _refresh(List<Pin> pins) async {
+    await Future.wait(
+      pins.map((p) => DataStore.shared.refreshArrivals(p.code)),
+    );
+    final loc = LocationService.shared.lastLocation;
+    if (loc != null) {
+      DataStore.shared.updateNearby(loc.lat, loc.lon);
     }
-    return all;
+    DataStore.shared.prefetchNearbyArrivals();
   }
 
-  List<Service> _liveServices(String code) {
-    final a = DataStore.shared.arrivals[code];
-    if (a == null || a.kind != ArrivalStateKind.loaded) return const [];
-    return a.services;
-  }
-
-  /// Build the flat item list for ListView.builder.
-  /// Section order: header → live row → MRT alerts → Pinned → Nearby → empty.
   List<_Item> _buildItems({
-    required List<Pin> pins,
     required List<NearbyStop> nearby,
     required List<TrainAlert> visibleAlerts,
   }) {
@@ -185,7 +173,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     items.add(_GapItem(6));
     items.add(_LiveRowItem());
 
-    // ── MRT alerts (above Pinned — matches iOS order) ──
+    // MRT alerts
     if (visibleAlerts.isNotEmpty) {
       items.add(_GapItem(16));
       for (var i = 0; i < visibleAlerts.length; i++) {
@@ -194,33 +182,33 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
       }
     }
 
-    // ── Pinned section ──
-    if (pins.isNotEmpty) {
-      items.add(_GapItem(16));
-      items.add(_EyebrowItem('Pinned'));
-      items.add(_GapItem(10));
-      for (var i = 0; i < pins.length; i++) {
-        if (i > 0) items.add(_GapItem(12));
-        items.add(_PinCardItem(pins[i]));
-      }
-    }
-
-    // ── Nearby section ──
-    if (nearby.isNotEmpty) {
-      items.add(_GapItem(16));
-      items.add(_EyebrowItem('Nearby'));
-      items.add(_GapItem(10));
-      for (var i = 0; i < nearby.length; i++) {
-        if (i > 0) items.add(_GapItem(10));
-        items.add(_NearbyCardItem(nearby[i]));
-      }
-    }
-
-    // ── Empty state (both pins AND nearby empty) ──
-    if (pins.isEmpty && nearby.isEmpty) {
+    if (nearby.isEmpty) {
       items.add(_GapItem(8));
       items.add(_EmptyItem());
+      return items;
     }
+
+    // "Closest to you" — the single nearest stop.
+    items.add(_GapItem(16));
+    items.add(_EyebrowItem('Closest to you'));
+    items.add(_GapItem(10));
+    items.add(_NearbyCardItem(nearby.first, highlight: true));
+
+    // "Other nearby stops" — up to 11 more.
+    final others = nearby.skip(1).take(11).toList();
+    if (others.isNotEmpty) {
+      items.add(_GapItem(16));
+      items.add(_EyebrowItem('Other nearby stops'));
+      items.add(_GapItem(10));
+      for (var i = 0; i < others.length; i++) {
+        if (i > 0) items.add(_GapItem(10));
+        items.add(_NearbyCardItem(others[i], highlight: false));
+      }
+    }
+
+    // "Live updates" banner
+    items.add(_GapItem(16));
+    items.add(_LiveBannerItem());
 
     return items;
   }
@@ -235,9 +223,6 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
         onSelect: widget.onTab,
       ),
       body: SafeArea(
-        // Outer builder: structural changes only (pins list, nearby list,
-        // alerts membership, location fix/loss). Does NOT rebuild on the 1s
-        // AppModel tick — that is isolated to the ETA text inside each card.
         child: ListenableBuilder(
           listenable: Listenable.merge([
             DataStore.shared,
@@ -252,29 +237,19 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
                 .toList();
 
             final items = _buildItems(
-              pins: pins,
               nearby: nearby,
               visibleAlerts: visibleAlerts,
             );
 
             return RefreshIndicator(
               color: t.accent,
-              onRefresh: () async {
-                await Future.wait(
-                  pins.map((p) => DataStore.shared.refreshArrivals(p.code)),
-                );
-                final loc = LocationService.shared.lastLocation;
-                if (loc != null) {
-                  DataStore.shared.updateNearby(loc.lat, loc.lon);
-                }
-                DataStore.shared.prefetchNearbyArrivals();
-              },
+              onRefresh: () => _refresh(pins),
               child: ListView.builder(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 itemCount: items.length,
                 itemBuilder: (context, index) =>
-                    _buildItem(context, items[index], nearby: nearby),
+                    _buildItem(context, items[index], pins: pins),
               ),
             );
           },
@@ -286,72 +261,38 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   Widget _buildItem(
     BuildContext context,
     _Item item, {
-    required List<NearbyStop> nearby,
+    required List<Pin> pins,
   }) {
     return switch (item) {
       _HeaderItem() => _header(context),
       _LiveRowItem() => _liveRow(context),
       _GapItem(:final height) => SizedBox(height: height),
       _EyebrowItem(:final label) => Eyebrow(label),
-      _PinCardItem(:final pin) =>
-        RepaintBoundary(child: _pinStopCard(pin)),
-      _NearbyCardItem(:final stop) =>
-        RepaintBoundary(child: _nearbyStopCard(stop)),
+      _NearbyCardItem(:final stop, :final highlight) => RepaintBoundary(
+          child: _NearbyCard(
+            stop: stop,
+            highlight: highlight,
+            onTap: () => widget.onOpenStop(stop.stopCode),
+          ),
+        ),
       _AlertItem(:final alert) => _mrtAlertCard(context, alert),
+      _LiveBannerItem() => _liveUpdatesBanner(context, pins: pins),
       _EmptyItem() => _EmptyState(
-        onNearby: () async {
-          await LocationService.shared.requestAndStart();
-          final loc = LocationService.shared.lastLocation;
-          if (loc != null) {
-            DataStore.shared.updateNearby(loc.lat, loc.lon);
-            DataStore.shared.prefetchNearbyArrivals();
-          }
-        },
-        onSearch: widget.onOpenSearch,
-      ),
+          onNearby: () async {
+            await LocationService.shared.requestAndStart();
+            final loc = LocationService.shared.lastLocation;
+            if (loc != null) {
+              DataStore.shared.updateNearby(loc.lat, loc.lon);
+              DataStore.shared.prefetchNearbyArrivals();
+            }
+          },
+          onSearch: widget.onOpenSearch,
+        ),
     };
-  }
-
-  /// Pinned-stop card — the unified SoftStopCard. When the pin has a custom
-  /// nickname it becomes the card title (the name the user gave it), with the
-  /// real stop name kept in the subline so context isn't lost. Without a
-  /// nickname the title is the stop's own name + "code · road" subline.
-  Widget _pinStopCard(Pin pin) {
-    final dsName = DataStore.shared.stopName(pin.code);
-    final stopName = dsName.isEmpty ? pin.code : dsName;
-    final nick = pin.nickname.trim();
-    final hasNick = nick.isNotEmpty && nick.toLowerCase() != stopName.toLowerCase();
-    final walk = _walkMinutes(pin.code);
-    return _SoftStopCard(
-      name: hasNick ? nick : stopName,
-      code: pin.code,
-      // Nicknamed → show the real stop name in the subline; otherwise the road.
-      desc: hasNick ? stopName : DataStore.shared.roadName(pin.code),
-      trailing: walk != null ? '$walk min' : null,
-      services: _filteredServices(pin),
-      feed: Freshness.from(DataStore.shared.lastRefresh(pin.code)),
-      onTap: () => widget.onOpenStop(pin.code),
-    );
-  }
-
-  /// Nearby-stop card — same unified card, trailing shows distance.
-  Widget _nearbyStopCard(NearbyStop stop) {
-    return _SoftStopCard(
-      name: stop.stopName,
-      code: stop.stopCode,
-      desc: DataStore.shared.roadName(stop.stopCode),
-      trailing: fmtDistance(stop.distanceM),
-      services: DataStore.shared.servicesFor(stop.stopCode),
-      feed: Freshness.from(DataStore.shared.lastRefresh(stop.stopCode)),
-      onTap: () => widget.onOpenStop(stop.stopCode),
-    );
   }
 
   Widget _header(BuildContext context) {
     final t = context.t;
-    // Greeting + title only — no search icon here. Search is reached via the
-    // bottom-bar Search tab (matching iOS, whose home header has no search
-    // button either); a second header button was redundant.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -359,13 +300,12 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
         const SizedBox(height: 2),
         Text(
           'Stops near you',
-          style: t.sans(28, weight: FontWeight.w600, color: t.fg),
+          style: t.sans(30, weight: FontWeight.w700, color: t.fg),
         ),
       ],
     );
   }
 
-  /// Live-location status row: icon + "NEAR YOU" / "LOCATION OFF" + live dot.
   Widget _liveRow(BuildContext context) {
     final t = context.t;
     final located = LocationService.shared.lastLocation != null;
@@ -374,13 +314,14 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
         Icon(
           located ? Icons.location_on : Icons.location_off,
           size: 13,
-          color: t.dim,
+          color: located ? LyneSignal.meBlue : t.dim,
         ),
         const SizedBox(width: 5),
         Text(
           located ? 'NEAR YOU' : 'LOCATION OFF',
           style: t
-              .mono(10, weight: FontWeight.w700, color: t.dim)
+              .mono(10, weight: FontWeight.w700,
+                  color: located ? LyneSignal.meBlue : t.dim)
               .copyWith(letterSpacing: 0.8),
         ),
         if (located) ...[
@@ -388,7 +329,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
           Container(
             width: 6,
             height: 6,
-            decoration: BoxDecoration(color: t.accent, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
           ),
           const SizedBox(width: 4),
           Text(
@@ -405,39 +346,86 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   Widget _mrtAlertCard(BuildContext context, TrainAlert alert) {
     final t = context.t;
     final color = alert.line?.color ?? t.dim;
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: () => setState(() => _dismissedAlerts.add(alert.id)),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            MRTLineBar(color: color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    alert.title,
-                    style: t.sans(13, weight: FontWeight.w600, color: t.fg),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    alert.detail,
-                    style: t.sans(12, color: t.dim),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        onTap: () => setState(() => _dismissedAlerts.add(alert.id)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MRTLineBar(color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      alert.title,
+                      style: t.sans(13, weight: FontWeight.w600, color: t.fg),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      alert.detail,
+                      style: t.sans(12, color: t.dim),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _liveUpdatesBanner(BuildContext context, {required List<Pin> pins}) {
+    final t = context.t;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        onTap: () => _refresh(pins),
+        child: Semantics(
+          label:
+              'Live updates. Arrival times update every few seconds. Tap to refresh.',
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Icon(Icons.sensors, size: 18, color: t.soon),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: RichText(
+                    maxLines: 2,
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'Live updates  ',
+                          style:
+                              t.sans(13, weight: FontWeight.w600, color: t.fg),
+                        ),
+                        TextSpan(
+                          text: 'Arrival times update every few seconds.',
+                          style: t.sans(13, color: t.dim),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right, size: 16, color: t.faint),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -452,254 +440,327 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   }
 }
 
-// ─── Unified stop card (mirrors iOS SoftStopCard) ───────────────────────────
+// ─── Nearby stop card ────────────────────────────────────────────────────────
 
-/// Natural service-number order ('7' < '91' < '107M' < '191') so a stop's
-/// chips read like its panel — leading integer first, then lexical.
-int _compareServiceNo(Service a, Service b) {
-  int lead(String s) =>
-      int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), '')) ?? 1 << 30;
-  final c = lead(a.no).compareTo(lead(b.no));
-  return c != 0 ? c : a.no.compareTo(b.no);
-}
-
-/// The Leyne 3.0 Home card — a stop's identity (pin tile · name · code · road)
-/// + a trailing distance/walk, then a wrapping row of mini bus-number chips.
-/// Used for BOTH the Pinned and Nearby sections so the page reads as one
-/// language — a direct port of iOS `SoftStopCard`. Material-native (Material
-/// surface + InkWell ripple). The chip row's ETAs refresh each second via a
-/// narrow ListenableBuilder(AppModel) so only the chips — not the card chrome —
-/// rebuild on the tick.
-class _SoftStopCard extends StatelessWidget {
-  const _SoftStopCard({
-    required this.name,
-    required this.code,
-    required this.desc,
-    required this.trailing,
-    required this.services,
-    required this.feed,
+/// A nearby-stop card matching iOS SoftNearbyStopCard:
+/// identity (pin tile · name · "Stop {code} · road" · walk + distance)
+/// over a 1px divider, then the soonest service's next three arrival columns.
+/// The closest stop is highlighted with a green border + "Closest stop" badge.
+class _NearbyCard extends StatelessWidget {
+  const _NearbyCard({
+    required this.stop,
+    required this.highlight,
     required this.onTap,
   });
 
-  static const int _maxChips = 4;
-
-  final String name;
-  final String code;
-  final String desc; // road name / "opp Blk 445"; may be empty
-  final String? trailing; // distance ("80m") or walk ("3 min"); may be null
-  final List<Service> services;
-  final Freshness feed;
+  final NearbyStop stop;
+  final bool highlight;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    // Chips order by bus number (matching iOS), capped at 4 + "+N".
-    final sorted = [...services]..sort(_compareServiceNo);
+    final borderColor = highlight ? t.soon : t.line;
+    final borderWidth = highlight ? 1.5 : 1.0;
 
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _headerRow(context),
-              const SizedBox(height: 11),
-              if (sorted.isEmpty)
-                _quietRow(context)
-              else
-                _chipRow(context, sorted),
-            ],
+    return Semantics(
+      button: true,
+      label: 'Open ${stop.stopName.isEmpty ? stop.stopCode : stop.stopName}',
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(18),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: borderColor, width: borderWidth),
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (highlight) ...[
+                  _closestBadge(t),
+                  const SizedBox(height: 12),
+                ],
+                _identityRow(context, t),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Divider(height: 1, thickness: 1, color: t.line),
+                ),
+                // Wrap service row in per-second tick.
+                ListenableBuilder(
+                  listenable: AppModel.shared,
+                  builder: (context, _) => _serviceRow(context, t),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _headerRow(BuildContext context) {
-    final t = context.t;
+  Widget _closestBadge(LyneTheme t) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: t.soon,
+        borderRadius: BorderRadius.circular(LyneRadius.full),
+      ),
+      child: Text(
+        'Closest stop',
+        style: t.sans(11, weight: FontWeight.w700, color: t.contrastFg),
+      ),
+    );
+  }
+
+  Widget _identityRow(BuildContext context, LyneTheme t) {
+    final code = stop.stopCode;
+    final name = stop.stopName.isEmpty ? code : stop.stopName;
+    final road = DataStore.shared.roadName(code);
+    final subtitle = road.isEmpty ? 'Stop $code' : 'Stop $code · $road';
+    final walkMin = stop.walkMin;
+    final dist = fmtDistance(stop.distanceM);
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Leading map-pin tile — distinguishes a stop card at a glance.
+        // Leading 46×46 rounded tile.
         Container(
-          width: 38,
-          height: 38,
+          width: 46,
+          height: 46,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: t.surfaceHi,
-            borderRadius: BorderRadius.circular(11),
+            borderRadius: BorderRadius.circular(LyneRadius.md),
           ),
-          child: Icon(Icons.location_on, size: 18, color: t.fg),
+          child: Icon(Icons.location_on, size: 20, color: t.fg),
         ),
-        const SizedBox(width: 11),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 name,
-                style: t.sans(16, weight: FontWeight.w600, color: t.fg),
+                style: t.sans(17, weight: FontWeight.w600, color: t.fg),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 3),
               Text(
-                desc.isEmpty ? code : '$code · $desc',
-                style: t.mono(11.5, color: t.dim),
+                subtitle,
+                style: t.mono(12.5, color: t.dim),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 3),
+              // Walk + distance line.
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.directions_walk, size: 13, color: t.soon),
+                  const SizedBox(width: 3),
+                  Text(
+                    '${walkMin < 1 ? 1 : walkMin} min walk',
+                    style: t.mono(12.5,
+                        weight: FontWeight.w500, color: t.soon),
+                  ),
+                  const SizedBox(width: 5),
+                  Text('·',
+                      style: t.mono(12.5, color: t.faint)),
+                  const SizedBox(width: 5),
+                  Text(dist, style: t.mono(12.5, color: t.dim)),
+                ],
               ),
             ],
           ),
         ),
-        if (trailing != null) ...[
-          const SizedBox(width: 8),
-          Text(
-            trailing!,
-            style: t.mono(12, weight: FontWeight.w600, color: t.dim),
-          ),
-        ],
-        const SizedBox(width: 6),
+        const SizedBox(width: 8),
         Icon(Icons.chevron_right, size: 18, color: t.faint),
       ],
     );
   }
 
-  /// Wrapping mini-chip row. Wrapped in a narrow AppModel listener so only the
-  /// chips re-render each second (the header/tile stay put).
-  Widget _chipRow(BuildContext context, List<Service> sorted) {
-    final t = context.t;
-    return ListenableBuilder(
-      listenable: AppModel.shared,
-      builder: (context, _) {
-        final now = DateTime.now();
-        final visible = sorted.take(_maxChips).toList();
-        final overflow = sorted.length > _maxChips
-            ? sorted.length - _maxChips
-            : 0;
-        return Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            for (final s in visible)
-              _MiniBusChip(
-                svc: s.no,
-                // Re-derive ETA from the live arrivalDate for a smooth
-                // countdown between LTA polls (as AppModel.liveServices does).
-                etaSec: s.arrivalDate != null
-                    ? s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
-                    : s.etaSec,
-                confidence: ArrivalConfidence.of(
-                  monitored: s.monitored,
-                  feed: feed,
-                ),
-              ),
-            if (overflow > 0)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Text(
-                  '+$overflow',
-                  style: t.mono(12, weight: FontWeight.w600, color: t.faint),
-                ),
-              ),
-          ],
-        );
-      },
+  Widget _serviceRow(BuildContext context, LyneTheme t) {
+    final code = stop.stopCode;
+    final now = DateTime.now();
+    final feed = Freshness.from(DataStore.shared.lastRefresh(code));
+
+    // Re-sort by live etaSec, recomputed from arrivalDate.
+    final raw = DataStore.shared.servicesFor(code);
+    if (raw.isEmpty) return _quietRow(t);
+
+    // Pick the soonest service (recompute etaSec from arrivalDate for smoothness).
+    Service soonest = raw.first;
+    int soonestSec = _liveSec(soonest, now);
+    for (final s in raw.skip(1)) {
+      final sec = _liveSec(s, now);
+      if (sec < soonestSec) {
+        soonest = s;
+        soonestSec = sec;
+      }
+    }
+
+    final conf =
+        ArrivalConfidence.of(monitored: soonest.monitored, feed: feed);
+    final badge = serviceBadgeColors(etaSec: soonestSec, confidence: conf, t: t);
+    final etas = _arrivalSecs(soonest, now);
+    final destLabel = _destLabel(soonest.dest);
+
+    return Row(
+      children: [
+        // Service-number badge.
+        Container(
+          constraints: const BoxConstraints(minWidth: 46, minHeight: 40),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: badge.fill,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Text(
+            soonest.no,
+            style: t.sans(17, weight: FontWeight.w700, color: badge.fg),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Destination label.
+        Expanded(
+          child: Text(
+            destLabel,
+            style: t.sans(14, weight: FontWeight.w500, color: t.fg),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Up to 3 ETA columns.
+        _etaColumns(t, etas, conf),
+      ],
     );
   }
 
-  Widget _quietRow(BuildContext context) {
-    final t = context.t;
+  Widget _etaColumns(
+      LyneTheme t, List<int> etas, ArrivalConfidence conf) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < etas.length; i++) ...[
+          if (i > 0) ...[
+            const SizedBox(width: 10),
+            Container(width: 1, height: 30, color: t.line),
+            const SizedBox(width: 10),
+          ],
+          _etaColumn(t, etas[i], lead: i == 0, conf: conf),
+        ],
+      ],
+    );
+  }
+
+  Widget _etaColumn(LyneTheme t, int sec,
+      {required bool lead, required ArrivalConfidence conf}) {
+    final eta = fmtEta(sec);
+    final arriving = eta.big == 'Arr';
+    final color = lead
+        ? etaColor(etaSec: sec, confidence: conf, t: t)
+        : t.fg;
+    final isGhost = conf == ArrivalConfidence.unconfirmed;
+
+    // minWidth (not a fixed width) so "Arr" — wider than a 2-digit ETA —
+    // expands instead of overflowing into the adjacent divider/column.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 34),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              if (lead && isGhost)
+                ExcludeSemantics(
+                  child: Text(
+                    '~',
+                    style: t.mono(11,
+                        weight: FontWeight.w400, color: t.faint),
+                  ),
+                ),
+              Text(
+                arriving ? 'Arr' : eta.big,
+                style: t.mono(20, weight: FontWeight.w600, color: color),
+              ),
+              if (lead && conf == ArrivalConfidence.live) ...[
+                const SizedBox(width: 1),
+                ExcludeSemantics(
+                  child: Transform.translate(
+                    offset: const Offset(0, -7),
+                    child: Icon(Icons.sensors, size: 9, color: t.soon),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          Text(
+            arriving ? 'now' : eta.small,
+            style: t.mono(10, color: t.dim),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quietRow(LyneTheme t) {
     return Row(
       children: [
         const ConfidenceDot(confidence: ArrivalConfidence.stale, size: 6),
         const SizedBox(width: 7),
-        Text('No live arrivals right now', style: t.mono(11, color: t.faint)),
+        Text(
+          'No live arrivals right now',
+          style: t.mono(12, color: t.faint),
+        ),
       ],
     );
   }
-}
 
-/// Compact next-bus chip: a service micro-pill + confidence-treated ETA, in a
-/// rounded capsule. Port of iOS `MiniBusChip`. Whisper-quiet: the ETA reads as
-/// a confident arrival; the only estimate tell is a faint trailing "~".
-class _MiniBusChip extends StatelessWidget {
-  const _MiniBusChip({
-    required this.svc,
-    required this.etaSec,
-    required this.confidence,
-  });
+  /// Live seconds for a service — recomputes from arrivalDate for smooth ticking.
+  static int _liveSec(Service s, DateTime now) {
+    if (s.arrivalDate != null) {
+      return s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30);
+    }
+    return s.etaSec;
+  }
 
-  final String svc;
-  final int etaSec;
-  final ArrivalConfidence confidence;
+  /// Build 1–3 arrival times from a service (in seconds-from-now).
+  static List<int> _arrivalSecs(Service s, DateTime now) {
+    final first = _liveSec(s, now);
+    final result = [first];
 
-  @override
-  Widget build(BuildContext context) {
-    final t = context.t;
-    final eta = fmtEta(etaSec);
-    final arriving = eta.big == 'Arr';
-    final whisper = confidence == ArrivalConfidence.stale ||
-        confidence == ArrivalConfidence.unconfirmed;
-    final label = arriving ? 'now' : '${eta.big} ${eta.small}';
+    int? second;
+    if (s.followingDate != null) {
+      second = s.followingDate!.difference(now).inSeconds.clamp(0, 1 << 30);
+    } else if (s.followingSec > first) {
+      second = s.followingSec;
+    }
+    if (second != null && second > first) result.add(second);
 
-    return Container(
-      height: 27,
-      padding: const EdgeInsets.only(left: 4, right: 9),
-      decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(LyneRadius.full),
-        border: Border.all(color: t.line, width: 0.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Inner service micro-pill.
-          Container(
-            constraints: const BoxConstraints(minWidth: 22),
-            height: 18,
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            decoration: BoxDecoration(
-              color: t.surface,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: t.line, width: 0.5),
-            ),
-            child: Text(
-              svc,
-              style: t.mono(12, weight: FontWeight.w700, color: t.fg),
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: t.mono(
-              12,
-              weight: FontWeight.w600,
-              color: etaColor(etaSec: etaSec, confidence: confidence, t: t),
-            ),
-          ),
-          if (whisper) ...[
-            const SizedBox(width: 1),
-            ExcludeSemantics(
-              child: Opacity(
-                opacity: 0.7,
-                child: Text(
-                  '~',
-                  style: t.mono(9, weight: FontWeight.w400, color: t.faint),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
+    if (s.thirdDate != null) {
+      final third =
+          s.thirdDate!.difference(now).inSeconds.clamp(0, 1 << 30);
+      if (third > (result.last)) result.add(third);
+    }
+    return result;
+  }
+
+  static String _destLabel(String dest) {
+    if (dest.isEmpty) return 'Next bus';
+    if (dest.startsWith('To ')) return dest;
+    return 'To $dest';
   }
 }
 
@@ -717,7 +778,7 @@ class _EmptyState extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: t.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -730,16 +791,16 @@ class _EmptyState extends StatelessWidget {
               color: t.liveBg,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Icon(Icons.push_pin_outlined, size: 28, color: t.accent),
+            child: Icon(Icons.location_searching, size: 28, color: t.accent),
           ),
           const SizedBox(height: 12),
           Text(
-            'No stops pinned',
+            'No stops yet',
             style: t.sans(20, weight: FontWeight.w600, color: t.fg),
           ),
           const SizedBox(height: 4),
           Text(
-            'Pin a bus stop to see live arrivals at a glance.',
+            'Turn on location to see stops near you, or search for one.',
             style: t.sans(13, color: t.dim),
           ),
           const SizedBox(height: 14),
@@ -751,10 +812,13 @@ class _EmptyState extends StatelessWidget {
                   backgroundColor: t.accent,
                   foregroundColor: t.onAccent,
                 ),
-                child: const Text('Nearby'),
+                child: const Text('Use location'),
               ),
               const SizedBox(width: 8),
-              OutlinedButton(onPressed: onSearch, child: const Text('Search')),
+              OutlinedButton(
+                onPressed: onSearch,
+                child: const Text('Search'),
+              ),
             ],
           ),
         ],

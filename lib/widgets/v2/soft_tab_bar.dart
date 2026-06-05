@@ -45,28 +45,29 @@ class SoftTabBar extends StatelessWidget {
         NavigationDestination(
           icon: Icon(Icons.star_outline_rounded),
           selectedIcon: Icon(Icons.star_rounded),
-          label: 'Favourites',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings_rounded),
-          label: 'Settings',
+          label: 'Saved',
         ),
         NavigationDestination(
           icon: Icon(Icons.search_rounded),
           selectedIcon: Icon(Icons.search_rounded),
           label: 'Search',
         ),
+        NavigationDestination(
+          icon: Icon(Icons.settings_outlined),
+          selectedIcon: Icon(Icons.settings_rounded),
+          label: 'Settings',
+        ),
       ],
     );
   }
 
   // Search is always pushed as a route, so all 4 tabs map 1:1.
+  // Order mirrors iOS: Home · Saved · Search · Settings.
   static const _visibleTabs = [
     SoftTab.home,
     SoftTab.favourites,
-    SoftTab.settings,
     SoftTab.search,
+    SoftTab.settings,
   ];
 
   static int _visibleIndex(SoftTab t) {

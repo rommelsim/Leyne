@@ -248,8 +248,7 @@ struct FavService: Codable, Equatable, Identifiable {
 
 @MainActor
 final class AppModel: ObservableObject {
-    // Sound / haptic feedback (v1.0 carry-over).
-    @AppStorage("leyne.sound")  var sound = true
+    // Haptic feedback (v1.0 carry-over).
     @AppStorage("leyne.haptic") var haptic = true
 
     // Onboarding completion. Persisted under the Flutter v2.0 key so an
@@ -484,6 +483,14 @@ final class AppModel: ObservableObject {
         recents = Array(recents.prefix(8))
         UserDefaults.standard.set(recents, forKey: "leyne.recents")
     }
+    func removeRecent(_ q: String) {
+        recents.removeAll { $0.caseInsensitiveCompare(q) == .orderedSame }
+        UserDefaults.standard.set(recents, forKey: "leyne.recents")
+    }
+    func clearRecents() {
+        recents = []
+        UserDefaults.standard.set(recents, forKey: "leyne.recents")
+    }
 
     func finishOnboarding() {
         onboarded = true
@@ -492,7 +499,7 @@ final class AppModel: ObservableObject {
         // the user's very next launch for the version they just installed.
         if let v = currentVersion { lastSeenVersion = v }
     }
-    func syncFeedback() { Feedback.shared.config(sound: sound, haptic: haptic) }
+    func syncFeedback() { Feedback.shared.config(haptic: haptic) }
 
     // ─── What's New / version tracking ──────────────────────
 

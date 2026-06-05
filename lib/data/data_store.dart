@@ -594,14 +594,31 @@ class DataStore extends ChangeNotifier {
   List<LtaBusStop> searchStops(String q) {
     final s = q.trim().toLowerCase();
     if (s.isEmpty) return const [];
-    return _stopByCode.values
-        .where((b) =>
-            b.description.toLowerCase().contains(s) ||
-            b.roadName.toLowerCase().contains(s) ||
-            b.busStopCode.contains(s))
-        .toList()
+    // Token match: every query word must appear in the stop's text (any order),
+    // after normalising synonyms — so "yio chu kang mrt" finds "Yio Chu Kang
+    // Stn", and "clementi interchange" finds "Clementi Int".
+    final queryTokens = _searchTokens(s);
+    return _stopByCode.values.where((b) {
+      if (b.busStopCode.contains(s)) return true;
+      final hay = _searchTokens('${b.description} ${b.roadName}');
+      return queryTokens.every((qt) => hay.any((h) => h.contains(qt)));
+    }).toList()
       ..sort((a, b) => a.description.compareTo(b.description));
   }
+
+  /// Synonym-normalised search tokens. Maps the words LTA never uses in stop
+  /// names (mrt / station / interchange / lrt) onto the ones it does (stn /
+  /// int), and splits on any non-alphanumeric separator.
+  static const _searchSynonyms = {
+    'mrt': 'stn', 'station': 'stn', 'stn': 'stn', 'lrt': 'stn',
+    'interchange': 'int', 'int': 'int', 'intg': 'int',
+  };
+  List<String> _searchTokens(String s) => s
+      .toLowerCase()
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((w) => w.isNotEmpty)
+      .map((w) => _searchSynonyms[w] ?? w)
+      .toList();
 
   /// First stop served by a service (its route origin), for bus-result taps.
   Future<LtaBusStop?> originStop(String serviceNo) async {

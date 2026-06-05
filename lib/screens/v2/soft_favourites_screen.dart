@@ -1,15 +1,22 @@
-// SoftFavouritesScreen — Leyne 2.4.0 Favourites tab (Material 3 Android).
+// SoftFavouritesScreen — Leyne 2.4.0 "Saved" tab (Material 3 Android).
 //
-// Shows the user's saved stops (m.pins) and saved services (m.favServices)
-// in two sections, each with a filter-chip row at the top (All / Stops /
-// Services / Bus+Stop). Mirrors the layout and data resolution of
-// ios-native/Leyne/V2/SoftFavouritesView.swift — Material-native rendering.
-//
-// Filter semantics (matching iOS):
-//   All      → both sections visible
-//   Stops    → only Pinned stops
-//   Services → only "anywhere" service favourites (isAnywhere == true)
-//   Bus+Stop → only stop-specific service favourites (isAnywhere == false)
+// DESIGN (2.4.0 restyle — mirrors SoftFavouritesView.swift):
+//   • Large bold title "Saved" (matches bottom-tab label).
+//   • Three-segment filter: All | Stops | Buses.
+//       All   = pinned stops first (section "Saved stops"), then saved bus
+//               services (section "Buses").
+//       Stops = only AppModel.shared.pins.
+//       Buses = only AppModel.shared.favServices.
+//   • Stop cards: 46×46 pin tile with gold star, stop name,
+//     "Stop {code} · road" (mono), walk/distance, mini-chip bus row.
+//   • Swipe gestures (Dismissible) — endToStart only (LEFT swipe = delete):
+//       Pinned stop    → swipe LEFT → unpin via togglePin; confirmDismiss
+//                        returns false so Dismissible never removes the widget.
+//       Saved service  → swipe LEFT → removeFavService; same false return.
+//   • Empty state: when pins AND favServices are both empty.
+//   • "+ Add stop" row at the bottom, always visible (outside empty state).
+//   • SoftTab.favourites is used internally (bottom bar label is "Saved"
+//     via SoftBottomBar — no change needed here).
 
 import 'package:flutter/material.dart';
 
@@ -23,9 +30,29 @@ import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
-// ─── Filter enum ─────────────────────────────────────────────────────────────
+// ─── Segment enum ─────────────────────────────────────────────────────────────
 
-enum _FavFilter { all, stops, services, busStop }
+enum _Segment { all, stops, buses }
+
+// ─── Distance helpers ─────────────────────────────────────────────────────────
+
+int _walkMinFromLocation(String code) {
+  final here = LocationService.shared.lastLocation;
+  if (here == null) return 0;
+  final stop = DataStore.shared.stopByCode[code];
+  if (stop == null) return 0;
+  final d = haversine(here.lat, here.lon, stop.latitude, stop.longitude);
+  final m = walkMinutesFor(d);
+  return m < 1 ? 1 : m;
+}
+
+int _distanceMFromLocation(String code) {
+  final here = LocationService.shared.lastLocation;
+  if (here == null) return 0;
+  final stop = DataStore.shared.stopByCode[code];
+  if (stop == null) return 0;
+  return haversine(here.lat, here.lon, stop.latitude, stop.longitude).round();
+}
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
@@ -48,9 +75,7 @@ class SoftFavouritesScreen extends StatefulWidget {
 }
 
 class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
-  _FavFilter _filter = _FavFilter.all;
-  bool _editingStops = false;
-  bool _editingServices = false;
+  _Segment _segment = _Segment.all;
 
   @override
   void initState() {
@@ -67,7 +92,6 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         DataStore.shared.ensureArrivals(fav.stop!);
       }
     }
-    DataStore.shared.prefetchNearbyArrivals();
   }
 
   Future<void> _refreshAll() async {
@@ -81,32 +105,35 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       }
     }
     await Future.wait(futures);
-    DataStore.shared.prefetchNearbyArrivals();
   }
 
-  bool get _showStops =>
-      _filter == _FavFilter.all || _filter == _FavFilter.stops;
+  // ── Derived lists ───────────────────────────────────────────────────────
 
-  bool get _showServices =>
-      _filter == _FavFilter.all ||
-      _filter == _FavFilter.services ||
-      _filter == _FavFilter.busStop;
-
-  List<FavService> get _filteredServices {
-    final all = AppModel.shared.favServices;
-    switch (_filter) {
-      case _FavFilter.services:
-        return all.where((f) => f.isAnywhere).toList();
-      case _FavFilter.busStop:
-        return all.where((f) => !f.isAnywhere).toList();
-      default:
-        return all;
+  List<Pin> get _visiblePins {
+    switch (_segment) {
+      case _Segment.all:
+      case _Segment.stops:
+        return AppModel.shared.pins;
+      case _Segment.buses:
+        return const [];
     }
   }
 
-  // ── Arrival resolution ──────────────────────────────────────────────────
+  List<FavService> get _visibleServices {
+    switch (_segment) {
+      case _Segment.all:
+      case _Segment.buses:
+        return AppModel.shared.favServices;
+      case _Segment.stops:
+        return const [];
+    }
+  }
 
-  /// For a stop-specific favourite: pull its first Service with matching no.
+  bool get _isEmpty =>
+      AppModel.shared.pins.isEmpty && AppModel.shared.favServices.isEmpty;
+
+  // ── Arrival resolution for services section ─────────────────────────────
+
   _Resolved? _atStopArrival(FavService fav) {
     final code = fav.stop!;
     final svc = DataStore.shared
@@ -121,49 +148,8 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
-  /// For an "anywhere" favourite: scan nearby stops (distance-sorted) for the
-  /// first one that serves this bus — mirrors iOS anywhereArrival().
-  _Resolved? _anywhereArrival(FavService fav) {
-    for (final n in DataStore.shared.nearby) {
-      final svc = DataStore.shared
-          .servicesFor(n.stopCode)
-          .cast<Service?>()
-          .firstWhere((s) => s!.no == fav.no, orElse: () => null);
-      if (svc != null) {
-        return _Resolved(
-          svc: svc,
-          stopName: n.stopName,
-          stopCode: n.stopCode,
-        );
-      }
-    }
-    return null;
-  }
-
   _Resolved? _resolve(FavService fav) =>
-      fav.isAnywhere ? _anywhereArrival(fav) : _atStopArrival(fav);
-
-  // ── Walk/distance helpers ───────────────────────────────────────────────
-
-  int? _walkMinutes(String code) {
-    final here = LocationService.shared.lastLocation;
-    if (here == null) return null;
-    final stop = DataStore.shared.stopByCode[code];
-    if (stop == null) return null;
-    final d =
-        haversine(here.lat, here.lon, stop.latitude, stop.longitude);
-    return walkMinutesFor(d);
-  }
-
-  String? _trailingLabel(String code) {
-    final here = LocationService.shared.lastLocation;
-    if (here == null) return null;
-    final stop = DataStore.shared.stopByCode[code];
-    if (stop == null) return null;
-    final d =
-        haversine(here.lat, here.lon, stop.latitude, stop.longitude);
-    return fmtDistance(d.round());
-  }
+      fav.isAnywhere ? null : _atStopArrival(fav);
 
   // ── Build ───────────────────────────────────────────────────────────────
 
@@ -184,28 +170,27 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
             LocationService.shared,
           ]),
           builder: (context, _) {
-            final pins = AppModel.shared.pins;
-            final isEmpty =
-                pins.isEmpty && AppModel.shared.favServices.isEmpty;
             return RefreshIndicator(
               color: t.accent,
               onRefresh: _refreshAll,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                 children: [
                   _header(context),
+                  const SizedBox(height: 14),
+                  _segmentedControl(context),
                   const SizedBox(height: 16),
-                  if (isEmpty)
+                  if (_isEmpty)
                     _emptyState(context)
                   else ...[
-                    _filterChips(context),
-                    const SizedBox(height: 16),
-                    if (_showStops) ...[
-                      _stopsSection(context),
+                    _stopsArea(context),
+                    if (_visibleServices.isNotEmpty) ...[
                       const SizedBox(height: 20),
+                      _servicesSection(context),
                     ],
-                    if (_showServices) _servicesSection(context),
+                    const SizedBox(height: 16),
+                    _addStopRow(context),
                   ],
                 ],
               ),
@@ -220,293 +205,218 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
   Widget _header(BuildContext context) {
     final t = context.t;
-    return Row(
+    return Text(
+      'Saved',
+      style: t.sans(29, weight: FontWeight.w700, color: t.fg),
+    );
+  }
+
+  // ─── Segmented control ────────────────────────────────────────────────────
+
+  Widget _segmentedControl(BuildContext context) {
+    final t = context.t;
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+      ),
+      child: Row(
+        children: [
+          _segmentPill(context, 'All', _Segment.all, t),
+          _segmentPill(context, 'Stops', _Segment.stops, t),
+          _segmentPill(context, 'Buses', _Segment.buses, t),
+        ],
+      ),
+    );
+  }
+
+  Widget _segmentPill(
+    BuildContext context,
+    String label,
+    _Segment value,
+    LyneTheme t,
+  ) {
+    final active = _segment == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _segment = value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          decoration: BoxDecoration(
+            color: active ? t.soon : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: t.sans(
+              13,
+              weight: FontWeight.w600,
+              color: active ? t.contrastFg : t.dim,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── Stops area ──────────────────────────────────────────────────────────
+
+  Widget _stopsArea(BuildContext context) {
+    final t = context.t;
+    final pins = _visiblePins;
+
+    // In the "all" segment, show the section header above stops.
+    // In "stops" segment the section is self-evident — omit.
+    // In "buses" segment there are no pins to render.
+    if (_segment == _Segment.buses) return const SizedBox.shrink();
+
+    if (pins.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 2),
+        child: Text(
+          'Pin a stop to see all its arrivals here.',
+          style: t.sans(13, color: t.faint),
+        ),
+      );
+    }
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        if (_segment == _Segment.all) ...[
+          Row(
             children: [
+              Icon(Icons.push_pin_rounded, size: 14, color: t.soon),
+              const SizedBox(width: 6),
               Text(
-                _greeting(),
-                style: t.mono(
-                  11,
-                  weight: FontWeight.w600,
-                  color: t.dim,
-                ).copyWith(letterSpacing: 0.6),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Favourites',
-                style: t.sans(28, weight: FontWeight.w700, color: t.fg),
-              ),
-              Text(
-                'Your saved stops and services',
-                style: t.sans(13, color: t.dim),
+                'Saved stops',
+                style: t.sans(15, weight: FontWeight.w600, color: t.dim),
               ),
             ],
           ),
-        ),
-        const SizedBox(width: 8),
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: _circleButton(
-            icon: Icons.add_rounded,
-            label: 'Add a favourite',
-            onTap: widget.onOpenSearch,
-            context: context,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _circleButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    required BuildContext context,
-  }) {
-    final t = context.t;
-    return Semantics(
-      label: label,
-      button: true,
-      child: Material(
-        color: t.surface,
-        shape: const CircleBorder(
-          side: BorderSide(color: Colors.transparent),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: t.line, width: 1),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 18, color: t.fg),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Filter chips ────────────────────────────────────────────────────────
-
-  Widget _filterChips(BuildContext context) {
-    final t = context.t;
-    const options = [
-      (_FavFilter.all, 'All'),
-      (_FavFilter.stops, 'Stops'),
-      (_FavFilter.services, 'Services'),
-      (_FavFilter.busStop, 'Bus + Stop'),
-    ];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (var i = 0; i < options.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            _filterChip(options[i].$1, options[i].$2, t),
-          ],
+          const SizedBox(height: 10),
         ],
-      ),
-    );
-  }
-
-  Widget _filterChip(_FavFilter filter, String label, LyneTheme t) {
-    final selected = _filter == filter;
-    return GestureDetector(
-      onTap: () => setState(() => _filter = filter),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? t.contrast : t.surface,
-          borderRadius: BorderRadius.circular(LyneRadius.full),
-          border: Border.all(
-            color: selected ? t.contrast : t.line,
-            width: 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: t.sans(
-            13,
-            weight: FontWeight.w600,
-            color: selected ? t.contrastFg : t.fg,
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Section header ──────────────────────────────────────────────────────
-
-  Widget _sectionHeader(
-    BuildContext context, {
-    required String title,
-    required IconData icon,
-    required bool showEdit,
-    required bool editing,
-    required VoidCallback onEditTap,
-  }) {
-    final t = context.t;
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: t.soon),
-        const SizedBox(width: 6),
-        Text(
-          title,
-          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
-        ),
-        const Spacer(),
-        if (showEdit)
-          GestureDetector(
-            onTap: onEditTap,
-            child: Text(
-              editing ? 'Done' : 'Edit',
-              style: t.sans(14, weight: FontWeight.w600, color: t.accent),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _hint(BuildContext context, String text) {
-    final t = context.t;
-    return Padding(
-      padding: const EdgeInsets.only(left: 2),
-      child: Text(text, style: t.sans(13, color: t.faint)),
-    );
-  }
-
-  // ─── Stops section ───────────────────────────────────────────────────────
-
-  Widget _stopsSection(BuildContext context) {
-    final pins = AppModel.shared.pins;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionHeader(
-          context,
-          title: 'Pinned stops',
-          icon: Icons.location_on_rounded,
-          showEdit: pins.isNotEmpty,
-          editing: _editingStops,
-          onEditTap: () => setState(() => _editingStops = !_editingStops),
-        ),
-        const SizedBox(height: 10),
-        if (pins.isEmpty)
-          _hint(context, 'Pin a stop to see all its arrivals here.')
-        else
-          for (var i = 0; i < pins.length; i++) ...[
-            if (i > 0) const SizedBox(height: 10),
-            _stopRow(context, pins[i]),
-          ],
-      ],
-    );
-  }
-
-  Widget _stopRow(BuildContext context, Pin pin) {
-    return AnimatedCrossFade(
-      duration: const Duration(milliseconds: 200),
-      crossFadeState: _editingStops
-          ? CrossFadeState.showSecond
-          : CrossFadeState.showFirst,
-      firstChild: _stopCard(context, pin),
-      secondChild: Row(
-        children: [
-          _removeButton(context, onTap: () {
-            setState(() {
-              AppModel.shared.pins.removeWhere((p) => p.code == pin.code);
-            });
-          }),
-          const SizedBox(width: 10),
-          Expanded(child: _stopCard(context, pin)),
+        for (var i = 0; i < pins.length; i++) ...[
+          if (i > 0) const SizedBox(height: 10),
+          _pinRow(context, pins[i]),
         ],
-      ),
+      ],
     );
   }
 
-  Widget _stopCard(BuildContext context, Pin pin) {
-    final dsName = DataStore.shared.stopName(pin.code);
-    final stopName = dsName.isEmpty ? pin.code : dsName;
+  Widget _pinRow(BuildContext context, Pin pin) {
+    final t = context.t;
+    final code = pin.code;
+
+    return Dismissible(
+      key: ValueKey('fav-$code'),
+      direction: DismissDirection.endToStart,
+      background: const SizedBox.shrink(),
+      secondaryBackground: _dismissBackground(
+        context: context,
+        color: t.crit,
+        icon: Icons.delete,
+        label: 'Delete',
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+      ),
+      confirmDismiss: (_) async {
+        AppModel.shared.togglePin(code);
+        // Always return false — AppModel mutation + ListenableBuilder rebuilds
+        // the list; we never let Dismissible remove the widget itself.
+        return false;
+      },
+      child: _pinCard(context, pin),
+    );
+  }
+
+  Widget _pinCard(BuildContext context, Pin pin) {
+    final code = pin.code;
+    final dsName = DataStore.shared.stopName(code);
+    final stopName = dsName.isEmpty ? code : dsName;
+    final road = DataStore.shared.roadName(code);
+
+    // If pin has a nickname, show it as title and stopName as desc.
     final nick = pin.nickname.trim();
     final hasNick =
         nick.isNotEmpty && nick.toLowerCase() != stopName.toLowerCase();
-    final walk = _walkMinutes(pin.code);
-    final trailing = walk != null ? '$walk min' : _trailingLabel(pin.code);
+    final displayName = hasNick ? nick : stopName;
+    final desc = hasNick ? stopName : (road.isEmpty ? null : road);
 
-    final all = DataStore.shared.servicesFor(pin.code);
+    // Service list — respects tracked subset.
+    final allSvcs = DataStore.shared.servicesFor(code);
     final tracked = pin.tracked;
     final services = (tracked != null && tracked.isNotEmpty)
-        ? all.where((s) => tracked.contains(s.no)).toList()
-        : all;
+        ? allSvcs.where((s) => tracked.contains(s.no)).toList()
+        : allSvcs;
+
+    final walkMin = _walkMinFromLocation(code);
+    final distM = _distanceMFromLocation(code);
 
     return _FavStopCard(
-      name: hasNick ? nick : stopName,
-      code: pin.code,
-      desc: hasNick ? stopName : DataStore.shared.roadName(pin.code),
-      trailing: trailing,
+      name: displayName,
+      code: code,
+      desc: desc,
+      road: road,
+      walkMin: walkMin,
+      distanceM: distM,
       services: services,
-      feed: Freshness.from(DataStore.shared.lastRefresh(pin.code)),
-      onTap: () => widget.onOpenStop(pin.code),
+      feed: Freshness.from(DataStore.shared.lastRefresh(code)),
+      onTap: () => widget.onOpenStop(code),
     );
   }
 
-  // ─── Services section ────────────────────────────────────────────────────
+  // ─── Saved services section ───────────────────────────────────────────────
 
   Widget _servicesSection(BuildContext context) {
-    final items = _filteredServices;
-    final hintText = _filter == _FavFilter.services
-        ? "Save a bus 'anywhere' to follow it across stops."
-        : _filter == _FavFilter.busStop
-            ? 'Track a specific bus at a stop to follow it here.'
-            : "Save a bus or tap the pin on a stop's bus row to see it here.";
+    final t = context.t;
+    final items = _visibleServices;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionHeader(
-          context,
-          title: 'Pinned services',
-          icon: Icons.directions_bus_rounded,
-          showEdit: items.isNotEmpty,
-          editing: _editingServices,
-          onEditTap: () =>
-              setState(() => _editingServices = !_editingServices),
+        Row(
+          children: [
+            Icon(Icons.directions_bus_rounded, size: 14, color: t.soon),
+            const SizedBox(width: 6),
+            Text(
+              'Buses',
+              style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+            ),
+          ],
         ),
         const SizedBox(height: 10),
-        if (items.isEmpty)
-          _hint(context, hintText)
-        else
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            _serviceRow(context, items[i]),
-          ],
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _serviceRow(context, items[i]),
+        ],
       ],
     );
   }
 
   Widget _serviceRow(BuildContext context, FavService fav) {
-    return AnimatedCrossFade(
-      duration: const Duration(milliseconds: 200),
-      crossFadeState: _editingServices
-          ? CrossFadeState.showSecond
-          : CrossFadeState.showFirst,
-      firstChild: _serviceCard(context, fav),
-      secondChild: Row(
-        children: [
-          _removeButton(context, onTap: () {
-            AppModel.shared.removeFavService(fav);
-          }),
-          const SizedBox(width: 10),
-          Expanded(child: _serviceCard(context, fav)),
-        ],
+    final t = context.t;
+
+    return Dismissible(
+      key: ValueKey('fav-${fav.id}'),
+      direction: DismissDirection.endToStart,
+      background: const SizedBox.shrink(),
+      secondaryBackground: _dismissBackground(
+        context: context,
+        color: t.crit,
+        icon: Icons.delete,
+        label: 'Delete',
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
       ),
+      confirmDismiss: (_) async {
+        AppModel.shared.removeFavService(fav);
+        return false;
+      },
+      child: _serviceCard(context, fav),
     );
   }
 
@@ -548,15 +458,12 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              // Proximity-coloured badge.
               _ColoredBadge(no: fav.no, fill: badge.fill, fg: badge.fg),
               const SizedBox(width: 12),
-              // Route info.
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Service number + destination inline.
                     RichText(
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -564,11 +471,8 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                         children: [
                           TextSpan(
                             text: fav.no,
-                            style: t.sans(
-                              15,
-                              weight: FontWeight.w700,
-                              color: t.fg,
-                            ),
+                            style: t.sans(15,
+                                weight: FontWeight.w700, color: t.fg),
                           ),
                           if (svc != null)
                             TextSpan(
@@ -579,7 +483,6 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    // Location row.
                     Row(
                       children: [
                         Icon(
@@ -606,11 +509,9 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              // ETA column.
               ListenableBuilder(
                 listenable: AppModel.shared,
-                builder: (context, _) =>
-                    _serviceEtas(context, svc, conf),
+                builder: (context, _) => _serviceEtas(context, svc, conf),
               ),
               const SizedBox(width: 6),
               Icon(Icons.chevron_right, size: 16, color: t.faint),
@@ -645,7 +546,6 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Primary ETA.
         Row(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -659,13 +559,13 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
               const SizedBox(width: 2),
               Text(
                 eta.small,
-                style: t.mono(12, weight: FontWeight.w600,
+                style: t.mono(12,
+                    weight: FontWeight.w600,
                     color: color.withValues(alpha: 0.85)),
               ),
             ],
           ],
         ),
-        // Following ETA, when present.
         if (!arriving && svc.followingSec > 0) ...[
           const SizedBox(height: 1),
           _followingLabel(context, svc),
@@ -696,25 +596,84 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
-  // ─── Remove button ───────────────────────────────────────────────────────
+  // ─── Add stop row ─────────────────────────────────────────────────────────
 
-  Widget _removeButton(BuildContext context, {required VoidCallback onTap}) {
+  Widget _addStopRow(BuildContext context) {
     final t = context.t;
     return Semantics(
-      label: 'Remove',
+      label: 'Add a stop to favourites',
       button: true,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Icon(
-          Icons.remove_circle,
-          size: 26,
-          color: t.crit,
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: widget.onOpenSearch,
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: t.surfaceHi,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.add, size: 18, color: LyneSignal.meBlue),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Add stop',
+                  style: t.sans(15,
+                      weight: FontWeight.w600, color: LyneSignal.meBlue),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  // ─── Empty state ─────────────────────────────────────────────────────────
+  // ─── Dismiss background helper ────────────────────────────────────────────
+
+  Widget _dismissBackground({
+    required BuildContext context,
+    required Color color,
+    required IconData icon,
+    required String label,
+    required Alignment alignment,
+    required EdgeInsets padding,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+      ),
+      alignment: alignment,
+      padding: padding,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 20),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Empty state ──────────────────────────────────────────────────────────
 
   Widget _emptyState(BuildContext context) {
     final t = context.t;
@@ -735,7 +694,8 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
               color: t.surfaceHi,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Icon(Icons.star_outline_rounded, size: 28, color: t.accent),
+            child: Icon(Icons.star_outline_rounded, size: 28,
+                color: LyneSignal.meBlue),
           ),
           const SizedBox(height: 16),
           Text(
@@ -745,7 +705,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
           const SizedBox(height: 6),
           Text(
             'Pin the stops and buses you use most — '
-            'tap the pin on any stop or bus — and they\'ll show up here.',
+            "tap the pin on any stop or bus — and they'll show up here.",
             style: t.sans(13, color: t.dim),
           ),
           const SizedBox(height: 16),
@@ -760,23 +720,14 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
               ),
               child: Text(
                 'Find a stop',
-                style: t.sans(14, weight: FontWeight.w600, color: t.onAccent),
+                style:
+                    t.sans(14, weight: FontWeight.w600, color: t.onAccent),
               ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  // ─── Greeting ────────────────────────────────────────────────────────────
-
-  String _greeting() {
-    final h = DateTime.now().hour;
-    if (h >= 5 && h < 12) return 'GOOD MORNING';
-    if (h >= 12 && h < 17) return 'GOOD AFTERNOON';
-    if (h >= 17 && h < 22) return 'GOOD EVENING';
-    return 'GOOD NIGHT';
   }
 }
 
@@ -795,9 +746,7 @@ class _Resolved {
 
 // ─── Proximity-coloured service badge ────────────────────────────────────────
 
-/// 48dp service number badge with a proximity-driven fill colour.
-/// Extracted because the ServiceBadge in soft_components.dart uses the fixed
-/// accent colour; here we override fill and fg from serviceBadgeColors().
+/// 48dp service-number badge with a proximity-driven fill.
 class _ColoredBadge extends StatelessWidget {
   const _ColoredBadge({
     required this.no,
@@ -828,17 +777,25 @@ class _ColoredBadge extends StatelessWidget {
   }
 }
 
-// ─── Pinned-stop card ────────────────────────────────────────────────────────
+// ─── Favourite stop card ─────────────────────────────────────────────────────
 
-/// Compact stop card for the Favourites pinned-stops section.
-/// Mirrors _SoftStopCard from soft_home_screen.dart — extracted here to avoid
-/// coupling to the home screen's private class.
+/// Mirrors FavStopCard in SoftFavouritesView.swift:
+///   46×46 pin tile (gold star always shown — every stop here is pinned)
+///   → name (sans 17 w600) + "Stop {code} · road" (mono 12.5 dim)
+///   → walk/distance row (when location is available)
+///   → 1px divider
+///   → mini-chip bus row (up to 4 chips + "+N" overflow)
+///
+/// The chip row is wrapped in ListenableBuilder(AppModel.shared) so ETAs
+/// tick on the 1-second heartbeat without rebuilding the whole card.
 class _FavStopCard extends StatelessWidget {
   const _FavStopCard({
     required this.name,
     required this.code,
     required this.desc,
-    required this.trailing,
+    required this.road,
+    required this.walkMin,
+    required this.distanceM,
     required this.services,
     required this.feed,
     required this.onTap,
@@ -849,7 +806,9 @@ class _FavStopCard extends StatelessWidget {
   final String name;
   final String code;
   final String? desc;
-  final String? trailing;
+  final String road;
+  final int walkMin;
+  final int distanceM;
   final List<Service> services;
   final Freshness feed;
   final VoidCallback onTap;
@@ -857,143 +816,188 @@ class _FavStopCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    final sorted = [...services]..sort(_compareNo);
+    final sorted = [...services]..sort(_compareEta);
 
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _headerRow(context, t),
-              const SizedBox(height: 11),
-              if (sorted.isEmpty)
-                _quietRow(context, t)
-              else
-                _chipRow(context, t, sorted),
-            ],
+    return Semantics(
+      button: true,
+      label: 'Open $name',
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(18),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: t.line, width: 1),
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _identityRow(context, t),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Divider(height: 1, thickness: 1, color: t.line),
+                ),
+                ListenableBuilder(
+                  listenable: AppModel.shared,
+                  builder: (context, _) => sorted.isEmpty
+                      ? _quietRow(t)
+                      : _chipRow(context, t, sorted),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _headerRow(BuildContext context, LyneTheme t) {
+  Widget _identityRow(BuildContext context, LyneTheme t) {
+    final subtitle = road.isEmpty ? 'Stop $code' : 'Stop $code · $road';
+    final hasLocation = walkMin > 0 || distanceM > 0;
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Container(
-          width: 38,
-          height: 38,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: t.surfaceHi,
-            borderRadius: BorderRadius.circular(11),
-          ),
-          child: Icon(Icons.location_on, size: 18, color: t.fg),
+        // 46×46 pin tile — gold star badge always shown (all stops here are pinned).
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: t.surfaceHi,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.location_on, size: 20, color: t.fg),
+            ),
+            Positioned(
+              top: -4,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: t.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.star,
+                  size: 11,
+                  color: Color(0xFFF5B500),
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 11),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 name,
-                style: t.sans(16, weight: FontWeight.w600, color: t.fg),
+                style: t.sans(17, weight: FontWeight.w600, color: t.fg),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 3),
               Text(
-                (desc == null || desc!.isEmpty) ? code : '$code · $desc',
-                style: t.mono(11.5, color: t.dim),
+                subtitle,
+                style: t.mono(12.5, color: t.dim),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+              if (hasLocation) ...[
+                const SizedBox(height: 3),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.directions_walk, size: 13, color: t.soon),
+                    const SizedBox(width: 3),
+                    Text(
+                      '${walkMin < 1 ? 1 : walkMin} min walk',
+                      style: t.mono(12.5,
+                          weight: FontWeight.w500, color: t.soon),
+                    ),
+                    const SizedBox(width: 5),
+                    Text('·', style: t.mono(12.5, color: t.faint)),
+                    const SizedBox(width: 5),
+                    Text(
+                      fmtDistance(distanceM),
+                      style: t.mono(12.5, color: t.dim),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
-        if (trailing != null) ...[
-          const SizedBox(width: 8),
-          Text(
-            trailing!,
-            style: t.mono(12, weight: FontWeight.w600, color: t.dim),
-          ),
-        ],
-        const SizedBox(width: 6),
+        const SizedBox(width: 8),
         Icon(Icons.chevron_right, size: 18, color: t.faint),
       ],
     );
   }
 
   Widget _chipRow(BuildContext context, LyneTheme t, List<Service> sorted) {
-    return ListenableBuilder(
-      listenable: AppModel.shared,
-      builder: (context, _) {
-        final now = DateTime.now();
-        final visible = sorted.take(_maxChips).toList();
-        final overflow =
-            sorted.length > _maxChips ? sorted.length - _maxChips : 0;
-        return Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            for (final s in visible)
-              _MiniChip(
-                svc: s.no,
-                etaSec: s.arrivalDate != null
-                    ? s.arrivalDate!
-                        .difference(now)
-                        .inSeconds
-                        .clamp(0, 1 << 30)
-                    : s.etaSec,
-                confidence: ArrivalConfidence.of(
-                  monitored: s.monitored,
-                  feed: feed,
-                ),
-              ),
-            if (overflow > 0)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Text(
-                  '+$overflow',
-                  style: t.mono(12, weight: FontWeight.w600, color: t.faint),
-                ),
-              ),
-          ],
-        );
-      },
+    final now = DateTime.now();
+    final visible = sorted.take(_maxChips).toList();
+    final overflow = sorted.length > _maxChips ? sorted.length - _maxChips : 0;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final s in visible)
+          _MiniChip(
+            svc: s.no,
+            etaSec: s.arrivalDate != null
+                ? s.arrivalDate!
+                    .difference(now)
+                    .inSeconds
+                    .clamp(0, 1 << 30)
+                : s.etaSec,
+            confidence: ArrivalConfidence.of(
+              monitored: s.monitored,
+              feed: feed,
+            ),
+          ),
+        if (overflow > 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Text(
+              '+$overflow',
+              style:
+                  t.mono(12, weight: FontWeight.w600, color: t.faint),
+            ),
+          ),
+      ],
     );
   }
 
-  Widget _quietRow(BuildContext context, LyneTheme t) {
+  Widget _quietRow(LyneTheme t) {
     return Row(
       children: [
         const ConfidenceDot(confidence: ArrivalConfidence.stale, size: 6),
         const SizedBox(width: 7),
         Text('No live arrivals right now',
-            style: t.mono(11, color: t.faint)),
+            style: t.mono(12, color: t.faint)),
       ],
     );
   }
 
-  static int _compareNo(Service a, Service b) {
-    int lead(String s) =>
-        int.tryParse(s.replaceAll(RegExp(r'[^0-9]'), '')) ?? (1 << 30);
-    final c = lead(a.no).compareTo(lead(b.no));
-    return c != 0 ? c : a.no.compareTo(b.no);
-  }
+  static int _compareEta(Service a, Service b) =>
+      a.etaSec.compareTo(b.etaSec);
 }
 
 // ─── Mini chip ───────────────────────────────────────────────────────────────
 
-/// Compact "88 · 3 min" chip — identical in shape to the one in
-/// soft_home_screen.dart's _MiniBusChip.
+/// Compact "88 · 3 min" chip — same shape as _MiniBusChip in soft_home_screen.
 class _MiniChip extends StatelessWidget {
   const _MiniChip({
     required this.svc,
@@ -1055,10 +1059,7 @@ class _MiniChip extends StatelessWidget {
             ExcludeSemantics(
               child: Opacity(
                 opacity: 0.7,
-                child: Text(
-                  '~',
-                  style: t.mono(9, color: t.faint),
-                ),
+                child: Text('~', style: t.mono(9, color: t.faint)),
               ),
             ),
           ],

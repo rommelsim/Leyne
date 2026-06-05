@@ -1,4 +1,8 @@
 // SoftSettingsScreen — Leyne 2.0 Settings (Material 3 Android variant).
+// Restyled for the 2.4.0 design language: grouped Material cards, icon chips,
+// chevron-trailing nav rows, SoftToggle for binary settings.
+// All pre-existing settings (notifications, appearance, language, 24h time,
+// haptics, search radius, about) are preserved and functional.
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -7,6 +11,7 @@ import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
+import '../about_screen.dart';
 import '../notifications_screen.dart';
 
 class SoftSettingsScreen extends StatefulWidget {
@@ -28,6 +33,273 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     });
   }
 
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  String _themeLabel(ThemeMode mode) => switch (mode) {
+    ThemeMode.system => 'System',
+    ThemeMode.light  => 'Light',
+    ThemeMode.dark   => 'Dark',
+  };
+
+  String _languageLabel(Locale? locale) {
+    final code = locale?.languageCode ?? '';
+    return switch (code) {
+      ''    => 'System',
+      'en'  => 'English',
+      'zh'  => '中文',
+      'ms'  => 'Bahasa Melayu',
+      'ta'  => 'தமிழ்',
+      _     => code.toUpperCase(),
+    };
+  }
+
+  String _radiusLabel(int metres) {
+    if (metres < 1000) return '$metres m';
+    final km = metres / 1000;
+    if (metres % 1000 == 0) return '${km.toInt()} km';
+    return '${km.toStringAsFixed(1)} km';
+  }
+
+  // ── Sheets ───────────────────────────────────────────────────────────────
+
+  void _showAppearanceSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(LyneRadius.lg)),
+      ),
+      builder: (_) => ListenableBuilder(
+        listenable: AppModel.shared,
+        builder: (ctx, _) {
+          final t = ctx.t;
+          const modes = [ThemeMode.system, ThemeMode.light, ThemeMode.dark];
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: t.line,
+                    borderRadius: BorderRadius.circular(LyneRadius.full),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Text('Appearance',
+                          style: t.sans(18, weight: FontWeight.w600, color: t.fg)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final mode in modes) ...[
+                  InkWell(
+                    onTap: () {
+                      AppModel.shared.setThemeMode(mode);
+                      Navigator.of(ctx).pop();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(_themeLabel(mode),
+                                style: t.sans(15,
+                                    weight: FontWeight.w500, color: t.fg)),
+                          ),
+                          if (AppModel.shared.themeMode == mode)
+                            Icon(Icons.check, size: 18, color: t.fg),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (mode != ThemeMode.dark)
+                    Divider(color: t.line, height: 1, indent: 20),
+                ],
+                const SizedBox(height: 16),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showLanguageSheet() {
+    // Language options: null = system; explicit locales below.
+    const options = <({Locale? locale, String label})>[
+      (locale: null, label: 'System'),
+      (locale: Locale('en'), label: 'English'),
+      (locale: Locale('zh'), label: '中文'),
+      (locale: Locale('ms'), label: 'Bahasa Melayu'),
+      (locale: Locale('ta'), label: 'தமிழ்'),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(LyneRadius.lg)),
+      ),
+      builder: (_) => ListenableBuilder(
+        listenable: AppModel.shared,
+        builder: (ctx, _) {
+          final t = ctx.t;
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: t.line,
+                    borderRadius: BorderRadius.circular(LyneRadius.full),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Text('Language',
+                          style: t.sans(18, weight: FontWeight.w600, color: t.fg)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text(
+                    'App text is in English today — more languages are rolling out. '
+                    'Your choice still localises dates, pickers and system text.',
+                    style: t.sans(12, color: t.dim),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final opt in options) ...[
+                  InkWell(
+                    onTap: () {
+                      AppModel.shared.setLocale(opt.locale);
+                      Navigator.of(ctx).pop();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(opt.label,
+                                style: t.sans(15,
+                                    weight: FontWeight.w500, color: t.fg)),
+                          ),
+                          if (AppModel.shared.locale?.languageCode ==
+                              opt.locale?.languageCode)
+                            Icon(Icons.check, size: 18, color: t.fg),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (opt != options.last)
+                    Divider(color: t.line, height: 1, indent: 20),
+                ],
+                const SizedBox(height: 16),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showRadiusSheet() {
+    const radii = [250, 500, 1000, 2000];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(LyneRadius.lg)),
+      ),
+      builder: (_) => ListenableBuilder(
+        listenable: AppModel.shared,
+        builder: (ctx, _) {
+          final t = ctx.t;
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: t.line,
+                    borderRadius: BorderRadius.circular(LyneRadius.full),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Text('Search radius',
+                          style: t.sans(18, weight: FontWeight.w600, color: t.fg)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text(
+                    'When you search a 6-digit postal code, bus stops within this '
+                    'distance of that address are shown.',
+                    style: t.sans(12, color: t.dim),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final r in radii) ...[
+                  InkWell(
+                    onTap: () {
+                      AppModel.shared.setSearchRadiusM(r);
+                      Navigator.of(ctx).pop();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(_radiusLabel(r),
+                                style: t.sans(15,
+                                    weight: FontWeight.w500, color: t.fg)),
+                          ),
+                          if (AppModel.shared.searchRadiusM == r)
+                            Icon(Icons.check, size: 18, color: t.fg),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (r != radii.last)
+                    Divider(color: t.line, height: 1, indent: 20),
+                ],
+                const SizedBox(height: 16),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final t = context.t;
@@ -40,91 +312,144 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
       body: SafeArea(
         child: ListenableBuilder(
           listenable: AppModel.shared,
-          builder: (context, _) => ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            children: [
-              Text(
-                'Settings',
-                style: t.sans(28, weight: FontWeight.w400, color: t.fg),
-              ),
-              const SizedBox(height: 16),
-              _section(context, 'Personalize', [
-                _row(
-                  context,
-                  icon: Icons.notifications_outlined,
-                  title: 'Notifications',
-                  detail: AppModel.shared.notificationsEnabled ? 'On' : 'Off',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const NotificationsScreen(),
+          builder: (context, _) {
+            final m = AppModel.shared;
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              children: [
+                // ── Large page title ──────────────────────────────────────
+                Text(
+                  'Settings',
+                  style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+                ),
+                const SizedBox(height: 20),
+
+                // ── Section 1: Preferences ────────────────────────────────
+                _sectionLabel(context, 'Preferences'),
+                const SizedBox(height: 8),
+                _card(context, [
+                  // Alerts & notifications → NotificationsScreen
+                  _navRow(
+                    context,
+                    icon: Icons.notifications_outlined,
+                    title: 'Alerts & notifications',
+                    detail: m.notificationsEnabled ? 'On' : 'Off',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsScreen(),
+                      ),
                     ),
                   ),
+                  _divider(context),
+                  // My favourites → switch to favourites tab
+                  _navRow(
+                    context,
+                    icon: Icons.star_outline,
+                    title: 'My favourites',
+                    onTap: () => widget.onTab(SoftTab.favourites),
+                  ),
+                  _divider(context),
+                  // Appearance → sheet picker
+                  _navRow(
+                    context,
+                    icon: Icons.dark_mode_outlined,
+                    title: 'Appearance',
+                    detail: _themeLabel(m.themeMode),
+                    onTap: _showAppearanceSheet,
+                  ),
+                  _divider(context),
+                  // Language → sheet picker
+                  _navRow(
+                    context,
+                    icon: Icons.language,
+                    title: 'Language',
+                    detail: _languageLabel(m.locale),
+                    onTap: _showLanguageSheet,
+                  ),
+                  _divider(context),
+                  // About → AboutScreen
+                  _navRow(
+                    context,
+                    icon: Icons.info_outline,
+                    title: 'About',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const AboutScreen(),
+                      ),
+                    ),
+                  ),
+                ]),
+
+                const SizedBox(height: 24),
+
+                // ── Section 2: Time & Feedback ────────────────────────────
+                _sectionLabel(context, 'Time & Feedback'),
+                const SizedBox(height: 8),
+                _card(context, [
+                  _toggleRow(
+                    context,
+                    icon: Icons.access_time,
+                    title: '24-hour time',
+                    value: m.use24h,
+                    onChanged: m.setUse24h,
+                  ),
+                  _divider(context),
+                  _toggleRow(
+                    context,
+                    icon: Icons.vibration,
+                    title: 'Haptics',
+                    value: m.hapticsEnabled,
+                    onChanged: m.setHaptics,
+                  ),
+                  _divider(context),
+                  // Search radius → sheet picker
+                  _navRow(
+                    context,
+                    icon: Icons.radar,
+                    title: 'Search radius',
+                    detail: _radiusLabel(m.searchRadiusM),
+                    onTap: _showRadiusSheet,
+                  ),
+                ]),
+
+                const SizedBox(height: 24),
+
+                // ── Footer ────────────────────────────────────────────────
+                Text(
+                  'Leyne v$_version · Data from LTA DataMall.',
+                  style: t.mono(10, color: t.faint),
                 ),
-                _divider(context),
-                _appearanceRow(context),
-                _divider(context),
-                _toggleRow(
-                  context,
-                  icon: Icons.access_time,
-                  title: '24-hour time',
-                  value: AppModel.shared.use24h,
-                  onChanged: (v) => AppModel.shared.setUse24h(v),
-                ),
-              ]),
-              const SizedBox(height: 24),
-              // [GAP-M] Feedback section — Sound + Haptics toggles.
-              _section(context, 'Feedback', [
-                _toggleRow(
-                  context,
-                  icon: Icons.volume_up_outlined,
-                  title: 'Sound',
-                  value: AppModel.shared.soundEnabled,
-                  onChanged: (v) => AppModel.shared.setSound(v),
-                ),
-                _divider(context),
-                _toggleRow(
-                  context,
-                  icon: Icons.vibration,
-                  title: 'Haptics',
-                  value: AppModel.shared.hapticsEnabled,
-                  onChanged: (v) => AppModel.shared.setHaptics(v),
-                ),
-              ]),
-              const SizedBox(height: 24),
-              Text(
-                'Leyne v$_version · Data from LTA DataMall.',
-                style: t.mono(10, color: t.faint),
-              ),
-            ],
-          ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _section(BuildContext context, String title, List<Widget> children) {
+  // ── Primitives ────────────────────────────────────────────────────────────
+
+  Widget _sectionLabel(BuildContext context, String title) {
     final t = context.t;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: t.sans(13, weight: FontWeight.w600, color: t.dim),
-        ),
-        const SizedBox(height: 8),
-        // Material + clipBehavior clips InkWell ripples to the rounded
-        // corners — fixes ink overflow on tappable rows.
-        Material(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(LyneRadius.lg),
-          clipBehavior: Clip.antiAlias,
-          child: Column(children: children),
-        ),
-      ],
+    return Text(
+      title,
+      style: t.sans(13, weight: FontWeight.w600, color: t.dim),
     );
   }
 
-  Widget _row(
+  /// Rounded Material card that clips InkWell ripples to its corners.
+  Widget _card(BuildContext context, List<Widget> children) {
+    final t = context.t;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.lg),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: children),
+    );
+  }
+
+  /// Tappable nav row: icon chip + title + optional trailing value + chevron.
+  Widget _navRow(
     BuildContext context, {
     required IconData icon,
     required String title,
@@ -134,30 +459,22 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     final t = context.t;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(LyneRadius.lg),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: t.surfaceHi,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, size: 16, color: t.fg),
-            ),
+            _iconChip(context, icon),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
-                style: t.sans(14, weight: FontWeight.w500, color: t.fg),
+                style: t.sans(15, weight: FontWeight.w500, color: t.fg),
               ),
             ),
-            if (detail != null) Text(detail, style: t.sans(13, color: t.dim)),
-            const SizedBox(width: 6),
+            if (detail != null) ...[
+              Text(detail, style: t.sans(13, color: t.dim)),
+              const SizedBox(width: 4),
+            ],
             Icon(Icons.chevron_right, color: t.faint, size: 18),
           ],
         ),
@@ -165,6 +482,7 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     );
   }
 
+  /// Toggle row: icon chip + title + SoftToggle (no chevron).
   Widget _toggleRow(
     BuildContext context, {
     required IconData icon,
@@ -177,21 +495,12 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: t.surfaceHi,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, size: 16, color: t.fg),
-          ),
+          _iconChip(context, icon),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               title,
-              style: t.sans(14, weight: FontWeight.w500, color: t.fg),
+              style: t.sans(15, weight: FontWeight.w500, color: t.fg),
             ),
           ),
           SoftToggle(value: value, onChanged: onChanged),
@@ -200,40 +509,18 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     );
   }
 
-  Widget _appearanceRow(BuildContext context) {
+  /// 32×32 rounded tile with a centred icon — matches iOS iconChip.
+  Widget _iconChip(BuildContext context, IconData icon) {
     final t = context.t;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: t.surfaceHi,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(Icons.brightness_4_outlined, size: 16, color: t.fg),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            'Appearance',
-            style: t.sans(14, weight: FontWeight.w500, color: t.fg),
-          ),
-          const Spacer(),
-          SegmentedButton<ThemeMode>(
-            segments: const [
-              ButtonSegment(value: ThemeMode.system, label: Text('Auto')),
-              ButtonSegment(value: ThemeMode.light, label: Text('Light')),
-              ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
-            ],
-            selected: {AppModel.shared.themeMode},
-            onSelectionChanged: (s) => AppModel.shared.setThemeMode(s.first),
-            showSelectedIcon: false,
-          ),
-        ],
+    return Container(
+      width: 32,
+      height: 32,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: t.surfaceHi,
+        borderRadius: BorderRadius.circular(8),
       ),
+      child: Icon(icon, size: 16, color: t.fg),
     );
   }
 

@@ -34,6 +34,7 @@ class _SoftRootState extends State<SoftRoot> {
           onOpenStop: (code) => _pushStop(code),
           onOpenBus: (stopCode, svc) =>
               _pushBus(stopCode, svc, fullRoute: true),
+          onTab: _handleTab,
         ),
       ));
       return;

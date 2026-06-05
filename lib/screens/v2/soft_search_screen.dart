@@ -3,33 +3,32 @@
 // Input kind is AUTO-DETECTED — no filter chips, no mode selection.
 //   • 6-digit all-numeric query → postal geocode flow (OneMap → nearby stops).
 //   • All other queries         → Services section + Bus stops section together.
-// Mirrors SoftSearchView.swift's resultsContent model exactly, staying
-// Material-native throughout (InkWell ripple, FilledButton, InputChip, etc.).
+// Mirrors SoftSearchView.swift's layout: large "Search" title, animated
+// Cancel button, prominent field (mic visual only), Recent searches vertical
+// list, and a 2×2 Browse shortcut grid.
 
 import 'package:flutter/material.dart';
 
 import '../../data/data_store.dart';
 import '../../data/lta_models.dart';
 import '../../data/models.dart';
+import '../../data/search_logic.dart';
 import '../../services/geocode_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
-
-// Example chips shown in the empty state — value fills the field and
-// auto-detect handles the rest. Kind tag mirrors iOS pill label
-// (SoftSearchView.swift:28-30 / exampleChips).
-const _examples = [
-  (value: '17179', kind: 'CODE'),
-  (value: '120338', kind: 'POSTAL'),
-  (value: 'Clementi', kind: 'PLACE'),
-  (value: '96', kind: 'BUS'),
-];
+import '../../widgets/v2/soft_tab_bar.dart';
 
 /// Returns true when [q] is a 6-digit all-numeric string — treated as a
 /// Singapore postal code. All other non-empty queries go through the combined
 /// Services + Bus stops path.
 bool detectIsPostal(String q) => RegExp(r'^\d{6}$').hasMatch(q);
+
+// Example values used by the Browse tiles.  Mirrors _examples in the old
+// empty state; the kind tag drives Browse tile routing (see _emptyState).
+const _exampleStop    = '17179';   // 5-digit stop code
+const _exampleBus     = '96';      // bus service number
+const _examplePlace   = 'Clementi'; // place name
 
 class SoftSearchScreen extends StatefulWidget {
   const SoftSearchScreen({
@@ -37,6 +36,7 @@ class SoftSearchScreen extends StatefulWidget {
     required this.onClose,
     required this.onOpenStop,
     required this.onOpenBus,
+    required this.onTab,
   });
   final VoidCallback onClose;
   final ValueChanged<String> onOpenStop;
@@ -46,12 +46,16 @@ class SoftSearchScreen extends StatefulWidget {
   /// the second is the service number.
   final void Function(String stopCode, String svc) onOpenBus;
 
+  /// Switch to another tab from the bottom bar (pops the search route).
+  final ValueChanged<SoftTab> onTab;
+
   @override
   State<SoftSearchScreen> createState() => _SoftSearchScreenState();
 }
 
 class _SoftSearchScreenState extends State<SoftSearchScreen> {
   final _ctrl = TextEditingController();
+  final _focus = FocusNode();
 
   // Postal-code geocoding state — `_geoFor` is the code `_geo` resolved for,
   // so each distinct code geocodes at most once. `_geo` is null while loading
@@ -69,18 +73,24 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     // the route view's serviceRoute); pre-loading here makes that tap open the
     // bus view immediately instead of blocking on a cold dataset fetch.
     DataStore.shared.ensureRoutes();
+
+    // Rebuild the header whenever field focus changes so the Cancel button
+    // animates in/out correctly.
+    _focus.addListener(_onFocusChanged);
   }
 
   @override
   void dispose() {
+    _focus.removeListener(_onFocusChanged);
+    _focus.dispose();
     _ctrl.dispose();
     super.dispose();
   }
 
+  void _onFocusChanged() => setState(() {});
+
   void _onQueryChanged() {
     setState(() {});
-    // Trigger geocode whenever the query becomes (or stays) a 6-digit code,
-    // regardless of any former filter state.
     _maybeGeocode(_ctrl.text);
   }
 
@@ -120,20 +130,45 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     });
   }
 
+  // ─── Build ────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      // Search is a first-class tab (parity with iOS): keep the bottom tab bar
+      // visible so it reappears after the keyboard closes. Tapping another tab
+      // pops the search route via onTab.
+      bottomNavigationBar: SoftBottomBar(
+        selection: SoftTab.search,
+        onSelect: (tab) {
+          if (tab != SoftTab.search) widget.onTab(tab);
+        },
+      ),
+      // Dismiss keyboard when tapping outside the field — mirrors iOS
+      // `.onTapGesture { focused = false }` on the background view.
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => _focus.unfocus(),
+        child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _searchBar(context),
-              const SizedBox(height: 16),
-              Expanded(child: _results(context)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _headerRow(context),
+                    const SizedBox(height: 14),
+                    _fieldRow(context),
+                    const SizedBox(height: 14),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _results(context),
+              ),
             ],
           ),
         ),
@@ -141,40 +176,130 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  Widget _searchBar(BuildContext context) {
+  // ─── Header: "Search" title + animated Cancel button ─────────
+  // Mirrors SoftSearchView.swift headerRow (lines 81-105).
+  Widget _headerRow(BuildContext context) {
     final t = context.t;
+    final focused = _focus.hasFocus;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'Search',
+          style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+        ),
+        const Spacer(),
+        // Cancel only appears while the field is focused — lets the user
+        // dismiss the keyboard and, if they choose, exit via onClose.
+        // Uses AnimatedSwitcher so it slides+fades in and out smoothly.
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          transitionBuilder: (child, anim) => FadeTransition(
+            opacity: anim,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0.3, 0),
+                end: Offset.zero,
+              ).animate(anim),
+              child: child,
+            ),
+          ),
+          child: focused
+              ? TextButton(
+                  key: const ValueKey('cancel'),
+                  onPressed: () {
+                    _focus.unfocus();
+                    widget.onClose();
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: LyneSignal.meBlue,
+                    textStyle: t.sans(14, weight: FontWeight.w500),
+                    minimumSize: const Size(48, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                  ),
+                  child: const Text('Cancel'),
+                )
+              : const SizedBox.shrink(key: ValueKey('no-cancel')),
+        ),
+      ],
+    );
+  }
+
+  // ─── Search field ─────────────────────────────────────────────
+  // Mirrors SoftSearchView.swift fieldRow (lines 109-144).
+  // Trailing: clear X when text present, else a mic icon (non-interactive
+  // visual only — no speech backend exists).
+  Widget _fieldRow(BuildContext context) {
+    final t = context.t;
+    final hasText = _ctrl.text.isNotEmpty;
     return Material(
       color: t.surface,
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: BorderRadius.circular(LyneRadius.md),
       child: TextField(
         controller: _ctrl,
+        focusNode: _focus,
         autofocus: true,
-        // Always text keyboard — postal detection handles numeric-only input;
-        // there's no reason to lock users to a number pad for an auto-detect field.
         keyboardType: TextInputType.text,
         autocorrect: false,
         onChanged: (_) => _onQueryChanged(),
-        style: t.mono(14, color: t.fg),
+        style: t.sans(15, weight: FontWeight.w500, color: t.fg),
         decoration: InputDecoration(
-          hintText: 'Search stop, postal code, or bus',
-          hintStyle: t.sans(14, color: t.dim),
-          prefixIcon: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: widget.onClose,
+          hintText: 'Search for stops, services or places',
+          hintStyle: t.sans(15, color: t.dim),
+          // Leading search icon — accent-coloured when text is present.
+          prefixIcon: Padding(
+            padding: const EdgeInsets.only(left: 14, right: 10),
+            child: Icon(
+              Icons.search,
+              size: 20,
+              color: hasText ? t.accent : t.dim,
+            ),
           ),
-          suffixIcon: _ctrl.text.isEmpty
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.close),
+          prefixIconConstraints: const BoxConstraints(
+            minWidth: 44,
+            minHeight: 44,
+          ),
+          // Trailing: clear button OR mic icon (visual-only).
+          suffixIcon: hasText
+              ? IconButton(
+                  icon: Icon(Icons.close, size: 18, color: t.dim),
                   onPressed: () {
                     _ctrl.clear();
                     _onQueryChanged();
                   },
+                  tooltip: 'Clear',
+                )
+              : Padding(
+                  padding: const EdgeInsets.only(right: 14),
+                  // Mic is an inert Icon, not a Button — no dead tap target.
+                  // Matches Swift: `Image(systemName: "mic")` with no action.
+                  child: Icon(Icons.mic, size: 20, color: t.faint),
                 ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(28),
-            borderSide: BorderSide.none,
+          suffixIconConstraints: const BoxConstraints(
+            minWidth: 44,
+            minHeight: 44,
           ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(LyneRadius.md),
+            borderSide: BorderSide(color: t.line),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(LyneRadius.md),
+            borderSide: BorderSide(color: t.line),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(LyneRadius.md),
+            borderSide: BorderSide(
+              color: t.accent.withValues(alpha: 0.6),
+            ),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 14,
+            horizontal: 14,
+          ),
+          filled: true,
+          fillColor: t.surface,
         ),
       ),
     );
@@ -188,83 +313,252 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     return _combinedResults(context, q);
   }
 
-  // ─── Empty state: recents + example chips ────────────────────
+  // ─── Empty state: recent searches + browse grid ───────────────
+  // Mirrors SoftSearchView.swift emptyState (lines 176-184).
+  // Wraps in ListenableBuilder so removeRecent/clearRecents (which call
+  // notifyListeners) automatically rebuild the list without needing the
+  // parent TextField setState.
   Widget _emptyState(BuildContext context) {
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) => _emptyStateContent(context),
+    );
+  }
+
+  Widget _emptyStateContent(BuildContext context) {
     final t = context.t;
     final recents = AppModel.shared.recents;
     return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Recent searches — shown only when the list is non-empty.
+          // ── Recent searches ───────────────────────────────────
+          // Shown only when the list is non-empty.
+          // Mirrors SoftSearchView.swift recentsSection (lines 188-265).
           if (recents.isNotEmpty) ...[
-            Text(
-              'Recent',
-              style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.8),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final r in recents)
-                  InputChip(
-                    avatar: Icon(Icons.history, size: 15, color: t.dim),
-                    label: Text(
-                      r,
-                      style: t.sans(12, weight: FontWeight.w500, color: t.fg),
-                    ),
-                    onPressed: () {
-                      setState(() => _ctrl.text = r);
-                      _onQueryChanged();
-                    },
-                    backgroundColor: t.surface,
-                    side: BorderSide(color: t.dim.withValues(alpha: 0.2)),
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 20),
+            _recentsSection(context, t, recents),
+            const SizedBox(height: 24),
           ],
-          // Example chips — always shown; tapping fills the field and
-          // auto-detect resolves the kind. KIND tag provides iOS-parity
-          // context label (SoftSearchView.swift:96-108).
-          Text(
-            'Examples',
-            style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.8),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+
+          // ── Browse grid ───────────────────────────────────────
+          // Always shown. 2×2 shortcut tiles.
+          // Mirrors SoftSearchView.swift browseSection (lines 269-320).
+          _browseSection(context, t),
+        ],
+      ),
+    );
+  }
+
+  // ─── Recent searches section ──────────────────────────────────
+  Widget _recentsSection(
+    BuildContext context,
+    LyneTheme t,
+    List<String> recents,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header row: "RECENT SEARCHES" eyebrow + "Clear" button.
+        Row(
+          children: [
+            const Eyebrow('Recent searches'),
+            const Spacer(),
+            TextButton(
+              onPressed: () {
+                AppModel.shared.clearRecents();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: LyneSignal.meBlue,
+                textStyle: t.sans(13, weight: FontWeight.w500),
+                minimumSize: const Size(48, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+              child: const Text('Clear'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // Vertical list of recent rows.
+        Column(
+          children: [
+            for (int i = 0; i < recents.length; i++) ...[
+              _recentRow(context, t, recents[i]),
+              if (i < recents.length - 1) const SizedBox(height: 6),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  // A single recent-search row.
+  // Mirrors SoftSearchView.swift recentRow (lines 214-265).
+  Widget _recentRow(BuildContext context, LyneTheme t, String recent) {
+    final kind = detectQueryKind(recent).kind;
+    final IconData icon = switch (kind) {
+      'bus'     => Icons.directions_bus,
+      'stopcode' => Icons.location_on,
+      'postal' || 'block' || 'text' => Icons.place,
+      _         => Icons.history,
+    };
+
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        onTap: () {
+          setState(() => _ctrl.text = recent);
+          _onQueryChanged();
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
             children: [
-              for (final ex in _examples)
-                ActionChip(
-                  label: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        ex.value,
-                        style: t.mono(12, weight: FontWeight.w600, color: t.fg),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        ex.kind,
-                        style: t.mono(9, weight: FontWeight.w600, color: t.dim),
-                      ),
-                    ],
-                  ),
-                  backgroundColor: t.surface,
-                  side: BorderSide(color: t.dim.withValues(alpha: 0.2)),
-                  // Tap fills the field; auto-detect in _results() handles the rest.
-                  onPressed: () {
-                    setState(() => _ctrl.text = ex.value);
-                    _onQueryChanged();
-                  },
+              // Leading icon tile — surfaceHi rounded square.
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: t.surfaceHi,
+                  borderRadius: BorderRadius.circular(9),
                 ),
+                child: Icon(icon, size: 14, color: t.dim),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  recent,
+                  style: t.sans(14, weight: FontWeight.w500, color: t.fg),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              // Trailing remove button — distinct tap area, does not trigger
+              // the row body's onTap (absorbs its pointer events).
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => AppModel.shared.removeRecent(recent),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.close, size: 16, color: t.faint),
+                ),
+              ),
             ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Browse section ───────────────────────────────────────────
+  // 2×2 grid of shortcut tiles. Each tile fills the field and runs the
+  // existing search path — no dead buttons.
+  //
+  // Tile wiring:
+  //   Nearby   → onClose() returns to Home's nearby list (no search needed).
+  //   Stops    → fills field with _exampleStop ("17179") → stopcode search.
+  //   Services → fills field with _exampleBus  ("96")    → bus search.
+  //   Places   → fills field with _examplePlace("Clementi") → text search.
+  Widget _browseSection(BuildContext context, LyneTheme t) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Eyebrow('Browse'),
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 2.0,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            _browseTile(
+              context,
+              t,
+              icon: Icons.near_me,
+              label: 'Nearby',
+              accent: LyneSignal.meBlue,
+              onTap: widget.onClose,
+            ),
+            _browseTile(
+              context,
+              t,
+              icon: Icons.location_on,
+              label: 'Stops',
+              accent: t.soon,
+              onTap: () {
+                setState(() => _ctrl.text = _exampleStop);
+                _onQueryChanged();
+              },
+            ),
+            _browseTile(
+              context,
+              t,
+              icon: Icons.directions_bus,
+              label: 'Services',
+              accent: const Color(0xFFE0683A),
+              onTap: () {
+                setState(() => _ctrl.text = _exampleBus);
+                _onQueryChanged();
+              },
+            ),
+            _browseTile(
+              context,
+              t,
+              icon: Icons.location_city,
+              label: 'Places',
+              accent: t.dim,
+              onTap: () {
+                setState(() => _ctrl.text = _examplePlace);
+                _onQueryChanged();
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _browseTile(
+    BuildContext context,
+    LyneTheme t, {
+    required IconData icon,
+    required String label,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: t.line),
+            borderRadius: BorderRadius.circular(LyneRadius.md),
+          ),
+          padding: const EdgeInsets.all(16),
+          alignment: Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Icon(icon, size: 22, color: accent),
+              Text(
+                label,
+                style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -284,6 +578,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     }
 
     return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       children: [
         if (services.isNotEmpty) ...[
           _sectionLabel(context, 'Services'),
@@ -366,7 +661,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       onTap: () => _pickStop(stop.busStopCode),
       child: Row(
         children: [
-          // Leading stop-pin tile — mirrors stopTile in SoftSearchView.swift:178-186.
+          // Leading stop-pin tile — mirrors stopTile in SoftSearchView.swift:388-396.
           Container(
             width: 34,
             height: 34,
@@ -436,6 +731,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       );
     }
     return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       itemCount: stops.length + 1,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, i) {
@@ -456,7 +752,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
 
   /// Shown when geo == null after loading completes: distinguishes a network
   /// failure (_geoFailed == true) from a genuine not-found. Adds a Retry
-  /// button that forces a fresh geocode. Mirrors SearchSheet.swift:238-267.
+  /// button that forces a fresh geocode. Mirrors SoftSearchView.swift:467-473.
   Widget _postalFailState(BuildContext context, String q) {
     final t = context.t;
     final isNetworkError = _geoFailed;
@@ -550,9 +846,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     final t = context.t;
     return Material(
       color: t.surface,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(LyneRadius.md),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(LyneRadius.md),
         onTap: onTap,
         child: Padding(padding: const EdgeInsets.all(14), child: child),
       ),
@@ -580,7 +876,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   }
 
   /// Two-line empty-results hint with title + subtitle, centred.
-  /// Mirrors SoftSearchView.swift:300-309 (emptyHint).
+  /// Mirrors SoftSearchView.swift:521-530 (emptyHint).
   Widget _emptyHint(BuildContext context, String title, String sub) {
     final t = context.t;
     return Center(

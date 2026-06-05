@@ -41,7 +41,6 @@ const _kNotifKey = 'lyne.notifications';
 const _kSearchRadiusKey = 'lyne.searchRadiusM';
 const _kLastSeenVersionKey = 'lyne.lastSeenVersion';
 const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
-const _kSoundKey = 'lyne.sound';
 const _kHapticsKey = 'lyne.haptics';
 
 /// The currently-armed on-bus alert: which bus, where to alight, when
@@ -341,19 +340,9 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ─── Sound & haptics (persisted) ─────────────────────────
-  // Whether arrival-alert notifications play a sound and whether the device
-  // vibrates when they fire. Mirrors iOS AppModel setSound / setHaptics.
-  // Default ON for both — matches the iOS defaults.
-  bool _soundEnabled = true;
-  bool get soundEnabled => _soundEnabled;
-
-  void setSound(bool v) {
-    if (_soundEnabled == v) return;
-    _soundEnabled = v;
-    _prefs?.setBool(_kSoundKey, v);
-    notifyListeners();
-  }
+  // ─── Haptics (persisted) ─────────────────────────────────
+  // Whether the device vibrates when arrival alerts fire.
+  // Default ON — matches the iOS defaults.
 
   bool _hapticsEnabled = true;
   bool get hapticsEnabled => _hapticsEnabled;
@@ -477,7 +466,6 @@ class AppModel extends ChangeNotifier {
     // toggle enabled before POST_NOTIFICATIONS was ever granted, so no
     // alerts would actually fire — a lying toggle. Opt-in only.
     _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? false;
-    _soundEnabled = _prefs!.getBool(_kSoundKey) ?? true;
     _hapticsEnabled = _prefs!.getBool(_kHapticsKey) ?? true;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
     _lastSeenVersion = _prefs!.getString(_kLastSeenVersionKey);
@@ -527,6 +515,18 @@ class AppModel extends ChangeNotifier {
     if (v.isEmpty) return;
     final next = [v, ..._recents.where((r) => r.toLowerCase() != v.toLowerCase())];
     _recents = next.take(8).toList();
+    _prefs?.setStringList(_kRecentsKey, _recents);
+    notifyListeners();
+  }
+
+  void removeRecent(String q) {
+    _recents = _recents.where((r) => r.toLowerCase() != q.toLowerCase()).toList();
+    _prefs?.setStringList(_kRecentsKey, _recents);
+    notifyListeners();
+  }
+
+  void clearRecents() {
+    _recents = const [];
     _prefs?.setStringList(_kRecentsKey, _recents);
     notifyListeners();
   }

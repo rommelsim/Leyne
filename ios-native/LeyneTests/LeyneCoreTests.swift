@@ -2,7 +2,7 @@
 
 import XCTest
 import CoreLocation
-@testable import Lyne
+@testable import Leyne
 
 final class LyneCoreTests: XCTestCase {
 
