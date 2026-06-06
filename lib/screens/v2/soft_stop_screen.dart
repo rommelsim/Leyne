@@ -19,7 +19,6 @@ import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/proximity.dart';
-import '../../widgets/v2/save_sheet.dart';
 import '../notifications_screen.dart';
 
 class SoftStopScreen extends StatefulWidget {
@@ -135,16 +134,19 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
   Widget _starMenu(BuildContext context, bool isPinned) {
     final t = context.t;
     final name = DataStore.shared.stopName(widget.stopCode);
+    // Save toggle — pins/unpins this stop. A pin glyph fills when saved; to
+    // save a specific bus instead, open the bus and toggle its (bus-glyph)
+    // save there.
     return Semantics(
-      label: isPinned ? '$name saved — saving options' : 'Save $name',
+      label: isPinned ? '$name saved. Tap to remove.' : 'Save stop $name',
       button: true,
       child: Material(
         color: t.surface,
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
-        child: PopupMenuButton<String>(
-          tooltip: 'Saving options',
-          icon: Container(
+        child: InkWell(
+          onTap: () => AppModel.shared.togglePin(widget.stopCode),
+          child: Container(
             width: 44,
             height: 44,
             decoration: BoxDecoration(
@@ -153,52 +155,13 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             ),
             alignment: Alignment.center,
             child: Icon(
-              isPinned ? Icons.star_rounded : Icons.star_border_rounded,
+              isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
               size: 20,
               color: isPinned ? t.soon : t.fg,
             ),
           ),
-          color: t.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(LyneRadius.md),
-          ),
-          onSelected: (v) {
-            if (v == 'pin') {
-              AppModel.shared.togglePin(widget.stopCode);
-            } else if (v == 'savebus') {
-              _showSaveSheet(context);
-            }
-          },
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              value: 'pin',
-              child: _menuRow(
-                context,
-                isPinned ? Icons.star_rounded : Icons.star_border_rounded,
-                isPinned ? 'Unpin from Saved' : 'Save to Saved',
-                tint: isPinned ? t.soon : null,
-              ),
-            ),
-            PopupMenuItem(
-              value: 'savebus',
-              child: _menuRow(
-                  context, Icons.directions_bus_rounded, 'Save a bus here…'),
-            ),
-          ],
         ),
       ),
-    );
-  }
-
-  Widget _menuRow(BuildContext context, IconData icon, String label,
-      {Color? tint}) {
-    final t = context.t;
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: tint ?? t.dim),
-        const SizedBox(width: 10),
-        Text(label, style: t.sans(14, weight: FontWeight.w500, color: tint ?? t.fg)),
-      ],
     );
   }
 
@@ -809,49 +772,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     if (s < 60) return 'Updated ${s}s ago';
     final m = s ~/ 60;
     return 'Updated $m min ago';
-  }
-
-  // ── Save sheet (pin/favourite flow — unchanged logic) ─────────────────────
-
-  void _showSaveSheet(BuildContext context) {
-    final messenger = ScaffoldMessenger.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => SaveSheetBody(
-        title: 'Save this stop',
-        subtitle: 'Choose how you want to save it.',
-        options: const [
-          SaveOption(
-            icon: Icons.push_pin_rounded,
-            title: 'Save stop',
-            subtitle: 'See all arriving buses at this stop',
-          ),
-          SaveOption(
-            icon: Icons.directions_bus_rounded,
-            title: 'Save a bus here',
-            subtitle: 'Track a specific bus at this stop',
-          ),
-        ],
-        initialSel: 0,
-        onSave: (chosen) {
-          Navigator.pop(ctx);
-          if (chosen == 0) {
-            if (!AppModel.shared.isPinned(widget.stopCode)) {
-              AppModel.shared.togglePin(widget.stopCode);
-            }
-          } else {
-            messenger.showSnackBar(
-              const SnackBar(
-                  content: Text('Tap a bus below to track it here')),
-            );
-          }
-        },
-      ),
-    );
   }
 
   // ── Per-bus bell (retained; wired via master bell in overflow if needed) ───

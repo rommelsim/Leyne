@@ -44,9 +44,7 @@ struct SoftBusView: View {
     let onBack: () -> Void
 
     @State private var alightId: String? = nil
-    @State private var showSave = false
     @State private var showMap = false
-    @State private var saveSel = 1
     @State private var serviceRouteData: ServiceRoute?
     @State private var selectedDirIndex: Int = 0
     @State private var camera: MapCameraPosition = .automatic
@@ -123,6 +121,9 @@ struct SoftBusView: View {
         .background(t.bg.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        // Pull-to-refresh — re-fetch this stop's arrivals; the arrivals
+        // onChange below repositions the bus. Matches the Stop view.
+        .refreshable { await ds.refreshArrivals(stop: stopCode) }
         .fullScreenCover(isPresented: $showMap) { mapFullScreen }
         .onAppear {
             ds.ensureArrivals(stop: stopCode)
@@ -134,27 +135,20 @@ struct SoftBusView: View {
         .onChange(of: serviceRouteData) { _, _ in recomputePlot() }
         .onChange(of: selectedDirIndex) { _, _ in recomputePlot() }
         .onChange(of: ds.arrivals[stopCode]) { _, _ in recomputePlot() }
-        .sheet(isPresented: $showSave) {
-            SaveSheet(
-                t: t,
-                title: "Save this service",
-                subtitle: "Choose how you want to save it.",
-                options: [
-                    SaveOption(icon: "bus", title: "Save service",
-                               subtitle: "See next arrival for Bus \(svc) anywhere"),
-                    SaveOption(icon: "mappin.and.ellipse", title: "Save Bus \(svc) at this stop",
-                               subtitle: "Quick access from Favourites here"),
-                ],
-                selection: $saveSel
-            ) { applyServiceSave() }
-            .presentationDetents([.height(400)])
-        }
     }
 
-    private func applyServiceSave() {
-        showSave = false
-        let stop: String? = saveSel == 0 ? nil : stopCode
-        if !m.isFavService(no: svc, stop: stop) { m.toggleFavService(no: svc, stop: stop) }
+    /// Toggle whether this bus is saved. Filled = saved (here or anywhere);
+    /// tapping clears every save of this service, or saves it at this stop when
+    /// none exists. Mirrors the stop view's single-tap pin toggle.
+    private func toggleServiceSaved() {
+        let here = m.isFavService(no: svc, stop: stopCode)
+        let anywhere = m.isFavService(no: svc, stop: nil)
+        if here || anywhere {
+            if here { m.toggleFavService(no: svc, stop: stopCode) }
+            if anywhere { m.toggleFavService(no: svc, stop: nil) }
+        } else {
+            m.toggleFavService(no: svc, stop: stopCode)
+        }
     }
 
     // MARK: Top bar
@@ -172,40 +166,21 @@ struct SoftBusView: View {
 
             Spacer(minLength: 0)
 
-            // Star menu — save this bus (here / anywhere) and set an arrival
-            // alert without leaving the page. Star fills green when saved.
-            let savedHere = m.isFavService(no: svc, stop: stopCode)
-            let savedAnywhere = m.isFavService(no: svc, stop: nil)
-            let alertOn = m.isTracked(code: stopCode, busNo: svc)
-            Menu {
-                Button {
-                    fb.select(); m.toggleFavService(no: svc, stop: stopCode)
-                } label: {
-                    Label(savedHere ? "Unpin from Saved" : "Save bus here",
-                          systemImage: savedHere ? "star.slash" : "star")
-                }
-                Button {
-                    fb.select(); m.toggleFavService(no: svc, stop: nil)
-                } label: {
-                    Label(savedAnywhere ? "Remove “anywhere” save" : "Save anywhere",
-                          systemImage: "bus")
-                }
-                Button {
-                    fb.select()
-                    m.toggleTracked(code: stopCode, busNo: svc, allNos: allServiceNos)
-                } label: {
-                    Label(alertOn ? "Cancel arrival alert" : "Set arrival alert",
-                          systemImage: alertOn ? "bell.fill" : "bell")
-                }
+            // Save toggle — saves/removes this bus. A bus glyph fills when
+            // saved (mirrors the stop's pin toggle). Arrival alerts live in the
+            // Alerts section below, not here.
+            Button {
+                fb.select(); toggleServiceSaved()
             } label: {
-                Image(systemName: serviceSaved ? "star.fill" : "star")
+                Image(systemName: serviceSaved ? "bus.fill" : "bus")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(serviceSaved ? t.soon : t.fg)
                     .frame(width: 40, height: 40)
                     .background(t.surface, in: Circle())
                     .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
             }
-            .accessibilityLabel(serviceSaved ? "Saved — saving options for Bus \(svc)"
+            .buttonStyle(.plain)
+            .accessibilityLabel(serviceSaved ? "Bus \(svc) saved. Tap to remove."
                                              : "Save Bus \(svc)")
 
             // Overflow — share.

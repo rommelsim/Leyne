@@ -326,7 +326,11 @@ struct SoftFavouritesView: View {
     // MARK: Add stop row
 
     private var addStopRow: some View {
-        Button {
+        // The Buses segment lists saved services, so the add row adds a bus
+        // there; otherwise it adds a stop. Search finds both either way — only
+        // the label follows the section the user is looking at.
+        let isBuses = segment == .buses
+        return Button {
             fb.select()
             onOpenSearch()
         } label: {
@@ -339,7 +343,7 @@ struct SoftFavouritesView: View {
                         .foregroundStyle(t.meBlue)
                 }
                 .frame(width: 36, height: 36)
-                Text("Add stop")
+                Text(isBuses ? "Add bus" : "Add stop")
                     .font(t.sans(15, weight: .semibold))
                     .foregroundStyle(t.meBlue)
                 Spacer(minLength: 0)
@@ -350,7 +354,8 @@ struct SoftFavouritesView: View {
                         in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("Add a stop to favourites")
+        .accessibilityLabel(isBuses ? "Add a bus to favourites"
+                                    : "Add a stop to favourites")
     }
 
     // MARK: Empty state

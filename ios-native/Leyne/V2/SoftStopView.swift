@@ -25,9 +25,6 @@ struct SoftStopView: View {
     let onOpenBus: (String) -> Void
 
     @State private var sort: StopSort = .arrival
-    @State private var showSave = false
-    @State private var saveSel = 0
-    @State private var hint: String? = nil
     @State private var expanded = false
 
     /// How many services to show before the "Show more" expander kicks in.
@@ -54,32 +51,6 @@ struct SoftStopView: View {
             .refreshable { await ds.refreshArrivals(stop: stopCode) }
         }
         .onAppear { ds.ensureArrivals(stop: stopCode) }
-        .overlay(alignment: .bottom) {
-            if let hint {
-                Text(hint)
-                    .font(t.sans(13, weight: .medium))
-                    .foregroundStyle(t.contrastFg)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(t.contrast, in: Capsule())
-                    .padding(.bottom, 100)
-                    .transition(.opacity)
-            }
-        }
-        .sheet(isPresented: $showSave) {
-            SaveSheet(
-                t: t,
-                title: "Save this stop",
-                subtitle: "Choose how you want to save it.",
-                options: [
-                    SaveOption(icon: "mappin.and.ellipse", title: "Save stop",
-                               subtitle: "See all arriving buses at this stop"),
-                    SaveOption(icon: "bus", title: "Save a bus here",
-                               subtitle: "Track a specific bus at this stop"),
-                ],
-                selection: $saveSel
-            ) { applyStopSave() }
-            .presentationDetents([.height(380)])
-        }
     }
 
     // MARK: - Top bar
@@ -96,30 +67,22 @@ struct SoftStopView: View {
 
             Spacer(minLength: 0)
 
-            // Star menu — pin/unpin this stop, or save a specific bus here,
-            // without leaving the page (replaces the old save-sheet-only flow).
-            Menu {
-                Button {
-                    fb.select(); m.togglePin(code: stopCode)
-                } label: {
-                    Label(isPinned ? "Unpin from Saved" : "Save to Saved",
-                          systemImage: isPinned ? "star.slash" : "star")
-                }
-                Button {
-                    fb.select(); showSave = true
-                } label: {
-                    Label("Save a bus here…", systemImage: "bus")
-                }
+            // Save toggle — pins/unpins this stop. A map-pin glyph fills when
+            // saved; to save a specific bus instead, open the bus and toggle
+            // its (bus-glyph) save there.
+            Button {
+                fb.select(); m.togglePin(code: stopCode)
             } label: {
-                Image(systemName: isPinned ? "star.fill" : "star")
-                    .font(.system(size: 16, weight: .semibold))
+                Image(systemName: isPinned ? "mappin.circle.fill" : "mappin.circle")
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isPinned ? t.soon : t.fg)
                     .frame(width: 44, height: 44)
                     .background(t.surface, in: Circle())
                     .overlay(Circle().stroke(t.line, lineWidth: 1))
             }
-            .onTapGesture { fb.tap() }
-            .accessibilityLabel(isPinned ? "\(stopName) saved — saving options" : "Save \(stopName)")
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPinned ? "\(stopName) saved. Tap to remove."
+                                         : "Save stop \(stopName)")
 
             // Sort menu — exposes the three sort options.
             Menu {
@@ -445,25 +408,6 @@ struct SoftStopView: View {
         if s < 60 { return "Updated \(s)s ago" }
         let m = s / 60
         return "Updated \(m) min ago"
-    }
-
-    // MARK: - Save / pin flow (unchanged behaviour)
-
-    private func applyStopSave() {
-        showSave = false
-        if saveSel == 0 {
-            if !isPinned { m.pins.append(Pin(code: stopCode, nickname: "")) }
-        } else {
-            showHint("Tap a bus below to track it here")
-        }
-    }
-
-    private func showHint(_ s: String) {
-        withAnimation { hint = s }
-        Task {
-            try? await Task.sleep(nanoseconds: 2_800_000_000)
-            await MainActor.run { withAnimation { hint = nil } }
-        }
     }
 
     // MARK: - Footer / empty

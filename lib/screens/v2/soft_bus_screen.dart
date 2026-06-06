@@ -410,7 +410,10 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     // rather than stopping just past your stop. RouteTimeline folds the
     // leading run behind a "show earlier stops" node to keep it scannable.
     final lead = BusProgress.timelineLead(
-        busIndex: busSeq, youIndex: youSeq, stopsCount: r.stops.length);
+      busIndex: busSeq,
+      youIndex: youSeq,
+      stopsCount: r.stops.length,
+    );
     final seg = showFull ? r.stops : r.stops.sublist(lead);
     // Only mark a "THIS STOP" boarding stop when this is the per-stop flow AND
     // the anchor is actually present in this direction. In fullRoute mode (bus
@@ -423,10 +426,11 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     return seg.map((stop) {
       final idx = r.stops.indexWhere((s) => s.code == stop.code);
       final state = BusProgress.stopState(
-          idx: idx,
-          busIndex: busSeq,
-          youIndex: youSeq,
-          canMarkBoard: canMarkBoard);
+        idx: idx,
+        busIndex: busSeq,
+        youIndex: youSeq,
+        canMarkBoard: canMarkBoard,
+      );
       return SoftRouteStop(id: stop.code, name: stop.name, state: state);
     }).toList();
   }
@@ -470,17 +474,19 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     final c = _liveBusCoord();
     final gpsNearest = c == null
         ? null
-        : BusProgress.nearestIndex(
-            [for (final s in dir.stops) (lat: s.lat, lon: s.lon)], c);
+        : BusProgress.nearestIndex([
+            for (final s in dir.stops) (lat: s.lat, lon: s.lon),
+          ], c);
     final lastRefresh = DataStore.shared.lastRefresh(widget.stopCode);
     final elapsed = lastRefresh != null
         ? DateTime.now().difference(lastRefresh).inSeconds.toDouble()
         : 0.0;
     return BusProgress.busIndex(
-        youIndex: you,
-        gpsNearest: gpsNearest,
-        etaSec: svc.etaSec,
-        elapsedSec: elapsed);
+      youIndex: you,
+      gpsNearest: gpsNearest,
+      etaSec: svc.etaSec,
+      elapsedSec: elapsed,
+    );
   }
 
   /// Straight-line distance from the bus to *your* stop — the intuitive "how
@@ -502,12 +508,8 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   // callout. prevName = stop the bus is at / just passed; nextName = the
   // immediately following stop (preferring widget.stopCode if it is next).
   // distMetres = haversine from the current display coord to nextStop.
-  ({
-    String prevName,
-    String nextName,
-    int stopsAway,
-    int? distMetres,
-  })? _calloutData() {
+  ({String prevName, String nextName, int stopsAway, int? distMetres})?
+  _calloutData() {
     final dir = _currentDir;
     final busIdx = _estimatedBusIndex();
     if (dir == null || busIdx == null || dir.stops.isEmpty) return null;
@@ -557,54 +559,60 @@ class _SoftBusScreenState extends State<SoftBusScreen>
         builder: (context, _) {
           final t = context.t;
           final live = _liveService();
-          return CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── 1. Top bar ────────────────────────────────────
-                    _buildTopBar(context, t, live),
+          // Pull-to-refresh — re-fetch this stop's arrivals; the ListenableBuilder
+          // rebuilds and repositions the bus. Matches the Stop view.
+          return RefreshIndicator(
+            onRefresh: () => DataStore.shared.refreshArrivals(widget.stopCode),
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── 1. Top bar ────────────────────────────────────
+                      _buildTopBar(context, t, live),
 
-                    // ── 2. Title block ────────────────────────────────
-                    _buildTitleBlock(context, t, live),
-                    const SizedBox(height: 16),
+                      // ── 2. Title block ────────────────────────────────
+                      _buildTitleBlock(context, t, live),
+                      const SizedBox(height: 16),
 
-                    // ── 3. Approaching card ───────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _buildApproachingCard(context, t),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // ── 4. Route progress ─────────────────────────────
-                    if (_route != null)
+                      // ── 3. Approaching card ───────────────────────────
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: _buildRouteProgressSection(context, t),
+                        child: _buildApproachingCard(context, t),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // ── 4. Route progress ─────────────────────────────
+                      if (_route != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: _buildRouteProgressSection(context, t),
+                        ),
+
+                      // ── View on map ───────────────────────────────────
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: _buildViewOnMapButton(context, t),
                       ),
 
-                    // ── View on map ───────────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                      child: _buildViewOnMapButton(context, t),
-                    ),
+                      // ── Live updates ──────────────────────────────────
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: _buildLiveUpdatesCard(context, t),
+                      ),
 
-                    // ── Live updates ──────────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                      child: _buildLiveUpdatesCard(context, t),
-                    ),
-
-                    // ── 5. Alerts (notify + ongoing) ──────────────────
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                      child: _buildAlertsSection(context, t, live),
-                    ),
-                  ],
+                      // ── 5. Alerts (notify + ongoing) ──────────────────
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                        child: _buildAlertsSection(context, t, live),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
@@ -633,9 +641,8 @@ class _SoftBusScreenState extends State<SoftBusScreen>
               child: Icon(Icons.arrow_back, size: 20, color: t.fg),
             ),
             const Spacer(),
-            // Star menu — save this bus (here / anywhere) + set an arrival
-            // alert, inline. Star fills when saved. Mirrors iOS SoftBusView.
-            _buildStarMenu(context, t, allNos),
+            // Save toggle — fills when this bus is saved. Mirrors iOS SoftBusView.
+            _buildStarMenu(context, t),
             const SizedBox(width: 8),
             // "…" overflow menu — notify + ongoing-tracking shortcuts.
             _MapControl(
@@ -649,118 +656,81 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
-  /// Star popup: save this bus here / anywhere + set an arrival alert. The
-  /// circular button fills gold when the bus is saved.
-  Widget _buildStarMenu(BuildContext context, LyneTheme t, List<String> allNos) {
-    final savedHere =
-        AppModel.shared.isFavService(no: widget.svc, stop: widget.stopCode);
-    final savedAnywhere =
-        AppModel.shared.isFavService(no: widget.svc, stop: null);
+  /// Save toggle — saves/removes this bus. A bus glyph fills (gold circle) when
+  /// saved, mirroring the stop view's single-tap pin toggle. Tapping clears
+  /// every save of this service, or saves it at this stop when none exists.
+  /// Arrival alerts live in the Alerts section below, not here.
+  Widget _buildStarMenu(BuildContext context, LyneTheme t) {
+    final savedHere = AppModel.shared.isFavService(
+      no: widget.svc,
+      stop: widget.stopCode,
+    );
+    final savedAnywhere = AppModel.shared.isFavService(
+      no: widget.svc,
+      stop: null,
+    );
     final saved = savedHere || savedAnywhere;
-    final alertOn =
-        AppModel.shared.isTracked(code: widget.stopCode, busNo: widget.svc);
     final bg = saved ? const Color(0xFFF4B870) : t.surface;
 
     return Semantics(
       label: saved
-          ? 'Bus ${widget.svc} saved — saving options'
+          ? 'Bus ${widget.svc} saved. Tap to remove.'
           : 'Save bus ${widget.svc}',
       button: true,
       child: SizedBox(
         width: 48,
         height: 48,
         child: Center(
-          child: PopupMenuButton<String>(
-            tooltip: 'Saving options',
-            padding: EdgeInsets.zero,
-            icon: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: bg,
-                shape: BoxShape.circle,
-                border: saved ? null : Border.all(color: t.line, width: 1.5),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 5,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                saved ? Icons.star_rounded : Icons.star_border_rounded,
-                size: 18,
-                color: saved ? Colors.white : t.fg,
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => _toggleServiceSaved(savedHere, savedAnywhere),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: bg,
+                  shape: BoxShape.circle,
+                  border: saved ? null : Border.all(color: t.line, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 5,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  saved
+                      ? Icons.directions_bus_rounded
+                      : Icons.directions_bus_outlined,
+                  size: 18,
+                  color: saved ? Colors.white : t.fg,
+                ),
               ),
             ),
-            color: t.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(LyneRadius.md),
-            ),
-            onSelected: (v) {
-              if (v == 'here') {
-                AppModel.shared
-                    .toggleFavService(no: widget.svc, stop: widget.stopCode);
-              } else if (v == 'anywhere') {
-                AppModel.shared.toggleFavService(no: widget.svc, stop: null);
-              } else if (v == 'alert') {
-                AppModel.shared.toggleTracked(
-                  code: widget.stopCode,
-                  busNo: widget.svc,
-                  allNos: allNos,
-                );
-                AppModel.shared.rescheduleIfNeeded();
-              }
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'here',
-                child: _busMenuRow(
-                  context,
-                  savedHere ? Icons.star_rounded : Icons.star_border_rounded,
-                  savedHere ? 'Unpin from Saved' : 'Save bus here',
-                  tint: savedHere ? t.soon : null,
-                ),
-              ),
-              PopupMenuItem(
-                value: 'anywhere',
-                child: _busMenuRow(
-                  context,
-                  Icons.directions_bus_rounded,
-                  savedAnywhere ? 'Remove “anywhere” save' : 'Save anywhere',
-                ),
-              ),
-              PopupMenuItem(
-                value: 'alert',
-                child: _busMenuRow(
-                  context,
-                  alertOn
-                      ? Icons.notifications_active_rounded
-                      : Icons.notifications_none_rounded,
-                  alertOn ? 'Cancel arrival alert' : 'Set arrival alert',
-                  tint: alertOn ? t.accent : null,
-                ),
-              ),
-            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _busMenuRow(BuildContext context, IconData icon, String label,
-      {Color? tint}) {
-    final t = context.t;
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: tint ?? t.dim),
-        const SizedBox(width: 10),
-        Text(label,
-            style: t.sans(14, weight: FontWeight.w500, color: tint ?? t.fg)),
-      ],
-    );
+  /// Filled = saved (here or anywhere). Clears every save of this service, or
+  /// saves it at this stop when none exists. Mirrors iOS toggleServiceSaved.
+  void _toggleServiceSaved(bool savedHere, bool savedAnywhere) {
+    if (savedHere || savedAnywhere) {
+      if (savedHere) {
+        AppModel.shared.toggleFavService(no: widget.svc, stop: widget.stopCode);
+      }
+      if (savedAnywhere) {
+        AppModel.shared.toggleFavService(no: widget.svc, stop: null);
+      }
+    } else {
+      AppModel.shared.toggleFavService(no: widget.svc, stop: widget.stopCode);
+    }
   }
 
   /// "…" overflow menu: notify toggle + ongoing-tracking shortcut.
@@ -774,7 +744,8 @@ class _SoftBusScreenState extends State<SoftBusScreen>
       code: widget.stopCode,
       busNo: widget.svc,
     );
-    final ongoingOn = live != null &&
+    final ongoingOn =
+        live != null &&
         AppModel.shared.isOngoingActive(
           busNo: widget.svc,
           stopCode: widget.stopCode,
@@ -785,10 +756,14 @@ class _SoftBusScreenState extends State<SoftBusScreen>
         Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
     final RelativeRect position = RelativeRect.fromRect(
       Rect.fromPoints(
-        button.localToGlobal(button.size.topRight(Offset.zero),
-            ancestor: overlay),
-        button.localToGlobal(button.size.bottomRight(Offset.zero),
-            ancestor: overlay),
+        button.localToGlobal(
+          button.size.topRight(Offset.zero),
+          ancestor: overlay,
+        ),
+        button.localToGlobal(
+          button.size.bottomRight(Offset.zero),
+          ancestor: overlay,
+        ),
       ),
       Offset.zero & overlay.size,
     );
@@ -961,8 +936,11 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                       color: t.soonBg,
                       borderRadius: BorderRadius.circular(13),
                     ),
-                    child: Icon(Icons.directions_bus_rounded,
-                        size: 20, color: t.soon),
+                    child: Icon(
+                      Icons.directions_bus_rounded,
+                      size: 20,
+                      color: t.soon,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -971,8 +949,11 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                       children: [
                         Text(
                           _approachHeadline(stopsAway, etaSec),
-                          style:
-                              t.sans(17, weight: FontWeight.w700, color: t.fg),
+                          style: t.sans(
+                            17,
+                            weight: FontWeight.w700,
+                            color: t.fg,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1014,8 +995,9 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   String _approachSubline(int? etaSec, int? dist) {
     if (etaSec == null) return 'Waiting for the next arrival';
     final eta = fmtEta(etaSec);
-    final timePart =
-        eta.big == 'Arr' ? 'Arriving now' : 'Arriving in ${eta.big} ${eta.small}';
+    final timePart = eta.big == 'Arr'
+        ? 'Arriving now'
+        : 'Arriving in ${eta.big} ${eta.small}';
     return dist != null ? '$timePart (${fmtDistance(dist)})' : timePart;
   }
 
@@ -1078,12 +1060,16 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                 Container(
                   width: 8,
                   height: 8,
-                  decoration:
-                      BoxDecoration(color: t.soon, shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: t.soon,
+                    shape: BoxShape.circle,
+                  ),
                 ),
                 const SizedBox(width: 8),
-                Text('Live updates',
-                    style: t.sans(15, weight: FontWeight.w600, color: t.fg)),
+                Text(
+                  'Live updates',
+                  style: t.sans(15, weight: FontWeight.w600, color: t.fg),
+                ),
                 const Spacer(),
                 Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
               ],
@@ -1107,12 +1093,19 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Service running smoothly',
-                          style: t.sans(14,
-                              weight: FontWeight.w600, color: t.soon)),
+                      Text(
+                        'Service running smoothly',
+                        style: t.sans(
+                          14,
+                          weight: FontWeight.w600,
+                          color: t.soon,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text('No major delays reported.',
-                          style: t.sans(13, color: t.dim)),
+                      Text(
+                        'No major delays reported.',
+                        style: t.sans(13, color: t.dim),
+                      ),
                     ],
                   ),
                 ),
@@ -1145,8 +1138,10 @@ class _SoftBusScreenState extends State<SoftBusScreen>
               children: [
                 Icon(Icons.map_rounded, size: 18, color: t.accent),
                 const SizedBox(width: 10),
-                Text('View on map',
-                    style: t.sans(15, weight: FontWeight.w600, color: t.fg)),
+                Text(
+                  'View on map',
+                  style: t.sans(15, weight: FontWeight.w600, color: t.fg),
+                ),
                 const Spacer(),
                 Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
               ],
@@ -1190,16 +1185,19 @@ class _SoftBusScreenState extends State<SoftBusScreen>
               child: Row(
                 children: [
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: t.surface,
                       borderRadius: BorderRadius.circular(LyneRadius.full),
                       border: Border.all(color: t.line, width: 1),
                     ),
-                    child: Text('Bus ${widget.svc}',
-                        style:
-                            t.sans(15, weight: FontWeight.w700, color: t.fg)),
+                    child: Text(
+                      'Bus ${widget.svc}',
+                      style: t.sans(15, weight: FontWeight.w700, color: t.fg),
+                    ),
                   ),
                   const Spacer(),
                   Material(
@@ -1210,14 +1208,21 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                       onTap: () => Navigator.of(context).maybePop(),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(LyneRadius.full),
                           border: Border.all(color: t.line, width: 1),
                         ),
-                        child: Text('Done',
-                            style: t.sans(15,
-                                weight: FontWeight.w600, color: t.accent)),
+                        child: Text(
+                          'Done',
+                          style: t.sans(
+                            15,
+                            weight: FontWeight.w600,
+                            color: t.accent,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1266,8 +1271,9 @@ class _SoftBusScreenState extends State<SoftBusScreen>
         final stopsLabel = data.stopsAway == 0
             ? 'Arriving'
             : '${data.stopsAway} stop${data.stopsAway == 1 ? '' : 's'} away';
-        final distLabel =
-            data.distMetres != null ? ' · ${data.distMetres} m' : '';
+        final distLabel = data.distMetres != null
+            ? ' · ${data.distMetres} m'
+            : '';
 
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -1293,15 +1299,11 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                   children: [
                     TextSpan(
                       text: stopsLabel,
-                      style: t
-                          .sans(11)
-                          .copyWith(color: t.soon),
+                      style: t.sans(11).copyWith(color: t.soon),
                     ),
                     TextSpan(
                       text: distLabel,
-                      style: t
-                          .sans(11)
-                          .copyWith(color: Colors.white70),
+                      style: t.sans(11).copyWith(color: Colors.white70),
                     ),
                   ],
                 ),
@@ -1513,8 +1515,7 @@ class _SoftBusScreenState extends State<SoftBusScreen>
         freshnessLabel = 'Updated ${age ~/ 60} min ago';
       }
     }
-    final feedLive =
-        Freshness.from(lastRefresh) == Freshness.live;
+    final feedLive = Freshness.from(lastRefresh) == Freshness.live;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1565,10 +1566,7 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                     color: feedLive ? t.soon : t.dim,
                   ),
                   const SizedBox(width: 5),
-                  Text(
-                    freshnessLabel,
-                    style: t.mono(11, color: t.dim),
-                  ),
+                  Text(freshnessLabel, style: t.mono(11, color: t.dim)),
                 ],
               ),
             ],
@@ -1630,8 +1628,7 @@ class _SoftBusScreenState extends State<SoftBusScreen>
 
   // ── 5. Alerts section ────────────────────────────────────────────────
   // Notify button + ongoing-tracking card, placed below route progress.
-  Widget _buildAlertsSection(
-      BuildContext context, LyneTheme t, Service? live) {
+  Widget _buildAlertsSection(BuildContext context, LyneTheme t, Service? live) {
     final st = DataStore.shared.arrivals[widget.stopCode];
     final allNos = st != null && st.kind == ArrivalStateKind.loaded
         ? st.services.map((s) => s.no).toList()
@@ -1930,14 +1927,15 @@ class _BusPillMarker extends StatelessWidget {
           children: [
             Icon(Icons.directions_bus_rounded, size: 11, color: textFg),
             const SizedBox(width: 4),
-            Builder(builder: (ctx) {
-              final tt = ctx.t;
-              return Text(
-                estimated ? '≈ $busNo' : busNo,
-                style: tt.mono(11,
-                    weight: FontWeight.w700, color: textFg),
-              );
-            }),
+            Builder(
+              builder: (ctx) {
+                final tt = ctx.t;
+                return Text(
+                  estimated ? '≈ $busNo' : busNo,
+                  style: tt.mono(11, weight: FontWeight.w700, color: textFg),
+                );
+              },
+            ),
           ],
         ),
       ),

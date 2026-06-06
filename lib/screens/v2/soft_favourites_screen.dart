@@ -600,8 +600,12 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
   Widget _addStopRow(BuildContext context) {
     final t = context.t;
+    // The Buses segment lists saved services, so the add row adds a bus there;
+    // otherwise it adds a stop. Search finds both either way — only the label
+    // follows the section the user is looking at.
+    final isBuses = _segment == _Segment.buses;
     return Semantics(
-      label: 'Add a stop to favourites',
+      label: isBuses ? 'Add a bus to favourites' : 'Add a stop to favourites',
       button: true,
       child: Material(
         color: t.surface,
@@ -626,7 +630,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Add stop',
+                  isBuses ? 'Add bus' : 'Add stop',
                   style: t.sans(15,
                       weight: FontWeight.w600, color: LyneSignal.meBlue),
                 ),
