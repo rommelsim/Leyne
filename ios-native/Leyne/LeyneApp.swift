@@ -8,6 +8,7 @@ struct LeyneApp: App {
     @StateObject private var store = DataStore.shared
     @StateObject private var location = LocationManager.shared
     @UIApplicationDelegateAdaptor(LeyneAppDelegate.self) private var delegate
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Pin the running marketing version into the model before the first
@@ -41,8 +42,31 @@ struct LeyneApp: App {
                 // code. We translate that into the same open-stop path
                 // the in-app search uses.
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    // Spotlight tap → opening a specific stop; skip App Open.
+                    AppOpenAdManager.shared.suppressNextPresentation()
                     if let code = Spotlight.openedStopCode(from: activity) {
                         model.openFromSearch(stopCode: code)
+                    }
+                }
+                // App Open ad: present on WARM foreground only. scenePhase steps
+                // through .inactive between .background and .active, so we can't
+                // rely on the previous phase being .background on return — we
+                // track backgrounding explicitly (noteBackgrounded). Cold launch
+                // never hits .background, so it never shows there. The brief delay
+                // lets a notification / widget / Spotlight handler set the
+                // suppression flag before we decide.
+                .onChange(of: scenePhase) { _, new in
+                    switch new {
+                    case .background:
+                        AppOpenAdManager.shared.noteBackgrounded()
+                    case .active:
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(500))
+                            AppOpenAdManager.shared
+                                .showIfReturningToForeground(model: model)
+                        }
+                    default:
+                        break
                     }
                 }
         }
@@ -88,6 +112,9 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
         //   • "arrival" — userInfo carries stopCode + busNo directly
         //   • "alight"  — userInfo carries only busNo; the stopCode comes
         //                 from the persisted ActiveAlight on AppModel
+        // Tap is taking the user to a stop/bus — skip the App Open ad on the
+        // foreground this triggers (hop to the main actor for the manager).
+        Task { @MainActor in AppOpenAdManager.shared.suppressNextPresentation() }
         let userInfo = response.notification.request.content.userInfo
         NotificationCenter.default.post(
             name: .leyneOpenStopFromNotification,

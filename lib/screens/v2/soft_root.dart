@@ -10,6 +10,7 @@ import 'soft_home_screen.dart';
 import 'soft_search_screen.dart';
 import 'soft_settings_screen.dart';
 import 'soft_stop_screen.dart';
+import '../../services/app_open_ad.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
 class SoftRoot extends StatefulWidget {
@@ -22,6 +23,28 @@ class SoftRoot extends StatefulWidget {
 class _SoftRootState extends State<SoftRoot> {
   SoftTab _tab = SoftTab.home;
   final _navKey = GlobalKey<NavigatorState>();
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    // App Open ad. SoftRoot only exists past onboarding, so mounting the
+    // listener here is the first-run gate. Preload once consent resolves, then
+    // show on every WARM foreground — this listener is created AFTER the
+    // initial cold-launch resume, so the very first launch never shows one.
+    // All other guards (frequency cap, notification/deep-link suppression,
+    // master switches) live in the manager.
+    AppOpenAdManager.instance.preloadWhenReady();
+    _lifecycle = AppLifecycleListener(
+      onResume: () => AppOpenAdManager.instance.showIfAvailable(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
 
   void _handleTab(SoftTab next) {
     if (next == SoftTab.search) {

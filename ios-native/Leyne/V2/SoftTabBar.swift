@@ -41,7 +41,7 @@ extension View {
         if AdConfig.adsEnabled && !AdConfig.screenshotMode {
             self.safeAreaInset(edge: .bottom) {
                 AdBanner()
-                    .frame(height: 50)
+                    .frame(height: AdConfig.adaptiveBannerHeight)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 12,
                                                 style: .continuous))

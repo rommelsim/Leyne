@@ -21,6 +21,7 @@ import 'screens/v2/soft_root.dart';
 import 'screens/v2/soft_stop_screen.dart';
 import 'screens/whats_new_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
+import 'services/app_open_ad.dart';
 import 'services/deep_link_service.dart';
 import 'services/location_service.dart';
 import 'services/notifications.dart';
@@ -51,6 +52,9 @@ void main() async {
   // bus. Set BEFORE init() so the initial cold-start launch tap (replayed
   // by the plugin via getNotificationAppLaunchDetails) lands.
   NotificationsService.shared.onNotificationTapped = (payload) {
+    // A notification tap is taking the user to a specific stop/bus — suppress
+    // the App Open ad on this foreground so they get content, not an ad.
+    AppOpenAdManager.instance.suppressNext();
     final parts = payload.split('.');
     if (parts.length < 3) return;
     final kind = parts[0];

@@ -77,6 +77,9 @@ struct RootView: View {
         .task {
             if !m.showOnboarding {
                 await AdConsent.gatherThenStart()
+                // Preload an App Open ad so one is ready for the first warm
+                // foreground (it never shows on this cold launch).
+                AppOpenAdManager.shared.preload()
                 let status = await NotificationsManager.shared.currentStatus()
                 if status == .notDetermined && m.notificationsEnabled {
                     await m.setNotificationsEnabled(true)
@@ -113,6 +116,8 @@ struct RootView: View {
         // had no receiver — a widget / Live Activity tap only foregrounded the
         // app instead of opening the stop or bus.
         .onOpenURL { url in
+            // Widget / Live Activity tap → opening a stop/bus; skip App Open.
+            AppOpenAdManager.shared.suppressNextPresentation()
             guard url.scheme == "lyne", let host = url.host else { return }
             let parts = url.pathComponents.filter { $0 != "/" }
             switch host {

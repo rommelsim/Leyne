@@ -29,6 +29,7 @@ import 'package:flutter/material.dart';
 import '../data/data_store.dart';
 import '../screens/v2/soft_bus_screen.dart';
 import '../screens/v2/soft_stop_screen.dart';
+import 'app_open_ad.dart';
 
 class DeepLinkService {
   DeepLinkService._();
@@ -79,6 +80,10 @@ class DeepLinkService {
     // local custom schemes). We only care about the path.
     final segments = uri.pathSegments;
     if (segments.isEmpty) return;
+
+    // A deep link is bringing the user to a specific stop/bus — suppress the
+    // App Open ad on this foreground so they land on content, not an ad.
+    AppOpenAdManager.instance.suppressNext();
 
     switch (segments[0]) {
       case 'stop':

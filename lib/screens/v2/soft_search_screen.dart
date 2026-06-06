@@ -239,7 +239,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       child: TextField(
         controller: _ctrl,
         focusNode: _focus,
-        autofocus: true,
+        // No autofocus — the keyboard opens only when the user taps the field,
+        // not the moment the Search tab opens (user-reported).
+        autofocus: false,
         keyboardType: TextInputType.text,
         autocorrect: false,
         onChanged: (_) => _onQueryChanged(),

@@ -105,6 +105,45 @@ enum AdConfig {
     }
 }
 
+// MARK: - Adaptive banner size
+
+extension AdConfig {
+    /// Anchored-adaptive banner size — fills the available width (instead of a
+    /// fixed 320pt) at a COMPACT height (~50–60pt). We deliberately use the
+    /// standard anchored-adaptive size, not the taller "Large" variant, for a
+    /// lighter footprint on every screen: the width fill is the main eCPM win
+    /// over a fixed 320×50; the extra Large height is the smaller increment.
+    /// (The standard getter is deprecated in favour of Large, so this emits one
+    /// intentional deprecation warning — accepted for the smaller footprint.)
+    ///
+    /// Computed once from the device's PORTRAIT width (stable across rotation)
+    /// minus the gutter's 16pt side insets, then cached. Caching keeps the
+    /// SwiftUI height reservation and the BannerView's `adSize` perfectly in
+    /// sync — a mismatch would clip the creative or jump the layout.
+    @MainActor private static var _adaptiveAdSize: AdSize?
+
+    @MainActor
+    static var adaptiveBannerAdSize: AdSize {
+        if let s = _adaptiveAdSize { return s }
+        let bounds = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?.bounds ?? UIScreen.main.bounds
+        // Portrait width regardless of current orientation, minus the gutter's
+        // 16pt insets (×2) so the banner fits inside its rounded card.
+        let width = min(bounds.width, bounds.height) - 32
+        // portrait… (not currentOrientation…) so the cached height is the
+        // stable portrait value and never clips after a rotation. Deprecated in
+        // favour of the Large variant — intentional; we want the compact height.
+        let size = portraitAnchoredAdaptiveBanner(width: width)
+        _adaptiveAdSize = size
+        return size
+    }
+
+    @MainActor static var adaptiveBannerWidth: CGFloat { adaptiveBannerAdSize.size.width }
+    @MainActor static var adaptiveBannerHeight: CGFloat { adaptiveBannerAdSize.size.height }
+}
+
 /// Consent + ATT gate for App Store / personalized ads.
 ///
 /// Order is required: Google UMP first (collects GDPR consent in the
@@ -188,7 +227,7 @@ private let kAdRetryDelays: [TimeInterval] = [5, 10, 30]
 
 // MARK: - BannerHostView
 
-/// Fixed-size 320×50 host. One `BannerHostView` is created per mount point
+/// Anchored-adaptive banner host. One `BannerHostView` is created per mount point
 /// (each tab's `adBannerGutter` owns its own — see `BannerAdView.Coordinator`)
 /// and lives for that mount's lifetime. Ad requests are gated by the
 /// SDK-started signal, window attachment, and a debounce timer so the
@@ -197,7 +236,7 @@ private let kAdRetryDelays: [TimeInterval] = [5, 10, 30]
 /// is refreshed every time the view re-enters a window so stale captures don't
 /// confuse AdMob's presentation layer after a re-parent.
 private final class BannerHostView: UIView {
-    let banner = BannerView(adSize: AdSizeBanner)   // 320 × 50
+    let banner: BannerView
     var onReady: (() -> Void)?
     private var sdkObserver: NSObjectProtocol?
 
@@ -214,14 +253,15 @@ private final class BannerHostView: UIView {
     private var loggedLayoutOnce = false
 
     override init(frame: CGRect) {
+        banner = BannerView(adSize: AdConfig.adaptiveBannerAdSize)
         super.init(frame: frame)
         adLog.notice("BannerHostView init")
         backgroundColor = .clear
         banner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(banner)
         NSLayoutConstraint.activate([
-            banner.widthAnchor.constraint(equalToConstant: 320),
-            banner.heightAnchor.constraint(equalToConstant: 50),
+            banner.widthAnchor.constraint(equalToConstant: AdConfig.adaptiveBannerWidth),
+            banner.heightAnchor.constraint(equalToConstant: AdConfig.adaptiveBannerHeight),
             banner.centerXAnchor.constraint(equalTo: centerXAnchor),
             banner.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -366,7 +406,8 @@ private final class BannerHostView: UIView {
 
 // MARK: - BannerAdView
 
-/// Standard fixed 320×50 banner — the smallest, least-intrusive size.
+/// Anchored-adaptive banner — fills the available width at a compact
+/// Google-optimized anchored height.
 ///
 /// Each mount point gets its OWN host + delegate, held in the representable's
 /// `Coordinator`. This is deliberate: the redesign mounts `adBannerGutter`
@@ -454,8 +495,8 @@ private enum BottomAdBannerProbe {
     }
 }
 
-/// Drop-in compact banner: fixed 320×50, centered. Reserves exactly 50pt
-/// so it never overlaps content. A faint surface fill sits behind the
+/// Drop-in anchored-adaptive banner, centered. Reserves the SDK-reported
+/// adaptive height so it never overlaps content. A faint surface fill sits behind the
 /// `BannerAdView` until the ad loads — `tabViewBottomAccessory` on iOS 26
 /// collapses fully-transparent accessory content, which made an unloaded
 /// banner look like it wasn't mounted at all.
@@ -471,9 +512,10 @@ struct AdBanner: View {
             // of the design language, not a stray panel.
             m.t.surfaceHi
             BannerAdView()
-                .frame(width: 320, height: 50)
+                .frame(width: AdConfig.adaptiveBannerWidth,
+                       height: AdConfig.adaptiveBannerHeight)
         }
-        .frame(maxWidth: .infinity, minHeight: 50)
+        .frame(maxWidth: .infinity, minHeight: AdConfig.adaptiveBannerHeight)
     }
 }
 

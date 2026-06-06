@@ -1,5 +1,9 @@
-// 320x50 banner host. Reserves 50pt vertically regardless of fill state
-// so the layout doesn't jump when an ad lands.
+// Anchored-adaptive banner host. Reserves the SDK-reported adaptive height
+// (~50–60pt on phones) regardless of fill state so the layout doesn't jump
+// when an ad lands. Adaptive banners fill the device width — better fill +
+// eCPM than a fixed 320×50 — at a COMPACT height: we deliberately use the
+// standard, not the taller "Large", variant for a lighter footprint on every
+// screen. Falls back to the standard 320×50 banner if the size can't resolve.
 //
 // Ad unit ID is gated by an explicit build flag, NOT by kDebugMode alone —
 // TestFlight / Play Internal builds are release-mode, so a kDebugMode gate
@@ -36,16 +40,18 @@ import '../theme.dart';
 /// True when this build should serve Google's universal TEST ad unit instead
 /// of the production banner.
 ///
-/// ⚠️ TEMPORARILY DEFAULTS TO `true` for the closed-alpha test track — real
-/// testers must NOT generate live impressions/clicks on the production unit
-/// (AdMob "invalid traffic" risks suspending the account). So the alpha AAB
-/// shows "Test Ad" banners.
+/// Defaults to `false` so the source contract matches the build scripts and
+/// this file's header: a plain `flutter build appbundle --release`
+/// (build-android-prod.sh, no flag) serves the REAL production unit and earns
+/// revenue. Safe-by-default — an accidental no-flag release can never silently
+/// ship $0 test ads to the Play Store.
 ///
-/// BEFORE THE PUBLIC PRODUCTION RELEASE: set this default back to `false`
-/// (or build with `--dart-define=LYNE_ADS_TEST=false`) so the Play Store
-/// build uses the real production unit and earns revenue.
+/// The closed-testing track opts IN explicitly: build-android-closed-test.sh
+/// passes `--dart-define=LYNE_ADS_TEST=true`, so alpha/beta testers still see
+/// "Test Ad" creatives and can never trigger AdMob invalid-traffic detection
+/// on the live unit. (DEBUG builds force the test unit regardless, below.)
 const bool kLyneAdsTest =
-    bool.fromEnvironment('LYNE_ADS_TEST', defaultValue: true);
+    bool.fromEnvironment('LYNE_ADS_TEST', defaultValue: false);
 
 /// True when this build was compiled with
 /// `--dart-define=LYNE_SCREENSHOT_MODE=true`. Suppresses the ad banner
@@ -91,6 +97,9 @@ class _AdBannerState extends State<AdBanner> {
   BannerAd? _ad;
   bool _loaded = false;
   Timer? _retry;
+  // Adaptive size, resolved once before the first request. Drives the
+  // reserved slot height so it matches the creative the SDK returns.
+  AnchoredAdaptiveBannerAdSize? _size;
 
   @override
   void initState() {
@@ -113,13 +122,39 @@ class _AdBannerState extends State<AdBanner> {
       });
       return;
     }
-    _load();
+    unawaited(_load());
   }
 
-  void _load() {
+  Future<void> _load() async {
+    // Resolve the anchored adaptive size for the screen width first, then
+    // request. Adaptive fills the width and lets AdMob choose the height —
+    // higher fill + eCPM than a fixed 320×50. Width comes from the view
+    // (no BuildContext needed, so this stays callable from initState/timer).
+    final view = WidgetsBinding.instance.platformDispatcher.views.first;
+    final widthDip = (view.physicalSize.width / view.devicePixelRatio).round();
+    // Standard anchored adaptive — compact, width-filling banner (~50–60pt),
+    // chosen over the taller "Large" variant for a lighter footprint on every
+    // screen: the width fill is the main eCPM win over a fixed 320×50; the
+    // extra Large height is the smaller increment, traded here for content
+    // space. google_mobile_ads 8 deprecates this getter in favour of Large —
+    // intentional, hence the ignore. Matches the iOS portraitAnchoredAdaptiveBanner.
+    // ignore: deprecated_member_use
+    final adaptive = await AdSize.getAnchoredAdaptiveBannerAdSize(
+      Orientation.portrait,
+      widthDip,
+    );
+    if (!mounted) return;
+    if (adaptive != null) {
+      // Reserve the adaptive height up front so the slot doesn't jump when
+      // the creative lands.
+      setState(() => _size = adaptive);
+    }
+
     final ad = BannerAd(
       adUnitId: _bannerUnitId(),
-      size: AdSize.banner, // 320x50
+      // Fall back to the standard banner if the adaptive size is unavailable
+      // (e.g. width not yet known) — still serves, just non-adaptive.
+      size: adaptive ?? AdSize.banner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (_) {
@@ -157,9 +192,11 @@ class _AdBannerState extends State<AdBanner> {
     final t = context.t;
     // Reserve the slot even when nothing is loaded so the layout doesn't
     // shift when an ad arrives. Thin hairline above to separate from the
-    // navigation bar.
+    // navigation bar. Height tracks the adaptive size once resolved, falling
+    // back to 50 before then.
+    final h = (_size?.height ?? 50).toDouble();
     return Container(
-      height: 50,
+      height: h,
       decoration: BoxDecoration(
         color: t.surface,
         border: Border(top: BorderSide(color: t.line)),

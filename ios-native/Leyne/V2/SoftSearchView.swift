@@ -67,8 +67,9 @@ struct SoftSearchView: View {
             }
         }
         .onAppear {
-            focused = true
-            // Warm the large, lazy BusRoutes dataset while the user types, so
+            // Don't auto-focus: the keyboard should appear only when the user
+            // taps the field, not the moment the Search tab opens (user-reported).
+            // Warm the large, lazy BusRoutes dataset while the user browses, so
             // tapping a bus result opens the route view immediately instead of
             // blocking on a cold fetch (originStop + serviceRoute both need it).
             ds.ensureRoutes()
