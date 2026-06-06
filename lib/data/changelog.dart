@@ -38,7 +38,7 @@ const Map<String, WhatsNewEntry> kChangelog = {
         title: 'Tell me before it arrives',
         body: 'Get a heads-up before your bus reaches your stop — or before '
             'it reaches your destination — with the lead time you choose. '
-            'Find and manage every alert in one place.',
+            'The new bell on the home screen opens every alert in one place.',
       ),
       WhatsNewItem(
         icon: Icons.location_on_rounded,

@@ -8,6 +8,47 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.4.2 · Android (33) · 2026-06-06
+
+**2026-06-06 — Android Play Store AAB (2.4.2, build 33):**
+`build/app/outputs/bundle/release/app-release.aab`. First Android build of the
+2.4.x line since 2.4.0 (closed alpha), so it carries the full notifications
+redesign plus this round's refinements.
+
+- **Notifications redesign — two configurable alert types:** notify me before
+  the bus reaches MY STOP (set from the Stop view) and before it reaches MY
+  DESTINATION (set from the Bus view), each with a lead-time picker (default
+  5 / 10 min) and a "You'll be notified!" confirmation. A central **Manage
+  alerts** screen (Active / Other, Edit → delete) collects them all. Replaces
+  the old fixed 60 s lead with a per-alert user choice; one persisted alert
+  list is the single scheduling source of truth. (`alert_timing.dart`,
+  `bus_alert.dart`, `notify_when_sheet.dart`, `notify_confirm.dart`,
+  `manage_alerts_screen.dart`, `app_model.dart`, `notifications.dart`)
+- **Alerts a tap away on Home:** a bell button at the top-right of Nearby opens
+  Manage alerts, with a badge showing how many you've set. (`soft_home_screen.dart`)
+- **Simpler Settings:** removed the Language picker (the app is English-only),
+  the redundant notifications on/off toggle (permission is requested once at
+  onboarding), and the My Favourites shortcut (Saved is already a tab).
+  (`soft_settings_screen.dart`)
+- **Bus-tracking accuracy fixes:** the bus on the map, the stops-away / distance
+  text, and route progress now agree — the bus index is grounded in the GPS fix,
+  distance measures to YOUR stop, and progress runs to the line's terminus.
+  (`bus_progress.dart`, `soft_bus_screen.dart`, `route_timeline.dart`)
+- **Simpler save model:** one-tap pin saves a stop, one-tap bus glyph saves a
+  bus, with distinct glyphs per type. (`soft_stop_screen.dart`,
+  `soft_bus_screen.dart`)
+- **"Home" → "Nearby":** the first tab is renamed Nearby with a location glyph.
+  (`soft_tab_bar.dart`)
+- **Ads on Stop & Bus pages; tab bar stays put:** the bottom bar (with the
+  banner) now rides along on the Stop and Bus detail screens instead of
+  vanishing. (`soft_stop_screen.dart`, `soft_bus_screen.dart`, `soft_root.dart`)
+- **Notify sheet & route polish:** collapsible full route on the Bus view, a
+  combined "arrival alert + live tracking" button, fixed truncated destination
+  strings, a LIVE badge in the sheet header (replacing a dead chevron), and
+  removal of the test-notification button and the redundant "manage in Settings"
+  footer. (`route_timeline.dart`, `notify_when_sheet.dart`)
+- **Build:** `flutter build appbundle --release`. pubspec `2.4.2+33`.
+
 ## Leyne 2.4.2 · iOS (20) · 2026-06-06
 
 **2026-06-06 — iOS App Store / TestFlight Archive (2.4.2, build 20):** headline
