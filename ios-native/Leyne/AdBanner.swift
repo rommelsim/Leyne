@@ -188,13 +188,14 @@ private let kAdRetryDelays: [TimeInterval] = [5, 10, 30]
 
 // MARK: - BannerHostView
 
-/// Fixed-size 320×50 host. The `BannerView` lives here for the app's
-/// lifetime. Ad requests are gated by the SDK-started signal, window
-/// attachment, and a debounce timer so constant `tabViewBottomAccessory`
-/// rebuilds never spam load(). On failure, exponential back-off retries
-/// are scheduled. The rootViewController is refreshed every time the view
-/// re-enters a window so stale captures don't confuse AdMob's presentation
-/// layer after a re-parent.
+/// Fixed-size 320×50 host. One `BannerHostView` is created per mount point
+/// (each tab's `adBannerGutter` owns its own — see `BannerAdView.Coordinator`)
+/// and lives for that mount's lifetime. Ad requests are gated by the
+/// SDK-started signal, window attachment, and a debounce timer so the
+/// frequent SwiftUI rebuilds (every AppModel `tick`) never spam load(). On
+/// failure, exponential back-off retries are scheduled. The rootViewController
+/// is refreshed every time the view re-enters a window so stale captures don't
+/// confuse AdMob's presentation layer after a re-parent.
 private final class BannerHostView: UIView {
     let banner = BannerView(adSize: AdSizeBanner)   // 320 × 50
     var onReady: (() -> Void)?
@@ -325,9 +326,9 @@ private final class BannerHostView: UIView {
     }
 
     // ------------------------------------------------------------------
-    // MARK: Delegate callbacks (called by BannerHostHolder)
+    // MARK: Delegate callbacks (called by BannerAdView.Coordinator)
 
-    /// Called by `BannerHostHolder.bannerViewDidReceiveAd`. Resets retry
+    /// Called by `BannerAdView.Coordinator.bannerViewDidReceiveAd`. Resets retry
     /// state so the next failure starts the back-off sequence fresh.
     func didReceiveAd() {
         retryIndex = 0
@@ -336,7 +337,7 @@ private final class BannerHostView: UIView {
         adLog.notice("BannerHostView didReceiveAd — retry state reset")
     }
 
-    /// Called by `BannerHostHolder.bannerView(_:didFailToReceiveAdWithError:)`.
+    /// Called by `BannerAdView.Coordinator.bannerView(_:didFailToReceiveAdWithError:)`.
     /// Schedules a retry after exponential back-off. Each successive failure
     /// advances the index (5 s → 10 s → 30 s, then stays at 30 s).
     func didFailWithError(_ error: Error) {
@@ -363,59 +364,61 @@ private final class BannerHostView: UIView {
     }
 }
 
-// MARK: - BannerHostHolder
-
-/// Process-singleton owner of the banner UIView + ad delegate. SwiftUI's
-/// `tabViewBottomAccessory` re-evaluates its content closure many times
-/// per app session — every accessory expand/collapse with scroll, every
-/// AppModel `tick` publish, every theme change. The previous design held
-/// the host inside a `Coordinator` that SwiftUI also recreates on each
-/// rebuild, so every cycle allocated a fresh `BannerHostView`, fresh
-/// `BannerView`, fresh delegate, and fired its own ad request. Hoisting
-/// the host into a static let means one of each, for the app's lifetime.
-/// iOS handles the UIView being re-parented across rebuilds transparently.
-@MainActor
-private final class BannerHostHolder: NSObject, BannerViewDelegate {
-    static let shared = BannerHostHolder()
-    let host = BannerHostView(frame: .zero)
-
-    func bannerViewDidReceiveAd(_ bannerView: BannerView) {
-        adLog.notice("Banner loaded \(bannerView.adUnitID ?? "?")")
-        host.didReceiveAd()
-    }
-    func bannerView(_ bannerView: BannerView,
-                    didFailToReceiveAdWithError error: Error) {
-        adLog.error("Banner failed: \(error.localizedDescription)")
-        host.didFailWithError(error)
-    }
-}
-
 // MARK: - BannerAdView
 
 /// Standard fixed 320×50 banner — the smallest, least-intrusive size.
 ///
-/// The host view + delegate live in `BannerHostHolder.shared` so a single
-/// pair survives every SwiftUI rebuild of the accessory. `makeUIView`
-/// re-applies the configuration each time (idempotent) and returns the
-/// same `BannerHostView`. Load orchestration (debounce, retry, rootVC
-/// refresh) is owned entirely by `BannerHostView`.
+/// Each mount point gets its OWN host + delegate, held in the representable's
+/// `Coordinator`. This is deliberate: the redesign mounts `adBannerGutter`
+/// once per tab (Home / Saved / Search / Settings), so four `BannerAdView`s
+/// coexist. A UIView can only live in one superview at a time, so a single
+/// shared host would be "stolen" by whichever tab was visited last, leaving
+/// the others blank on return — the exact bug this replaced. With one host
+/// per tab, every tab keeps its own banner permanently.
+///
+/// SwiftUI calls `makeCoordinator` once per stable view identity (each tab's
+/// gutter is stable across AppModel `tick` rebuilds), so the host is NOT
+/// reallocated on every rebuild — `updateUIView` is a no-op. Load
+/// orchestration (debounce, retry, rootVC refresh) is owned entirely by
+/// `BannerHostView`, and its `window != nil` gate means only the currently
+/// visible tab ever requests an ad (the TabView keeps only the selected tab
+/// in the window), so multiple hosts stay AdMob-policy-clean.
 private struct BannerAdView: UIViewRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> BannerHostView {
-        let holder = BannerHostHolder.shared
-        let host = holder.host
+        let host = context.coordinator.host
         let banner = host.banner
         banner.adUnitID = AdConfig.bannerUnitID
-        banner.delegate = holder
+        banner.delegate = context.coordinator
         // Wire the onReady closure: called by dispatchLoad() each time a
         // fresh request should go out. rootViewController is set immediately
         // before load() inside dispatchLoad, so it's always current.
-        host.onReady = {
-            banner.load(Request())
+        host.onReady = { [weak banner] in
+            banner?.load(Request())
         }
         return host
     }
 
     func updateUIView(_ uiView: BannerHostView, context: Context) {}
+
+    /// Per-instance owner of the banner UIView + ad delegate. One is created
+    /// for each `BannerAdView` (i.e. one per tab gutter) and retained for that
+    /// view's lifetime.
+    @MainActor
+    final class Coordinator: NSObject, BannerViewDelegate {
+        let host = BannerHostView(frame: .zero)
+
+        func bannerViewDidReceiveAd(_ bannerView: BannerView) {
+            adLog.notice("Banner loaded \(bannerView.adUnitID ?? "?")")
+            host.didReceiveAd()
+        }
+        func bannerView(_ bannerView: BannerView,
+                        didFailToReceiveAdWithError error: Error) {
+            adLog.error("Banner failed: \(error.localizedDescription)")
+            host.didFailWithError(error)
+        }
+    }
 
     /// Resolves the current key-window rootViewController. Called from
     /// BannerHostView so the VC is refreshed on every re-parent, not just

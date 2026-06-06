@@ -44,6 +44,13 @@ class SoftStopScreen extends StatefulWidget {
 class _SoftStopScreenState extends State<SoftStopScreen> {
   _StopSort _sort = _StopSort.arrival;
 
+  /// Inline expand state for the grouped arrivals list. Opened from a
+  /// "see all" entry (widget.showAll) starts expanded.
+  late bool _expanded = widget.showAll;
+
+  /// Services shown before the "Show more" expander kicks in.
+  static const int _collapsedCount = 6;
+
   @override
   void initState() {
     super.initState();
@@ -66,7 +73,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             final loaded =
                 state != null && state.kind == ArrivalStateKind.loaded;
             final sorted = loaded ? _sortServices(state.services) : <Service>[];
-            final allNos = sorted.map((s) => s.no).toList();
             final isPinned = m.pinForCode(widget.stopCode) != null;
             return RefreshIndicator(
               color: t.accent,
@@ -87,7 +93,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   ],
                   const SizedBox(height: 20),
                   // ── Arrivals section ────────────────────────────────────
-                  _arrivalSection(context, state, sorted, allNos, isPinned),
+                  _arrivalSection(context, state, sorted, isPinned),
                 ],
               ),
             );
@@ -101,7 +107,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
   // Back · (spacer) · star · overflow  — all 44×44 circular icon buttons.
 
   Widget _topBar(BuildContext context, bool isPinned) {
-    final t = context.t;
     return Row(
       children: [
         // Back
@@ -115,23 +120,84 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           ),
         ),
         const Spacer(),
-        // Star — opens the save sheet (existing _showSaveSheet logic).
-        Semantics(
-          label: isPinned ? '${DataStore.shared.stopName(widget.stopCode)} saved — edit favourite' : 'Save ${DataStore.shared.stopName(widget.stopCode)} to favourites',
-          button: true,
-          child: _circleButton(
-            context,
-            iconWidget: Icon(
+        // Star menu — pin/unpin this stop or save a specific bus here,
+        // without leaving the page (replaces the old save-sheet-only flow).
+        _starMenu(context, isPinned),
+        const SizedBox(width: 10),
+        // Sort overflow — PopupMenuButton with three sort options.
+        _sortOverflow(context),
+      ],
+    );
+  }
+
+  /// Star popup: pin/unpin (Saved) + "save a bus here". The star fills green
+  /// when the stop is pinned. Mirrors iOS SoftStopView's star Menu.
+  Widget _starMenu(BuildContext context, bool isPinned) {
+    final t = context.t;
+    final name = DataStore.shared.stopName(widget.stopCode);
+    return Semantics(
+      label: isPinned ? '$name saved — saving options' : 'Save $name',
+      button: true,
+      child: Material(
+        color: t.surface,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: PopupMenuButton<String>(
+          tooltip: 'Saving options',
+          icon: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: t.line, width: 1),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
               isPinned ? Icons.star_rounded : Icons.star_border_rounded,
               size: 20,
               color: isPinned ? t.soon : t.fg,
             ),
-            onTap: () => _showSaveSheet(context),
           ),
+          color: t.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(LyneRadius.md),
+          ),
+          onSelected: (v) {
+            if (v == 'pin') {
+              AppModel.shared.togglePin(widget.stopCode);
+            } else if (v == 'savebus') {
+              _showSaveSheet(context);
+            }
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: 'pin',
+              child: _menuRow(
+                context,
+                isPinned ? Icons.star_rounded : Icons.star_border_rounded,
+                isPinned ? 'Unpin from Saved' : 'Save to Saved',
+                tint: isPinned ? t.soon : null,
+              ),
+            ),
+            PopupMenuItem(
+              value: 'savebus',
+              child: _menuRow(
+                  context, Icons.directions_bus_rounded, 'Save a bus here…'),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _menuRow(BuildContext context, IconData icon, String label,
+      {Color? tint}) {
+    final t = context.t;
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: tint ?? t.dim),
         const SizedBox(width: 10),
-        // Sort overflow — PopupMenuButton with three sort options.
-        _sortOverflow(context),
+        Text(label, style: t.sans(14, weight: FontWeight.w500, color: tint ?? t.fg)),
       ],
     );
   }
@@ -264,6 +330,8 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         : 'Stop ${widget.stopCode} · $road';
     final walkInfo = _walkInfo();
     final freshness = _freshnessLabel();
+    final isLive =
+        Freshness.from(ds.lastRefresh(widget.stopCode)) == Freshness.live;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -277,7 +345,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         // Stop code · road
         Text(subtitle, style: t.mono(13, color: t.dim)),
         const SizedBox(height: 6),
-        // Walk + dist row (left) + freshness (right)
+        // Walk + dist row (left) + LIVE / freshness (right)
         Row(
           children: [
             if (walkInfo != null) ...[
@@ -293,9 +361,31 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   style: t.mono(13, color: t.dim)),
             ],
             const Spacer(),
-            if (freshness != null)
-              Text(freshness,
-                  style: t.mono(12, color: t.dim)),
+            // LIVE when the feed is live; otherwise the freshness label.
+            if (isLive)
+              Semantics(
+                label: 'Live feed',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                          color: t.soon, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'LIVE',
+                      style: t
+                          .mono(10, weight: FontWeight.w700, color: t.soon)
+                          .copyWith(letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+              )
+            else if (freshness != null)
+              Text(freshness, style: t.mono(12, color: t.dim)),
           ],
         ),
       ],
@@ -308,7 +398,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     BuildContext context,
     ArrivalState? state,
     List<Service> sorted,
-    List<String> allNos,
     bool isPinned,
   ) {
     return Column(
@@ -330,111 +419,104 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             _hintRow(context),
             const SizedBox(height: 12),
           ],
-          _arrivalsList(context, sorted, allNos),
+          _arrivalsList(context, sorted),
         ],
       ],
     );
   }
 
+  /// Section title above the grouped arrivals list. (LIVE moved up to the
+  /// title block's walk/distance row.)
   Widget _sectionHeader(BuildContext context) {
     final t = context.t;
-    final feed =
-        Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
-    final isLive = feed == Freshness.live;
-    return Row(
-      children: [
-        Text(
-          'Buses arriving',
-          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
-        ),
-        const Spacer(),
-        if (isLive)
-          ExcludeSemantics(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration:
-                      BoxDecoration(color: t.soon, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'LIVE',
-                  style: t
-                      .mono(10, weight: FontWeight.w700, color: t.soon)
-                      .copyWith(letterSpacing: 0.5),
-                ),
-              ],
-            ),
-          ),
-        if (isLive)
-          Semantics(
-            label: 'Live feed',
-            child: const SizedBox.shrink(),
-          ),
-      ],
+    return Text(
+      'All arriving buses',
+      style: t.sans(15, weight: FontWeight.w600, color: t.dim),
     );
   }
 
   // ── Arrivals list ─────────────────────────────────────────────────────────
 
-  Widget _arrivalsList(
-    BuildContext context,
-    List<Service> sorted,
-    List<String> allNos,
-  ) {
-    final visible = widget.showAll ? sorted : sorted.take(4).toList();
-    final overflow = !widget.showAll && sorted.length > 4;
+  /// The grouped arrivals card: one row per service with hairline dividers,
+  /// then a "Show more" expander past [_collapsedCount]. Mirrors iOS
+  /// SoftStopView's "All arriving buses" list.
+  Widget _arrivalsList(BuildContext context, List<Service> sorted) {
+    final t = context.t;
+    final canCollapse = sorted.length > _collapsedCount;
+    final shown = (_expanded || !canCollapse)
+        ? sorted
+        : sorted.take(_collapsedCount).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < visible.length; i++) ...[
-          _serviceCard(context, visible[i], allNos),
-          if (i < visible.length - 1) const SizedBox(height: 10),
-        ],
-        if (overflow) ...[
-          const SizedBox(height: 8),
-          _showAllRow(context, sorted.length - 4),
-        ],
+        Material(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(18),
+          clipBehavior: Clip.antiAlias,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: t.line, width: 1),
+            ),
+            child: Column(
+              children: [
+                for (var i = 0; i < shown.length; i++) ...[
+                  if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
+                  _busRow(context, shown[i]),
+                ],
+                if (canCollapse) ...[
+                  Divider(height: 1, thickness: 1, color: t.line),
+                  _showMoreRow(context, sorted.length),
+                ],
+              ],
+            ),
+          ),
+        ),
         const SizedBox(height: 16),
         _footer(context),
       ],
     );
   }
 
-  /// "Show all buses" row — wired to the existing onSeeAll callback.
-  Widget _showAllRow(BuildContext context, int extraCount) {
+  // ── Service row (inside the grouped card) ─────────────────────────────────
+  //
+  // badge · "To {dest}" · its next three arrival times in columns. The whole
+  // row opens the bus view. No per-row bell (matches iOS SoftStopView); alert
+  // management lives in the bus view's Notify button.
+
+  Widget _busRow(BuildContext context, Service bus) {
     final t = context.t;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      clipBehavior: Clip.antiAlias,
+    final now = DateTime.now();
+    final feed =
+        Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
+    final conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed);
+    final sec = _liveSec(bus, now);
+    final badge = serviceBadgeColors(etaSec: sec, confidence: conf, t: t);
+    final etas = _arrivalTimes(bus, now);
+
+    return Semantics(
+      label: 'Bus ${bus.no} to ${bus.dest}',
+      hint: 'Opens bus ${bus.no}',
+      button: true,
       child: InkWell(
-        onTap: widget.onSeeAll,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(LyneRadius.md),
-            border: Border.all(color: t.line, width: 1),
-          ),
+        onTap: () => widget.onOpenBus(bus.no),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              Text(
-                'Show all buses',
-                style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-              ),
-              if (extraCount > 0) ...[
-                const SizedBox(width: 6),
-                Text(
-                  '+$extraCount more',
-                  style: t.mono(13, color: t.dim),
+              _coloredBadge(bus.no, badge.fill, badge.fg, t),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  bus.dest.isEmpty ? 'Bus ${bus.no}' : 'To ${bus.dest}',
+                  style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ],
-              const Spacer(),
-              Icon(Icons.chevron_right_rounded, size: 20, color: t.faint),
+              ),
+              const SizedBox(width: 8),
+              _etaColumns(t, etas, conf),
             ],
           ),
         ),
@@ -442,142 +524,129 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  // ── Service card ──────────────────────────────────────────────────────────
-  //
-  // Material card (t.surface, LyneRadius.md border, InkWell ripple → onOpenBus)
-  //   Left  : proximity-coloured service badge
-  //   Middle: "To {dest}" + following arrivals in mono
-  //   Right : ETA pill (Capsule, green when live+soon, neutral otherwise)
-  //           + chevron_right
-  //
-  // Bell icon removed from the card row per the iOS design (SoftStopView has
-  // no per-row bell). Alert management lives in the master bell (top-bar area),
-  // which this screen retains through the existing _masterBell logic wired into
-  // the PopupMenuButton overflow.
-  //
-  // The bell logic (_bell, _masterBell) is preserved in full and called from
-  // the overflow or could be re-added; it is not in the card row per spec.
+  /// Up to three arrival columns ("Arr · 13 · 24 min") split by hairlines. The
+  /// lead column carries proximity colour + a live signal; the rest are ink.
+  Widget _etaColumns(LyneTheme t, List<int> etas, ArrivalConfidence conf) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < etas.length; i++) ...[
+          if (i > 0) ...[
+            const SizedBox(width: 10),
+            Container(width: 1, height: 30, color: t.line),
+            const SizedBox(width: 10),
+          ],
+          _etaColumn(t, etas[i], lead: i == 0, conf: conf),
+        ],
+      ],
+    );
+  }
 
-  Widget _serviceCard(
-    BuildContext context,
-    Service bus,
-    List<String> allNos,
-  ) {
-    final t = context.t;
-    final feed =
-        Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
-    final conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed);
-    final tier = EtaTier.of(bus.etaSec);
-    final badge = serviceBadgeColors(etaSec: bus.etaSec, confidence: conf, t: t);
-    final isLiveSoon = (conf == ArrivalConfidence.live ||
-            conf == ArrivalConfidence.stale) &&
-        (tier == EtaTier.imminent || tier == EtaTier.soon);
-    final ghost = conf == ArrivalConfidence.unconfirmed;
-    final pillBg = isLiveSoon ? t.soonBg : t.surfaceHi;
-    final pillFg = isLiveSoon ? t.soon : t.fg;
+  Widget _etaColumn(LyneTheme t, int sec,
+      {required bool lead, required ArrivalConfidence conf}) {
+    final eta = fmtEta(sec);
+    final arriving = eta.big == 'Arr';
+    final color =
+        lead ? etaColor(etaSec: sec, confidence: conf, t: t) : t.fg;
+    final isGhost = conf == ArrivalConfidence.unconfirmed;
 
-    final eta = fmtEta(bus.etaSec);
-    final etaText = () {
-      final prefix = ghost ? '~' : '';
-      if (eta.big == 'Arr') return '${prefix}Arr';
-      return '$prefix${eta.big} ${eta.small}';
-    }();
-
-    final following = _followingText(bus);
-
-    return Semantics(
-      label: 'Bus ${bus.no} to ${bus.dest}, $etaText',
-      hint: 'Opens bus ${bus.no}',
-      button: true,
-      child: Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(LyneRadius.md),
-          onTap: () => widget.onOpenBus(bus.no),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(LyneRadius.md),
-              border: Border.all(color: t.line, width: 1),
-            ),
-            child: Row(
-              children: [
-                // Service badge
-                _coloredBadge(bus.no, badge.fill, badge.fg, t),
-                const SizedBox(width: 12),
-                // Destination + following arrivals
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        bus.dest.isEmpty ? 'Bus ${bus.no}' : 'To ${bus.dest}',
-                        style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (following.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          following,
-                          style: t.mono(12, color: t.dim),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // ETA pill — Capsule shape via ClipRRect + Container
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 34),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              if (isGhost)
                 ExcludeSemantics(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: pillBg,
-                      borderRadius:
-                          BorderRadius.circular(LyneRadius.full),
-                    ),
-                    child: Text(
-                      etaText,
-                      style: t.mono(14,
-                          weight: FontWeight.w600, color: pillFg),
-                    ),
+                  child: Text('~',
+                      style: t.mono(11,
+                          weight: FontWeight.w400, color: t.faint)),
+                ),
+              Text(
+                arriving ? 'Arr' : eta.big,
+                style: t.mono(20, weight: FontWeight.w600, color: color),
+              ),
+              if (lead && arriving && conf == ArrivalConfidence.live) ...[
+                const SizedBox(width: 1),
+                ExcludeSemantics(
+                  child: Transform.translate(
+                    offset: const Offset(0, -7),
+                    child: Icon(Icons.sensors, size: 9, color: t.soon),
                   ),
                 ),
-                const SizedBox(width: 6),
-                Icon(Icons.chevron_right_rounded,
-                    size: 16, color: t.faint),
               ],
-            ),
+            ],
+          ),
+          Text(
+            arriving ? 'now' : eta.small,
+            style: t.mono(10, color: t.dim),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// "Show more" / "Show less" expander at the foot of the grouped card.
+  Widget _showMoreRow(BuildContext context, int total) {
+    final t = context.t;
+    return Semantics(
+      button: true,
+      label: _expanded ? 'Show fewer buses' : 'Show all $total buses',
+      child: InkWell(
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Text(
+                _expanded ? 'Show less' : 'Show more',
+                style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+              ),
+              const Spacer(),
+              Icon(
+                _expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: t.dim,
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  /// "18 min   29 min" secondary arrivals line from followingSec + thirdDate.
-  /// Empty string when neither subsequent arrival exists.
-  String _followingText(Service bus) {
-    final parts = <String>[];
-    if (bus.followingSec > bus.etaSec) {
-      final e = fmtEta(bus.followingSec);
-      parts.add(e.big == 'Arr' ? 'Arr' : '${e.big} ${e.small}');
+  /// Live seconds for a service — recomputed from arrivalDate for smoothness.
+  int _liveSec(Service s, DateTime now) {
+    if (s.arrivalDate != null) {
+      return s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30);
     }
-    final third = bus.thirdDate;
+    return s.etaSec;
+  }
+
+  /// 1–3 upcoming arrival times (seconds) for a service, dropping any that
+  /// aren't strictly later than the previous one.
+  List<int> _arrivalTimes(Service s, DateTime now) {
+    final first = _liveSec(s, now);
+    final result = [first];
+    int? second;
+    if (s.followingDate != null) {
+      second = s.followingDate!.difference(now).inSeconds.clamp(0, 1 << 30);
+    } else if (s.followingSec > first) {
+      second = s.followingSec;
+    }
+    if (second != null && second > first) result.add(second);
+    final third = s.thirdDate;
     if (third != null) {
-      final sec = third.difference(DateTime.now()).inSeconds;
-      final threshold =
-          bus.followingSec > bus.etaSec ? bus.followingSec : bus.etaSec;
-      if (sec > threshold) {
-        final e = fmtEta(sec < 0 ? 0 : sec);
-        parts.add(e.big == 'Arr' ? 'Arr' : '${e.big} ${e.small}');
-      }
+      final sec = third.difference(now).inSeconds.clamp(0, 1 << 30);
+      if (sec > result.last) result.add(sec);
     }
-    return parts.join('   ');
+    return result;
   }
 
   // ── Shared badge ──────────────────────────────────────────────────────────

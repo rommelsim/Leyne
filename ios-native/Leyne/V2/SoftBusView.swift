@@ -45,6 +45,7 @@ struct SoftBusView: View {
 
     @State private var alightId: String? = nil
     @State private var showSave = false
+    @State private var showMap = false
     @State private var saveSel = 1
     @State private var serviceRouteData: ServiceRoute?
     @State private var selectedDirIndex: Int = 0
@@ -108,8 +109,10 @@ struct SoftBusView: View {
             VStack(alignment: .leading, spacing: 20) {
                 topBar
                 titleBlock
-                mapCard
+                approachingCard
                 routeProgressSection
+                viewOnMapButton
+                liveUpdatesCard
                 alertsSection
                 Color.clear.frame(height: 8)
             }
@@ -120,6 +123,7 @@ struct SoftBusView: View {
         .background(t.bg.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .fullScreenCover(isPresented: $showMap) { mapFullScreen }
         .onAppear {
             ds.ensureArrivals(stop: stopCode)
             loadRoute()
@@ -168,29 +172,52 @@ struct SoftBusView: View {
 
             Spacer(minLength: 0)
 
-            // Share
-            Button {
-                fb.select()
-                shareSheet()
-            } label: {
-                circleButton("square.and.arrow.up", size: 16)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Share Bus \(svc)")
-
-            // More (star / save — "..." menu)
+            // Star menu — save this bus (here / anywhere) and set an arrival
+            // alert without leaving the page. Star fills green when saved.
+            let savedHere = m.isFavService(no: svc, stop: stopCode)
+            let savedAnywhere = m.isFavService(no: svc, stop: nil)
+            let alertOn = m.isTracked(code: stopCode, busNo: svc)
             Menu {
                 Button {
-                    saveSel = m.isFavService(no: svc, stop: nil) ? 0 : 1
-                    showSave = true
+                    fb.select(); m.toggleFavService(no: svc, stop: stopCode)
                 } label: {
-                    Label(serviceSaved ? "Edit favourite" : "Save Bus \(svc)",
-                          systemImage: serviceSaved ? "star.fill" : "star")
+                    Label(savedHere ? "Unpin from Saved" : "Save bus here",
+                          systemImage: savedHere ? "star.slash" : "star")
+                }
+                Button {
+                    fb.select(); m.toggleFavService(no: svc, stop: nil)
+                } label: {
+                    Label(savedAnywhere ? "Remove “anywhere” save" : "Save anywhere",
+                          systemImage: "bus")
+                }
+                Button {
+                    fb.select()
+                    m.toggleTracked(code: stopCode, busNo: svc, allNos: allServiceNos)
+                } label: {
+                    Label(alertOn ? "Cancel arrival alert" : "Set arrival alert",
+                          systemImage: alertOn ? "bell.fill" : "bell")
+                }
+            } label: {
+                Image(systemName: serviceSaved ? "star.fill" : "star")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(serviceSaved ? t.soon : t.fg)
+                    .frame(width: 40, height: 40)
+                    .background(t.surface, in: Circle())
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+            }
+            .accessibilityLabel(serviceSaved ? "Saved — saving options for Bus \(svc)"
+                                             : "Save Bus \(svc)")
+
+            // Overflow — share.
+            Menu {
+                Button {
+                    fb.select(); shareSheet()
+                } label: {
+                    Label("Share Bus \(svc)", systemImage: "square.and.arrow.up")
                 }
             } label: {
                 circleButton("ellipsis", size: 16)
             }
-            .buttonStyle(.plain)
             .accessibilityLabel("More options")
         }
     }
@@ -258,86 +285,274 @@ struct SoftBusView: View {
         }
     }
 
-    // MARK: Map card
+    // MARK: Approaching status card
 
-    private var mapCard: some View {
-        ZStack(alignment: .bottomLeading) {
-            // The map itself — clipped to card bounds.
-            Map(position: $camera) {
-                // Bus stop — green accent pin.
-                if let stop = ds.stopByCode[stopCode] {
-                    Annotation(stop.Description,
-                               coordinate: CLLocationCoordinate2D(
-                                latitude: stop.Latitude, longitude: stop.Longitude),
-                               anchor: .bottom) {
-                        MapStopMarker(t: t)
-                            .accessibilityLabel("Bus stop \(stop.Description)")
-                    }
+    /// Compact "where's the bus" summary that sits where the inline map used to.
+    /// Headline = stops away, subline = arriving-in + distance, then a slim
+    /// journey bar. The full map is one tap away via `viewOnMapButton`.
+    private var approachingCard: some View {
+        let svcLive = liveService()
+        let etaSec = svcLive?.etaSec
+        let stopsAway = stopsRemaining
+        let dist = distanceToYouMeters
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "bus.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(t.soon)
+                    .frame(width: 44, height: 44)
+                    .background(t.soonBg, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(approachHeadline(stopsAway: stopsAway, etaSec: etaSec))
+                        .font(t.sans(17, weight: .bold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Text(approachSubline(etaSec: etaSec, dist: dist))
+                        .font(t.sans(13))
+                        .foregroundStyle(t.dim)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
-                // Other stops on the journey — faint dots.
-                if let r = route {
-                    ForEach(journeySegment(r).filter { $0.code != stopCode }, id: \.code) { rs in
-                        Annotation(rs.name,
-                                   coordinate: CLLocationCoordinate2D(
-                                    latitude: rs.lat, longitude: rs.lon)) {
-                            Circle().fill(t.dim.opacity(0.5)).frame(width: 6, height: 6)
-                        }
+                Spacer(minLength: 0)
+                if pillConfidence == .live {
+                    HStack(spacing: 4) {
+                        Circle().fill(t.soon).frame(width: 6, height: 6)
+                        Text("LIVE")
+                            .font(t.mono(10, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundStyle(t.soon)
                     }
-                }
-                // The bus — solid pin; tier in accessibility label only.
-                if let p = plot, let d = displayCoord {
-                    Annotation("Bus \(svc)", coordinate: d, anchor: .center) {
-                        MapBusMarker(t: t, svc: svc)
-                            .accessibilityLabel("Bus \(svc), \(positionA11y(p.tier))")
-                    }
-                }
-                // You — blue person marker.
-                if let here = loc.location {
-                    Annotation("You", coordinate: here.coordinate, anchor: .center) {
-                        MapUserMarker().accessibilityLabel("Your location")
-                    }
+                    .accessibilityHidden(true)
                 }
             }
-            .mapStyle(.standard(elevation: .realistic))
-            .onChange(of: ds.stopByCode[stopCode]) { _, stop in
-                guard let s = stop, !didCenterOnStop else { return }
-                centerOnStop(s)
+            if let frac = journeyFraction {
+                slimProgressBar(frac)
             }
-            .frame(height: 300)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-            // Live-position callout — bottom-leading, only when we have data.
-            if let callout = liveCalloutInfo {
-                busCallout(callout)
-                    .padding(.leading, 12)
-                    .padding(.bottom, 12)
-            }
-
-            // Recenter button — bottom-trailing.
-            Button {
-                fb.select()
-                didAutoFrame = true
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    camera = .userLocation(fallback: .automatic)
-                    didCenterOnStop = false
-                }
-            } label: {
-                Image(systemName: "location.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .frame(width: 34, height: 34)
-                    .background(.thinMaterial, in: Circle())
-                    .shadow(color: .black.opacity(0.18), radius: 4, y: 1)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Center on my location")
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.trailing, 12)
-            .padding(.bottom, 12)
         }
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(t.line, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Headline: how many stops the bus is from the user's stop.
+    private func approachHeadline(stopsAway: Int?, etaSec: Int?) -> String {
+        if let n = stopsAway {
+            return n == 0 ? "Arriving now" : "\(n) stop\(n == 1 ? "" : "s") away"
+        }
+        if let e = etaSec, fmtETA(e).big == "Arr" { return "Arriving now" }
+        return "On the way"
+    }
+
+    /// Subline: "Arriving in {n} min" plus the distance to the next stop.
+    private func approachSubline(etaSec: Int?, dist: Int?) -> String {
+        guard let e = etaSec else { return "Waiting for the next arrival" }
+        let eta = fmtETA(e)
+        let timePart = eta.big == "Arr" ? "Arriving now" : "Arriving in \(eta.big) \(eta.small)"
+        if let d = dist { return "\(timePart) (\(fmtDistance(d)))" }
+        return timePart
+    }
+
+    /// Fraction of the journey the bus has covered toward the user's stop —
+    /// drives the slim bar. Near-full when the bus is a stop or two away.
+    private var journeyFraction: Double? {
+        guard let dir = currentDirection, let busIdx = estimatedBusIndex else { return nil }
+        let youIdx = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        guard youIdx > 0 else { return 1 }
+        return min(1, max(0, Double(busIdx) / Double(youIdx)))
+    }
+
+    private func slimProgressBar(_ frac: Double) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(t.line)
+                Capsule().fill(t.soon)
+                    .frame(width: max(6, geo.size.width * frac))
+            }
+        }
+        .frame(height: 6)
+        .accessibilityHidden(true)
+    }
+
+    // MARK: Live updates card
+
+    /// Service-status card. We have no live disruption feed for buses yet, so —
+    /// per the timely-over-honest design language — this presents confidently as
+    /// "running smoothly" rather than advertising the absence of data. If a
+    /// route-level alert source is added later, bind its title/detail here.
+    private var liveUpdatesCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Circle().fill(t.soon).frame(width: 8, height: 8)
+                Text("Live updates")
+                    .font(t.sans(15, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
+            }
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(t.soon)
+                    .frame(width: 36, height: 36)
+                    .background(t.soonBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Service running smoothly")
+                        .font(t.sans(14, weight: .semibold))
+                        .foregroundStyle(t.soon)
+                    Text("No major delays reported.")
+                        .font(t.sans(13))
+                        .foregroundStyle(t.dim)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(t.line, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Live updates. Service running smoothly, no major delays reported.")
+    }
+
+    // MARK: View-on-map button
+
+    private var viewOnMapButton: some View {
+        Button {
+            fb.select()
+            showMap = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(t.accent)
+                Text("View on map")
+                    .font(t.sans(15, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(t.line, lineWidth: 1))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("View bus \(svc) on the map")
+    }
+
+    // MARK: Map (presented full-screen from "View on map")
+
+    /// Shared annotation set for the bus map — stop, journey dots, the bus
+    /// (tier in the a11y label), and the user.
+    @MapContentBuilder
+    private var mapAnnotations: some MapContent {
+        if let stop = ds.stopByCode[stopCode] {
+            Annotation(stop.Description,
+                       coordinate: CLLocationCoordinate2D(
+                        latitude: stop.Latitude, longitude: stop.Longitude),
+                       anchor: .bottom) {
+                MapStopMarker(t: t)
+                    .accessibilityLabel("Bus stop \(stop.Description)")
+            }
+        }
+        if let r = route {
+            ForEach(journeySegment(r).filter { $0.code != stopCode }, id: \.code) { rs in
+                Annotation(rs.name,
+                           coordinate: CLLocationCoordinate2D(
+                            latitude: rs.lat, longitude: rs.lon)) {
+                    Circle().fill(t.dim.opacity(0.5)).frame(width: 6, height: 6)
+                }
+            }
+        }
+        if let p = plot, let d = displayCoord {
+            Annotation("Bus \(svc)", coordinate: d, anchor: .center) {
+                MapBusMarker(t: t, svc: svc)
+                    .accessibilityLabel("Bus \(svc), \(positionA11y(p.tier))")
+            }
+        }
+        if let here = loc.location {
+            Annotation("You", coordinate: here.coordinate, anchor: .center) {
+                MapUserMarker().accessibilityLabel("Your location")
+            }
+        }
+    }
+
+    private var mapFullScreen: some View {
+        ZStack(alignment: .top) {
+            Map(position: $camera) { mapAnnotations }
+                .mapStyle(.standard(elevation: .realistic))
+                .ignoresSafeArea()
+                .onChange(of: ds.stopByCode[stopCode]) { _, stop in
+                    guard let s = stop, !didCenterOnStop else { return }
+                    centerOnStop(s)
+                }
+
+            // Top bar — title + Done.
+            HStack(spacing: 10) {
+                Text("Bus \(svc)")
+                    .font(t.sans(17, weight: .bold))
+                    .foregroundStyle(t.fg)
+                Spacer(minLength: 0)
+                Button {
+                    fb.select(); showMap = false
+                } label: {
+                    Text("Done")
+                        .font(t.sans(15, weight: .semibold))
+                        .foregroundStyle(t.accent)
+                        .padding(.horizontal, 14)
+                        .frame(height: 36)
+                        .background(t.surface, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close map")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.thinMaterial)
+
+            // Callout + recenter pinned to the bottom.
+            VStack {
+                Spacer()
+                ZStack(alignment: .bottomLeading) {
+                    if let callout = liveCalloutInfo {
+                        busCallout(callout)
+                            .padding(.leading, 16)
+                            .padding(.bottom, 24)
+                    }
+                    Button {
+                        fb.select()
+                        didAutoFrame = true
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            camera = .userLocation(fallback: .automatic)
+                            didCenterOnStop = false
+                        }
+                    } label: {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(t.fg)
+                            .frame(width: 40, height: 40)
+                            .background(.thinMaterial, in: Circle())
+                            .shadow(color: .black.opacity(0.18), radius: 4, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Center on my location")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 24)
+                }
+            }
+        }
+        .background(t.bg)
     }
 
     // MARK: Live-position callout
@@ -418,22 +633,15 @@ struct SoftBusView: View {
 
     private var routeProgressSection: some View {
         let computed = timelineStops
-        let progress = progressNodes
         return VStack(alignment: .leading, spacing: 12) {
             // Section header
-            if !computed.isEmpty || !progress.isEmpty {
+            if !computed.isEmpty {
                 Text("Route progress")
                     .font(t.sans(15, weight: .semibold))
                     .foregroundStyle(t.dim)
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                // Compact horizontal progress bar
-                if !progress.isEmpty {
-                    RouteProgressBar(t: t, nodes: progress, remaining: stopsRemaining)
-                        .padding(.top, 2)
-                }
-
                 // Direction toggle — only when 2+ directions
                 if let sr = serviceRouteData, sr.directions.count >= 2 {
                     directionPicker(sr)
@@ -665,21 +873,54 @@ struct SoftBusView: View {
         return [svc]
     }
 
+    /// The bus's *actual* position when we have a fix — the live GPS coord from
+    /// the feed, or a recent one (< 150 s). nil when we have nothing real and
+    /// must fall back to the ETA estimate.
+    private var liveBusCoord: CLLocationCoordinate2D? {
+        if let s = liveService(), let lat = s.busLat, let lon = s.busLon,
+           lat != 0, lon != 0 {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+        if let f = lastFix, Date().timeIntervalSince(f.at) < 150 { return f.coord }
+        return nil
+    }
+
+    /// Where the bus is along the route, as a stop index. Grounded in the real
+    /// GPS fix (nearest route stop) whenever we have one, so "stops away", the
+    /// callout, the journey bar, and the timeline all agree with the map pin.
+    /// Only when there's no usable fix do we fall back to the ETA estimate
+    /// (`youIndex − eta/90`), which can disagree with reality.
     private var estimatedBusIndex: Int? {
         guard !fullRoute, let dir = currentDirection, dir.anchorPresent,
               !dir.stops.isEmpty, let s = liveService() else { return nil }
         let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
-        guard you > 0 else { return 0 }
+        // Snap a real fix to the nearest route stop; BusProgress clamps it to
+        // your stop and falls back to the ETA estimate when there's no fix.
+        let gpsNearest = liveBusCoord.flatMap { c in
+            BusProgress.nearestIndex(
+                stops: dir.stops.map {
+                    CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
+                }, to: c)
+        }
         let elapsed = ds.lastRefresh(stopCode).map { Date().timeIntervalSince($0) } ?? 0
-        let eta = max(0, Double(s.etaSec) - elapsed)
-        let back = min(Double(you), eta / 90.0)
-        return min(max(0, Int((Double(you) - back).rounded())), you)
+        return BusProgress.busIndex(youIndex: you, gpsNearest: gpsNearest,
+                                    etaSec: s.etaSec, elapsedSec: elapsed)
     }
 
     private var stopsRemaining: Int? {
         guard let dir = currentDirection, let busIdx = estimatedBusIndex else { return nil }
         let youIdx = min(max(dir.youIndex, 0), dir.stops.count - 1)
         return max(0, youIdx - busIdx)
+    }
+
+    /// Straight-line distance from the bus to *your* stop — the intuitive "how
+    /// far is it from me" number for the approaching card. nil without a fix.
+    private var distanceToYouMeters: Int? {
+        guard let dir = currentDirection, let c = liveBusCoord, !dir.stops.isEmpty
+        else { return nil }
+        let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        let s = dir.stops[you]
+        return Int(haversine(c.latitude, c.longitude, s.lat, s.lon).rounded())
     }
 
     private var progressNodes: [RouteStop] {
@@ -697,29 +938,39 @@ struct SoftBusView: View {
     }
 
     private func etaClock(forIndex i: Int, busIdx: Int?, youIdx: Int, youEtaSec: Int) -> String? {
-        guard let b = busIdx, youIdx > b, i >= b else { return nil }
-        let secs: Double = i <= youIdx
-            ? Double(youEtaSec) * Double(i - b) / Double(youIdx - b)
-            : Double(youEtaSec) + Double(i - youIdx) * 90
+        // Only between the bus and your stop do we have a defensible time: it's
+        // interpolated from the real arrival ETA. Past your stop we have no
+        // anchor, so we show nothing rather than fabricate a 90 s-per-stop guess.
+        guard let b = busIdx, youIdx > b, i >= b, i <= youIdx else { return nil }
+        let secs = Double(youEtaSec) * Double(i - b) / Double(youIdx - b)
         let clock = fmtClock(Date().addingTimeInterval(secs), use24h: m.use24h)
         return i == b ? clock : "ETA \(clock)"
     }
 
     private var timelineStops: [RouteStop] {
         guard let r = route, let dir = currentDirection else { return [] }
-        let showFull = fullRoute || !dir.anchorPresent
-        let segment = showFull ? r.stops : journeySegment(r)
         let busSeq = estimatedBusIndex
         let youSeq = r.youIndex
         let youEta = liveService()?.etaSec ?? 0
         let canMarkBoard = !fullRoute && dir.anchorPresent
+        let showFull = fullRoute || !dir.anchorPresent
+
+        // From a couple of stops before the bus all the way to the line's
+        // terminus, so the progress visibly leads to the stated destination
+        // rather than stopping just past your stop. RouteTimeline folds the
+        // leading run behind a "show earlier stops" node to keep it scannable.
+        let segment: [RouteStopLive]
+        if showFull {
+            segment = r.stops
+        } else {
+            let lead = BusProgress.timelineLead(busIndex: busSeq, youIndex: youSeq,
+                                                stopsCount: r.stops.count)
+            segment = Array(r.stops[lead...])
+        }
         return segment.map { stop -> RouteStop in
             let idx = r.stops.firstIndex(where: { $0.code == stop.code }) ?? -1
-            let state: RouteStopState
-            if let b = busSeq, idx == b { state = .here }
-            else if canMarkBoard && idx == youSeq { state = .board }
-            else if idx < (busSeq ?? -1) { state = .past }
-            else { state = .next }
+            let state = BusProgress.stopState(idx: idx, busIndex: busSeq,
+                                              youIndex: youSeq, canMarkBoard: canMarkBoard)
             let time = etaClock(forIndex: idx, busIdx: busSeq, youIdx: youSeq, youEtaSec: youEta)
             return RouteStop(id: stop.code, name: stop.name, state: state, time: time)
         }

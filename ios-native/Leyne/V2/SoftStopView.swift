@@ -28,6 +28,10 @@ struct SoftStopView: View {
     @State private var showSave = false
     @State private var saveSel = 0
     @State private var hint: String? = nil
+    @State private var expanded = false
+
+    /// How many services to show before the "Show more" expander kicks in.
+    private let collapsedCount = 6
 
     private var t: Theme { m.t }
     private var feed: Freshness { Freshness.from(ds.lastRefresh(stopCode)) }
@@ -92,8 +96,21 @@ struct SoftStopView: View {
 
             Spacer(minLength: 0)
 
-            // Star / favourite toggle — wired to the existing SaveSheet flow.
-            Button { fb.select(); showSave = true } label: {
+            // Star menu — pin/unpin this stop, or save a specific bus here,
+            // without leaving the page (replaces the old save-sheet-only flow).
+            Menu {
+                Button {
+                    fb.select(); m.togglePin(code: stopCode)
+                } label: {
+                    Label(isPinned ? "Unpin from Saved" : "Save to Saved",
+                          systemImage: isPinned ? "star.slash" : "star")
+                }
+                Button {
+                    fb.select(); showSave = true
+                } label: {
+                    Label("Save a bus here…", systemImage: "bus")
+                }
+            } label: {
                 Image(systemName: isPinned ? "star.fill" : "star")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(isPinned ? t.soon : t.fg)
@@ -101,8 +118,8 @@ struct SoftStopView: View {
                     .background(t.surface, in: Circle())
                     .overlay(Circle().stroke(t.line, lineWidth: 1))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isPinned ? "\(stopName) saved — edit favourite" : "Save \(stopName) to favourites")
+            .onTapGesture { fb.tap() }
+            .accessibilityLabel(isPinned ? "\(stopName) saved — saving options" : "Save \(stopName)")
 
             // Sort menu — exposes the three sort options.
             Menu {
@@ -168,8 +185,18 @@ struct SoftStopView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                // Freshness — right-aligned
-                if let label = updatedLabel {
+                // LIVE when the feed is live; otherwise the freshness label.
+                if feed == .live {
+                    HStack(spacing: 4) {
+                        Circle().fill(t.soon).frame(width: 6, height: 6)
+                        Text("LIVE")
+                            .font(t.mono(10, weight: .bold))
+                            .tracking(0.5)
+                            .foregroundStyle(t.soon)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Live feed")
+                } else if let label = updatedLabel {
                     Text(label)
                         .font(t.mono(12))
                         .foregroundStyle(t.dim)
@@ -188,26 +215,12 @@ struct SoftStopView: View {
         }
     }
 
-    /// "Buses arriving" left + "● LIVE" right.
+    /// Section title above the grouped arrivals list.
     private var sectionHeader: some View {
-        HStack(alignment: .center) {
-            Text("Buses arriving")
-                .font(t.sans(15, weight: .semibold))
-                .foregroundStyle(t.dim)
-            Spacer(minLength: 0)
-            if feed == .live {
-                HStack(spacing: 4) {
-                    Circle().fill(t.soon).frame(width: 7, height: 7)
-                    Text("LIVE")
-                        .font(t.mono(10, weight: .bold))
-                        .tracking(0.5)
-                        .foregroundStyle(t.soon)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Live feed")
-            }
-        }
-        .padding(.leading, 2)
+        Text("All arriving buses")
+            .font(t.sans(15, weight: .semibold))
+            .foregroundStyle(t.dim)
+            .padding(.leading, 2)
     }
 
     @ViewBuilder
@@ -215,11 +228,22 @@ struct SoftStopView: View {
         switch ds.arrivals[stopCode] {
         case .some(.loaded(let services)) where !services.isEmpty:
             let sorted = sortedServices(services)
-            VStack(spacing: 10) {
-                ForEach(Array(sorted.enumerated()), id: \.element.no) { _, bus in
+            let canCollapse = sorted.count > collapsedCount
+            let shown = (expanded || !canCollapse) ? sorted
+                                                   : Array(sorted.prefix(collapsedCount))
+            VStack(spacing: 0) {
+                ForEach(Array(shown.enumerated()), id: \.element.no) { i, bus in
+                    if i > 0 { rowDivider }
                     busRow(bus)
                 }
+                if canCollapse {
+                    rowDivider
+                    showMoreRow(total: sorted.count)
+                }
             }
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(t.line, lineWidth: 1))
             footer
         case .some(.empty):
             emptyArrivals(message: "No buses in operation right now.")
@@ -232,11 +256,17 @@ struct SoftStopView: View {
         }
     }
 
-    // MARK: - Bus row card
+    /// Full-bleed hairline separating rows inside the grouped card.
+    private var rowDivider: some View {
+        Rectangle().fill(t.line).frame(height: 1)
+    }
 
+    // MARK: - Bus row
+
+    /// One service row inside the grouped card: badge · destination · its next
+    /// three arrival times in columns. The whole row opens the bus view.
     private func busRow(_ bus: Service) -> some View {
         let conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed)
-        let tier = ETATier.of(etaSec: bus.etaSec)
         let badge = serviceBadgeColors(etaSec: bus.etaSec, confidence: conf, t: t)
 
         return Button {
@@ -244,68 +274,97 @@ struct SoftStopView: View {
             onOpenBus(bus.no)
         } label: {
             HStack(spacing: 12) {
-                // Service badge — green when soon, amber when mid, neutral otherwise
                 ServiceBadge(svc: bus.no, t: t, size: .md,
                              fillOverride: badge.fill, fgOverride: badge.fg)
 
-                // Destination + following arrivals
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(destLabel(bus))
-                        .font(t.sans(14, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                        .lineLimit(1)
-                    let following = followingText(bus)
-                    if !following.isEmpty {
-                        Text(following)
-                            .font(t.mono(12))
-                            .foregroundStyle(t.dim)
-                            .lineLimit(1)
-                    }
-                }
+                Text(destLabel(bus))
+                    .font(t.sans(14, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 8)
 
-                // ETA pill — prominent green when live+soon, neutral for ghost/far
-                etaPill(bus, conf: conf, tier: tier)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                etaColumns(bus, confidence: conf)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(t.line, lineWidth: 1))
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel("Bus \(bus.no) to \(bus.dest), \(arrivalA11y(bus, conf))")
         .accessibilityHint("Opens bus \(bus.no)")
     }
 
-    /// Prominent ETA pill — green pill for live/soon, neutral surface for ghost/far.
-    /// Ghost arrivals are never painted green; "~" prefix signals unconfirmed.
-    private func etaPill(_ bus: Service, conf: ArrivalConfidence, tier: ETATier) -> some View {
-        let eta = fmtETA(bus.etaSec)
-        let isLiveSoon = (conf == .live || conf == .stale) && (tier == .imminent || tier == .soon)
-        let ghost = conf == .unconfirmed
-        let pillBg: Color = isLiveSoon ? t.soonBg : t.surfaceHi
-        let pillFg: Color = isLiveSoon ? t.soon : t.fg
+    /// Up to three arrival columns ("Arr · 13 · 24 min") split by hairlines.
+    /// The lead column carries proximity colour + a live signal; the rest ink.
+    private func etaColumns(_ bus: Service, confidence: ArrivalConfidence) -> some View {
+        let etas = arrivalTimes(bus)
+        return HStack(spacing: 0) {
+            ForEach(Array(etas.enumerated()), id: \.offset) { i, sec in
+                if i > 0 {
+                    Rectangle().fill(t.line).frame(width: 1, height: 30)
+                        .padding(.horizontal, 10)
+                }
+                etaColumn(sec, lead: i == 0, confidence: confidence)
+            }
+        }
+    }
 
-        let etaText: String = {
-            let prefix = ghost ? "~" : ""
-            if eta.big == "Arr" { return "\(prefix)Arr" }
-            return "\(prefix)\(eta.big) \(eta.small)"
-        }()
+    private func etaColumn(_ sec: Int, lead: Bool, confidence: ArrivalConfidence) -> some View {
+        let eta = fmtETA(sec)
+        let arriving = eta.big == "Arr"
+        let color = lead ? etaColor(etaSec: sec, confidence: confidence, t: t) : t.fg
+        let ghost = confidence == .unconfirmed
+        return VStack(spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                if ghost {
+                    Text("~").font(t.mono(11, weight: .regular))
+                        .foregroundStyle(t.faint).accessibilityHidden(true)
+                }
+                Text(arriving ? "Arr" : eta.big)
+                    .font(t.mono(20, weight: .semibold))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                if lead && arriving && confidence == .live {
+                    Image(systemName: "dot.radiowaves.up.forward")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(t.soon)
+                        .offset(y: -7)
+                        .accessibilityHidden(true)
+                }
+            }
+            Text(arriving ? "now" : eta.small)
+                .font(t.mono(10))
+                .foregroundStyle(t.dim)
+        }
+        .frame(minWidth: 34)
+    }
 
-        return Text(etaText)
-            .font(t.mono(14, weight: .semibold))
-            .foregroundStyle(pillFg)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(pillBg, in: Capsule())
-            .accessibilityHidden(true) // label carried by parent button
+    /// "Show more" / "Show less" expander at the foot of the grouped card.
+    private func showMoreRow(total: Int) -> some View {
+        Button {
+            fb.tap()
+            withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text(expanded ? "Show less" : "Show more")
+                    .font(t.sans(14, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                Spacer(minLength: 0)
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.dim)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel(expanded ? "Show fewer buses" : "Show all \(total) buses")
     }
 
     // MARK: - Helpers
@@ -314,21 +373,16 @@ struct SoftStopView: View {
         bus.dest.isEmpty ? "Bus \(bus.no)" : "To \(bus.dest)"
     }
 
-    /// "18 min   29 min" secondary arrivals line; empty string when none.
-    private func followingText(_ bus: Service) -> String {
-        var parts: [String] = []
-        if bus.followingSec > bus.etaSec {
-            let e = fmtETA(bus.followingSec)
-            parts.append(e.big == "Arr" ? "Arr" : "\(e.big) \(e.small)")
-        }
+    /// 1–3 upcoming arrival times (seconds) for a service, dropping any that
+    /// aren't strictly later than the previous one.
+    private func arrivalTimes(_ bus: Service) -> [Int] {
+        var out = [bus.etaSec]
+        if bus.followingSec > bus.etaSec { out.append(bus.followingSec) }
         if let d = bus.thirdDate {
-            let sec = Int(d.timeIntervalSinceNow)
-            if sec > (bus.followingSec > bus.etaSec ? bus.followingSec : bus.etaSec) {
-                let e = fmtETA(max(0, sec))
-                parts.append(e.big == "Arr" ? "Arr" : "\(e.big) \(e.small)")
-            }
+            let third = Int(d.timeIntervalSinceNow)
+            if third > (out.last ?? 0) { out.append(max(0, third)) }
         }
-        return parts.joined(separator: "   ")
+        return out
     }
 
     private func arrivalA11y(_ bus: Service, _ conf: ArrivalConfidence) -> String {

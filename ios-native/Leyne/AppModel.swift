@@ -84,6 +84,29 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.4.1": WhatsNewEntry(
+        headline: "Clearer arrivals.",
+        items: [
+            WhatsNewItem(
+                icon: "star.fill",
+                title: "Your buses, first",
+                body: "The Home card now shows the top three buses at each stop "
+                    + "— your favourites first, then whatever's arriving soonest."
+            ),
+            WhatsNewItem(
+                icon: "bus.fill",
+                title: "A simpler bus view",
+                body: "Tracking a bus leads with how far away it is and when it'll "
+                    + "arrive; the live map is one tap away when you want it."
+            ),
+            WhatsNewItem(
+                icon: "checkmark.seal",
+                title: "Polish and fixes",
+                body: "Minor stability and reliability fixes to keep "
+                    + "everything quick and dependable."
+            ),
+        ]
+    ),
     "2.4.0": WhatsNewEntry(
         headline: "A brighter, clearer Leyne.",
         items: [
@@ -975,7 +998,10 @@ final class AppModel: ObservableObject {
     private func liveState(etaSec: Int, stopsAway: Int, monitored: Bool = true)
         -> LeyneActivityAttributes.ContentState {
         let arrived = etaSec <= 0
-        let mins = max(0, Int(ceil(Double(etaSec) / 60)))
+        // Floor to whole minutes so the Dynamic Island / Lock Screen numeral
+        // matches the app's `fmtETA` (sec / 60). Using ceil here made the Live
+        // Activity read one minute higher than SoftBusView for the same ETA.
+        let mins = max(0, etaSec / 60)
         // Whisper-quiet: the status reads confidently regardless of `monitored`
         // (no "Scheduled ·" banner). The estimate tell is the "~" in the widget
         // / Live Activity numeral; `monitored` still flows through for that.
@@ -995,22 +1021,24 @@ final class AppModel: ObservableObject {
         liveActivityTask = Task { [weak self] in
             guard let self else { return }
             var routeYou: Int?
-            var routeStops: [RouteStopLive] = []
             if let r = await self.ds.route(service: busNo, stopCode: stopCode) {
-                routeYou = r.youIndex; routeStops = r.stops
+                routeYou = r.youIndex
             }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 if Task.isCancelled { return }
                 guard let snap = await self.ds.liveServiceSnapshot(
                     serviceNo: busNo, stopCode: stopCode) else { continue }
+                // Stops-away MUST match what SoftBusView shows, or the Live
+                // Activity (Dynamic Island / Lock Screen) and the app disagree.
+                // SoftBusView derives the bus index from the ETA (~90 s/stop),
+                // so stopsRemaining ≈ round(etaSec / 90); we replicate that here
+                // rather than the old GPS-nearest-stop method, which produced a
+                // different number from the same feed.
                 var stopsAway = -1
-                if let you = routeYou, let c = snap.coord, !routeStops.isEmpty {
-                    let bi = routeStops.enumerated().min(by: {
-                        haversine($0.element.lat, $0.element.lon, c.latitude, c.longitude)
-                            < haversine($1.element.lat, $1.element.lon, c.latitude, c.longitude)
-                    })?.offset ?? 0
-                    stopsAway = max(0, you - bi)
+                if let you = routeYou {
+                    let fromEta = Int((Double(max(0, snap.etaSec)) / 90.0).rounded())
+                    stopsAway = max(0, min(you, fromEta))
                 }
                 let state = self.liveState(etaSec: snap.etaSec, stopsAway: stopsAway,
                                            monitored: snap.monitored)

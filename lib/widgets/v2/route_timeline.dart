@@ -2,6 +2,7 @@
 // connector + dot + state chip. Tap upcoming to set alight.
 
 import 'package:flutter/material.dart';
+import '../../data/bus_progress.dart';
 import '../../theme.dart';
 
 enum SoftRouteStopState { past, here, board, next, alight }
@@ -54,28 +55,34 @@ class _RouteTimelineState extends State<RouteTimeline> {
     final t = context.t;
     final stops = widget.stops;
 
-    // "N STOPS AWAY" badge: iOS deliberately suppresses this because busIndex
-    // is always nil today (DataStore hard-codes it to null — RouteTimeline.swift
-    // comment). Android mirrors that decision: only show the badge when we have
-    // a genuine live bus position (aheadIdx >= 0 AND at least one stop has
-    // the `here` state, i.e. the live bus position is actually known).
     final hereIdx = stops.indexWhere((s) => s.state == SoftRouteStopState.here);
-    // aheadCount is only meaningful when there is a live `.here` stop
-    // (hereIdx > 0 ensures it isn't the very first stop, which would give 0).
-    final showAhead = hereIdx > 0;
-    final aheadCount = showAhead ? stops.length - hereIdx - 1 : 0;
+    final boardIdx =
+        stops.indexWhere((s) => s.state == SoftRouteStopState.board);
+
+    // "N STOPS AWAY" badge: only meaningful when we have a live bus position
+    // (`here`) and the boarding stop ahead of it. Count from the bus to YOUR
+    // stop — not to the terminus, which the timeline now extends to.
+    final showAhead = hereIdx >= 0 && boardIdx > hereIdx;
+    final aheadCount = showAhead ? boardIdx - hereIdx : 0;
 
     final showHint =
         widget.alightId == null &&
         stops.any((s) => s.state == SoftRouteStopState.next);
 
     // Long-route collapse: fold the lead-in (everything more than 2 stops
-    // before the focal stop — the boarding stop, else the live bus, else the
-    // start) into one expandable node, keeping the actionable tail visible.
-    int focalIdx =
-        stops.indexWhere((s) => s.state == SoftRouteStopState.board);
-    if (focalIdx < 0) focalIdx = hereIdx;
-    if (focalIdx < 0) focalIdx = 0;
+    // before the focal stop) into one expandable node, keeping the actionable
+    // tail visible. Focal = the earlier of the live bus and the boarding stop,
+    // so collapse never folds the bus away.
+    int focalIdx;
+    if (hereIdx >= 0 && boardIdx >= 0) {
+      focalIdx = hereIdx < boardIdx ? hereIdx : boardIdx;
+    } else if (hereIdx >= 0) {
+      focalIdx = hereIdx;
+    } else if (boardIdx >= 0) {
+      focalIdx = boardIdx;
+    } else {
+      focalIdx = 0;
+    }
     final keepFrom = (focalIdx - 2).clamp(0, stops.length);
     final canCollapse = stops.length > RouteTimeline.maxVisible && keepFrom >= 2;
     final startIdx = (canCollapse && !_expanded) ? keepFrom : 0;
@@ -214,6 +221,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
                 children: [
                   Column(
                     children: [
+                      // Top half: green if the bus has reached this stop.
                       Expanded(
                         child: Container(
                           width: 2,
@@ -222,12 +230,18 @@ class _RouteTimelineState extends State<RouteTimeline> {
                               : _connector(t, resolved),
                         ),
                       ),
+                      // Bottom half: the bus hasn't travelled past its own stop
+                      // yet, so the green trail ends *at* the bus — this half
+                      // greys out, giving one continuous green run from the
+                      // origin to the bus and grey all the way after.
                       Expanded(
                         child: Container(
                           width: 2,
                           color: last
                               ? Colors.transparent
-                              : _connector(t, resolved),
+                              : (BusProgress.lowerConnectorIsGreen(resolved)
+                                  ? t.soon
+                                  : t.line),
                         ),
                       ),
                     ],
@@ -383,17 +397,12 @@ class _RouteTimelineState extends State<RouteTimeline> {
     }
   }
 
-  Color _connector(LyneTheme t, SoftRouteStopState state) {
-    switch (state) {
-      case SoftRouteStopState.next:
-        return t.line;
-      case SoftRouteStopState.past:
-      case SoftRouteStopState.here:
-      case SoftRouteStopState.board:
-      case SoftRouteStopState.alight:
-        return t.soon;
-    }
-  }
+  // Green marks track the bus has covered. Only stops the bus has reached
+  // (passed, or its current stop) are green; your boarding/alight stop is
+  // ahead of the bus, so its connector stays grey — no isolated green segment
+  // detached from the bus's trail.
+  Color _connector(LyneTheme t, SoftRouteStopState state) =>
+      BusProgress.connectorIsGreen(state) ? t.soon : t.line;
 
   Widget _chip(LyneTheme t, String text, {required bool filled}) {
     return Container(

@@ -42,11 +42,14 @@ struct RouteTimeline: View {
     // collapsed so the boarding/upcoming area is what you see first.
     @State private var expanded = false
 
-    /// Focal stop: the boarding stop, else the live bus, else the start.
+    /// Focal stop: keep both the live bus and the boarding stop on screen, so
+    /// collapse never folds the bus away. Use the earlier of the two; fall back
+    /// to whichever exists, else the start.
     private var focalIdx: Int {
-        if let i = stops.firstIndex(where: { $0.state == .board }) { return i }
-        if let i = stops.firstIndex(where: { $0.state == .here }) { return i }
-        return 0
+        let here = stops.firstIndex { $0.state == .here }
+        let board = stops.firstIndex { $0.state == .board }
+        if let h = here, let b = board { return min(h, b) }
+        return here ?? board ?? 0
     }
 
     /// First stop kept visible when collapsed — 2 stops of lead-in before the
@@ -72,7 +75,7 @@ struct RouteTimeline: View {
                         withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                     } label: {
                         HStack(spacing: 4) {
-                            Text(expanded ? "Show less" : "View all stops")
+                            Text(expanded ? "Show less" : "View all \(stops.count) stops")
                             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                                 .font(.system(size: 10, weight: .semibold))
                         }
@@ -165,12 +168,17 @@ struct RouteTimeline: View {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
                     VStack(spacing: 0) {
+                        // Top half: green if the bus has reached this stop.
                         Rectangle()
                             .fill(connectorColor(for: resolved))
                             .frame(width: 2)
                             .opacity(isFirst ? 0 : 1)
+                        // Bottom half: the bus hasn't travelled past its own
+                        // stop yet, so the green trail ends *at* the bus — this
+                        // half greys out, giving one continuous green run from
+                        // the origin to the bus and grey all the way after.
                         Rectangle()
-                            .fill(connectorColor(for: resolved))
+                            .fill(BusProgress.lowerConnectorIsGreen(resolved) ? t.soon : t.line)
                             .frame(width: 2)
                             .opacity(isLast ? 0 : 1)
                     }
@@ -267,10 +275,11 @@ struct RouteTimeline: View {
     }
 
     private func connectorColor(for state: RouteStopState) -> Color {
-        switch state {
-        case .past, .here, .board, .alight: return t.soon
-        case .next: return t.line
-        }
+        // Green marks track the bus has covered. Only stops the bus has reached
+        // (passed, or its current stop) are green; your boarding/alight stop is
+        // ahead of the bus, so its connector stays grey — no isolated green
+        // segment detached from the bus's trail.
+        BusProgress.connectorIsGreen(state) ? t.soon : t.line
     }
 
     private func timeColor(_ state: RouteStopState) -> Color {

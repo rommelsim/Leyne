@@ -1,8 +1,9 @@
 name: CI
 
-# Verifies every push and pull request: static analysis + the widget test
-# suite, plus a build of both the Android and iOS apps. Catches regressions
-# on both platforms before they reach a device.
+# Verifies every push and pull request: static analysis + the Dart test suite
+# (Android job) and the Swift XCTest suite (ios-native job), plus a build of
+# the Android, Flutter-iOS, and native-iOS apps. Catches regressions on both
+# platforms before they reach a device.
 on:
   push:
   pull_request:
@@ -80,7 +81,7 @@ jobs:
       - run: flutter build ios --no-codesign --debug
 
   ios-native:
-    name: iOS native build (SwiftUI app + widgets)
+    name: iOS native build + unit tests (SwiftUI app + widgets)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,15 +95,28 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      # The active iOS product is the native SwiftUI app under ios-native/,
-      # NOT the Flutter wrapper the `ios` job builds. Nothing else compiles
-      # this target, so a Swift error — or a broken widget extension / Live
-      # Activity — is invisible until someone opens Xcode. This compiles the
-      # app + LeyneWidgets extension on every push. No signing needed.
-      - name: Build ios-native (app + LeyneWidgets extension)
+      # Running the test action needs a concrete, booted simulator. Device names
+      # track the SDK (iPhone 16 on Xcode 16, iPhone 17 on Xcode 26), so resolve
+      # a UDID dynamically rather than pinning a device that may not exist.
+      - name: Select an iPhone simulator
+        id: sim
         run: |
-          xcodebuild build \
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import sys,json;d=json.load(sys.stdin)['devices'];print(next(dev['udid'] for rt in d.values() for dev in rt if 'iPhone' in dev['name']))")
+          echo "Using simulator $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID" || true
+
+      # The active iOS product is the native SwiftUI app under ios-native/, NOT
+      # the Flutter wrapper the `ios` job builds. `xcodebuild test` compiles the
+      # app + embedded LeyneWidgets extension AND the LeyneTests target, then
+      # runs the unit suite (BusProgress route-progress math, ETA rounding,
+      # LTA parsing, search, pins). The Live-LTA integration tests XCTSkip when
+      # the network/key is unavailable, so they never fail the run. No signing.
+      - name: Build & test ios-native (app + LeyneWidgets + LeyneTests)
+        run: |
+          xcodebuild test \
             -project ios-native/Leyne.xcodeproj \
             -scheme Leyne \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
             CODE_SIGNING_ALLOWED=NO

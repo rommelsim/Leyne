@@ -129,7 +129,7 @@ struct SoftHomeView: View {
             road: ds.roadName(code),
             walkMin: stop.walkMin,
             distanceM: stop.distanceM,
-            service: featured(code),
+            arrivals: rankedArrivals(code),
             feed: feed(code),
             highlight: highlight,
             tick: m.tick,
@@ -216,9 +216,21 @@ struct SoftHomeView: View {
 
     private func feed(_ code: String) -> Freshness { Freshness.from(ds.lastRefresh(code)) }
 
-    /// The soonest live-recomputed service at a stop — the card's featured row.
-    private func featured(_ code: String) -> Service? {
-        m.liveServices(code: code, tracked: []).first
+    /// Top-3 services at a stop, ranked by the Home card's "what to show" rule:
+    ///   1. Favourite buses first (saved at this stop OR anywhere),
+    ///   2. then earliest arrival within each group,
+    ///   3. capped at three so the card stays scannable.
+    /// `liveServices` already returns the stop's services sorted by ETA, so a
+    /// stable partition into favourites + the rest preserves the soonest-first
+    /// order inside each group.
+    private func rankedArrivals(_ code: String) -> [RankedArrival] {
+        let services = m.liveServices(code: code, tracked: [])
+        func isFav(_ s: Service) -> Bool {
+            m.isFavService(no: s.no, stop: code) || m.isFavService(no: s.no, stop: nil)
+        }
+        let favs = services.filter(isFav)
+        let rest = services.filter { !isFav($0) }
+        return (favs + rest).prefix(3).map { RankedArrival(service: $0, fav: isFav($0)) }
     }
 
     private func warmArrivals() {
@@ -244,9 +256,18 @@ struct SoftHomeView: View {
 
 // MARK: - Nearby stop card
 
+/// One ranked arrival on the Home card: a service plus whether the user has
+/// favourited it (drives the leading star + the favourite-first ordering).
+struct RankedArrival: Identifiable {
+    let service: Service
+    let fav: Bool
+    var id: String { service.no }
+}
+
 /// A nearby-stop card: identity (pin · name · "Stop {code} · road" · walk +
-/// distance) over a divider, then the soonest service's next three arrivals in
-/// columns. The closest stop is highlighted with a green border + badge.
+/// distance) over a divider, then the stop's top-3 services — favourites first,
+/// then soonest — each on its own row with its next arrival. A "View all buses"
+/// footer opens the full stop. The closest stop gets a green border + badge.
 struct SoftNearbyStopCard: View {
     let t: Theme
     let name: String
@@ -254,7 +275,7 @@ struct SoftNearbyStopCard: View {
     let road: String
     let walkMin: Int
     let distanceM: Int
-    let service: Service?
+    let arrivals: [RankedArrival]
     let feed: Freshness
     let highlight: Bool
     let tick: Int            // forces a per-second live ETA recompute
@@ -267,7 +288,14 @@ struct SoftNearbyStopCard: View {
                 if highlight { closestBadge.padding(.bottom, 12) }
                 identityRow
                 Rectangle().fill(t.line).frame(height: 1).padding(.vertical, 12)
-                if let service { serviceRow(service) } else { quietRow }
+                if arrivals.isEmpty {
+                    quietRow
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(arrivals) { arrivalRow($0) }
+                    }
+                    viewAllRow
+                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -322,9 +350,6 @@ struct SoftNearbyStopCard: View {
                 .padding(.top, 1)
             }
             Spacer(minLength: 4)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(t.faint)
         }
     }
 
@@ -332,73 +357,88 @@ struct SoftNearbyStopCard: View {
         road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)"
     }
 
-    private func serviceRow(_ s: Service) -> some View {
+    /// One ranked service: number badge (proximity-tinted), a gold star when
+    /// favourited, the destination, then its soonest arrival on the trailing
+    /// edge. Matches the "Top 3 arrivals" rows in the spec.
+    private func arrivalRow(_ a: RankedArrival) -> some View {
+        let s = a.service
         let conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed)
         let badge = serviceBadgeColors(etaSec: s.etaSec, confidence: conf, t: t)
-        return HStack(spacing: 12) {
+        return HStack(spacing: 10) {
             Text(s.no)
-                .font(t.sans(17, weight: .bold))
+                .font(t.sans(16, weight: .bold))
                 .foregroundStyle(badge.fg)
                 .lineLimit(1)
-                .frame(minWidth: 46, minHeight: 40)
-                .padding(.horizontal, 8)
+                .frame(minWidth: 46, minHeight: 36)
+                .padding(.horizontal, 6)
                 .background(badge.fill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            if a.fav {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color(hex: "F5B500"))
+                    .accessibilityLabel("Favourite")
+            }
             Text(destLabel(s.dest))
                 .font(t.sans(14, weight: .medium))
                 .foregroundStyle(t.fg)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 8)
-            etaColumns(s, confidence: conf)
+            etaTrailing(s.etaSec, confidence: conf)
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
         }
     }
 
-    /// Up to three arrival columns ("6 · 18 · 29 min") split by hairlines. The
-    /// lead column carries proximity colour + a live signal; the rest are ink.
-    private func etaColumns(_ s: Service, confidence: ArrivalConfidence) -> some View {
-        let etas = arrivalSecs(s)
-        return HStack(spacing: 0) {
-            ForEach(Array(etas.enumerated()), id: \.offset) { i, sec in
-                if i > 0 {
-                    Rectangle().fill(t.line).frame(width: 1, height: 30)
-                        .padding(.horizontal, 10)
+    /// The single soonest arrival, trailing-aligned: proximity-tinted "Arr"
+    /// (with a live signal) or "{n} min". A faint "~" precedes an unconfirmed
+    /// estimate — the whisper-quiet honesty cue used app-wide.
+    private func etaTrailing(_ sec: Int, confidence: ArrivalConfidence) -> some View {
+        let eta = fmtETA(sec)
+        let arriving = eta.big == "Arr"
+        return HStack(alignment: .firstTextBaseline, spacing: 2) {
+            if confidence == .unconfirmed {
+                Text("~").font(t.mono(13, weight: .regular))
+                    .foregroundStyle(t.faint).accessibilityHidden(true)
+            }
+            Text(arriving ? "Arr" : eta.big)
+                .font(t.mono(19, weight: .semibold))
+                .foregroundStyle(etaColor(etaSec: sec, confidence: confidence, t: t))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            if arriving {
+                if confidence == .live {
+                    Image(systemName: "dot.radiowaves.up.forward")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(t.soon)
+                        .offset(y: -6)
+                        .accessibilityHidden(true)
                 }
-                etaColumn(sec, lead: i == 0, confidence: confidence)
+            } else {
+                Text(eta.small)
+                    .font(t.mono(11))
+                    .foregroundStyle(t.dim)
             }
         }
     }
 
-    private func etaColumn(_ sec: Int, lead: Bool, confidence: ArrivalConfidence) -> some View {
-        let eta = fmtETA(sec)
-        let arriving = eta.big == "Arr"
-        let color = lead ? etaColor(etaSec: sec, confidence: confidence, t: t) : t.fg
-        let ghost = confidence == .unconfirmed
-        return VStack(spacing: 1) {
-            HStack(alignment: .firstTextBaseline, spacing: 1) {
-                if ghost {
-                    Text("~").font(t.mono(11, weight: .regular))
-                        .foregroundStyle(t.faint).accessibilityHidden(true)
-                }
-                Text(arriving ? "Arr" : eta.big)
-                    .font(t.mono(20, weight: .semibold))
-                    .foregroundStyle(color)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                if lead && confidence == .live {
-                    Image(systemName: "dot.radiowaves.up.forward")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(t.soon)
-                        .offset(y: -7)
-                        .accessibilityHidden(true)
-                }
-            }
-            Text(arriving ? "now" : eta.small)
-                .font(t.mono(10))
+    /// "View all buses" footer with a leading hairline — the tappable cue that
+    /// opens the full stop (the whole card shares the same action).
+    private var viewAllRow: some View {
+        HStack(spacing: 6) {
+            Text("View all buses")
+                .font(t.sans(13, weight: .semibold))
                 .foregroundStyle(t.dim)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(t.faint)
         }
-        .frame(minWidth: 34)
+        .padding(.top, 14)
+        .overlay(alignment: .top) {
+            Rectangle().fill(t.line).frame(height: 1)
+        }
+        .padding(.top, 2)
     }
 
     private var quietRow: some View {
@@ -409,17 +449,6 @@ struct SoftNearbyStopCard: View {
                 .foregroundStyle(t.faint)
             Spacer(minLength: 0)
         }
-    }
-
-    /// 1–3 upcoming arrival times (seconds), dropping any that aren't real.
-    private func arrivalSecs(_ s: Service) -> [Int] {
-        var out = [s.etaSec]
-        if s.followingSec > s.etaSec { out.append(s.followingSec) }
-        if let d = s.thirdDate {
-            let third = Int(d.timeIntervalSinceNow)
-            if third > (out.last ?? 0) { out.append(max(0, third)) }
-        }
-        return out
     }
 
     private func destLabel(_ dest: String) -> String {

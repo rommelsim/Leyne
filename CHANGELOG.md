@@ -8,6 +8,81 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.4.1 · iOS (19) · 2026-06-06
+
+**2026-06-06 — iOS App Store / TestFlight Archive (2.4.1, build 19):** patch
+over 2.4.0 (that train is closed for new submissions, so the marketing version
+moves to 2.4.1). Carries the ad-banner fix from on-device testing.
+
+- **Banner ad fix:** the bottom banner went permanently blank after leaving a
+  tab and returning (e.g. Home → Saved → Home). Cause: a single shared
+  `BannerHostView` (UIKit singleton) was mounted by all four tab gutters, and a
+  `UIView` can only live in one place — whichever tab was visited last "stole"
+  it. Each tab gutter now owns its own banner host via
+  `BannerAdView.Coordinator`, so banners persist per tab. The `window != nil`
+  load gate keeps only the visible tab requesting ads (AdMob-policy clean).
+  (`ios-native/Leyne/AdBanner.swift`)
+- **Home card — Top-3 arrivals:** each nearby-stop card now lists up to three
+  services ranked favourite-first → soonest, each with its next arrival and a
+  gold star on favourites, plus a "View all buses" footer — replacing the old
+  one-service / three-times layout. Ranking is a stable partition of the
+  eta-sorted services (`rankedArrivals` in `SoftHomeView.swift`); a bus counts
+  as favourite when saved at the stop or anywhere.
+- **Bus view — route-progress first:** the bus screen now leads with a compact
+  "approaching" card (stops away · arriving-in · distance · slim journey bar)
+  and the route-progress timeline; the live map moved to a full-screen sheet
+  behind a "View on map" button. (`ios-native/Leyne/V2/SoftBusView.swift`)
+- **Stop detail — grouped list + next-three times:** "All arriving buses" is now
+  a single grouped card; each service row shows its next three arrival times in
+  columns (lead column proximity-tinted with a live signal) instead of one ETA
+  pill, with a "Show more" expander past six services. LIVE moved up beside the
+  walk/distance line. (`ios-native/Leyne/V2/SoftStopView.swift`)
+- **Live Activity ↔ app data mismatch (critical):** the Dynamic Island / Lock
+  Screen showed a different "stops away" and minute count than the bus screen
+  (e.g. 8 stops / 8 min vs the app's 5 stops / 7 min). Two causes, both fixed in
+  `AppModel.startLivePolling` / `liveState`: stops-away used a GPS-nearest-stop
+  search while the app derives it from the ETA (~90 s/stop) — now both use the
+  ETA method; and the minute count used `ceil` vs the app's `fmtETA` floor — now
+  both floor. (`ios-native/Leyne/AppModel.swift`)
+- **Quick pin/save/alert menu:** the star on Stop and Bus views now opens a menu
+  to pin/unpin (Saved), save a bus (here / anywhere) and set/cancel an arrival
+  alert — no sheet, no leaving the page. The star fills green when saved.
+  (`SoftStopView.swift`, `SoftBusView.swift`)
+- **Bus view — Live updates card + stop count:** added a "Live updates — Service
+  running smoothly" status card below the map button, and the route expander now
+  shows the stop count ("View all N stops").
+
+## Leyne 2.4.1 · Android (31) · 2026-06-06
+
+**2026-06-06 — Android parity with iOS 2.4.1:** ports the three arrival-view
+redesigns from the iOS build to Flutter so both platforms match. Bump to
+`2.4.1+31`. Build artifact (when archived):
+`build/app/outputs/bundle/release/app-release.aab`.
+
+- **Home card — Top-3 arrivals:** each nearby-stop card now lists up to three
+  services ranked favourite-first → soonest (gold star on favourites), each with
+  its next arrival, plus a "View all buses" footer — replacing the old
+  one-service / three-times layout. (`lib/screens/v2/soft_home_screen.dart`)
+- **Stop detail — grouped list + next-three times:** "All arriving buses" is a
+  single grouped card; each row shows its next three arrival times in columns
+  (lead column proximity-tinted with a live signal). The old per-card list +
+  "Show all buses" navigation became an inline "Show more" expander past six
+  services. LIVE moved up beside the walk/distance line.
+  (`lib/screens/v2/soft_stop_screen.dart`)
+- **Bus view — route-progress first:** leads with a compact "approaching" card
+  (stops away · arriving-in · distance · slim journey bar) and the route-progress
+  timeline; the live map moved to a full-screen page behind a "View on map"
+  button. (`lib/screens/v2/soft_bus_screen.dart`)
+- **Ongoing-notification minute fix:** the live-tracking notification used `ceil`
+  while the bus screen uses `fmtEta` floor, so it read one minute higher; now both
+  floor (`lib/services/notifications.dart`). (Android has no Live Activity, so the
+  iOS stops-away mismatch doesn't apply here.)
+- **Quick pin/save/alert menu:** the star on Stop and Bus views now opens a popup
+  menu — pin/unpin (Saved), save a bus (here / anywhere), set/cancel arrival alert
+  — instead of a bottom sheet; the star fills when saved.
+- **Bus view — Live updates card:** added a "Service running smoothly" status card
+  below "View on map".
+
 ## Leyne 2.4.0 · Android (30) · 2026-06-05
 
 **2026-06-05 — Android closed-alpha AAB (2.4.0, build 30):** the 9-screen

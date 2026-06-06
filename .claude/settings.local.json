@@ -141,7 +141,9 @@
       "Bash(curl -s https://rommelsim.github.io/app-ads.txt)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rommelsim.github.io/Leyne/app-ads.txt)",
       "Bash(curl -s https://rommelsim.github.io/Leyne/app-ads.txt)",
-      "Bash(xcodebuild -list -project Leyne.xcodeproj)"
+      "Bash(xcodebuild -list -project Leyne.xcodeproj)",
+      "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build CODE_SIGNING_ALLOWED=NO -quiet)",
+      "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build CODE_SIGNING_ALLOWED=NO)"
     ]
   }
 }

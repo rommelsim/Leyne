@@ -443,8 +443,9 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
 // ─── Nearby stop card ────────────────────────────────────────────────────────
 
 /// A nearby-stop card matching iOS SoftNearbyStopCard:
-/// identity (pin tile · name · "Stop {code} · road" · walk + distance)
-/// over a 1px divider, then the soonest service's next three arrival columns.
+/// identity (pin tile · name · "Stop {code} · road" · walk + distance) over a
+/// 1px divider, then the stop's top-3 services — favourites first, then soonest
+/// — each on its own row with its next arrival and a "View all buses" footer.
 /// The closest stop is highlighted with a green border + "Closest stop" badge.
 class _NearbyCard extends StatelessWidget {
   const _NearbyCard({
@@ -491,10 +492,10 @@ class _NearbyCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Divider(height: 1, thickness: 1, color: t.line),
                 ),
-                // Wrap service row in per-second tick.
+                // Wrap arrivals in per-second tick + favourite changes.
                 ListenableBuilder(
                   listenable: AppModel.shared,
-                  builder: (context, _) => _serviceRow(context, t),
+                  builder: (context, _) => _arrivalsSection(context, t),
                 ),
               ],
             ),
@@ -580,135 +581,148 @@ class _NearbyCard extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(width: 8),
-        Icon(Icons.chevron_right, size: 18, color: t.faint),
       ],
     );
   }
 
-  Widget _serviceRow(BuildContext context, LyneTheme t) {
+  /// The stop's top-3 services ranked favourite-first → soonest, each on its
+  /// own row, plus a "View all buses" footer. Mirrors iOS SoftNearbyStopCard.
+  Widget _arrivalsSection(BuildContext context, LyneTheme t) {
     final code = stop.stopCode;
     final now = DateTime.now();
     final feed = Freshness.from(DataStore.shared.lastRefresh(code));
+    final ranked = _rankedArrivals(code, now);
+    if (ranked.isEmpty) return _quietRow(t);
 
-    // Re-sort by live etaSec, recomputed from arrivalDate.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < ranked.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          _arrivalRow(t, ranked[i].service, ranked[i].fav, now, feed),
+        ],
+        _viewAllRow(t),
+      ],
+    );
+  }
+
+  /// Rank the stop's services: favourites first (saved here OR anywhere), then
+  /// earliest within each group, capped at three. The list is sorted by live
+  /// ETA before partitioning so each group stays soonest-first.
+  List<({Service service, bool fav})> _rankedArrivals(
+      String code, DateTime now) {
     final raw = DataStore.shared.servicesFor(code);
-    if (raw.isEmpty) return _quietRow(t);
+    bool isFav(Service s) =>
+        AppModel.shared.isFavService(no: s.no, stop: code) ||
+        AppModel.shared.isFavService(no: s.no);
+    final sorted = [...raw]
+      ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
+    final favs = sorted.where(isFav);
+    final rest = sorted.where((s) => !isFav(s));
+    return [...favs, ...rest]
+        .take(3)
+        .map((s) => (service: s, fav: isFav(s)))
+        .toList();
+  }
 
-    // Pick the soonest service (recompute etaSec from arrivalDate for smoothness).
-    Service soonest = raw.first;
-    int soonestSec = _liveSec(soonest, now);
-    for (final s in raw.skip(1)) {
-      final sec = _liveSec(s, now);
-      if (sec < soonestSec) {
-        soonest = s;
-        soonestSec = sec;
-      }
-    }
-
-    final conf =
-        ArrivalConfidence.of(monitored: soonest.monitored, feed: feed);
-    final badge = serviceBadgeColors(etaSec: soonestSec, confidence: conf, t: t);
-    final etas = _arrivalSecs(soonest, now);
-    final destLabel = _destLabel(soonest.dest);
-
+  /// One ranked service row: number badge (proximity-tinted), a gold star when
+  /// favourited, the destination, then its single soonest arrival.
+  Widget _arrivalRow(
+      LyneTheme t, Service s, bool fav, DateTime now, Freshness feed) {
+    final sec = _liveSec(s, now);
+    final conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed);
+    final badge = serviceBadgeColors(etaSec: sec, confidence: conf, t: t);
     return Row(
       children: [
-        // Service-number badge.
         Container(
-          constraints: const BoxConstraints(minWidth: 46, minHeight: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          constraints: const BoxConstraints(minWidth: 46, minHeight: 36),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: badge.fill,
             borderRadius: BorderRadius.circular(11),
           ),
           child: Text(
-            soonest.no,
-            style: t.sans(17, weight: FontWeight.w700, color: badge.fg),
+            s.no,
+            style: t.sans(16, weight: FontWeight.w700, color: badge.fg),
           ),
         ),
-        const SizedBox(width: 12),
-        // Destination label.
+        const SizedBox(width: 10),
+        if (fav) ...[
+          const Icon(Icons.star, size: 13, color: Color(0xFFF5B500)),
+          const SizedBox(width: 8),
+        ],
         Expanded(
           child: Text(
-            destLabel,
+            _destLabel(s.dest),
             style: t.sans(14, weight: FontWeight.w500, color: t.fg),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
         const SizedBox(width: 8),
-        // Up to 3 ETA columns.
-        _etaColumns(t, etas, conf),
+        _etaTrailing(t, sec, conf),
       ],
     );
   }
 
-  Widget _etaColumns(
-      LyneTheme t, List<int> etas, ArrivalConfidence conf) {
+  /// The single soonest arrival, trailing-aligned: proximity-tinted "Arr"
+  /// (with a live signal) or "{n} min". A faint "~" precedes an unconfirmed
+  /// estimate — the whisper-quiet honesty cue used app-wide.
+  Widget _etaTrailing(LyneTheme t, int sec, ArrivalConfidence conf) {
+    final eta = fmtEta(sec);
+    final arriving = eta.big == 'Arr';
+    final isGhost = conf == ArrivalConfidence.unconfirmed;
     return Row(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
       children: [
-        for (var i = 0; i < etas.length; i++) ...[
-          if (i > 0) ...[
-            const SizedBox(width: 10),
-            Container(width: 1, height: 30, color: t.line),
-            const SizedBox(width: 10),
+        if (isGhost)
+          ExcludeSemantics(
+            child: Text('~',
+                style: t.mono(13, weight: FontWeight.w400, color: t.faint)),
+          ),
+        Text(
+          arriving ? 'Arr' : eta.big,
+          style: t.mono(19,
+              weight: FontWeight.w600,
+              color: etaColor(etaSec: sec, confidence: conf, t: t)),
+        ),
+        if (arriving) ...[
+          if (conf == ArrivalConfidence.live) ...[
+            const SizedBox(width: 1),
+            ExcludeSemantics(
+              child: Transform.translate(
+                offset: const Offset(0, -6),
+                child: Icon(Icons.sensors, size: 9, color: t.soon),
+              ),
+            ),
           ],
-          _etaColumn(t, etas[i], lead: i == 0, conf: conf),
+        ] else ...[
+          const SizedBox(width: 3),
+          Text(eta.small, style: t.mono(11, color: t.dim)),
         ],
       ],
     );
   }
 
-  Widget _etaColumn(LyneTheme t, int sec,
-      {required bool lead, required ArrivalConfidence conf}) {
-    final eta = fmtEta(sec);
-    final arriving = eta.big == 'Arr';
-    final color = lead
-        ? etaColor(etaSec: sec, confidence: conf, t: t)
-        : t.fg;
-    final isGhost = conf == ArrivalConfidence.unconfirmed;
-
-    // minWidth (not a fixed width) so "Arr" — wider than a 2-digit ETA —
-    // expands instead of overflowing into the adjacent divider/column.
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 34),
+  /// "View all buses" footer with a leading hairline — the tappable cue that
+  /// opens the full stop (the whole card shares the same action).
+  Widget _viewAllRow(LyneTheme t) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
+          Divider(height: 1, thickness: 1, color: t.line),
+          const SizedBox(height: 12),
           Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
             children: [
-              if (lead && isGhost)
-                ExcludeSemantics(
-                  child: Text(
-                    '~',
-                    style: t.mono(11,
-                        weight: FontWeight.w400, color: t.faint),
-                  ),
-                ),
-              Text(
-                arriving ? 'Arr' : eta.big,
-                style: t.mono(20, weight: FontWeight.w600, color: color),
-              ),
-              if (lead && conf == ArrivalConfidence.live) ...[
-                const SizedBox(width: 1),
-                ExcludeSemantics(
-                  child: Transform.translate(
-                    offset: const Offset(0, -7),
-                    child: Icon(Icons.sensors, size: 9, color: t.soon),
-                  ),
-                ),
-              ],
+              Text('View all buses',
+                  style: t.sans(13, weight: FontWeight.w600, color: t.dim)),
+              const Spacer(),
+              Icon(Icons.chevron_right, size: 16, color: t.faint),
             ],
-          ),
-          Text(
-            arriving ? 'now' : eta.small,
-            style: t.mono(10, color: t.dim),
           ),
         ],
       ),
@@ -734,27 +748,6 @@ class _NearbyCard extends StatelessWidget {
       return s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30);
     }
     return s.etaSec;
-  }
-
-  /// Build 1–3 arrival times from a service (in seconds-from-now).
-  static List<int> _arrivalSecs(Service s, DateTime now) {
-    final first = _liveSec(s, now);
-    final result = [first];
-
-    int? second;
-    if (s.followingDate != null) {
-      second = s.followingDate!.difference(now).inSeconds.clamp(0, 1 << 30);
-    } else if (s.followingSec > first) {
-      second = s.followingSec;
-    }
-    if (second != null && second > first) result.add(second);
-
-    if (s.thirdDate != null) {
-      final third =
-          s.thirdDate!.difference(now).inSeconds.clamp(0, 1 << 30);
-      if (third > (result.last)) result.add(third);
-    }
-    return result;
   }
 
   static String _destLabel(String dest) {

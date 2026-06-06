@@ -174,8 +174,12 @@ class NotificationsService {
     bool finished = false,
   }) async {
     if (!_initialized) return;
-    final mins = (etaSec / 60).ceil();
-    final body = etaSec <= 0
+    // Floor to whole minutes so the ongoing notification matches the app's
+    // `fmtEta` (etaSec ~/ 60). Using ceil read one minute higher than the bus
+    // screen for the same ETA; sub-minute now reads "Arriving now" like the
+    // app's "Arr".
+    final mins = etaSec ~/ 60;
+    final body = (etaSec <= 0 || mins == 0)
         ? 'Arriving now · $stopName'
         : 'Arrives in $mins min · $stopName';
     try {
