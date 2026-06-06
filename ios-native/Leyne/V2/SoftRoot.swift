@@ -73,7 +73,7 @@ struct SoftRoot: View {
             // keep the native slide + edge-swipe-back. Selection tint is the
             // location blue used across the redesign.
             TabView(selection: $tab) {
-                Tab("Home", systemImage: "house.fill", value: SoftTab.home) {
+                Tab("Nearby", systemImage: "location.fill", value: SoftTab.home) {
                     navStack($homeStack) {
                         SoftHomeView(
                             onTab: { tab = $0 },
@@ -140,7 +140,11 @@ struct SoftRoot: View {
 
     /// Wraps a tab's root in a NavigationStack bound to that tab's path,
     /// registering the shared route destinations. The ad-banner gutter is
-    /// applied to the root only, so pushed detail views stay full-bleed.
+    /// applied to the root *and* every pushed detail view, so the banner
+    /// stays visible on Stop / Bus pages too. Each mount point owns its own
+    /// banner host (see `BannerAdView`); the host's `window != nil` gate
+    /// means only the on-screen view ever requests an ad, so the extra
+    /// gutters stay AdMob-policy-clean.
     @ViewBuilder
     private func navStack<Root: View>(_ path: Binding<[SoftRoute]>,
                                       @ViewBuilder root: () -> Root) -> some View {
@@ -151,9 +155,11 @@ struct SoftRoot: View {
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: SoftRoute.self) { route in
                     routeView(route, path: path)
+                        .adBannerGutter()
                         .softTopEdgeBlur()
                         .toolbar(.hidden, for: .navigationBar)
-                        .toolbar(.hidden, for: .tabBar)
+                        // Tab bar stays visible on pushed Stop / Bus detail
+                        // pages so the user can switch tabs without backing out.
                         .enableSwipeBack()
                 }
         }

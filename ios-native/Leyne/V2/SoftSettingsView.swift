@@ -1,13 +1,14 @@
 // SoftSettingsView — Leyne 2.0 Settings.
 // Restyled for the 2.4.0 design language: grouped List cards, icon chips,
 // chevron-trailing nav rows, SoftToggle for binary settings.
-// All pre-existing settings (notifications, appearance, language, 24h time,
-// haptics, search radius, about) are preserved and functional.
+// Settings: manage alerts, appearance, 24h time, haptics, search radius,
+// about. Notification permission is requested once at first launch (no
+// in-app on/off toggle); the app ships English-only (no language picker).
 
 import SwiftUI
 
 /// Programmatic push targets for the settings nav rows.
-private enum SettingsDest: Hashable { case notifications, about }
+private enum SettingsDest: Hashable { case manageAlerts, about }
 
 struct SoftSettingsView: View {
     @EnvironmentObject var m: AppModel
@@ -19,7 +20,6 @@ struct SoftSettingsView: View {
 
     // Sheet state
     @State private var showAppearanceSheet = false
-    @State private var showLanguageSheet    = false
     @State private var showRadiusSheet      = false
     // Push destinations — driven programmatically so nav rows use the SAME
     // trailing chevron as the sheet rows (NavigationLink's auto-chevron sat at
@@ -30,26 +30,18 @@ struct SoftSettingsView: View {
         List {
             // ── Section 1: title + primary rows ──────────────────────────
             Section {
-                // Alerts & Notifications → NotificationsView
+                // Manage alerts → ManageAlertsView (the central alert list).
+                // Notification permission itself is requested once at first
+                // launch, so there is no separate in-app on/off toggle.
                 Button {
-                    settingsDest = .notifications
+                    settingsDest = .manageAlerts
                 } label: {
                     rowLabel(
-                        icon: "bell",
-                        title: "Alerts & notifications",
-                        detail: m.notificationsEnabled ? "On" : "Off"
+                        icon: "bell.badge",
+                        title: "Manage alerts",
+                        detail: m.alerts.isEmpty ? nil : "\(m.alerts.count)"
                     )
                     .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .listRowBackground(rowBG)
-
-                // My Favourites → switch to favourites tab
-                Button {
-                    onTab(.favourites)
-                } label: {
-                    rowLabel(icon: "star", title: "My favourites", detail: nil)
-                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .listRowBackground(rowBG)
@@ -62,20 +54,6 @@ struct SoftSettingsView: View {
                         icon: "moon",
                         title: "Appearance",
                         detail: themeLabel(m.themeMode)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .listRowBackground(rowBG)
-
-                // Language → OptionSheet (backed by m.localeCode)
-                Button {
-                    showLanguageSheet = true
-                } label: {
-                    rowLabel(
-                        icon: "globe",
-                        title: "Language",
-                        detail: languageLabel(m.localeCode)
                     )
                     .contentShape(Rectangle())
                 }
@@ -155,8 +133,8 @@ struct SoftSettingsView: View {
         .tint(t.accent)
         .navigationDestination(item: $settingsDest) { dest in
             switch dest {
-            case .notifications:
-                NotificationsView().toolbar(.hidden, for: .tabBar)
+            case .manageAlerts:
+                ManageAlertsView().toolbar(.hidden, for: .tabBar)
             case .about:
                 AboutView().toolbar(.hidden, for: .tabBar)
             }
@@ -174,21 +152,6 @@ struct SoftSettingsView: View {
                     )
                 },
                 footnote: nil
-            )
-            .environmentObject(m)
-        }
-        .sheet(isPresented: $showLanguageSheet) {
-            OptionSheet(
-                title: "Language",
-                options: ["", "en", "zh", "ms", "ta"].map { code in
-                    OptionRow(
-                        label: languageLabel(code),
-                        sub: nil,
-                        selected: (m.localeIdentifier ?? "") == (code == "" ? "" : code),
-                        pick: { m.localeCode = code }
-                    )
-                },
-                footnote: "App text is in English today — more languages are rolling out. Your choice still localises dates, pickers and system text."
             )
             .environmentObject(m)
         }
@@ -288,16 +251,6 @@ struct SoftSettingsView: View {
         case .system: return "System"
         case .light:  return "Light"
         case .dark:   return "Dark"
-        }
-    }
-
-    private func languageLabel(_ code: String) -> String {
-        switch code {
-        case "", "en": return "English"
-        case "zh":     return "中文"
-        case "ms":     return "Bahasa Melayu"
-        case "ta":     return "தமிழ்"
-        default:       return code.uppercased()
         }
     }
 

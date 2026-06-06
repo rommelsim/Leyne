@@ -25,17 +25,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../data/alert_timing.dart';
 import '../../data/bus_progress.dart';
 import '../../data/data_store.dart';
 import '../../data/geo.dart';
 import '../../data/models.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
+import '../../state/bus_alert.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
+import '../../widgets/v2/notify_confirm.dart';
+import '../../widgets/v2/notify_when_sheet.dart';
 import '../../widgets/v2/route_timeline.dart';
 import '../../widgets/v2/soft_components.dart';
-import '../notifications_screen.dart';
+import '../../widgets/v2/soft_tab_bar.dart';
+import 'manage_alerts_screen.dart';
 
 // ─── Bus position tier ──────────────────────────────────────────────────
 // `recent` is a first-class tier (mirrors iOS BusTier.recent):
@@ -66,6 +71,8 @@ class SoftBusScreen extends StatefulWidget {
     required this.svc,
     required this.onBack,
     this.fullRoute = false,
+    this.onTab,
+    this.tabSelection,
   });
   final String stopCode;
   final String svc;
@@ -75,6 +82,12 @@ class SoftBusScreen extends StatefulWidget {
   /// route timeline shows the WHOLE route (anchored at the service origin)
   /// instead of the narrow approach window used when arriving at a real stop.
   final bool fullRoute;
+
+  /// When provided, the tab bar (with its ad banner) stays visible on this
+  /// pushed detail page. [tabSelection] is the tab it was opened from. Null for
+  /// deep-link contexts.
+  final ValueChanged<SoftTab>? onTab;
+  final SoftTab? tabSelection;
 
   @override
   State<SoftBusScreen> createState() => _SoftBusScreenState();
@@ -87,12 +100,22 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   ServiceRoute? _serviceRoute;
   int _dirIndex = 0;
 
-  // ── Alight pick ─────────────────────────────────────────────────────
+  // ── Destination pick ────────────────────────────────────────────────
+  // The stop highlighted on the timeline as the chosen destination — backed
+  // by the destination BusAlert for this bus (set from this stop's context).
   String? get _alightId {
-    final a = AppModel.shared.activeAlight;
-    if (a == null || a.busNo != widget.svc) return null;
-    return a.stopCode;
+    final a = AppModel.shared.alertFor(
+      kind: AlertKind.destination,
+      busNo: widget.svc,
+      stopCode: _destAlertStopCode ?? '',
+    );
+    return a?.stopCode;
   }
+
+  // The stopCode of the destination alert currently set for this bus from
+  // this view (so the timeline can highlight it). Tracked locally because the
+  // alert id keys on the dest stopCode, not the boarding stop.
+  String? _destAlertStopCode;
 
   // ── Map controller ──────────────────────────────────────────────────
   final MapController _mapCtrl = MapController();
@@ -126,6 +149,16 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   @override
   void initState() {
     super.initState();
+    // Restore the highlight if a destination alert for this bus already exists
+    // (set earlier from this stop). Match on the boarding stop this view owns.
+    for (final a in AppModel.shared.alerts) {
+      if (a.kind == AlertKind.destination &&
+          a.busNo == widget.svc &&
+          a.boardStopCode == widget.stopCode) {
+        _destAlertStopCode = a.stopCode;
+        break;
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DataStore.shared.ensureArrivals(widget.stopCode);
       _loadRoute();
@@ -176,29 +209,94 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     return sr.directions[_dirIndex];
   }
 
-  // ── Alight scheduling ────────────────────────────────────────────────
+  // ── Destination alert scheduling ─────────────────────────────────────
+  // Tapping a timeline stop toggles a destination alert for that stop. A new
+  // pick opens the "Notify me when" sheet (lead choice) then schedules at the
+  // estimated arrival; tapping the current pick removes it.
   Future<void> _onAlightChanged(String? code) async {
     final route = _route;
     if (route == null) return;
-    if (code == null) {
-      await AppModel.shared.clearActiveAlight();
+    // Toggle off: tapping the already-selected destination removes the alert.
+    if (code == null || code == _destAlertStopCode) {
+      final prev = _destAlertStopCode;
+      if (prev != null) {
+        await AppModel.shared.removeAlertsFor(
+          kind: AlertKind.destination,
+          busNo: widget.svc,
+          stopCode: prev,
+        );
+      }
+      _destAlertStopCode = null;
       if (mounted) setState(() {});
       return;
     }
-    final alightIdx = route.stops.indexWhere((s) => s.code == code);
-    if (alightIdx < 0) return;
-    final stop = route.stops[alightIdx];
-    final base = route.busIndex ?? route.youIndex;
-    final stopsToAlight = (alightIdx - base).clamp(0, 1 << 30);
-    final stopsToWait = (stopsToAlight - 2).clamp(0, 1 << 30);
-    final fireAt = DateTime.now().add(Duration(seconds: stopsToWait * 90));
-    await AppModel.shared.setActiveAlight(
+    await _openDestinationSheet(destCode: code);
+  }
+
+  /// Open the destination "Notify me when" sheet for [destCode] (defaults to
+  /// the route terminus — the last stop of the current direction). On Done,
+  /// compute the estimated fire time and create the destination alert.
+  Future<void> _openDestinationSheet({String? destCode}) async {
+    final route = _route;
+    if (route == null || route.stops.isEmpty) return;
+    final destIdx = destCode == null
+        ? route.stops.length - 1 // terminus
+        : route.stops.indexWhere((s) => s.code == destCode);
+    if (destIdx < 0) return;
+    final destStop = route.stops[destIdx];
+    final dest = _liveService()?.dest ?? '';
+
+    final result = await showNotifyWhenSheet(
+      context,
+      kind: AlertKind.destination,
       busNo: widget.svc,
-      stopCode: code,
-      stopName: stop.name,
-      fireAt: fireAt,
+      stopName: destStop.name,
+      dest: dest,
     );
-    if (mounted) setState(() {});
+    if (result == null || !mounted) return;
+    final lead = result.lead;
+    // Destination alerts hide the Live Activity (ongoing-tracker) row, so
+    // result.liveActivity is always false here — nothing extra to start.
+
+    // Estimate the bus's arrival at the chosen destination: the live ETA at
+    // YOUR boarding stop, then ~90 s per segment from there to the dest.
+    final boardIndex = route.youIndex.clamp(0, route.stops.length - 1);
+    final live = _liveService();
+    final arrivalAtBoard = live?.arrivalDate ??
+        DateTime.now().add(Duration(seconds: live?.etaSec ?? 0));
+    final fireAt = AlertTiming.destinationFireAt(
+      arrivalAtBoard: arrivalAtBoard,
+      boardIndex: boardIndex,
+      destIndex: destIdx,
+      leadMinutes: lead,
+    );
+
+    await AppModel.shared.upsertAlert(
+      BusAlert(
+        kind: AlertKind.destination,
+        busNo: widget.svc,
+        stopCode: destStop.code,
+        stopName: destStop.name,
+        dest: dest,
+        boardStopCode: widget.stopCode,
+        leadMinutes: lead,
+      ),
+      destinationFireAt: fireAt,
+    );
+    _destAlertStopCode = destStop.code;
+    if (!mounted) return;
+    setState(() {});
+    await showNotifyConfirm(
+      context,
+      kind: AlertKind.destination,
+      busNo: widget.svc,
+      stopCode: destStop.code,
+      stopName: destStop.name,
+      leadMinutes: lead,
+      onManageAll: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
+      ),
+    );
   }
 
   // ── Bus position resolution ──────────────────────────────────────────
@@ -554,6 +652,11 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: context.t.bg,
+      bottomNavigationBar:
+          (widget.onTab != null && widget.tabSelection != null)
+              ? SoftBottomBar(
+                  selection: widget.tabSelection!, onSelect: widget.onTab!)
+              : null,
       body: ListenableBuilder(
         listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
         builder: (context, _) {
@@ -740,10 +843,12 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     Service? live,
     List<String> allNos,
   ) {
-    final notifyOn = AppModel.shared.isTracked(
-      code: widget.stopCode,
-      busNo: widget.svc,
-    );
+    final notifyOn = AppModel.shared.alertFor(
+          kind: AlertKind.arrival,
+          busNo: widget.svc,
+          stopCode: widget.stopCode,
+        ) !=
+        null;
     final ongoingOn =
         live != null &&
         AppModel.shared.isOngoingActive(
@@ -817,12 +922,23 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     ).then((value) {
       if (!mounted) return;
       if (value == 'notify') {
-        AppModel.shared.toggleTracked(
-          code: widget.stopCode,
-          busNo: widget.svc,
-          allNos: allNos,
-        );
-        AppModel.shared.rescheduleIfNeeded();
+        final m = AppModel.shared;
+        final existing = m.alertFor(
+            kind: AlertKind.arrival,
+            busNo: widget.svc,
+            stopCode: widget.stopCode);
+        if (existing != null) {
+          m.removeAlert(existing.id);
+        } else {
+          m.upsertAlert(BusAlert(
+            kind: AlertKind.arrival,
+            busNo: widget.svc,
+            stopCode: widget.stopCode,
+            stopName: DataStore.shared.stopName(widget.stopCode),
+            dest: live?.dest ?? '',
+            leadMinutes: AlertTiming.defaultLead(AlertKind.arrival),
+          ));
+        }
       } else if (value == 'ongoing' && live != null) {
         AppModel.shared.toggleOngoing(
           busNo: widget.svc,
@@ -1629,83 +1745,201 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   // ── 5. Alerts section ────────────────────────────────────────────────
   // Notify button + ongoing-tracking card, placed below route progress.
   Widget _buildAlertsSection(BuildContext context, LyneTheme t, Service? live) {
-    final st = DataStore.shared.arrivals[widget.stopCode];
-    final allNos = st != null && st.kind == ArrivalStateKind.loaded
-        ? st.services.map((s) => s.no).toList()
-        : <String>[];
+    // Active destination alert for this bus set from this view, if any.
+    final destAlert = _destAlertStopCode == null
+        ? null
+        : AppModel.shared.alertFor(
+            kind: AlertKind.destination,
+            busNo: widget.svc,
+            stopCode: _destAlertStopCode!,
+          );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Eyebrow('Alerts'),
         const SizedBox(height: 8),
-        _notifyButton(context, t, allNos),
-        if (live != null) ...[
-          const SizedBox(height: 12),
-          _ongoingCard(context, t, live),
+        _arrivalAlertCard(context, t, live),
+        const SizedBox(height: 12),
+        if (destAlert != null)
+          _destAlertRow(context, t, destAlert)
+        else
+          _notifyDestinationButton(context, t),
+      ],
+    );
+  }
+
+  // ── Notify (destination) button ──────────────────────────────────────
+  // Default destination = route terminus; "View full route" lets the user
+  // pick any stop via the timeline above (which routes through _onAlightChanged).
+  Widget _notifyDestinationButton(BuildContext context, LyneTheme t) {
+    final stopsCount = _route?.stops.length ?? 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(LyneRadius.full),
+          onTap: () => _openDestinationSheet(), // terminus default
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: t.liveBg,
+              borderRadius: BorderRadius.circular(LyneRadius.full),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.flag_rounded, size: 18, color: t.accent),
+                const SizedBox(width: 8),
+                Text(
+                  'Notify me at my destination',
+                  style:
+                      t.sans(14, weight: FontWeight.w600, color: t.accent),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (stopsCount > 0) ...[
+          const SizedBox(height: 6),
+          Center(
+            child: Text(
+              'Default: route terminus · tap a stop above to pick any of '
+              '$stopsCount stops',
+              style: t.sans(11, color: t.dim),
+              textAlign: TextAlign.center,
+            ),
+          ),
         ],
       ],
     );
   }
 
-  // ── Notify button ────────────────────────────────────────────────────
-  Widget _notifyButton(BuildContext context, LyneTheme t, List<String> allNos) {
-    final on = AppModel.shared.isTracked(
-      code: widget.stopCode,
-      busNo: widget.svc,
-    );
-    return InkWell(
-      borderRadius: BorderRadius.circular(LyneRadius.full),
-      onTap: () async {
-        AppModel.shared.toggleTracked(
-          code: widget.stopCode,
-          busNo: widget.svc,
-          allNos: allNos,
-        );
-        await AppModel.shared.rescheduleIfNeeded();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 13),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: on ? t.accent : t.liveBg,
-          borderRadius: BorderRadius.circular(LyneRadius.full),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              on
-                  ? Icons.notifications_active_rounded
-                  : Icons.notifications_none_rounded,
-              size: 18,
-              color: on ? t.onAccent : t.accent,
+  /// Inline active destination-alert row: `<dest> (Destination)` + lead, with
+  /// a switch that removes the alert.
+  Widget _destAlertRow(BuildContext context, LyneTheme t, BusAlert a) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: t.soonBg,
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.flag_rounded, size: 18, color: t.soon),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${a.stopName} (Destination)',
+                  style: t.sans(13, weight: FontWeight.w600, color: t.fg),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  AlertTiming.leadRowSubtitle(a.leadMinutes),
+                  style: t.sans(12, color: t.dim),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Text(
-              on ? 'Alert on — tap to cancel' : 'Notify me before it arrives',
-              style: t.sans(
-                14,
-                weight: FontWeight.w600,
-                color: on ? t.onAccent : t.accent,
-              ),
-            ),
-          ],
-        ),
+          ),
+          Switch(
+            value: true,
+            activeThumbColor: t.soon,
+            onChanged: (v) async {
+              if (!v) {
+                await AppModel.shared.removeAlert(a.id);
+                _destAlertStopCode = null;
+                if (mounted) setState(() {});
+              }
+            },
+          ),
+        ],
       ),
     );
   }
 
-  // ── Ongoing tracking card ────────────────────────────────────────────
-  Widget _ongoingCard(BuildContext context, LyneTheme t, Service live) {
+  /// Set up BOTH: create the arrival alert, then start the ongoing tracker as a
+  /// best-effort companion (only when there's a live service + notifications are
+  /// on — the notification alone still works otherwise). Then reuse the shared
+  /// confirmation sheet.
+  Future<void> _setUpArrivalAlert(Service? live) async {
     final m = AppModel.shared;
+    await m.upsertAlert(BusAlert(
+      kind: AlertKind.arrival,
+      busNo: widget.svc,
+      stopCode: widget.stopCode,
+      stopName: DataStore.shared.stopName(widget.stopCode),
+      dest: live?.dest ?? '',
+      boardStopCode: widget.stopCode,
+      leadMinutes: AlertTiming.defaultLead(AlertKind.arrival),
+    ));
+    if (live != null &&
+        m.notificationsEnabled &&
+        !m.isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode)) {
+      await m.toggleOngoing(
+        busNo: widget.svc,
+        stopCode: widget.stopCode,
+        stopName: DataStore.shared.stopName(widget.stopCode),
+      );
+    }
+    if (!mounted) return;
+    setState(() {});
+    await showNotifyConfirm(
+      context,
+      kind: AlertKind.arrival,
+      busNo: widget.svc,
+      stopCode: widget.stopCode,
+      stopName: DataStore.shared.stopName(widget.stopCode),
+      leadMinutes: AlertTiming.defaultLead(AlertKind.arrival),
+      onManageAll: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
+      ),
+    );
+  }
 
-    if (!m.notificationsEnabled) {
-      return Container(
+  /// Cancel BOTH: remove the arrival alert + stop the ongoing tracker if active.
+  Future<void> _cancelArrivalAlert(BusAlert existing) async {
+    final m = AppModel.shared;
+    await m.removeAlert(existing.id);
+    if (m.isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode)) {
+      await m.toggleOngoing(
+        busNo: widget.svc,
+        stopCode: widget.stopCode,
+        stopName: DataStore.shared.stopName(widget.stopCode),
+      );
+    }
+    if (mounted) setState(() {});
+  }
+
+  // ── Combined arrival alert card ──────────────────────────────────────
+  // ONE "Set up" affordance that does BOTH: creates the arrival BusAlert at the
+  // boarding stop AND starts the ongoing tracker (the Android analog of iOS's
+  // lock-screen Live Activity — "follow on your lock screen"). "Active" keys off
+  // the arrival alert; tapping while active cancels both. The ongoing tracker is
+  // a best-effort companion — only started when there's a live service and
+  // notifications are enabled; the notification alone still works otherwise.
+  Widget _arrivalAlertCard(BuildContext context, LyneTheme t, Service? live) {
+    final m = AppModel.shared;
+    final existing = m.alertFor(
+      kind: AlertKind.arrival,
+      busNo: widget.svc,
+      stopCode: widget.stopCode,
+    );
+    final on = existing != null;
+
+    final fg = on ? t.onAccent : t.contrastFg;
+    return InkWell(
+      borderRadius: BorderRadius.circular(LyneRadius.lg),
+      onTap: () => on ? _cancelArrivalAlert(existing) : _setUpArrivalAlert(live),
+      child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(LyneRadius.md),
+          color: on ? t.accent : t.contrast,
+          borderRadius: BorderRadius.circular(LyneRadius.lg),
         ),
         child: Row(
           children: [
@@ -1714,12 +1948,14 @@ class _SoftBusScreenState extends State<SoftBusScreen>
               height: 40,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: t.liveBg,
-                borderRadius: BorderRadius.circular(12),
+                color: fg.withValues(alpha: on ? 0.25 : 0.12),
+                shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.notifications_off_outlined,
-                color: t.dim,
+                on
+                    ? Icons.notifications_active_rounded
+                    : Icons.notifications_none_rounded,
+                color: fg,
                 size: 20,
               ),
             ),
@@ -1729,84 +1965,44 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Track in your status bar',
-                    style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+                    on ? 'Alert on' : 'Notify me before it arrives',
+                    style: t.sans(14, weight: FontWeight.w700, color: fg),
                   ),
-                  Text(
-                    'Enable notifications to track Bus ${widget.svc} in your status bar.',
-                    style: t.sans(12, color: t.dim),
-                  ),
-                ],
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-              ),
-              child: Text(
-                'Enable',
-                style: t.sans(13, weight: FontWeight.w600, color: t.accent),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final on = m.isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode);
-    return InkWell(
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      onTap: () => m.toggleOngoing(
-        busNo: widget.svc,
-        stopCode: widget.stopCode,
-        stopName: DataStore.shared.stopName(widget.stopCode),
-      ),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(LyneRadius.md),
-          border: on
-              ? Border.all(color: t.accent.withValues(alpha: 0.4))
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: on ? t.accent : t.liveBg,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                on ? Icons.stop_rounded : Icons.notifications_active_outlined,
-                color: on ? t.onAccent : t.accent,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    on ? 'Tracking in notifications' : 'Track in notifications',
-                    style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                  ),
+                  const SizedBox(height: 2),
                   Text(
                     on
-                        ? 'In your status bar · updates while Leyne is open'
-                        : 'Follow Bus ${widget.svc} — updates while the app is open',
-                    style: t.sans(12, color: t.dim),
+                        ? 'Notifying you · on your lock screen'
+                        : 'Get a notification and follow this bus on your '
+                            'lock screen.',
+                    style: t.sans(12, color: fg.withValues(alpha: 0.7)),
                   ),
                 ],
               ),
             ),
-            Icon(
-              on ? Icons.check_circle_rounded : Icons.chevron_right,
-              color: on ? t.accent : t.dim,
-            ),
+            const SizedBox(width: 8),
+            if (on)
+              Icon(Icons.check_circle_rounded, color: fg, size: 22)
+            else
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: t.soon,
+                  borderRadius: BorderRadius.circular(LyneRadius.full),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Set up',
+                      style:
+                          t.sans(13, weight: FontWeight.w700, color: t.contrast),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right, color: t.contrast, size: 16),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

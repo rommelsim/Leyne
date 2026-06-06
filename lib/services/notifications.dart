@@ -23,8 +23,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../data/alert_timing.dart';
+import '../data/data_store.dart' show ArrivalState, ArrivalStateKind;
 import '../data/models.dart';
 import '../state/app_model.dart' show Pin;
+import '../state/bus_alert.dart';
 
 /// Resolved status of the Android `POST_NOTIFICATIONS` permission. Drives
 /// the warning row + Open Settings shortcut on NotificationsScreen.
@@ -288,6 +291,164 @@ class NotificationsService {
   // prior alight request before adding the new one.
 
   static const String _alightIdPrefix = 'alight.';
+
+  // ─── Configurable BusAlert scheduling (notifications redesign) ─────────
+  //
+  // The single source of truth is AppModel._alerts. `scheduleAlerts` re-arms
+  // every `arrival` alert from the live ETA on each coarse tick, and sweeps
+  // any of our pending requests whose alert no longer exists. `destination`
+  // alerts carry a precomputed absolute fire time (no per-stop LTA times to
+  // recompute from), so they're scheduled once via [scheduleDestinationAlert]
+  // when the alert is upserted and are NOT re-armed here — the sweep below
+  // preserves them.
+  //
+  // Payload identifiers reuse the prefixes so the existing _idPrefix /
+  // _alightIdPrefix orphan sweeps stay correct:
+  //   arrival     → `arrival.<stopCode>.<busNo>`   (= old per-service id)
+  //   destination → `alight.<busNo>.<stopCode>`    (= old alight id shape)
+
+  static int _notifIdFor(String identifier) => identifier.hashCode & 0x7fffffff;
+
+  static String _arrivalIdentifier(BusAlert a) =>
+      '$_idPrefix${a.stopCode}.${a.busNo}';
+
+  static String _destinationIdentifier(BusAlert a) =>
+      '$_alightIdPrefix${a.busNo}.${a.stopCode}';
+
+  /// Re-arm all `arrival` alerts from the live arrivals store, and sweep any
+  /// of our pending requests no longer backed by an alert. `destination`
+  /// alerts already pending (scheduled at upsert time) are left intact.
+  Future<void> scheduleAlerts(
+    List<BusAlert> alerts,
+    Map<String, ArrivalState> arrivals,
+  ) async {
+    if (!_initialized) return;
+    final now = DateTime.now();
+
+    // The identifiers we want to keep alive: every destination alert's id +
+    // every arrival alert whose live ETA still places its fire time ahead.
+    final keepIds = <String>{};
+
+    // (Re)schedule arrival alerts off the live ETA.
+    for (final a in alerts) {
+      if (a.kind != AlertKind.arrival) {
+        keepIds.add(_destinationIdentifier(a));
+        continue;
+      }
+      final arrivalDate = _liveArrivalDate(arrivals, a.stopCode, a.busNo);
+      if (arrivalDate == null) continue;
+      final fireAt = AlertTiming.arrivalFireAt(arrivalDate, a.leadMinutes);
+      if (!fireAt.isAfter(now.add(const Duration(seconds: 1)))) continue;
+      final identifier = _arrivalIdentifier(a);
+      keepIds.add(identifier);
+      await _zonedSchedule(
+        identifier: identifier,
+        fireAt: fireAt,
+        title: AlertTiming.arrivalTitle(a.busNo),
+        body: AlertTiming.arrivalBody(a.stopName, a.leadMinutes),
+        groupKey: 'leyne.arrivals.${a.stopCode}',
+      );
+    }
+
+    // Orphan sweep — cancel any pending request we own (arrival OR destination
+    // payload prefix) that isn't in keepIds.
+    final pending = await _plugin.pendingNotificationRequests();
+    for (final r in pending) {
+      final payload = r.payload;
+      if (payload == null) continue;
+      final owned =
+          payload.startsWith(_idPrefix) || payload.startsWith(_alightIdPrefix);
+      if (!owned) continue;
+      if (!keepIds.contains(payload)) {
+        await _plugin.cancel(r.id);
+      }
+    }
+  }
+
+  /// Schedule a single `destination` alert at the precomputed [fireAt] (the
+  /// Bus view computes it via AlertTiming.destinationFireAt at set time).
+  /// Replaces any earlier request with the same identifier. Past/near-now
+  /// fire times are nudged ~1 s into the future so they still deliver.
+  Future<void> scheduleDestinationAlert(BusAlert a, DateTime fireAt) async {
+    if (!_initialized) return;
+    await _zonedSchedule(
+      identifier: _destinationIdentifier(a),
+      fireAt: fireAt,
+      title: AlertTiming.destinationTitle(),
+      body: AlertTiming.destinationBody(a.stopName, a.leadMinutes),
+      groupKey: 'leyne.destination',
+    );
+  }
+
+  /// Cancel the pending request backing [a] (used when an alert is removed).
+  Future<void> cancelAlert(BusAlert a) async {
+    if (!_initialized) return;
+    final identifier = a.kind == AlertKind.arrival
+        ? _arrivalIdentifier(a)
+        : _destinationIdentifier(a);
+    await _plugin.cancel(_notifIdFor(identifier));
+  }
+
+  /// Live arrival time for [busNo] at [stopCode] from the arrivals store, or
+  /// null when the stop isn't loaded or the service isn't currently arriving.
+  DateTime? _liveArrivalDate(
+    Map<String, ArrivalState> arrivals,
+    String stopCode,
+    String busNo,
+  ) {
+    final state = arrivals[stopCode];
+    if (state == null || state.kind != ArrivalStateKind.loaded) return null;
+    for (final s in state.services) {
+      if (s.no == busNo) return s.arrivalDate;
+    }
+    return null;
+  }
+
+  /// Shared zonedSchedule body for the configurable alerts. Idempotent by
+  /// identifier (same id → same notif id → replaces).
+  Future<void> _zonedSchedule({
+    required String identifier,
+    required DateTime fireAt,
+    required String title,
+    required String body,
+    required String groupKey,
+  }) async {
+    final now = DateTime.now();
+    final effective = fireAt.isAfter(now.add(const Duration(seconds: 1)))
+        ? fireAt
+        : now.add(const Duration(seconds: 1));
+    final tzFire = tz.TZDateTime.from(effective, tz.local);
+    try {
+      await _plugin.zonedSchedule(
+        _notifIdFor(identifier),
+        title,
+        body,
+        tzFire,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            _channelName,
+            channelDescription: _channelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+            category: AndroidNotificationCategory.reminder,
+            groupKey: groupKey,
+            ticker: title,
+          ),
+          iOS: const DarwinNotificationDetails(
+            interruptionLevel: InterruptionLevel.timeSensitive,
+          ),
+        ),
+        androidScheduleMode: await _scheduleMode(),
+        payload: identifier,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        // ignore: avoid_print
+        print('[notif] schedule $identifier failed: $e');
+      }
+    }
+  }
 
   /// Schedules a one-shot heads-up at `fireAt` so the user knows the bus
   /// is approaching their alight stop. Replaces any prior alight alert.

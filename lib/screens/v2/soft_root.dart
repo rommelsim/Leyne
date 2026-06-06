@@ -53,6 +53,8 @@ class _SoftRootState extends State<SoftRoot> {
         svc: svc,
         fullRoute: fullRoute,
         onBack: () => _navKey.currentState?.pop(),
+        onTab: _handleTab,
+        tabSelection: _tab,
       ),
     ));
   }
@@ -63,12 +65,16 @@ class _SoftRootState extends State<SoftRoot> {
         stopCode: code,
         onBack: () => _navKey.currentState?.pop(),
         onOpenBus: (svc) => _pushBus(code, svc),
+        onTab: _handleTab,
+        tabSelection: _tab,
         onSeeAll: () => _navKey.currentState?.push(MaterialPageRoute(
           builder: (_) => SoftStopScreen(
             stopCode: code,
             showAll: true,
             onBack: () => _navKey.currentState?.pop(),
             onOpenBus: (svc) => _pushBus(code, svc),
+            onTab: _handleTab,
+            tabSelection: _tab,
             onSeeAll: () {},
           ),
         )),

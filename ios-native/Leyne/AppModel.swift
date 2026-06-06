@@ -84,6 +84,32 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.4.2": WhatsNewEntry(
+        headline: "Alerts that fit your trip.",
+        items: [
+            WhatsNewItem(
+                icon: "bell.fill",
+                title: "Tell me before it arrives",
+                body: "Get a heads-up before your bus reaches your stop — or "
+                    + "before it reaches your destination — with the lead time "
+                    + "you choose. Find and manage every alert in one place."
+            ),
+            WhatsNewItem(
+                icon: "location.fill",
+                title: "Tracking that lines up",
+                body: "The bus on the map now matches the stops-away and "
+                    + "distance you read, and route progress follows the line "
+                    + "all the way to its destination."
+            ),
+            WhatsNewItem(
+                icon: "checkmark.seal",
+                title: "Quicker saving and refresh",
+                body: "Tap the pin to save a stop or the bus to save a bus, "
+                    + "pull down to refresh while tracking a bus, plus polish "
+                    + "and fixes."
+            ),
+        ]
+    ),
     "2.4.1": WhatsNewEntry(
         headline: "Clearer arrivals.",
         items: [
@@ -417,6 +443,15 @@ final class AppModel: ObservableObject {
     // Persisted recent searches
     @Published var recents: [String] = []
 
+    // ─── Notification alerts (the redesign's single source of truth) ───
+    // Both alert kinds — "notify me when my bus reaches MY STOP" (arrival)
+    // and "…MY DESTINATION" (destination) — live here, persisted as JSON.
+    // The old `Pin.tracked`-driven arrival path and `activeAlight` destination
+    // path are migrated into this list on first load. Alerts are managed via
+    // `upsertAlert`/`removeAlert` and are independent of pin/`tracked` card
+    // visibility.
+    @Published var alerts: [BusAlert] = []
+
     @Published var tick = 0
     private var timer: AnyCancellable?
     private let ds = DataStore.shared
@@ -425,6 +460,7 @@ final class AppModel: ObservableObject {
         loadPins()
         loadFavServices()
         loadRecents()
+        loadAlerts()
         timer = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
@@ -561,6 +597,119 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(recents, forKey: "leyne.recents")
     }
 
+    // ─── Notification alerts: persistence + migration ─────
+    private static let alertsKey = "leyne.alerts"
+
+    /// Loads persisted alerts. On the very first run after this feature
+    /// ships (`leyne.alerts` absent) it migrates the pre-existing alert
+    /// data — each `Pin.tracked` service becomes an arrival alert, and the
+    /// active alight ride becomes a destination alert — so users keep their
+    /// arrangements without re-setting them. Best-effort: anything that
+    /// can't be resolved is simply skipped.
+    private func loadAlerts() {
+        if let d = UserDefaults.standard.data(forKey: Self.alertsKey),
+           let a = try? JSONDecoder().decode([BusAlert].self, from: d) {
+            alerts = a
+            return
+        }
+        migrateLegacyAlerts()
+    }
+
+    private func persistAlerts() {
+        if let d = try? JSONEncoder().encode(alerts) {
+            UserDefaults.standard.set(d, forKey: Self.alertsKey)
+        }
+    }
+
+    /// One-time migration from the legacy tracked-service + alight model.
+    private func migrateLegacyAlerts() {
+        var migrated: [BusAlert] = []
+        // Tracked services → arrival alerts (lead 1, the old behaviour).
+        for pin in pins {
+            let name = ds.stopName(pin.code)
+            let nos: [String] = pin.tracked
+                ?? ds.servicesFor(pin.code).map(\.no)        // nil = all
+            for no in nos {
+                let dest = ds.servicesFor(pin.code).first { $0.no == no }?.dest ?? ""
+                migrated.append(BusAlert(
+                    kind: .arrival, busNo: no, stopCode: pin.code,
+                    stopName: name.isEmpty ? pin.code : name, dest: dest,
+                    boardStopCode: pin.code, leadMinutes: 1))
+            }
+        }
+        // Active alight ride → destination alert (lead 1).
+        if let al = activeAlight {
+            migrated.append(BusAlert(
+                kind: .destination, busNo: al.busNo, stopCode: al.stopCode,
+                stopName: al.stopName, dest: "",
+                boardStopCode: al.stopCode, leadMinutes: 1))
+        }
+        alerts = migrated
+        persistAlerts()
+    }
+
+    // ─── Notification alerts: CRUD ────────────────────────
+
+    /// The alert matching this (kind, bus, stop), or nil.
+    func alert(kind: AlertKind, busNo: String, stopCode: String) -> BusAlert? {
+        alerts.first { $0.kind == kind && $0.busNo == busNo && $0.stopCode == stopCode }
+    }
+
+    /// Adds the alert, or replaces an existing one with the same id. Persists
+    /// and re-arms notifications. For destination alerts, pass a `fireAt` so
+    /// the one-shot can be scheduled at the absolute computed moment (the
+    /// caller — SoftBusView — has the boarding ETA to compute it).
+    func upsertAlert(_ alert: BusAlert, fireAt: Date? = nil) {
+        if let i = alerts.firstIndex(where: { $0.id == alert.id }) {
+            alerts[i] = alert
+        } else {
+            alerts.append(alert)
+        }
+        persistAlerts()
+        if alert.kind == .destination, let fireAt {
+            NotificationsManager.shared.scheduleDestinationAlert(alert, fireAt: fireAt)
+        }
+        rearmAlertNotifications()
+    }
+
+    /// Removes the alert with this id (and cancels its pending notification).
+    func removeAlert(id: String) {
+        guard let i = alerts.firstIndex(where: { $0.id == id }) else { return }
+        let removed = alerts.remove(at: i)
+        persistAlerts()
+        NotificationsManager.shared.cancelAlert(removed)
+        rearmAlertNotifications()
+    }
+
+    /// Removes the alert matching (kind, bus, stop), if any.
+    func removeAlerts(kind: AlertKind, busNo: String, stopCode: String) {
+        if let a = alert(kind: kind, busNo: busNo, stopCode: stopCode) {
+            removeAlert(id: a.id)
+        }
+    }
+
+    /// Re-computes the arrival schedule from the live data, leaving
+    /// destination one-shots (already scheduled at their absolute fire time)
+    /// untouched. Called after any alert mutation and on the 10 s tick.
+    private func rearmAlertNotifications() {
+        guard notificationsEnabled else { return }
+        NotificationsManager.shared.scheduleArrivalAlerts(
+            alerts: alerts, cards: alertSchedulingCards)
+    }
+
+    /// Live cards covering every stop an arrival alert references, so the
+    /// scheduler can read each bus's `arrivalDate`. Pinned stops are already
+    /// kept fresh by the tick; alert stops that aren't pinned still resolve
+    /// from whatever arrivals the DataStore holds.
+    private var alertSchedulingCards: [CardModel] {
+        let codes = Set(alerts.filter { $0.kind == .arrival }.map(\.stopCode))
+        return codes.map { code in
+            CardModel(id: code, label: ds.stopName(code), stopName: ds.stopName(code),
+                      stopCode: code, walkMin: 0,
+                      services: liveServices(code: code, tracked: []))
+        }
+    }
+
     func finishOnboarding() {
         onboarded = true
         showOnboarding = false
@@ -610,12 +759,15 @@ final class AppModel: ObservableObject {
         if let c = openCard?.stopCode { codes.insert(c) }
         for c in codes { ds.ensureArrivals(stop: c) }
 
+        // Keep every alert's stop fresh (not just pinned ones) so the
+        // scheduler reads current arrivalDates for un-pinned alert stops.
+        for a in alerts where a.kind == .arrival { ds.ensureArrivals(stop: a.stopCode) }
+
         // Reschedule arrival-alert notifications every ~10 s — LTA's
         // arrivalDate values drift, and a coarse cadence is enough since
-        // notification fire times are absolute (set via UNCalendarTrigger).
+        // notification fire times are absolute (set via UNTimeIntervalTrigger).
         if notificationsEnabled, tick % 10 == 0 {
-            NotificationsManager.shared.scheduleArrivalAlerts(
-                pins: pins, cards: allPinnedCards)
+            rearmAlertNotifications()
         }
 
         // Pull MRT/LRT disruption alerts on a slow cadence. The DataStore
@@ -634,8 +786,7 @@ final class AppModel: ObservableObject {
             notificationAuth = await NotificationsManager.shared.currentStatus()
             if granted {
                 notificationsEnabled = true
-                NotificationsManager.shared.scheduleArrivalAlerts(
-                    pins: pins, cards: allPinnedCards)
+                rearmAlertNotifications()
             } else {
                 notificationsEnabled = false
             }
@@ -812,7 +963,9 @@ final class AppModel: ObservableObject {
     }
     func renameCard(_ id: String, _ newLabel: String) { rename(code: id, to: newLabel) }
 
-    /// True if `busNo` is shown on Home. Not pinned → nothing tracked.
+    /// True iff this bus is shown on the stop's Home card (pinned ⟺ ≥1 bus;
+    /// nil `tracked` = all shown). This is card *visibility*, independent of
+    /// notification alerts — those live in the `alerts` list.
     func isTracked(code: String, busNo: String) -> Bool {
         guard let p = pin(forCode: code) else { return false }
         guard let tr = p.tracked else { return true }      // nil = all
@@ -826,8 +979,10 @@ final class AppModel: ObservableObject {
         return Set(allNos).subtracting(tr)
     }
 
-    /// Toggle a service. Checking on an unpinned stop pins it; unchecking
-    /// the last tracked bus unpins it (pinned ⟺ ≥1 bus).
+    /// Toggle a service on the stop's Home card. Checking on an unpinned stop
+    /// pins it; unchecking the last tracked bus unpins it (pinned ⟺ ≥1 bus).
+    /// Card visibility only — notification alerts are managed separately via
+    /// `upsertAlert`/`removeAlert`.
     func toggleTracked(code: String, busNo: String, allNos: [String] = []) {
         guard let i = pins.firstIndex(where: { $0.code == code }) else {
             // Not pinned → checking a bus pins the stop tracking just it.
@@ -1107,11 +1262,18 @@ final class NotificationsManager {
     private let headsUpPrefix  = "headsup."
     private var arrivalPrefixes: [String] { [imminentPrefix, headsUpPrefix] }
 
+    /// Destination ("reach my stop") one-shots. Keyed off the BusAlert id.
+    private let destinationPrefix = "destination."
+
     private func imminentId(stopCode: String, busNo: String) -> String {
         "\(imminentPrefix)\(stopCode).\(busNo)"
     }
     private func headsUpId(stopCode: String, busNo: String) -> String {
         "\(headsUpPrefix)\(stopCode).\(busNo)"
+    }
+    /// Stable per-alert request id. Slashes/@ in the id are fine for UN.
+    private func destinationId(_ alert: BusAlert) -> String {
+        "\(destinationPrefix)\(alert.busNo).\(alert.stopCode)"
     }
 
     func currentStatus() async -> UNAuthorizationStatus {
@@ -1228,60 +1390,47 @@ final class NotificationsManager {
         }
     }
 
-    /// Recomputes the desired schedule given the live cards and tracked
-    /// services. Idempotent: replaces requests with the same id and cancels
-    /// any pending arrival alerts that no longer have a tracked service.
-    func scheduleArrivalAlerts(pins: [Pin], cards: [CardModel]) {
+    /// Recomputes the desired ARRIVAL schedule from the user's alerts and the
+    /// live cards. Each arrival alert fires `lead` minutes before its bus's
+    /// live ETA at its stop. Idempotent: replaces requests with the same id
+    /// and cancels any pending arrival alerts whose alert no longer exists.
+    /// Destination one-shots are left alone (scheduled separately, at an
+    /// absolute moment, by `scheduleDestinationAlert`).
+    func scheduleArrivalAlerts(alerts: [BusAlert], cards: [CardModel]) {
         var desired: [(id: String, content: UNNotificationContent, trigger: UNNotificationTrigger)] = []
         let now = Date()
 
-        for card in cards {
-            guard let pin = pins.first(where: { $0.code == card.stopCode }) else { continue }
-            let tracked: Set<String>? = pin.tracked.map(Set.init)
-            let stopLabel = card.stopName.isEmpty ? card.label : card.stopName
+        let cardByCode = Dictionary(uniqueKeysWithValues:
+            cards.map { ($0.stopCode, $0) })
 
-            for s in card.services {
-                // Only tracked services are eligible.
-                if let tr = tracked, !tr.contains(s.no) { continue }
-                guard let arrives = s.arrivalDate else { continue }
+        for alert in alerts where alert.kind == .arrival {
+            guard let card = cardByCode[alert.stopCode],
+                  let s = card.services.first(where: { $0.no == alert.busNo }),
+                  let arrives = s.arrivalDate else { continue }
+            let stopLabel = alert.stopName.isEmpty
+                ? (card.stopName.isEmpty ? card.label : card.stopName)
+                : alert.stopName
 
-                // Imminent "arriving soon" nudge — fires `imminentLeadSec`
-                // before arrival. Inside that window already → too late.
-                let imminentFire = arrives.addingTimeInterval(-imminentLeadSec)
-                let imminentInterval = imminentFire.timeIntervalSince(now)
-                if imminentInterval > 1 {
-                    let mins = max(1, Int((imminentLeadSec / 60).rounded()))
-                    desired.append((
-                        id: imminentId(stopCode: card.stopCode, busNo: s.no),
-                        content: arrivalContent(
-                            busNo: s.no, stopCode: card.stopCode, stopName: stopLabel,
-                            title: "Bus \(s.no) is arriving soon", mins: mins),
-                        trigger: UNTimeIntervalNotificationTrigger(
-                            timeInterval: imminentInterval, repeats: false)))
-                }
-
-                // Early heads-up — fires `headsUpLeadSec` before arrival, but
-                // only if it lands a sensible gap before the imminent nudge
-                // (no double-ping for a bus that's already close).
-                let headsUpFire = arrives.addingTimeInterval(-headsUpLeadSec)
-                let headsUpInterval = headsUpFire.timeIntervalSince(now)
-                if headsUpInterval > 1,
-                   imminentFire.timeIntervalSince(headsUpFire) >= minTierGapSec {
-                    let mins = max(1, Int((headsUpLeadSec / 60).rounded()))
-                    desired.append((
-                        id: headsUpId(stopCode: card.stopCode, busNo: s.no),
-                        content: arrivalContent(
-                            busNo: s.no, stopCode: card.stopCode, stopName: stopLabel,
-                            title: "Bus \(s.no) is \(mins) min away", mins: mins),
-                        trigger: UNTimeIntervalNotificationTrigger(
-                            timeInterval: headsUpInterval, repeats: false)))
-                }
-            }
+            // Fire `lead` minutes before the live ETA. Already inside the
+            // window (or arrived) → nothing to schedule this round.
+            let fireAt = AlertTiming.arrivalFireAt(arrives, leadMinutes: alert.leadMinutes)
+            let interval = fireAt.timeIntervalSince(now)
+            guard interval > 1 else { continue }
+            desired.append((
+                id: imminentId(stopCode: alert.stopCode, busNo: alert.busNo),
+                content: arrivalContent(
+                    busNo: alert.busNo, stopCode: alert.stopCode, stopName: stopLabel,
+                    title: AlertTiming.arrivalTitle(alert.busNo),
+                    body: AlertTiming.arrivalBody(stopName: stopLabel,
+                                                  leadMinutes: alert.leadMinutes)),
+                trigger: UNTimeIntervalNotificationTrigger(
+                    timeInterval: interval, repeats: false)))
         }
 
         // Cancel orphans first so the system's pending list stays clean,
         // then (re)add the desired set. UN replaces requests with the same
-        // identifier, so add-after-add is safe.
+        // identifier, so add-after-add is safe. Only arrival prefixes are
+        // swept here; destination one-shots are owned by their own path.
         let desiredIds = Set(desired.map(\.id))
         let prefixes = arrivalPrefixes
         center.getPendingNotificationRequests { reqs in
@@ -1304,17 +1453,69 @@ final class NotificationsManager {
         }
     }
 
-    /// Shared arrival-alert content. Body mirrors the design copy: "Bus {no}
-    /// will arrive at {stop} in {N} min." The displayed minutes come from the
-    /// scheduling lead, so what the banner says is what the timer does. No
-    /// stops-away parenthetical — at schedule time we can't guarantee it'll
-    /// still be true at fire time, and a wrong "(1 stop away)" reads worse
-    /// than none (see feedback_timely_over_honest).
+    /// Schedules a destination alert as a one-shot at the absolute `fireAt`
+    /// the caller computed (boarding ETA + per-segment estimate − lead). The
+    /// id is stable per alert, so re-setting replaces in place. Past/near-now
+    /// fire times are dropped (UNTimeIntervalNotificationTrigger rejects
+    /// intervals ≤ 0); we never fire a "you've already arrived" ping.
+    func scheduleDestinationAlert(_ alert: BusAlert, fireAt: Date) {
+        let id = destinationId(alert)
+        let interval = fireAt.timeIntervalSinceNow
+        // Replace any prior instance regardless of whether we reschedule.
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+        guard interval > 1 else { return }
+        let content = destinationContent(alert)
+        let req = UNNotificationRequest(
+            identifier: id, content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: interval, repeats: false))
+        center.add(req) { err in
+            if let err {
+                notifLog.error("destination schedule failed: \(err.localizedDescription)")
+            }
+        }
+    }
+
+    private func destinationContent(_ alert: BusAlert) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = AlertTiming.destinationTitle()
+        content.body = AlertTiming.destinationBody(destName: alert.stopName,
+                                                   leadMinutes: alert.leadMinutes)
+        content.threadIdentifier = "destination"
+        content.sound = .default
+        content.userInfo = [
+            "kind": "destination",
+            "stopCode": alert.boardStopCode,
+            "busNo": alert.busNo,
+        ]
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+        return content
+    }
+
+    /// Cancels the pending notification(s) for one alert (used on delete).
+    func cancelAlert(_ alert: BusAlert) {
+        let id = alert.kind == .arrival
+            ? imminentId(stopCode: alert.stopCode, busNo: alert.busNo)
+            : destinationId(alert)
+        // Arrival also had a legacy heads-up companion in older builds —
+        // sweep it too so a deleted arrival alert leaves nothing behind.
+        let headsUp = headsUpId(stopCode: alert.stopCode, busNo: alert.busNo)
+        center.removePendingNotificationRequests(withIdentifiers: [id, headsUp])
+    }
+
+    /// Shared arrival-alert content. Title + body come from `AlertTiming` so
+    /// the copy stays identical to the Flutter side and the displayed minutes
+    /// can never drift from the scheduling lead. No stops-away parenthetical —
+    /// at schedule time we can't guarantee it'll still be true at fire time,
+    /// and a wrong "(1 stop away)" reads worse than none
+    /// (see feedback_timely_over_honest).
     private func arrivalContent(busNo: String, stopCode: String, stopName: String,
-                                title: String, mins: Int) -> UNMutableNotificationContent {
+                                title: String, body: String) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = title
-        content.body = "Bus \(busNo) will arrive at \(stopName) in \(mins) min."
+        content.body = body
         content.threadIdentifier = stopCode
         content.sound = .default
         // userInfo drives the tap-to-open deep link: LeyneAppDelegate
@@ -1330,6 +1531,7 @@ final class NotificationsManager {
         }
         return content
     }
+
 }
 
 // Phase helper (used by the status string + tests).

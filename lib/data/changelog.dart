@@ -30,6 +30,31 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.4.2': WhatsNewEntry(
+    headline: 'Alerts that fit your trip.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.notifications_active_rounded,
+        title: 'Tell me before it arrives',
+        body: 'Get a heads-up before your bus reaches your stop — or before '
+            'it reaches your destination — with the lead time you choose. '
+            'Find and manage every alert in one place.',
+      ),
+      WhatsNewItem(
+        icon: Icons.location_on_rounded,
+        title: 'Tracking that lines up',
+        body: 'The bus on the map now matches the stops-away and distance '
+            'you read, and route progress follows the line all the way to '
+            'its destination.',
+      ),
+      WhatsNewItem(
+        icon: Icons.verified_rounded,
+        title: 'Quicker saving and refresh',
+        body: 'Tap the pin to save a stop or the bus to save a bus, pull '
+            'down to refresh while tracking a bus, plus polish and fixes.',
+      ),
+    ],
+  ),
   '2.4.0': WhatsNewEntry(
     headline: 'A brighter, clearer Leyne.',
     items: [

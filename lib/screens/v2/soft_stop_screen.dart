@@ -11,14 +11,20 @@
 
 import 'package:flutter/material.dart';
 
+import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
 import '../../data/geo.dart';
 import '../../data/models.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
+import '../../state/bus_alert.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
+import '../../widgets/v2/notify_confirm.dart';
+import '../../widgets/v2/notify_when_sheet.dart';
 import '../../widgets/v2/proximity.dart';
+import '../../widgets/v2/soft_tab_bar.dart';
+import 'manage_alerts_screen.dart';
 import '../notifications_screen.dart';
 
 class SoftStopScreen extends StatefulWidget {
@@ -29,12 +35,20 @@ class SoftStopScreen extends StatefulWidget {
     required this.onOpenBus,
     required this.onSeeAll,
     this.showAll = false,
+    this.onTab,
+    this.tabSelection,
   });
   final String stopCode;
   final VoidCallback onBack;
   final ValueChanged<String> onOpenBus;
   final VoidCallback onSeeAll;
   final bool showAll;
+
+  /// When provided, the tab bar stays visible on this pushed detail page so the
+  /// user can switch tabs without backing out. [tabSelection] is the tab the
+  /// page was opened from (kept highlighted). Null for deep-link contexts.
+  final ValueChanged<SoftTab>? onTab;
+  final SoftTab? tabSelection;
 
   @override
   State<SoftStopScreen> createState() => _SoftStopScreenState();
@@ -63,6 +77,11 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
+      bottomNavigationBar:
+          (widget.onTab != null && widget.tabSelection != null)
+              ? SoftBottomBar(
+                  selection: widget.tabSelection!, onSelect: widget.onTab!)
+              : null,
       body: SafeArea(
         child: ListenableBuilder(
           listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
@@ -378,6 +397,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         else if (state.kind == ArrivalStateKind.error)
           _emptyCard(context, state.errorMessage ?? "Couldn't reach LTA")
         else ...[
+          ..._activeAlertRows(context),
           if (!isPinned) ...[
             _hintRow(context),
             const SizedBox(height: 12),
@@ -386,6 +406,71 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         ],
       ],
     );
+  }
+
+  /// Inline "Notify me when" rows — one per active arrival alert at this stop.
+  /// Each shows the bus + lead subtitle with a switch that removes the alert
+  /// (off) or re-opens the sheet to reconfigure (on).
+  List<Widget> _activeAlertRows(BuildContext context) {
+    final t = context.t;
+    final mine = AppModel.shared.alerts
+        .where((a) =>
+            a.kind == AlertKind.arrival && a.stopCode == widget.stopCode)
+        .toList();
+    if (mine.isEmpty) return const [];
+    return [
+      Container(
+        decoration: BoxDecoration(
+          color: t.soonBg,
+          borderRadius: BorderRadius.circular(LyneRadius.md),
+        ),
+        child: Column(
+          children: [
+            for (var i = 0; i < mine.length; i++) ...[
+              if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.notifications_active_rounded,
+                        size: 18, color: t.soon),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Notify me when · Bus ${mine[i].busNo}',
+                            style:
+                                t.sans(13, weight: FontWeight.w600, color: t.fg),
+                          ),
+                          Text(
+                            AlertTiming.leadRowSubtitle(mine[i].leadMinutes),
+                            style: t.sans(12, color: t.dim),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: true,
+                      activeThumbColor: t.soon,
+                      onChanged: (v) {
+                        if (!v) {
+                          AppModel.shared.removeAlert(mine[i].id);
+                        } else {
+                          _openArrivalSheet(mine[i].busNo, mine[i].dest);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+    ];
   }
 
   /// Section title above the grouped arrivals list. (LIVE moved up to the
@@ -470,19 +555,100 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             children: [
               _coloredBadge(bus.no, badge.fill, badge.fg, t),
               const SizedBox(width: 12),
+              // Destination is the flexible element: it wraps to two lines
+              // before truncating so "To Kampong Bahru Ter" reads in full.
+              // The badge, time columns and bell keep their intrinsic width.
               Expanded(
                 child: Text(
                   bus.dest.isEmpty ? 'Bus ${bus.no}' : 'To ${bus.dest}',
                   style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               const SizedBox(width: 8),
               _etaColumns(t, etas, conf),
+              const SizedBox(width: 4),
+              _rowBell(context, bus),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Per-bus bell — opens the arrival NotifyWhenSheet for this service. Fills
+  /// when an arrival alert already exists for this bus at this stop.
+  Widget _rowBell(BuildContext context, Service bus) {
+    final t = context.t;
+    final on = AppModel.shared.alertFor(
+          kind: AlertKind.arrival,
+          busNo: bus.no,
+          stopCode: widget.stopCode,
+        ) !=
+        null;
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      tooltip: on ? 'Alerting for bus ${bus.no}' : 'Notify me about bus ${bus.no}',
+      icon: Icon(
+        on
+            ? Icons.notifications_active_rounded
+            : Icons.notifications_none_rounded,
+        size: 20,
+        color: on ? t.soon : t.dim,
+      ),
+      onPressed: () => _openArrivalSheet(bus.no, bus.dest),
+    );
+  }
+
+  /// Open the arrival "Notify me when" sheet for [busNo]. If an alert already
+  /// exists, removing it is the natural toggle (tap the active row); here we
+  /// always (re)configure: pick a lead, create the alert, then confirm.
+  Future<void> _openArrivalSheet(String busNo, String dest) async {
+    final stopName = DataStore.shared.stopName(widget.stopCode);
+    final result = await showNotifyWhenSheet(
+      context,
+      kind: AlertKind.arrival,
+      busNo: busNo,
+      stopName: stopName,
+      dest: dest,
+    );
+    if (result == null || !mounted) return;
+    final lead = result.lead;
+    await AppModel.shared.upsertAlert(BusAlert(
+      kind: AlertKind.arrival,
+      busNo: busNo,
+      stopCode: widget.stopCode,
+      stopName: stopName,
+      dest: dest,
+      leadMinutes: lead,
+    ));
+    // Live Activity analog: start the ongoing tracker when opted in, there's a
+    // live service for this bus, notifications are enabled, and one isn't
+    // already running for this bus.
+    if (result.liveActivity &&
+        AppModel.shared.notificationsEnabled &&
+        AppModel.shared
+            .liveServices(widget.stopCode)
+            .any((s) => s.no == busNo) &&
+        !AppModel.shared
+            .isOngoingActive(busNo: busNo, stopCode: widget.stopCode)) {
+      await AppModel.shared.toggleOngoing(
+        busNo: busNo,
+        stopCode: widget.stopCode,
+        stopName: stopName,
+      );
+    }
+    if (!mounted) return;
+    await showNotifyConfirm(
+      context,
+      kind: AlertKind.arrival,
+      busNo: busNo,
+      stopCode: widget.stopCode,
+      stopName: stopName,
+      leadMinutes: lead,
+      onManageAll: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
       ),
     );
   }
@@ -495,9 +661,9 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
       children: [
         for (var i = 0; i < etas.length; i++) ...[
           if (i > 0) ...[
-            const SizedBox(width: 10),
+            const SizedBox(width: 6),
             Container(width: 1, height: 30, color: t.line),
-            const SizedBox(width: 10),
+            const SizedBox(width: 6),
           ],
           _etaColumn(t, etas[i], lead: i == 0, conf: conf),
         ],
@@ -514,7 +680,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     final isGhost = conf == ArrivalConfidence.unconfirmed;
 
     return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 34),
+      constraints: const BoxConstraints(minWidth: 30),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

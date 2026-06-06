@@ -5,6 +5,7 @@
 // green service badge, destination + following arrivals, and a prominent ETA
 // pill. Confidence: "~" whisper only for ghost arrivals — never over-honesty.
 
+import ActivityKit
 import SwiftUI
 
 /// How the stop's arrivals are ordered.
@@ -26,6 +27,12 @@ struct SoftStopView: View {
 
     @State private var sort: StopSort = .arrival
     @State private var expanded = false
+
+    // "Notify me when" flow — the service the sheet is being set for, the
+    // just-set alert driving the confirmation, and the Manage-alerts route.
+    @State private var notifySvc: Service?
+    @State private var confirmAlert: BusAlert?
+    @State private var showManage = false
 
     /// How many services to show before the "Show more" expander kicks in.
     private let collapsedCount = 6
@@ -51,6 +58,48 @@ struct SoftStopView: View {
             .refreshable { await ds.refreshArrivals(stop: stopCode) }
         }
         .onAppear { ds.ensureArrivals(stop: stopCode) }
+        // "Notify me when" arrival sheet for the picked service.
+        .sheet(item: $notifySvc) { svc in
+            NotifyWhenSheet(
+                kind: .arrival, busNo: svc.no, stopName: stopName,
+                initialLead: m.alert(kind: .arrival, busNo: svc.no,
+                                     stopCode: stopCode)?.leadMinutes,
+                onCancel: { notifySvc = nil },
+                onDone: { lead, liveActivity in
+                    let alert = BusAlert(
+                        kind: .arrival, busNo: svc.no, stopCode: stopCode,
+                        stopName: stopName, dest: svc.dest, boardStopCode: stopCode,
+                        leadMinutes: lead)
+                    m.upsertAlert(alert)
+                    // Optionally start the lock-screen Live Activity for this
+                    // live service (only when ActivityKit is enabled + not
+                    // already tracking this bus at this stop).
+                    if liveActivity,
+                       ActivityAuthorizationInfo().areActivitiesEnabled,
+                       !m.isLiveActivityActive(svc, stopCode: stopCode) {
+                        m.toggleLiveActivity(svc, stopName: stopName, stopCode: stopCode)
+                    }
+                    notifySvc = nil
+                    confirmAlert = alert
+                })
+            .environmentObject(m)
+            .environmentObject(fb)
+        }
+        // "You'll be notified!" confirmation, then a route into Manage alerts.
+        .sheet(item: $confirmAlert) { alert in
+            NotifyConfirmView(
+                alert: alert,
+                onClose: { confirmAlert = nil },
+                onManageAll: { confirmAlert = nil; showManage = true })
+            .environmentObject(m)
+            .environmentObject(fb)
+        }
+        .sheet(isPresented: $showManage) {
+            NavigationStack { ManageAlertsView() }
+                .environmentObject(m)
+                .environmentObject(fb)
+                .environmentObject(ds)
+        }
     }
 
     // MARK: - Top bar
@@ -173,8 +222,49 @@ struct SoftStopView: View {
 
     private var arrivalSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            activeAlertsCard
             sectionHeader
             arrivalContent
+        }
+    }
+
+    /// Arrival alerts already set at this stop, each as a "Notify me when"
+    /// row (bus + lead) with a Toggle to switch it off. Hidden when none.
+    @ViewBuilder
+    private var activeAlertsCard: some View {
+        let active = m.alerts.filter { $0.kind == .arrival && $0.stopCode == stopCode }
+        if !active.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(Array(active.enumerated()), id: \.element.id) { i, a in
+                    if i > 0 { rowDivider }
+                    HStack(spacing: 12) {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(t.soon)
+                            .frame(width: 32, height: 32)
+                            .background(t.soonBg,
+                                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Notify me when")
+                                .font(t.sans(12))
+                                .foregroundStyle(t.dim)
+                            Text("Bus \(a.busNo) · \(AlertTiming.leadRowSubtitle(a.leadMinutes))")
+                                .font(t.sans(14, weight: .semibold))
+                                .foregroundStyle(t.fg)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                        SoftToggle(t: t, value: Binding(
+                            get: { true },
+                            set: { on in if !on { m.removeAlert(id: a.id) } }))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+            }
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(t.line, lineWidth: 1))
         }
     }
 
@@ -231,34 +321,64 @@ struct SoftStopView: View {
     private func busRow(_ bus: Service) -> some View {
         let conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed)
         let badge = serviceBadgeColors(etaSec: bus.etaSec, confidence: conf, t: t)
+        let notifyOn = m.alert(kind: .arrival, busNo: bus.no, stopCode: stopCode) != nil
 
-        return Button {
-            fb.select()
-            onOpenBus(bus.no)
-        } label: {
-            HStack(spacing: 12) {
-                ServiceBadge(svc: bus.no, t: t, size: .md,
-                             fillOverride: badge.fill, fgOverride: badge.fg)
+        return HStack(spacing: 8) {
+            // Main area opens the bus view.
+            Button {
+                fb.select()
+                onOpenBus(bus.no)
+            } label: {
+                HStack(spacing: 12) {
+                    ServiceBadge(svc: bus.no, t: t, size: .md,
+                                 fillOverride: badge.fill, fgOverride: badge.fg)
 
-                Text(destLabel(bus))
-                    .font(t.sans(14, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    Text(destLabel(bus))
+                        .font(t.sans(14, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        // Destination is the flexible element: wrap to two lines
+                        // before truncating so "To Kampong Bahru Ter" reads in
+                        // full. It out-prioritises the (intrinsic) ETA columns.
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1)
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                etaColumns(bus, confidence: conf)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .layoutPriority(1)
+                    // Time columns hug their intrinsic width and never grow at
+                    // the destination's expense.
+                    etaColumns(bus, confidence: conf)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .padding(.leading, 16)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .contentShape(Rectangle())
+            .buttonStyle(PressScaleButtonStyle())
+            .accessibilityLabel("Bus \(bus.no) to \(bus.dest), \(arrivalA11y(bus, conf))")
+            .accessibilityHint("Opens bus \(bus.no)")
+
+            // Trailing notify affordance — opens the arrival "Notify me when"
+            // sheet (or jumps straight to it pre-filled when an alert exists).
+            Button {
+                fb.select()
+                notifySvc = bus
+            } label: {
+                Image(systemName: notifyOn ? "bell.fill" : "bell")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(notifyOn ? t.soon : t.dim)
+                    .frame(width: 40, height: 40)
+                    .background(notifyOn ? AnyShapeStyle(t.soonBg) : AnyShapeStyle(t.surfaceHi),
+                                in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 12)
+            .accessibilityLabel(notifyOn
+                ? "Edit arrival alert for bus \(bus.no)"
+                : "Notify me when bus \(bus.no) arrives")
         }
-        .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("Bus \(bus.no) to \(bus.dest), \(arrivalA11y(bus, conf))")
-        .accessibilityHint("Opens bus \(bus.no)")
     }
 
     /// Up to three arrival columns ("Arr · 13 · 24 min") split by hairlines.
@@ -269,7 +389,7 @@ struct SoftStopView: View {
             ForEach(Array(etas.enumerated()), id: \.offset) { i, sec in
                 if i > 0 {
                     Rectangle().fill(t.line).frame(width: 1, height: 30)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 6)
                 }
                 etaColumn(sec, lead: i == 0, confidence: confidence)
             }
@@ -304,7 +424,7 @@ struct SoftStopView: View {
                 .font(t.mono(10))
                 .foregroundStyle(t.dim)
         }
-        .frame(minWidth: 34)
+        .frame(minWidth: 30)
     }
 
     /// "Show more" / "Show less" expander at the foot of the grouped card.

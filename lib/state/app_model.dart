@@ -15,12 +15,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/alert_timing.dart';
 import '../data/changelog.dart';
 import '../data/data_store.dart';
 import '../data/geo.dart';
 import '../data/models.dart';
 import '../services/location_service.dart';
 import '../services/notifications.dart';
+import 'bus_alert.dart';
 
 /// Global ScaffoldMessenger key — lets AppModel surface in-app arrival
 /// alerts as a banner from outside the widget tree. Wired into MaterialApp
@@ -42,6 +44,7 @@ const _kSearchRadiusKey = 'lyne.searchRadiusM';
 const _kLastSeenVersionKey = 'lyne.lastSeenVersion';
 const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
 const _kHapticsKey = 'lyne.haptics';
+const _kAlertsKey = 'lyne.alerts'; // JSON list of BusAlert (notifs redesign)
 
 /// The currently-armed on-bus alert: which bus, where to alight, when
 /// the heads-up notification fires. Single ride at a time — see
@@ -300,8 +303,8 @@ class AppModel extends ChangeNotifier {
         await NotificationsService.shared.requestExactAlarmAuthorization();
         _notificationsEnabled = true;
         _prefs?.setBool(_kNotifKey, true);
-        await NotificationsService.shared.scheduleArrivalAlerts(
-          pins: _pins, cards: allPinnedCards);
+        await NotificationsService.shared
+            .scheduleAlerts(_alerts, _ds.arrivals);
       } else {
         _notificationsEnabled = false;
         _prefs?.setBool(_kNotifKey, false);
@@ -438,6 +441,75 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Configurable alerts (persisted, notifications redesign) ────────────
+  // The single source of truth for notification alerts (both kinds). Arrival
+  // alerts are re-armed from the live ETA each coarse tick; destination alerts
+  // carry a fire time computed at set-time by the Bus view (see scheduleAlerts).
+  // Independent of pin/`tracked` card visibility — set via upsertAlert/removeAlert.
+  List<BusAlert> _alerts = [];
+  List<BusAlert> get alerts => List.unmodifiable(_alerts);
+
+  void _persistAlerts() {
+    _prefs?.setString(
+      _kAlertsKey,
+      jsonEncode(_alerts.map((a) => a.toJson()).toList()),
+    );
+  }
+
+  /// The alert matching this exact kind + bus + stop, or null.
+  BusAlert? alertFor({
+    required AlertKind kind,
+    required String busNo,
+    required String stopCode,
+  }) {
+    final id = BusAlert.makeId(kind, busNo, stopCode);
+    for (final a in _alerts) {
+      if (a.id == id) return a;
+    }
+    return null;
+  }
+
+  /// Add an alert, or replace the existing one with the same id. Persists,
+  /// schedules (destination alerts compute their fire time at the call site
+  /// and pass it; arrival alerts re-arm from the live ETA), then notifies.
+  Future<void> upsertAlert(BusAlert a, {DateTime? destinationFireAt}) async {
+    final idx = _alerts.indexWhere((e) => e.id == a.id);
+    if (idx >= 0) {
+      _alerts[idx] = a;
+    } else {
+      _alerts = [..._alerts, a];
+    }
+    _persistAlerts();
+    if (a.kind == AlertKind.destination &&
+        destinationFireAt != null &&
+        _notificationsEnabled) {
+      await NotificationsService.shared
+          .scheduleDestinationAlert(a, destinationFireAt);
+    }
+    await rescheduleIfNeeded();
+    notifyListeners();
+  }
+
+  /// Remove an alert by id; cancel its pending notification, persist, reschedule.
+  Future<void> removeAlert(String id) async {
+    final idx = _alerts.indexWhere((e) => e.id == id);
+    if (idx < 0) return;
+    final removed = _alerts[idx];
+    _alerts = [..._alerts]..removeAt(idx);
+    _persistAlerts();
+    await NotificationsService.shared.cancelAlert(removed);
+    await rescheduleIfNeeded();
+    notifyListeners();
+  }
+
+  /// Convenience: remove the alert matching kind + bus + stop, if any.
+  Future<void> removeAlertsFor({
+    required AlertKind kind,
+    required String busNo,
+    required String stopCode,
+  }) =>
+      removeAlert(BusAlert.makeId(kind, busNo, stopCode));
+
   // ─── Pins / recents (persisted) ───────────────────────────
   List<Pin> _pins = const [];
   List<Pin> get pins => List.unmodifiable(_pins);
@@ -497,6 +569,22 @@ class AppModel extends ChangeNotifier {
             jsonDecode(alightRaw) as Map<String, dynamic>);
       } catch (_) {/* corrupt — start empty */}
     }
+    // Configurable alerts (notifications redesign). When the key is present we
+    // load it verbatim; when it's absent we run a one-time, best-effort
+    // migration that turns the legacy state into equivalent alerts so existing
+    // users keep their behaviour:
+    //   • each Pin.tracked service → an arrival alert (lead 1 = old 60 s)
+    //   • the active alight ride    → a destination alert (lead 1)
+    final alertsRaw = _prefs!.getString(_kAlertsKey);
+    if (alertsRaw != null) {
+      try {
+        final list = (jsonDecode(alertsRaw) as List).cast<Map<String, dynamic>>();
+        _alerts = list.map(BusAlert.fromJson).toList();
+      } catch (_) {/* corrupt — start empty */}
+    } else {
+      _migrateLegacyAlerts();
+    }
+
     // An ongoing tracker is in-memory only (`_ongoingKey`), so after a cold
     // start there's nothing driving it — but the OS may still be showing a
     // stale, frozen notification from the killed session. Clear it.
@@ -508,6 +596,45 @@ class AppModel extends ChangeNotifier {
     final p = _prefs;
     if (p == null) return;
     p.setString(_kPinsKey, jsonEncode(_pins.map((e) => e.toJson()).toList()));
+  }
+
+  /// One-time migration from legacy state → BusAlerts. Best-effort: preserves
+  /// the old 60 s lead via lead=1 so a returning user's notifications behave
+  /// the same. Persists the seeded list so it never runs twice.
+  void _migrateLegacyAlerts() {
+    final seeded = <BusAlert>[];
+    // Each explicitly-tracked service became a 60 s arrival alert. Pins with
+    // tracked == null (all) carry no per-service alert in the legacy model
+    // (they only schedule for the services they show), so we can't enumerate
+    // the bus numbers here without arrivals; those re-arm on demand once the
+    // user re-toggles. Migrate only the explicit subsets.
+    for (final p in _pins) {
+      final tracked = p.tracked;
+      if (tracked == null) continue;
+      for (final no in tracked) {
+        seeded.add(BusAlert(
+          kind: AlertKind.arrival,
+          busNo: no,
+          stopCode: p.code,
+          stopName: _ds.stopName(p.code),
+          leadMinutes: 1,
+        ));
+      }
+    }
+    // The active alight ride became a destination alert (lead 1).
+    final a = _activeAlight;
+    if (a != null) {
+      seeded.add(BusAlert(
+        kind: AlertKind.destination,
+        busNo: a.busNo,
+        stopCode: a.stopCode,
+        stopName: a.stopName,
+        leadMinutes: 1,
+        boardStopCode: a.stopCode,
+      ));
+    }
+    _alerts = seeded;
+    _persistAlerts();
   }
 
   void addRecent(String q) {
@@ -543,8 +670,7 @@ class AppModel extends ChangeNotifier {
     // fire times are absolute (zonedSchedule registers an exact alarm
     // with the system, which keeps firing regardless of app lifecycle).
     if (_notificationsEnabled && tick % 10 == 0) {
-      NotificationsService.shared.scheduleArrivalAlerts(
-        pins: _pins, cards: allPinnedCards);
+      NotificationsService.shared.scheduleAlerts(_alerts, _ds.arrivals);
     }
     // Pull MRT/LRT disruption alerts on a slow cadence. DataStore
     // enforces a 60 s gate internally so this call is cheap.
@@ -679,7 +805,9 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// True if `busNo` is shown on Home for this stop. Not pinned → false.
+  /// True if `busNo` is shown on the Home card for this stop (pinned ⟺ ≥1 bus;
+  /// nil `tracked` = all shown). Card VISIBILITY only — notification alerts are
+  /// managed separately via `upsertAlert`/`removeAlert`.
   bool isTracked({required String code, required String busNo}) {
     final p = pinForCode(code);
     if (p == null) return false;
@@ -699,6 +827,8 @@ class AppModel extends ChangeNotifier {
 
   /// Toggle a single service. Checking on an unpinned stop pins it tracking
   /// just that bus; unchecking the last tracked bus unpins (pinned ⟺ ≥1 bus).
+  /// Card visibility only — notification alerts are managed separately via
+  /// `upsertAlert`/`removeAlert`.
   void toggleTracked({
     required String code,
     required String busNo,
@@ -768,8 +898,7 @@ class AppModel extends ChangeNotifier {
   /// of waiting for the next tick. No-op when notifications are globally off.
   Future<void> rescheduleIfNeeded() async {
     if (!_notificationsEnabled) return;
-    await NotificationsService.shared
-        .scheduleArrivalAlerts(pins: _pins, cards: allPinnedCards);
+    await NotificationsService.shared.scheduleAlerts(_alerts, _ds.arrivals);
   }
 
   // ─── Ongoing "live tracking" notification (Android Live Activity analog)

@@ -44,6 +44,10 @@ struct SoftBusView: View {
     let onBack: () -> Void
 
     @State private var alightId: String? = nil
+    // Destination "Notify me when" flow.
+    @State private var showDestSheet = false
+    @State private var confirmAlert: BusAlert?
+    @State private var showManage = false
     @State private var showMap = false
     @State private var serviceRouteData: ServiceRoute?
     @State private var selectedDirIndex: Int = 0
@@ -125,6 +129,31 @@ struct SoftBusView: View {
         // onChange below repositions the bus. Matches the Stop view.
         .refreshable { await ds.refreshArrivals(stop: stopCode) }
         .fullScreenCover(isPresented: $showMap) { mapFullScreen }
+        // Destination "Notify me when" sheet → confirmation → Manage alerts.
+        .sheet(isPresented: $showDestSheet) {
+            NotifyWhenSheet(
+                kind: .destination, busNo: svc, stopName: destinationName,
+                initialLead: m.alert(kind: .destination, busNo: svc,
+                                     stopCode: destinationCode)?.leadMinutes,
+                onCancel: { showDestSheet = false },
+                onDone: { lead, _ in commitDestinationAlert(lead: lead) })
+            .environmentObject(m)
+            .environmentObject(fb)
+        }
+        .sheet(item: $confirmAlert) { alert in
+            NotifyConfirmView(
+                alert: alert,
+                onClose: { confirmAlert = nil },
+                onManageAll: { confirmAlert = nil; showManage = true })
+            .environmentObject(m)
+            .environmentObject(fb)
+        }
+        .sheet(isPresented: $showManage) {
+            NavigationStack { ManageAlertsView() }
+                .environmentObject(m)
+                .environmentObject(fb)
+                .environmentObject(ds)
+        }
         .onAppear {
             ds.ensureArrivals(stop: stopCode)
             loadRoute()
@@ -622,10 +651,12 @@ struct SoftBusView: View {
                     directionPicker(sr)
                 }
 
-                // Full route timeline
+                // Full route timeline. Tapping a stop selects it as the
+                // destination for the "Notify me when … reaches my
+                // destination" alert below (no alert is scheduled until the
+                // user confirms a lead in the sheet).
                 if !computed.isEmpty {
                     RouteTimeline(t: t, svc: svc, stops: computed, alightId: $alightId)
-                        .onChange(of: alightId) { _, new in scheduleAlight(stopCode: new) }
                 }
 
                 // Freshness line
@@ -680,76 +711,192 @@ struct SoftBusView: View {
     private var alertsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Eyebrow(text: "Alerts", t: t)
-            notifyButton
-            liveActivityCTA
+            arrivalAlertButton
+            destinationRow
         }
     }
 
-    private var notifyButton: some View {
-        let on = m.isTracked(code: stopCode, busNo: svc)
+    /// Combined arrival affordance: ONE tap sets up BOTH an arrival alert at the
+    /// boarding stop AND a lock-screen Live Activity (best-effort — only when
+    /// Activities are enabled and there's a live service). "Active" keys off the
+    /// arrival alert; tapping while active cancels both. Replaces the old
+    /// separate notify-button + Live-Activity CTA. Lead fine-tuning still lives
+    /// in the Stop view's "Notify me when" sheet.
+    private var arrivalAlertButton: some View {
+        let existing = m.alert(kind: .arrival, busNo: svc, stopCode: stopCode)
+        let on = existing != nil
         return Button {
             fb.select()
-            m.toggleTracked(code: stopCode, busNo: svc, allNos: allServiceNos)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: on ? "bell.fill" : "dot.radiowaves.left.and.right")
-                    .font(.system(size: 16, weight: .semibold))
-                Text(on ? "Alert on — tap to cancel" : "Notify me before it arrives")
-                    .font(t.sans(15, weight: .bold))
+            if let a = existing {
+                // Cancel both: remove the arrival alert + stop the Live Activity
+                // if one is running for this service/stop.
+                m.removeAlert(id: a.id)
+                if let s = liveService(), m.isLiveActivityActive(s, stopCode: stopCode) {
+                    m.toggleLiveActivity(s, stopName: ds.stopName(stopCode), stopCode: stopCode)
+                }
+            } else {
+                // Set up both: create the arrival alert, then start the Live
+                // Activity as a best-effort companion (skip silently when it's
+                // unavailable — the notification alone still works).
+                let alert = BusAlert(
+                    kind: .arrival, busNo: svc, stopCode: stopCode,
+                    stopName: ds.stopName(stopCode), dest: liveService()?.dest ?? "",
+                    boardStopCode: stopCode,
+                    leadMinutes: AlertTiming.defaultLead(.arrival))
+                m.upsertAlert(alert)
+                if let s = liveService(),
+                   ActivityAuthorizationInfo().areActivitiesEnabled,
+                   !m.isLiveActivityActive(s, stopCode: stopCode) {
+                    m.toggleLiveActivity(s, stopName: ds.stopName(stopCode), stopCode: stopCode)
+                }
+                confirmAlert = alert
             }
-            .foregroundStyle(on ? t.onAccent : t.contrastFg)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 15)
-            .background(on ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.contrast), in: Capsule())
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: on ? "bell.fill" : "bell")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(on ? t.onAccent : t.contrastFg)
+                    .frame(width: 40, height: 40)
+                    .background(on ? AnyShapeStyle(t.accent.opacity(0.25))
+                                   : AnyShapeStyle(t.contrastFg.opacity(0.12)),
+                                in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(on ? "Alert on" : "Notify me before it arrives")
+                        .font(t.sans(15, weight: .bold))
+                        .foregroundStyle(on ? t.onAccent : t.contrastFg)
+                    Text(on ? "Notifying you · on your lock screen"
+                            : "Get a notification and follow this bus on your lock screen.")
+                        .font(t.sans(12))
+                        .foregroundStyle((on ? t.onAccent : t.contrastFg).opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                if on {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(t.onAccent)
+                } else {
+                    HStack(spacing: 4) {
+                        Text("Set up")
+                            .font(t.sans(13, weight: .bold))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                    }
+                    .foregroundStyle(t.contrast)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(t.soon, in: Capsule())
+                }
+            }
+            .padding(12)
+            .background(on ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.contrast),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(on
-            ? "Arrival alert on for bus \(svc)"
-            : "Notify me before bus \(svc) arrives")
+            ? "Arrival alert on for bus \(svc) — tap to cancel"
+            : "Notify me before bus \(svc) arrives and follow it on your lock screen")
     }
 
-    @ViewBuilder
-    private var liveActivityCTA: some View {
-        if let service = liveService(),
-           ActivityAuthorizationInfo().areActivitiesEnabled {
-            let liveOn = m.isLiveActivityActive(service, stopCode: stopCode)
-            Button {
-                fb.select()
-                m.toggleLiveActivity(service,
-                                     stopName: ds.stopName(stopCode),
-                                     stopCode: stopCode)
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: liveOn ? "stop.fill" : "clock")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(liveOn ? t.onAccent : t.dim)
-                        .frame(width: 40, height: 40)
-                        .background(liveOn ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.surface),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(liveOn ? "Stop Live Activity" : "Start Live Activity")
-                            .font(t.sans(14, weight: .semibold))
-                            .foregroundStyle(t.fg)
-                        Text(liveOn ? "Bus \(svc) is on your lock screen"
-                                    : "Follow on your lock screen")
+    /// "Notify me when … reaches my DESTINATION" row. Defaults to the route
+    /// terminus; tapping a stop in the timeline above (which sets `alightId`)
+    /// changes the destination. Reflects an existing destination alert with
+    /// its chosen lead.
+    private var destinationRow: some View {
+        let existing = m.alert(kind: .destination, busNo: svc, stopCode: destinationCode)
+        let active = existing != nil
+        return Button {
+            fb.select()
+            showDestSheet = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(active ? t.onAccent : t.dim)
+                    .frame(width: 40, height: 40)
+                    .background(active ? AnyShapeStyle(t.accent) : AnyShapeStyle(t.surface),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Notify me when")
+                        .font(t.sans(12))
+                        .foregroundStyle(t.dim)
+                    Text(destinationName.isEmpty ? "Pick a destination"
+                                                 : "\(destinationName) (Destination)")
+                        .font(t.sans(14, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                    if active, let e = existing {
+                        Text(AlertTiming.leadRowSubtitle(e.leadMinutes) + " before arrival")
+                            .font(t.sans(12))
+                            .foregroundStyle(t.soon)
+                    } else {
+                        Text("Set how early to be notified")
                             .font(t.sans(12))
                             .foregroundStyle(t.dim)
                     }
-                    Spacer()
-                    Image(systemName: liveOn ? "checkmark.circle.fill" : "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(liveOn ? t.accent : t.dim)
                 }
-                .padding(12)
-                .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(liveOn ? t.accent.opacity(0.4) : Color.clear, lineWidth: 1))
+                Spacer(minLength: 0)
+                Image(systemName: active ? "checkmark.circle.fill" : "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(active ? t.accent : t.faint)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(liveOn
-                ? "Stop Live Activity for bus \(svc)"
-                : "Start Live Activity for bus \(svc) on your lock screen")
+            .padding(12)
+            .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(active ? t.accent.opacity(0.4) : Color.clear, lineWidth: 1))
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(active
+            ? "Destination alert on for \(destinationName)"
+            : "Notify me when bus \(svc) reaches my destination")
+    }
+
+    // ── Destination resolution ──────────────────────────────
+    // The destination defaults to the route terminus (last stop of the
+    // selected direction); tapping a stop in the timeline overrides it.
+
+    private var destinationStops: [RouteStopLive] { currentDirection?.stops ?? [] }
+
+    /// Index of the chosen destination in the selected direction's stop list.
+    private var destinationIndex: Int? {
+        let stops = destinationStops
+        guard !stops.isEmpty else { return nil }
+        if let id = alightId, let i = stops.firstIndex(where: { $0.code == id }) {
+            return i
+        }
+        return stops.count - 1                       // default: terminus
+    }
+
+    private var destinationCode: String {
+        guard let i = destinationIndex else { return "" }
+        return destinationStops[i].code
+    }
+
+    private var destinationName: String {
+        guard let i = destinationIndex else { return "" }
+        return destinationStops[i].name
+    }
+
+    /// Commits a destination alert with the chosen lead, computing the
+    /// absolute fire time from this bus's live arrival at the boarding stop
+    /// plus the per-segment estimate to the destination.
+    private func commitDestinationAlert(lead: Int) {
+        guard let dir = currentDirection, let destIdx = destinationIndex,
+              let s = liveService(), let board = s.arrivalDate else {
+            showDestSheet = false
+            return
+        }
+        let boardIdx = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        let fireAt = AlertTiming.destinationFireAt(
+            arrivalAtBoard: board, boardIndex: boardIdx,
+            destIndex: destIdx, leadMinutes: lead)
+        let alert = BusAlert(
+            kind: .destination, busNo: svc, stopCode: destinationCode,
+            stopName: destinationName, dest: s.dest, boardStopCode: stopCode,
+            leadMinutes: lead)
+        m.upsertAlert(alert, fireAt: fireAt)
+        showDestSheet = false
+        confirmAlert = alert
     }
 
     // MARK: Bus-position resolution (live → recent → estimated) + glide
@@ -982,19 +1129,6 @@ struct SoftBusView: View {
         } else {
             m.pins.append(Pin(code: stopCode, nickname: ""))
         }
-    }
-
-    private func scheduleAlight(stopCode code: String?) {
-        guard let code, let r = route,
-              let alightIdx = r.stops.firstIndex(where: { $0.code == code }) else {
-            m.clearActiveAlight()
-            return
-        }
-        let base = r.busIndex ?? r.youIndex
-        let stopsToWait = max(0, (alightIdx - base) - 2)
-        let fireAt = Date().addingTimeInterval(TimeInterval(stopsToWait) * 90)
-        m.setActiveAlight(busNo: svc, stopCode: code,
-                          stopName: r.stops[alightIdx].name, fireAt: fireAt)
     }
 
     private func positionA11y(_ tier: BusTier) -> String {

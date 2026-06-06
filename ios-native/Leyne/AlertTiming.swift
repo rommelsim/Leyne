@@ -1,0 +1,86 @@
+// AlertTiming — pure timing + copy rules for the two notification alert types,
+// factored out so they can be unit-tested without a notification host and kept
+// identical to the Flutter side (lib/data/alert_timing.dart).
+//
+//   • arrival     — fire `lead` minutes before the bus reaches YOUR stop.
+//   • destination — fire `lead` minutes before the bus is estimated to reach
+//                   your chosen alight stop (~90 s per route segment past the
+//                   boarding stop; LTA gives no per-stop times, so this is an
+//                   estimate surfaced with the quiet "~" cue).
+
+import Foundation
+
+enum AlertKind: String, Codable, Equatable { case arrival, destination }
+
+enum AlertTiming {
+
+    /// Estimated travel time between adjacent stops (no per-stop LTA times).
+    static let perStopSec = 90
+
+    /// Lead-time choices offered in the "Notify me when" sheet. Destination
+    /// alerts add a 30-min option (you may want a long head start to pack up).
+    static func leadOptions(_ kind: AlertKind) -> [Int] {
+        kind == .destination ? [1, 2, 5, 10, 15, 30] : [1, 2, 5, 10, 15]
+    }
+
+    /// Pre-selected lead when first opening the sheet (matches the mockup).
+    static func defaultLead(_ kind: AlertKind) -> Int {
+        kind == .destination ? 10 : 5
+    }
+
+    /// At-my-stop fire time: `lead` minutes before the live ETA.
+    static func arrivalFireAt(_ arrivalAtStop: Date, leadMinutes: Int) -> Date {
+        arrivalAtStop.addingTimeInterval(TimeInterval(-leadMinutes * 60))
+    }
+
+    /// At-destination fire time: `lead` minutes before the bus is estimated to
+    /// reach the destination — the boarding ETA plus one `perStop` per segment
+    /// from the boarding stop to the destination.
+    static func destinationFireAt(arrivalAtBoard: Date, boardIndex: Int,
+                                  destIndex: Int, leadMinutes: Int,
+                                  perStop: Int = perStopSec) -> Date {
+        let segs = max(0, destIndex - boardIndex)
+        return arrivalAtBoard.addingTimeInterval(
+            TimeInterval(segs * perStop - leadMinutes * 60))
+    }
+
+    // ── Sheet labels ─────────────────────────────────────────────
+
+    static func leadLabel(_ lead: Int) -> String {
+        lead <= 1 ? "When bus is arriving" : "\(lead) minutes before"
+    }
+
+    static func leadSubLabel(_ lead: Int) -> String {
+        lead <= 1 ? "~ 1 min before" : "~ \(lead) min before"
+    }
+
+    static func leadRowSubtitle(_ lead: Int) -> String {
+        lead <= 1 ? "When arriving" : "\(lead) min before arrival"
+    }
+
+    static func summary(kind: AlertKind, busNo: String, stopName: String,
+                        leadMinutes: Int) -> String {
+        let lead = leadMinutes <= 1 ? "when" : "\(leadMinutes) min before"
+        return kind == .destination
+            ? "We'll notify you \(lead) Bus \(busNo) reaches \(stopName)."
+            : "We'll notify you \(lead) Bus \(busNo) arrives at \(stopName)."
+    }
+
+    // ── Notification copy ────────────────────────────────────────
+
+    static func arrivalTitle(_ busNo: String) -> String {
+        "Bus \(busNo) arriving soon"
+    }
+
+    static func arrivalBody(stopName: String, leadMinutes: Int) -> String {
+        leadMinutes <= 1 ? "\(stopName) · Arriving now"
+                         : "\(stopName) · \(leadMinutes) min to arrival"
+    }
+
+    static func destinationTitle() -> String { "Your stop is next" }
+
+    static func destinationBody(destName: String, leadMinutes: Int) -> String {
+        leadMinutes <= 1 ? "\(destName) · Arriving now"
+                         : "\(destName) · Arriving in \(leadMinutes) min"
+    }
+}

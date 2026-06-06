@@ -1,8 +1,9 @@
 // SoftSettingsScreen — Leyne 2.0 Settings (Material 3 Android variant).
 // Restyled for the 2.4.0 design language: grouped Material cards, icon chips,
 // chevron-trailing nav rows, SoftToggle for binary settings.
-// All pre-existing settings (notifications, appearance, language, 24h time,
-// haptics, search radius, about) are preserved and functional.
+// Settings: manage alerts, appearance, 24h time, haptics, search radius,
+// about. Notification permission is requested once at onboarding (no in-app
+// on/off toggle); the app ships English-only (no language picker).
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -12,7 +13,7 @@ import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 import '../about_screen.dart';
-import '../notifications_screen.dart';
+import 'manage_alerts_screen.dart';
 
 class SoftSettingsScreen extends StatefulWidget {
   const SoftSettingsScreen({super.key, required this.onTab});
@@ -40,18 +41,6 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     ThemeMode.light  => 'Light',
     ThemeMode.dark   => 'Dark',
   };
-
-  String _languageLabel(Locale? locale) {
-    final code = locale?.languageCode ?? '';
-    return switch (code) {
-      ''    => 'System',
-      'en'  => 'English',
-      'zh'  => '中文',
-      'ms'  => 'Bahasa Melayu',
-      'ta'  => 'தமிழ்',
-      _     => code.toUpperCase(),
-    };
-  }
 
   String _radiusLabel(int metres) {
     if (metres < 1000) return '$metres m';
@@ -121,93 +110,6 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                     ),
                   ),
                   if (mode != ThemeMode.dark)
-                    Divider(color: t.line, height: 1, indent: 20),
-                ],
-                const SizedBox(height: 16),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _showLanguageSheet() {
-    // Language options: null = system; explicit locales below.
-    const options = <({Locale? locale, String label})>[
-      (locale: null, label: 'System'),
-      (locale: Locale('en'), label: 'English'),
-      (locale: Locale('zh'), label: '中文'),
-      (locale: Locale('ms'), label: 'Bahasa Melayu'),
-      (locale: Locale('ta'), label: 'தமிழ்'),
-    ];
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.t.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(LyneRadius.lg)),
-      ),
-      builder: (_) => ListenableBuilder(
-        listenable: AppModel.shared,
-        builder: (ctx, _) {
-          final t = ctx.t;
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: t.line,
-                    borderRadius: BorderRadius.circular(LyneRadius.full),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      Text('Language',
-                          style: t.sans(18, weight: FontWeight.w600, color: t.fg)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Text(
-                    'App text is in English today — more languages are rolling out. '
-                    'Your choice still localises dates, pickers and system text.',
-                    style: t.sans(12, color: t.dim),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final opt in options) ...[
-                  InkWell(
-                    onTap: () {
-                      AppModel.shared.setLocale(opt.locale);
-                      Navigator.of(ctx).pop();
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(opt.label,
-                                style: t.sans(15,
-                                    weight: FontWeight.w500, color: t.fg)),
-                          ),
-                          if (AppModel.shared.locale?.languageCode ==
-                              opt.locale?.languageCode)
-                            Icon(Icons.check, size: 18, color: t.fg),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (opt != options.last)
                     Divider(color: t.line, height: 1, indent: 20),
                 ],
                 const SizedBox(height: 16),
@@ -328,25 +230,19 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                 _sectionLabel(context, 'Preferences'),
                 const SizedBox(height: 8),
                 _card(context, [
-                  // Alerts & notifications → NotificationsScreen
+                  // Manage alerts → central alerts list. Notification
+                  // permission itself is requested once at onboarding, so
+                  // there is no separate in-app on/off toggle here.
                   _navRow(
                     context,
-                    icon: Icons.notifications_outlined,
-                    title: 'Alerts & notifications',
-                    detail: m.notificationsEnabled ? 'On' : 'Off',
+                    icon: Icons.tune_rounded,
+                    title: 'Manage alerts',
+                    detail: m.alerts.isEmpty ? null : '${m.alerts.length}',
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => const NotificationsScreen(),
+                        builder: (_) => const ManageAlertsScreen(),
                       ),
                     ),
-                  ),
-                  _divider(context),
-                  // My favourites → switch to favourites tab
-                  _navRow(
-                    context,
-                    icon: Icons.star_outline,
-                    title: 'My favourites',
-                    onTap: () => widget.onTab(SoftTab.favourites),
                   ),
                   _divider(context),
                   // Appearance → sheet picker
@@ -356,15 +252,6 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                     title: 'Appearance',
                     detail: _themeLabel(m.themeMode),
                     onTap: _showAppearanceSheet,
-                  ),
-                  _divider(context),
-                  // Language → sheet picker
-                  _navRow(
-                    context,
-                    icon: Icons.language,
-                    title: 'Language',
-                    detail: _languageLabel(m.locale),
-                    onTap: _showLanguageSheet,
                   ),
                   _divider(context),
                   // About → AboutScreen

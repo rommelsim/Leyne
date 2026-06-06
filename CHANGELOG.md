@@ -8,6 +8,78 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.4.2 · iOS (20) · 2026-06-06
+
+**2026-06-06 — iOS App Store / TestFlight Archive (2.4.2, build 20):** headline
+feature is the notifications redesign; also bus-tracking accuracy fixes, a
+simpler save model, and pull-to-refresh on the bus view.
+
+- **Notifications redesign — two configurable alert types (NEW):**
+  - *Notify me when my bus reaches MY STOP* (arrival) — set from the Stop view:
+    tap a bus's bell → "Notify me when" sheet → choose how early (When arriving /
+    2 / 5 / 10 / 15 min; default 5) → "You'll be notified!" confirmation. Fires
+    that many minutes before the live ETA. Copy: "Bus 153 arriving soon /
+    <stop> / 5 min to arrival."
+  - *Notify me when my bus reaches MY DESTINATION* (alight) — set from the Bus
+    view: destination defaults to the route terminus and any stop is selectable
+    via the route timeline; lead adds a 30-min option (default 10). Fires that
+    many minutes before the estimated destination arrival (~90 s/stop estimate,
+    shown with the quiet "~" cue). Copy: "Your stop is next / <dest> / Arriving
+    in 10 min."
+  - A central **Manage alerts** screen (Active / Other sections, Edit → delete),
+    reachable from the confirmation and from Settings.
+  - Replaces the old hardcoded lead (60 s / 300 s) with a per-alert user choice.
+  - Architecture: pure tested `AlertTiming` (lead options + fire-time math +
+    copy), a `BusAlert` model + single persisted alert list (`leyne.alerts`) as
+    the one scheduling source of truth, with one-time migration of legacy
+    `tracked`/`activeAlight`. Notification alerts are now fully independent of
+    pinned-card visibility (`Pin.tracked`). New files: `AlertTiming.swift`,
+    `BusAlert.swift`, `V2/NotifyWhenSheet.swift`, `V2/NotifyConfirmView.swift`,
+    `V2/ManageAlertsView.swift`; tests `AlertTimingTests.swift`,
+    `BusAlertTests.swift`. (`AppModel.swift`, `SoftStopView.swift`,
+    `SoftBusView.swift`, `SoftSettingsView.swift`)
+- **Bus-tracking accuracy fixes:** the map pin used the real GPS fix while the
+  "stops away" / callout / approaching card used a pure ETA estimate, so they
+  disagreed (a pin ~1.3 km away while the text said "arriving now / 0 stops").
+  The bus's route index is now grounded in the GPS fix (nearest stop, clamped to
+  your stop), with the ETA estimate only as a fallback; the approaching-card
+  distance now measures to YOUR stop. Route progress now runs to the line's
+  terminus (was cut off just past your stop), and the green progress line ends
+  exactly at the bus (the boarding stop no longer paints an isolated green
+  segment). Logic extracted to a pure, tested `BusProgress` helper.
+  (`SoftBusView.swift`, `V2/RouteTimeline.swift`, `BusProgress.swift`,
+  `BusProgressTests.swift`)
+- **Simpler save model:** the star menu is gone — the Stop view's save is a
+  one-tap **pin** toggle (saves the stop) and the Bus view's is a one-tap **bus**
+  toggle (saves the bus), each filling when saved. Distinct glyphs differentiate
+  the two. (`SoftStopView.swift`, `SoftBusView.swift`)
+- **Pull-to-refresh on the bus view:** tracking a bus now supports pull-to-
+  refresh (matches Home / Stop / Saved). (`SoftBusView.swift`)
+- **"Add bus" in Saved:** on the Buses segment, the add row now reads "Add bus"
+  instead of "Add stop". (`SoftFavouritesView.swift`)
+- **CI:** the `ios-native` job now runs the Swift unit test suite
+  (`xcodebuild test`), not just a build. (`.github/workflows/ci.yml`)
+
+## Leyne 2.4.2 · Android (32) · 2026-06-06
+
+**2026-06-06 — Android parity with iOS 2.4.2:** the same notifications redesign,
+bus-tracking fixes, save toggles, pull-to-refresh, and "Add bus" label, ported
+to Flutter so both platforms match. Bump to `2.4.2+32`. Build artifact (when
+archived): `build/app/outputs/bundle/release/app-release.aab`.
+
+- **Notifications redesign:** `AlertKind`/`AlertTiming` (`lib/data/alert_timing.dart`),
+  `BusAlert` (`lib/state/bus_alert.dart`), alert CRUD + persistence (`lyne.alerts`)
+  + legacy migration in `app_model.dart`, scheduling via `scheduleAlerts` /
+  `scheduleDestinationAlert` in `notifications.dart`, and the
+  `notify_when_sheet.dart` / `notify_confirm.dart` / `manage_alerts_screen.dart`
+  UI, wired into the Stop and Bus screens + Settings.
+- **Bus-tracking fixes:** GPS-grounded bus index, distance-to-your-stop,
+  route-to-terminus timeline, and the green-line fix — via the shared
+  `lib/data/bus_progress.dart` helper and `widgets/v2/route_timeline.dart`.
+- **Save toggles, pull-to-refresh, "Add bus" label** mirrored from iOS.
+- Tests: `test/alert_timing_test.dart`, `test/bus_alert_test.dart`,
+  `test/bus_progress_test.dart`. CI runs `flutter analyze` + `flutter test`.
+
 ## Leyne 2.4.1 · iOS (19) · 2026-06-06
 
 **2026-06-06 — iOS App Store / TestFlight Archive (2.4.1, build 19):** patch

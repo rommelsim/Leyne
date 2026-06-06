@@ -38,9 +38,9 @@ class SoftTabBar extends StatelessWidget {
       surfaceTintColor: Colors.transparent,
       destinations: const [
         NavigationDestination(
-          icon: Icon(Icons.home_outlined),
-          selectedIcon: Icon(Icons.home_rounded),
-          label: 'Home',
+          icon: Icon(Icons.near_me_outlined),
+          selectedIcon: Icon(Icons.near_me_rounded),
+          label: 'Nearby',
         ),
         NavigationDestination(
           icon: Icon(Icons.star_outline_rounded),

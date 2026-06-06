@@ -23,6 +23,7 @@ import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
+import 'manage_alerts_screen.dart';
 
 class SoftHomeScreen extends StatefulWidget {
   const SoftHomeScreen({
@@ -293,16 +294,87 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
 
   Widget _header(BuildContext context) {
     final t = context.t;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Eyebrow(_greeting()),
-        const SizedBox(height: 2),
-        Text(
-          'Stops near you',
-          style: t.sans(30, weight: FontWeight.w700, color: t.fg),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Eyebrow(_greeting()),
+              const SizedBox(height: 2),
+              Text(
+                'Stops near you',
+                style: t.sans(30, weight: FontWeight.w700, color: t.fg),
+              ),
+            ],
+          ),
         ),
+        const SizedBox(width: 12),
+        _alertButton(context),
       ],
+    );
+  }
+
+  /// Top-right bell → the central alerts list, with a count badge when the
+  /// user has any alerts set. Refreshes the badge on return (an alert may
+  /// have been deleted in the list).
+  Widget _alertButton(BuildContext context) {
+    final t = context.t;
+    final count = AppModel.shared.alerts.length;
+    return Semantics(
+      button: true,
+      label: count == 0 ? 'Alerts' : 'Alerts, $count set',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: () {
+          Navigator.of(context)
+              .push(MaterialPageRoute(
+                builder: (_) => const ManageAlertsScreen(),
+              ))
+              .then((_) {
+            if (mounted) setState(() {});
+          });
+        },
+        child: Container(
+          width: 42,
+          height: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: t.surface,
+            shape: BoxShape.circle,
+            border: Border.all(color: t.line, width: 1),
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Icon(Icons.notifications_rounded, size: 20, color: t.fg),
+              if (count > 0)
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    constraints:
+                        const BoxConstraints(minWidth: 18, minHeight: 18),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: t.soon,
+                      borderRadius: BorderRadius.circular(99),
+                      border: Border.all(color: t.bg, width: 1.5),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: t.sans(11,
+                          weight: FontWeight.w700, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

@@ -50,6 +50,10 @@ class _RouteTimelineState extends State<RouteTimeline> {
   // collapsed so the boarding/upcoming area is what you see first.
   bool _expanded = false;
 
+  // Whether the whole route list is shown. The header toggles it so the
+  // (often long) bus→terminus list can be folded away.
+  bool _routeShown = true;
+
   @override
   Widget build(BuildContext context) {
     final t = context.t;
@@ -96,45 +100,66 @@ class _RouteTimelineState extends State<RouteTimeline> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                'ROUTE · BUS ${widget.svc}',
-                style: t
-                    .mono(10, weight: FontWeight.w600, color: t.dim)
-                    .copyWith(letterSpacing: 1),
+          // Tappable header — collapse / expand the whole route list.
+          InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: () => setState(() => _routeShown = !_routeShown),
+            child: Padding(
+              padding: EdgeInsets.only(bottom: _routeShown ? 8 : 0, top: 2),
+              child: Row(
+                children: [
+                  Text(
+                    'ROUTE · BUS ${widget.svc}',
+                    style: t
+                        .mono(10, weight: FontWeight.w600, color: t.dim)
+                        .copyWith(letterSpacing: 1),
+                  ),
+                  Text(
+                    '  · ${stops.length}',
+                    style: t.mono(10, weight: FontWeight.w600, color: t.faint),
+                  ),
+                  const Spacer(),
+                  if (showAhead)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Text(
+                        '$aheadCount STOP${aheadCount == 1 ? "" : "S"} AWAY',
+                        style: t
+                            .mono(10, weight: FontWeight.w600, color: t.dim)
+                            .copyWith(letterSpacing: 1),
+                      ),
+                    ),
+                  Icon(
+                    _routeShown
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: t.dim,
+                  ),
+                ],
               ),
-              const Spacer(),
-              // Badge suppressed unless we have a genuine live bus position.
-              // Mirror of iOS RouteTimeline.swift comment.
-              if (showAhead)
-                Text(
-                  '$aheadCount STOP${aheadCount == 1 ? "" : "S"} AWAY',
-                  style: t
-                      .mono(10, weight: FontWeight.w600, color: t.dim)
-                      .copyWith(letterSpacing: 1),
-                ),
-            ],
+            ),
           ),
-          const SizedBox(height: 8),
-          if (showHint)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                'Tap a stop to be alerted when arriving.',
-                style: t.sans(12, color: t.dim),
+          if (_routeShown) ...[
+            if (showHint)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Tap a stop to be alerted when arriving.',
+                  style: t.sans(12, color: t.dim),
+                ),
               ),
-            ),
-          // The collapse node sits at the visual top when active; the first
-          // rendered stop then keeps its top connector so the line is unbroken.
-          if (canCollapse) _collapseNode(context, hiddenCount: keepFrom),
-          for (var i = startIdx; i < stops.length; i++)
-            _row(
-              context,
-              stops[i],
-              !canCollapse && i == startIdx,
-              i == stops.length - 1,
-            ),
+            // The collapse node sits at the visual top when active; the first
+            // rendered stop then keeps its top connector so the line is unbroken.
+            if (canCollapse) _collapseNode(context, hiddenCount: keepFrom),
+            for (var i = startIdx; i < stops.length; i++)
+              _row(
+                context,
+                stops[i],
+                !canCollapse && i == startIdx,
+                i == stops.length - 1,
+              ),
+          ],
         ],
       ),
     );

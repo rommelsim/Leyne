@@ -31,8 +31,8 @@ void main() {
     await tester.pump(); // initial frame
 
     // All four destinations are present in the bottom navigation
-    // (2.4.0 redesign: Home · Saved · Search · Settings).
-    expect(find.text('Home'), findsAtLeastNWidgets(1));
+    // (2.4.0 redesign: Nearby · Saved · Search · Settings).
+    expect(find.text('Nearby'), findsAtLeastNWidgets(1));
     expect(find.text('Saved'), findsAtLeastNWidgets(1));
     expect(find.text('Search'), findsAtLeastNWidgets(1));
     expect(find.text('Settings'), findsAtLeastNWidgets(1));

@@ -42,6 +42,10 @@ struct RouteTimeline: View {
     // collapsed so the boarding/upcoming area is what you see first.
     @State private var expanded = false
 
+    /// Whether the whole route list is shown. The "FULL ROUTE" header toggles
+    /// it so the (often long) bus→terminus list can be folded away.
+    @State private var routeShown = true
+
     /// Focal stop: keep both the live bus and the boarding stop on screen, so
     /// collapse never folds the bus away. Use the earlier of the two; fall back
     /// to whichever exists, else the start.
@@ -64,50 +68,50 @@ struct RouteTimeline: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text("FULL ROUTE")
-                    .font(t.mono(10, weight: .semibold))
-                    .tracking(1)
-                    .foregroundStyle(t.dim)
-                Spacer()
-                if canCollapse {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(expanded ? "Show less" : "View all \(stops.count) stops")
-                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .font(t.sans(12, weight: .medium))
+            // Tappable header — collapse / expand the whole route list.
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { routeShown.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("FULL ROUTE")
+                        .font(t.mono(10, weight: .semibold))
+                        .tracking(1)
                         .foregroundStyle(t.dim)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(t.surfaceHi, in: Capsule())
+                    Text("· \(stops.count)")
+                        .font(t.mono(10, weight: .semibold))
+                        .foregroundStyle(t.faint)
+                    Spacer()
+                    Image(systemName: routeShown ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(t.dim)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, routeShown ? 8 : 0)
+            .accessibilityLabel(routeShown ? "Hide full route" : "Show full route, \(stops.count) stops")
+
+            if routeShown {
+                if stops.contains(where: { $0.state == .next }) {
+                    Text("Tap a stop to be alerted when arriving.")
+                        .font(t.sans(12))
+                        .foregroundStyle(t.dim)
+                        .padding(.bottom, 12)
+                }
+
+                VStack(spacing: 0) {
+                    // The collapse node sits at the visual top when active; the
+                    // first rendered stop then keeps its top connector so the line
+                    // stays unbroken.
+                    if canCollapse {
+                        collapseNode(hiddenCount: keepFrom)
                     }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.bottom, 8)
-
-            if stops.contains(where: { $0.state == .next }) {
-                Text("Tap a stop to be alerted when arriving.")
-                    .font(t.sans(12))
-                    .foregroundStyle(t.dim)
-                    .padding(.bottom, 12)
-            }
-
-            VStack(spacing: 0) {
-                // The collapse node sits at the visual top when active; the
-                // first rendered stop then keeps its top connector so the line
-                // stays unbroken.
-                if canCollapse {
-                    collapseNode(hiddenCount: keepFrom)
-                }
-                ForEach(Array(stops.enumerated()).filter { $0.offset >= startIdx },
-                        id: \.element.id) { idx, stop in
-                    routeRow(stop: stop,
-                             isFirst: !canCollapse && idx == startIdx,
-                             isLast: idx == stops.count - 1)
+                    ForEach(Array(stops.enumerated()).filter { $0.offset >= startIdx },
+                            id: \.element.id) { idx, stop in
+                        routeRow(stop: stop,
+                                 isFirst: !canCollapse && idx == startIdx,
+                                 isLast: idx == stops.count - 1)
+                    }
                 }
             }
         }
