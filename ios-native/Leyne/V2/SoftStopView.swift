@@ -25,7 +25,9 @@ struct SoftStopView: View {
     let onBack: () -> Void
     let onOpenBus: (String) -> Void
 
-    @State private var sort: StopSort = .arrival
+    // Default to service-number order (natural sort, so 2 < 10 < 53M), not ETA.
+    // The Sort menu still offers arrival/distance.
+    @State private var sort: StopSort = .service
     @State private var expanded = false
 
     // "Notify me when" flow — the service the sheet is being set for, the

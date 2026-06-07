@@ -5,6 +5,14 @@
 // stop's identity and its soonest service's next three arrivals.
 
 import SwiftUI
+import MapKit
+import UIKit
+
+/// Identifies the stop a long-press "Arrival Alerts" sheet is open for.
+private struct AlertTarget: Identifiable {
+    let code: String
+    var id: String { code }
+}
 
 struct SoftHomeView: View {
     @EnvironmentObject var m: AppModel
@@ -18,6 +26,9 @@ struct SoftHomeView: View {
 
     /// Drives the push to the central alerts list from the header bell.
     @State private var showAlerts = false
+
+    /// Stop whose long-press "Arrival Alerts" sheet is open (nil = none).
+    @State private var alertTarget: AlertTarget?
 
     let onTab: (SoftTab) -> Void
     let onOpenStop: (String) -> Void
@@ -75,6 +86,17 @@ struct SoftHomeView: View {
         // keeps its own nav bar (title + Edit) and the swipe-back gesture.
         .navigationDestination(isPresented: $showAlerts) {
             ManageAlertsView().toolbar(.hidden, for: .tabBar)
+        }
+        // Long-press "Arrival Alerts" → stop-level sheet (targets the soonest bus).
+        .sheet(item: $alertTarget) { target in
+            StopAlertSheet(
+                stopCode: target.code,
+                stopName: ds.stopName(target.code),
+                road: ds.roadName(target.code),
+                onClose: { alertTarget = nil })
+            .environmentObject(m)
+            .environmentObject(fb)
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -164,9 +186,10 @@ struct SoftHomeView: View {
 
     private func stopCard(_ stop: NearbyStop, highlight: Bool) -> some View {
         let code = stop.stopCode
+        let name = stop.stopName.isEmpty ? code : stop.stopName
         return SoftNearbyStopCard(
             t: t,
-            name: stop.stopName.isEmpty ? code : stop.stopName,
+            name: name,
             code: code,
             road: ds.roadName(code),
             walkMin: stop.walkMin,
@@ -175,9 +198,81 @@ struct SoftHomeView: View {
             feed: feed(code),
             highlight: highlight,
             tick: m.tick,
-            onTap: { fb.select(); m.addRecent(stop.stopName.isEmpty ? code : stop.stopName)
-                     onOpenStop(code) }
+            onTap: { fb.select(); m.addRecent(name); onOpenStop(code) }
         )
+        // Long-press menu (matches the mockup): the card lifts as the preview.
+        // Long-press → a peek of the stop (mini live-arrivals view) + actions.
+        .contextMenu(menuItems: {
+            Button {
+                fb.select(); m.addRecent(name); onOpenStop(code)
+            } label: {
+                Label("Open Stop", systemImage: "arrow.up.forward")
+            }
+            Divider()
+            Button {
+                fb.select(); m.togglePin(code: code)
+            } label: {
+                Label(m.isPinned(code) ? "Remove from Saved" : "Add to Saved",
+                      systemImage: m.isPinned(code) ? "star.slash" : "star")
+            }
+            Button {
+                fb.select(); alertTarget = AlertTarget(code: code)
+            } label: {
+                Label("Arrival Alerts", systemImage: "bell")
+            }
+            Button {
+                fb.select(); openOnMap(code: code, name: name)
+            } label: {
+                Label("Open on Map", systemImage: "map")
+            }
+            Button {
+                fb.success(); UIPasteboard.general.string = code
+            } label: {
+                Label("Copy Stop Code", systemImage: "doc.on.doc")
+            }
+            Button {
+                fb.select(); shareStop(code: code, name: name)
+            } label: {
+                Label("Share Stop", systemImage: "square.and.arrow.up")
+            }
+            Divider()
+            Button(role: .destructive) {
+                fb.select(); m.hideFromNearby(code: code)
+            } label: {
+                Label("Hide From Nearby", systemImage: "eye.slash")
+            }
+        }, preview: {
+            stopPreview(code: code, name: name)
+        })
+    }
+
+    // MARK: Context-menu actions
+
+    /// Opens the stop's location in Apple Maps (external handoff).
+    private func openOnMap(code: String, name: String) {
+        guard let stop = ds.stopByCode[code] else { return }
+        let coord = CLLocationCoordinate2D(latitude: stop.Latitude,
+                                           longitude: stop.Longitude)
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: coord))
+        item.name = name.isEmpty ? "Stop \(code)" : name
+        item.openInMaps()
+    }
+
+    /// Shares the stop as text + a universal link (lyne.sg/stop/<code>) so the
+    /// recipient can deep-link straight into it. Presents from the top-most VC.
+    private func shareStop(code: String, name: String) {
+        let label = name.isEmpty ? "Stop \(code)" : "\(name) (Stop \(code))"
+        let text = "\(label) — track arrivals on Leyne https://lyne.sg/stop/\(code)"
+        let av = UIActivityViewController(activityItems: [text],
+                                          applicationActivities: nil)
+        guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene }).first,
+              let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController
+        else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        av.popoverPresentationController?.sourceView = top.view
+        top.present(av, animated: true)
     }
 
     private var liveUpdatesBanner: some View {
@@ -203,12 +298,13 @@ struct SoftHomeView: View {
         .accessibilityLabel("Live updates. Arrival times update every few seconds. Tap to refresh.")
     }
 
-    /// Nearby stops (closest first). Pins are excluded — they live on the
-    /// Favourites tab.
+    /// Nearby stops (closest first). Saved stops are kept — "nearby" means
+    /// physically near you regardless of saved status (they also appear on the
+    /// Saved tab). Only stops the user explicitly hid are dropped.
     private var nearbyStops: [NearbyStop] {
-        let pinned = Set(m.pins.map(\.code))
+        let hidden = m.hiddenNearby
         return ds.nearby
-            .filter { !pinned.contains($0.stopCode) }
+            .filter { !hidden.contains($0.stopCode) }
             .sorted { $0.distanceM < $1.distanceM }
     }
 
@@ -265,6 +361,67 @@ struct SoftHomeView: View {
     /// `liveServices` already returns the stop's services sorted by ETA, so a
     /// stable partition into favourites + the rest preserves the soonest-first
     /// order inside each group.
+    /// A compact "peek" of a stop for the long-press preview — the stop name and
+    /// its live arrivals (service no · crowd · ETA), like a miniature Stop view.
+    private func stopPreview(code: String, name: String) -> some View {
+        let services = m.liveServices(code: code, tracked: [])
+            .sorted { $0.no.localizedStandardCompare($1.no) == .orderedAscending }
+        let road = ds.roadName(code)
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(t.sans(16, weight: .bold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                Text(road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)")
+                    .font(t.mono(11))
+                    .foregroundStyle(t.dim)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            Rectangle().fill(t.line).frame(height: 1)
+
+            if services.isEmpty {
+                Text("No live arrivals right now")
+                    .font(t.sans(13))
+                    .foregroundStyle(t.dim)
+                    .padding(16)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(services.prefix(7).enumerated()), id: \.element.id) { i, s in
+                        let eta = fmtETA(s.etaSec)
+                        if i > 0 {
+                            Rectangle().fill(t.line).frame(height: 1).padding(.leading, 16)
+                        }
+                        HStack(spacing: 10) {
+                            Text(s.no)
+                                .font(t.mono(15, weight: .bold))
+                                .foregroundStyle(t.fg)
+                                .frame(minWidth: 42, alignment: .leading)
+                            CrowdMeter(load: s.load, t: t, showLabel: false)
+                            Spacer(minLength: 8)
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text(eta.big)
+                                    .font(t.mono(15, weight: .bold))
+                                    .foregroundStyle(eta.big == "Arr" ? t.soon : t.fg)
+                                Text(eta.small)
+                                    .font(t.sans(11))
+                                    .foregroundStyle(t.dim)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                    }
+                }
+            }
+        }
+        .frame(width: 300)
+        .background(t.surface)
+    }
+
     private func rankedArrivals(_ code: String) -> [RankedArrival] {
         let services = m.liveServices(code: code, tracked: [])
         func isFav(_ s: Service) -> Bool {

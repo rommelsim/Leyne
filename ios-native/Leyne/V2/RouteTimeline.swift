@@ -32,6 +32,12 @@ struct RouteTimeline: View {
     let svc: String
     let stops: [RouteStop]
     @Binding var alightId: String?
+    /// When false the list is a read-only viewer: no "tap to be alerted" hint,
+    /// no per-row tap or chevron. (Alight selection is disabled for now.)
+    var selectable: Bool = true
+    /// When true, drop the inner card chrome (padding + surface) so the list
+    /// sits flush with its parent's margin — e.g. inside the glass route card.
+    var embedded: Bool = false
 
     // Beyond this many stops the leading run is collapsed behind a "show
     // earlier stops" node so a long route stays scannable. Kept in sync with
@@ -45,6 +51,10 @@ struct RouteTimeline: View {
     /// Whether the whole route list is shown. The "FULL ROUTE" header toggles
     /// it so the (often long) bus→terminus list can be folded away.
     @State private var routeShown = true
+
+    /// Whether the stops past your stop (→ terminus) are revealed. Long routes
+    /// start with the tail folded so the card opens on bus → your stop.
+    @State private var tailExpanded = false
 
     /// Focal stop: keep both the live bus and the boarding stop on screen, so
     /// collapse never folds the bus away. Use the earlier of the two; fall back
@@ -65,6 +75,27 @@ struct RouteTimeline: View {
     }
 
     private var startIdx: Int { (canCollapse && !expanded) ? keepFrom : 0 }
+
+    /// The furthest "important" stop to keep visible by default — your boarding
+    /// stop, or the alight target if it's further along (else the bus). Stops
+    /// beyond it fold into a trailing node so a long route doesn't scroll forever.
+    private var tailAnchorIdx: Int {
+        let board = stops.firstIndex { $0.state == .board }
+        let here = stops.firstIndex { $0.state == .here }
+        let alight = alightId.flatMap { id in stops.firstIndex { $0.id == id } }
+        return max(board ?? here ?? -1, alight ?? -1)
+    }
+    /// Keep two stops of lead-out past the anchor, then collapse to the terminus.
+    private var tailKeepTo: Int {
+        guard tailAnchorIdx >= 0 else { return stops.count - 1 }
+        return min(stops.count - 1, tailAnchorIdx + 2)
+    }
+    private var canCollapseTail: Bool {
+        tailAnchorIdx >= 0 && (stops.count - 1 - tailKeepTo) >= 2
+    }
+    private var effectiveEndIdx: Int {
+        (canCollapseTail && !tailExpanded) ? tailKeepTo : stops.count - 1
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -92,7 +123,7 @@ struct RouteTimeline: View {
             .accessibilityLabel(routeShown ? "Hide full route" : "Show full route, \(stops.count) stops")
 
             if routeShown {
-                if stops.contains(where: { $0.state == .next }) {
+                if selectable && stops.contains(where: { $0.state == .next }) {
                     Text("Tap a stop to be alerted when arriving.")
                         .font(t.sans(12))
                         .foregroundStyle(t.dim)
@@ -106,17 +137,28 @@ struct RouteTimeline: View {
                     if canCollapse {
                         collapseNode(hiddenCount: keepFrom)
                     }
-                    ForEach(Array(stops.enumerated()).filter { $0.offset >= startIdx },
+                    ForEach(Array(stops.enumerated())
+                                .filter { $0.offset >= startIdx && $0.offset <= effectiveEndIdx },
                             id: \.element.id) { idx, stop in
                         routeRow(stop: stop,
                                  isFirst: !canCollapse && idx == startIdx,
                                  isLast: idx == stops.count - 1)
                     }
+                    // The long tail past your stop folds away, so the card opens on
+                    // the part you care about (bus → your stop), not a long scroll.
+                    if canCollapseTail {
+                        tailCollapseNode(hiddenCount: stops.count - 1 - tailKeepTo,
+                                         terminus: stops.last?.name ?? "the end")
+                    }
                 }
             }
         }
-        .padding(16)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(embedded ? 0 : 16)
+        .background {
+            if !embedded {
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(t.surface)
+            }
+        }
     }
 
     /// Expandable node standing in for the collapsed leading stops. Tapping it
@@ -149,6 +191,45 @@ struct RouteTimeline: View {
                     .foregroundStyle(t.dim)
                     .padding(.bottom, 14)
                     .padding(.top, 2)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Trailing counterpart to `collapseNode` — folds the stops between your
+    /// stop and the terminus. The connector enters from the top; nothing below.
+    @ViewBuilder
+    private func tailCollapseNode(hiddenCount: Int, terminus: String) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { tailExpanded.toggle() }
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    // Connector only while collapsed; when expanded the terminus
+                    // above is the line's end, so this is a plain "hide" control.
+                    if !tailExpanded {
+                        VStack(spacing: 0) {
+                            Rectangle().fill(t.line).frame(width: 2)
+                            Rectangle().fill(Color.clear).frame(width: 2)
+                        }
+                    }
+                    Image(systemName: tailExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(t.dim)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(t.surface))
+                }
+                .frame(width: 24)
+
+                Text(tailExpanded
+                     ? "Hide later stops"
+                     : "Show \(hiddenCount) more stop\(hiddenCount == 1 ? "" : "s") to \(terminus)")
+                    .font(t.sans(13, weight: .medium))
+                    .foregroundStyle(t.dim)
+                    .padding(.top, 2)
+                    .padding(.bottom, 4)
                 Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
@@ -227,15 +308,17 @@ struct RouteTimeline: View {
                         .lineLimit(1)
                         .padding(.top, 1)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(t.faint)
-                    .padding(.top, 2)
+                if selectable {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(t.faint)
+                        .padding(.top, 2)
+                }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!isUpcoming)
+        .disabled(!isUpcoming || !selectable)
     }
 
     @ViewBuilder

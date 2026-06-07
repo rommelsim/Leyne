@@ -221,11 +221,12 @@ struct ConfidenceStatusPill: View {
 }
 
 // ─── Crowd meter glyph ─────────────────────────────────────────────────
-/// Three ascending bars filled by load (Seats=1, Standing=2, Crowded=3),
-/// with an unknown state rendered as dashed outlines. Replaces the
-/// colour-dot + word so crowding reads as a small pictogram — and "unknown"
-/// is shown honestly rather than hidden. Bars are monochrome ink; this is a
-/// data signal, not a place to spend the accent.
+/// Occupancy shown as a row of three person glyphs filled by load
+/// (Seats=1, Standing=2, Crowded=3) and tinted green / amber / grey — the
+/// "how full is the bus" metaphor riders already know from the LTA app.
+/// (Deliberately NOT ascending bars: those read as a cellular-signal meter,
+/// which is the wrong sense — more crowding is worse, not "stronger".)
+/// Unknown shows three faint outlines, honestly rather than hidden.
 struct CrowdMeter: View {
     let load: Load?          // nil → unknown
     let t: Theme
@@ -249,16 +250,16 @@ struct CrowdMeter: View {
         case .none:       return "Crowd unknown"
         }
     }
-    private let heights: [CGFloat] = [8, 11, 14]
 
     var body: some View {
         HStack(spacing: 5) {
-            HStack(alignment: .bottom, spacing: 2.5) {
-                ForEach(Array(heights.enumerated()), id: \.offset) { i, h in
-                    bar(filled: load != nil && i < fill, height: h)
+            HStack(spacing: 1.5) {
+                ForEach(0..<3, id: \.self) { i in
+                    Image(systemName: (load != nil && i < fill) ? "person.fill" : "person")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(personColor(i))
                 }
             }
-            .frame(height: 14)
             if showLabel {
                 Text(label)
                     .font(t.mono(10, weight: .medium))
@@ -269,18 +270,10 @@ struct CrowdMeter: View {
         .accessibilityLabel(load == nil ? "Crowd unknown" : label)
     }
 
-    @ViewBuilder
-    private func bar(filled: Bool, height: CGFloat) -> some View {
-        if load == nil {
-            RoundedRectangle(cornerRadius: 1.5)
-                .strokeBorder(t.faint, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-                .frame(width: 4, height: height)
-        } else if filled {
-            RoundedRectangle(cornerRadius: 1.5).fill(occupancyColor(load, t: t))
-                .frame(width: 4, height: height)
-        } else {
-            RoundedRectangle(cornerRadius: 1.5).stroke(t.line, lineWidth: 1)
-                .frame(width: 4, height: height)
-        }
+    /// Filled people take the occupancy hue; empties are hairline; an unknown
+    /// load greys the whole row.
+    private func personColor(_ i: Int) -> Color {
+        guard load != nil else { return t.faint }
+        return i < fill ? occupancyColor(load, t: t) : t.line
     }
 }

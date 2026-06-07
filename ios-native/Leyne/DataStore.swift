@@ -42,6 +42,15 @@ struct RouteInfo: Equatable {
 /// list, where the anchor stop sits in it, and whether the anchor is in this
 /// direction at all. A bus service almost always runs two directions
 /// (origin→terminus and back), so the Bus view offers a toggle between them.
+/// First/last bus clock times at a stop, per service day. Strings are raw LTA
+/// "HHmm" (e.g. "0530"; LTA encodes past-midnight as "24xx"/"25xx"). The view
+/// picks today's pair and formats it for the user's 12/24-h preference.
+struct OperatingWindow: Equatable {
+    let firstWD: String?,  lastWD: String?
+    let firstSat: String?, lastSat: String?
+    let firstSun: String?, lastSun: String?
+}
+
 struct RouteDirection: Equatable {
     /// LTA `Direction` value (1 or 2).
     let direction: Int
@@ -54,6 +63,10 @@ struct RouteDirection: Equatable {
     /// Whether the anchor stopCode actually appears in this direction. False for
     /// the "other" direction when the view was opened from a specific stop.
     let anchorPresent: Bool
+
+    /// First/last bus at the anchor (boarding) stop in this direction, when the
+    /// BusRoutes feed carried it. nil for the non-anchor direction.
+    var firstLast: OperatingWindow? = nil
 
     var originName: String { stops.first?.name ?? "" }
     var destinationName: String { stops.last?.name ?? "" }
@@ -467,11 +480,21 @@ final class DataStore: ObservableObject {
             } else {
                 youIdx = -1
             }
+            // First/last bus at the boarding stop (this direction only).
+            var window: OperatingWindow? = nil
+            if let code = stopCode, youIdx >= 0,
+               let row = seq.first(where: { $0.BusStopCode == code }) {
+                window = OperatingWindow(
+                    firstWD: row.WD_FirstBus,   lastWD: row.WD_LastBus,
+                    firstSat: row.SAT_FirstBus, lastSat: row.SAT_LastBus,
+                    firstSun: row.SUN_FirstBus, lastSun: row.SUN_LastBus)
+            }
             directions.append(RouteDirection(
                 direction: d,
                 stops: stops,
                 youIndex: youIdx < 0 ? 0 : youIdx,
-                anchorPresent: youIdx >= 0
+                anchorPresent: youIdx >= 0,
+                firstLast: window
             ))
         }
         guard !directions.isEmpty else { return nil }

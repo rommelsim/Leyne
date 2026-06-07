@@ -8,6 +8,41 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.4.3 · iOS (21) · 2026-06-08
+
+**2026-06-08 — iOS Archive (2.4.3, build 21):** iOS-only release continuing the
+2.4.x redesign — reworks the Bus view into a single glanceable dashboard and
+refines Nearby. No Android changes this round.
+
+- **Bus view → one-screen dashboard:** ETA, stops-away, deck type, crowd, the
+  next two arrivals, a compact route strip (origin → bus → your stop →
+  destination), a live map, and first/last bus are all visible without
+  scrolling (laid out in a `GeometryReader` so the map flexes to fit). The ETA
+  hero was reorganised — ETA + stops-away headline, crowd top-right, deck +
+  next-two in a quiet footer. (`SoftBusView.swift`)
+- **Route & map as glass cards:** tapping the route strip raises a Liquid-Glass
+  card (`.regularMaterial`) with the full route timeline + live "BUS HERE NOW"
+  position; it folds the long tail so it opens on bus → your stop, and the
+  expand/collapse toggles both ways. Tapping the map opens a half-height map
+  card. (`SoftBusView.swift`, `RouteTimeline.swift`)
+- **Alerts moved to the top bar:** a bell toggles the boarding alert (+ lock-
+  screen tracking) and a save (bus) toggle, each with a confirmation toast so
+  the buttons explain themselves. The alight reminder is removed for now.
+  (`SoftBusView.swift`)
+- **Stop list sorts by bus number** (natural order: 2 · 10 · 53 · 53M · 98A),
+  with Arrival / Distance still available in the Sort menu. (`SoftStopView.swift`)
+- **Nearby keeps saved stops:** saving a stop no longer removes it from Nearby —
+  Nearby now hides only stops you explicitly hid. (`SoftHomeView.swift`)
+- **Long-press a nearby stop → peek:** a mini Stop view (name + live arrivals,
+  service · crowd · ETA) plus an Open Stop action. (`SoftHomeView.swift`)
+- **Map fixes:** the inline preview auto-frames its markers (no edge clipping);
+  the recenter button locates the bus's *current* position; a separate button
+  recentres on you (shown only when a fix exists). (`SoftBusView.swift`)
+- **Tests:** added `NearbyActionTests` covering Add to Saved / Hide From Nearby /
+  Open Stop / Copy and the service-number ordering, with a regression that
+  saving a stop never hides it from Nearby.
+- Build + tests verified.
+
 ## Leyne 2.4.2 · Android (33) · 2026-06-06
 
 **2026-06-06 — Android Play Store AAB (2.4.2, build 33):**

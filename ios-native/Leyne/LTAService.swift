@@ -144,7 +144,10 @@ final class LTAService: @unchecked Sendable {
         try await cachedOrFetch("BusServices", "BusServices", LTABusServiceDTO.self)
     }
     func busRoutes() async throws -> [LTABusRouteDTO] {
-        try await cachedOrFetch("BusRoutes", "BusRoutes", LTABusRouteDTO.self)
+        // Cache key bumped to "BusRoutes2" so existing installs re-fetch once
+        // and pick up the first/last-bus columns added to LTABusRouteDTO; the
+        // old "BusRoutes.json" cache lacked them and would decode them as nil.
+        try await cachedOrFetch("BusRoutes2", "BusRoutes", LTABusRouteDTO.self)
     }
 
     // ─── Live: Train Service Alerts (MRT/LRT) ─────────────

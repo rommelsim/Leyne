@@ -8,7 +8,7 @@
 import SwiftUI
 
 /// Programmatic push targets for the settings nav rows.
-private enum SettingsDest: Hashable { case manageAlerts, about }
+private enum SettingsDest: Hashable { case manageAlerts, hiddenStops, about }
 
 struct SoftSettingsView: View {
     @EnvironmentObject var m: AppModel
@@ -59,6 +59,23 @@ struct SoftSettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .listRowBackground(rowBG)
+
+                // Hidden stops → HiddenStopsView. Only surfaces once you've
+                // hidden something from Nearby (long-press → Hide From Nearby).
+                if !m.hiddenNearby.isEmpty {
+                    Button {
+                        settingsDest = .hiddenStops
+                    } label: {
+                        rowLabel(
+                            icon: "eye.slash",
+                            title: "Hidden stops",
+                            detail: "\(m.hiddenNearby.count)"
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(rowBG)
+                }
 
                 // About → AboutView
                 Button {
@@ -135,6 +152,8 @@ struct SoftSettingsView: View {
             switch dest {
             case .manageAlerts:
                 ManageAlertsView().toolbar(.hidden, for: .tabBar)
+            case .hiddenStops:
+                HiddenStopsView().toolbar(.hidden, for: .tabBar)
             case .about:
                 AboutView().toolbar(.hidden, for: .tabBar)
             }
