@@ -443,6 +443,13 @@ final class AppModel: ObservableObject {
     // Persisted recent searches
     @Published var recents: [String] = []
 
+    // Persisted stop codes the user has hidden from the Nearby list (via the
+    // long-press "Hide From Nearby" action). Filtered out in SoftHomeView and
+    // restored from Settings → Hidden stops.
+    @Published var hiddenNearby: Set<String> = [] {
+        didSet { persistHiddenNearby() }
+    }
+
     // ─── Notification alerts (the redesign's single source of truth) ───
     // Both alert kinds — "notify me when my bus reaches MY STOP" (arrival)
     // and "…MY DESTINATION" (destination) — live here, persisted as JSON.
@@ -461,6 +468,7 @@ final class AppModel: ObservableObject {
         loadFavServices()
         loadRecents()
         loadAlerts()
+        loadHiddenNearby()
         timer = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
@@ -513,6 +521,22 @@ final class AppModel: ObservableObject {
         }
         mirrorFavServicesToWidget()
     }
+    private func loadHiddenNearby() {
+        if let d = UserDefaults.standard.data(forKey: "leyne.hiddenNearby"),
+           let h = try? JSONDecoder().decode(Set<String>.self, from: d) {
+            hiddenNearby = h
+        }
+    }
+    private func persistHiddenNearby() {
+        if let d = try? JSONEncoder().encode(hiddenNearby) {
+            UserDefaults.standard.set(d, forKey: "leyne.hiddenNearby")
+        }
+    }
+
+    /// Hide a stop from the Nearby list ("Hide From Nearby" long-press action).
+    func hideFromNearby(code: String) { hiddenNearby.insert(code) }
+    /// Restore a previously hidden stop (Settings → Hidden stops).
+    func unhideNearby(code: String) { hiddenNearby.remove(code) }
 
     /// Re-publish the favourite-service snapshot. Called after reference data
     /// finishes loading, when stop names + destinations finally resolve.
