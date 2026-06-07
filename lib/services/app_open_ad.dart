@@ -1,6 +1,7 @@
-// Google AdMob App Open ad — full-screen ad shown when the app returns to the
-// foreground from the background. The single highest-value format for a
+// Google AdMob App Open ad — full-screen ad shown when the app is launched or
+// returns to the foreground. The single highest-value format for a
 // high-frequency utility app like a bus tracker (opened many times a day).
+// AdMob: "apps with frequent opens (>once every 4h) see the best performance."
 //
 // UX-first / policy-safe guards, all enforced in [showIfAvailable]:
 //   • Respects the same master switches as the banner: kLyneAdsEnabled,
@@ -11,10 +12,13 @@
 //   • At most once every [_minInterval] (frequency cap, persisted).
 //   • Only shows a fresh creative — App Open ads expire [_maxCacheAge] after
 //     load (AdMob policy), so stale ones are dropped and reloaded.
+//   • Never stacks with the Interstitial (shared FullScreenAdGate) — AdMob
+//     disallows an ad immediately before/after an app-open ad.
 //
-// It is wired to fire on warm foreground only (Flutter's AppLifecycleListener
-// onResume), NOT on cold launch — the cold-start listener is created after the
-// initial resume, so the very first launch never shows one (least jarring).
+// Fires on BOTH a cold launch ([showOnColdLaunch], for returning users — never
+// the very first launch) and warm foreground (AppLifecycleListener onResume).
+// The 4h cap means a brief in-and-out won't trigger one; a genuine new session
+// (launch, or a return after hours) will.
 
 import 'dart:async';
 
@@ -43,13 +47,19 @@ class AppOpenAdManager {
 
   String get _unitId => (kDebugMode || kLyneAdsTest) ? _testUnit : _prodUnit;
 
-  /// Frequency cap — at most one App Open ad per this window.
-  static const Duration _minInterval = Duration(minutes: 5);
+  /// Frequency cap — at most one App Open ad per this window. 4h matches
+  /// AdMob's "best performance for apps opened more than once every 4h" and
+  /// keeps brief in-and-out returns ad-free; a genuine new session triggers it.
+  static const Duration _minInterval = Duration(hours: 4);
 
   /// App Open creatives expire 4h after load (AdMob). Drop + reload past this.
   static const Duration _maxCacheAge = Duration(hours: 4);
 
   static const String _lastShownKey = 'lyne.appOpenAd.lastShownMs';
+
+  /// Set true after the first launch into the main UI, so the cold-launch ad
+  /// never greets a brand-new user on their very first open (AdMob guidance).
+  static const String _coldLaunchedKey = 'lyne.appOpenAd.coldLaunchedBefore';
 
   AppOpenAd? _ad;
   DateTime? _loadTime;
@@ -107,6 +117,31 @@ class AppOpenAdManager {
       const Duration(milliseconds: 800),
       () => preloadWhenReady(attemptsLeft - 1),
     );
+  }
+
+  /// Cold-launch presentation: on a genuine app launch (not a warm resume),
+  /// show one App Open ad once it's loaded — bounded to a short window after
+  /// launch so a late creative never covers content the user is already using.
+  /// Skipped on the very first launch into the app (AdMob guidance: don't greet
+  /// a brand-new user with an ad). All the usual guards (4h cap, onboarding,
+  /// deep-link suppression, cross-format gap) still apply inside
+  /// [showIfAvailable].
+  Future<void> showOnColdLaunch() async {
+    if (!kLyneAdsEnabled || kLyneScreenshotMode) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!(prefs.getBool(_coldLaunchedKey) ?? false)) {
+      await prefs.setBool(_coldLaunchedKey, true); // first launch — no ad
+      return;
+    }
+    // Wait briefly for consent + a loaded creative, then present. Bounded
+    // (~5s) so we never show over content the user has already started using.
+    for (var i = 0; i < 10; i++) {
+      if (AdConsent.started && _ad != null && !_isExpired) {
+        await showIfAvailable();
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
   }
 
   /// Show the App Open ad on foreground IF every guard passes; otherwise make

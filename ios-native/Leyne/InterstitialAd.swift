@@ -22,6 +22,18 @@ import os
 private let interLog = Logger(subsystem: "com.leyne.Leyne", category: "InterstitialAd")
 
 enum InterstitialAdConfig {
+    /// Master switch for the Interstitial format. OFF for the current release.
+    ///
+    /// Per the phased ad rollout (and AdMob's "start low, increase carefully to
+    /// protect retention" guidance), interstitials are a Phase 2 addition —
+    /// added after banners + App Open have a usage/retention baseline, since
+    /// those two carry the bulk of revenue while interstitials carry the most
+    /// retention risk. The implementation, wiring, and prod unit all stay in
+    /// place; flip this to `true` to enable. The back-exit placement is
+    /// intentionally policy-aligned (AdMob caps interstitials at one per two
+    /// user actions, back press included).
+    static let enabled = false
+
     // Ad unit selection mirrors AdConfig.bannerUnitID:
     //   • DEBUG (Xcode Run): Google's reserved Interstitial TEST unit.
     //   • RELEASE: the real production unit, unless `forceTestUnitForRelease`
@@ -63,9 +75,11 @@ final class InterstitialAdManager: NSObject {
 
     private override init() { super.init() }
 
-    /// True once a real prod unit is wired (or in test builds). When false in a
-    /// prod build the manager is a complete no-op.
-    private var configured: Bool { !InterstitialAdConfig.unitID.isEmpty }
+    /// True only when the format is enabled for this build AND a unit is wired
+    /// (always in test builds). When false the manager is a complete no-op.
+    private var configured: Bool {
+        InterstitialAdConfig.enabled && !InterstitialAdConfig.unitID.isEmpty
+    }
 
     /// Called before a deep-link / notification mutates a nav stack so the
     /// stack-shrink it causes isn't mistaken for a user back-exit. Short TTL

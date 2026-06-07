@@ -77,9 +77,12 @@ struct RootView: View {
         .task {
             if !m.showOnboarding {
                 await AdConsent.gatherThenStart()
-                // Preload an App Open ad so one is ready for the first warm
-                // foreground (it never shows on this cold launch).
+                // Preload an App Open ad, then present it for this cold launch
+                // once it's ready (returning users only; never the first launch,
+                // and gated behind the splash + 4h cap inside the manager). Run
+                // detached so its short poll doesn't hold up the rest of launch.
                 AppOpenAdManager.shared.preload()
+                Task { await AppOpenAdManager.shared.showOnColdLaunch(model: m) }
                 // Preload an Interstitial so one is ready when the user first
                 // backs out of a Stop / Bus detail.
                 InterstitialAdManager.shared.preload()

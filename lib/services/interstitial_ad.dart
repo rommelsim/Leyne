@@ -27,6 +27,17 @@ import '../widgets/ad_banner.dart'
 import 'ad_consent.dart';
 import 'full_screen_ad_gate.dart';
 
+/// Master switch for the Interstitial format. OFF for the current release.
+///
+/// Per the phased ad rollout (and AdMob's "start low, increase carefully to
+/// protect retention" guidance), interstitials are a Phase 2 addition — added
+/// after banners + App Open have a usage/retention baseline, since those two
+/// carry the bulk of revenue while interstitials carry the most retention risk.
+/// The implementation, wiring, and prod unit all stay in place; flip this to
+/// `true` to enable. The back-exit placement is intentionally policy-aligned
+/// (AdMob caps interstitials at one per two user actions, back press included).
+const bool kLyneInterstitialEnabled = false;
+
 class InterstitialAdManager {
   InterstitialAdManager._();
   static final InterstitialAdManager instance = InterstitialAdManager._();
@@ -61,9 +72,10 @@ class InterstitialAdManager {
   /// first interstitial regardless of last session's count.
   int _exitsSinceShown = 0;
 
-  /// True once a real prod unit has been wired (or in test builds). When false
-  /// in a prod build, the manager is a complete no-op.
-  bool get _configured => _unitId.isNotEmpty;
+  /// True only when the format is enabled for this build AND a unit is wired
+  /// (always in test builds). When false the manager is a complete no-op —
+  /// gates preload, preloadWhenReady, and maybeShowOnExit.
+  bool get _configured => kLyneInterstitialEnabled && _unitId.isNotEmpty;
 
   /// Load a single ad ahead of time if we don't already have one.
   void preload() {

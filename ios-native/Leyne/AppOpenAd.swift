@@ -12,9 +12,12 @@
 //   • Only a fresh creative — App Open ads expire `maxCacheAge` after load
 //     (AdMob policy); stale ones are dropped and reloaded.
 //
-// Wired to fire on WARM foreground only (scenePhase .background → .active in
-// LeyneApp), never on cold launch — least jarring, and avoids racing the
-// consent / ATT prompts that run on first launch.
+// Fires on BOTH a cold launch (`showOnColdLaunch(model:)`, for returning users
+// — never the very first launch, and gated behind consent/ATT + the splash) and
+// a WARM foreground (scenePhase .background → .active in LeyneApp). The 4h cap
+// means a brief in-and-out won't trigger one; a genuine new session (launch, or
+// a return after hours) will. Never stacks with the Interstitial (shared
+// FullScreenAdGate) — AdMob disallows an ad immediately before/after app-open.
 
 import SwiftUI
 import GoogleMobileAds
@@ -39,8 +42,10 @@ enum AppOpenAdConfig {
         : "ca-app-pub-5864511655536507/4093216883"   // leyne-acct prod App Open
     #endif
 
-    /// Frequency cap — at most one App Open ad per this window.
-    static let minInterval: TimeInterval = 5 * 60
+    /// Frequency cap — at most one App Open ad per this window. 4h matches
+    /// AdMob's "best performance for apps opened more than once every 4h" and
+    /// keeps brief in-and-out returns ad-free; a genuine new session triggers it.
+    static let minInterval: TimeInterval = 4 * 60 * 60
 
     /// App Open creatives expire 4h after load (AdMob). Drop + reload past this.
     static let maxCacheAge: TimeInterval = 4 * 60 * 60
@@ -57,8 +62,35 @@ final class AppOpenAdManager: NSObject {
     private var suppressUntil: Date = .distantPast
     private var wasBackgrounded = false
     private let lastShownKey = "leyne.appOpenAd.lastShown"
+    /// Set true after the first launch into the main UI, so the cold-launch ad
+    /// never greets a brand-new user on their very first open (AdMob guidance).
+    private let coldLaunchedKey = "leyne.appOpenAd.coldLaunchedBefore"
 
     private override init() { super.init() }
+
+    /// Cold-launch presentation: on a genuine app launch (not a warm resume),
+    /// present one App Open ad once it's loaded — bounded to a short window
+    /// after launch so a late creative never covers content the user is already
+    /// using. Skipped on the very first launch (don't greet a new user with an
+    /// ad). All the usual guards (4h cap, onboarding/splash, deep-link
+    /// suppression, cross-format gap) still apply inside `showIfReady`.
+    func showOnColdLaunch(model: AppModel) async {
+        guard AdConfig.adsEnabled, !AdConfig.screenshotMode else { return }
+        let d = UserDefaults.standard
+        guard d.bool(forKey: coldLaunchedKey) else {
+            d.set(true, forKey: coldLaunchedKey)   // first launch — no ad
+            return
+        }
+        // Wait briefly for consent + a loaded creative + the splash to clear,
+        // then present. Bounded (~5s) so we never show over live content.
+        for _ in 0..<10 {
+            if ad != nil, !isExpired, !model.launching {
+                showIfReady(model: model)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
 
     /// Call when the scene enters the background. scenePhase steps through
     /// .inactive between .background and .active, so the previous phase is NOT
