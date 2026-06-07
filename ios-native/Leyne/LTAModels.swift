@@ -72,6 +72,17 @@ struct LTABusRouteDTO: Codable, Equatable {
     let StopSequence: Int
     let BusStopCode: String
     let Distance: Double?
+    // First/last bus clock times ("HHmm", e.g. "0530"; "-"/"" when not running)
+    // per service day. LTA returns these on every BusRoutes row; the Bus view
+    // surfaces the boarding stop's window so a late-night commuter can tell
+    // whether the last bus has already gone. Optional → an older on-disk cache
+    // (encoded before these fields existed) decodes them as nil, not an error.
+    let WD_FirstBus: String?
+    let WD_LastBus: String?
+    let SAT_FirstBus: String?
+    let SAT_LastBus: String?
+    let SUN_FirstBus: String?
+    let SUN_LastBus: String?
 }
 
 // ─── Train service alerts (MRT/LRT) ───────────────────────
@@ -128,6 +139,18 @@ extension Load {
         default:    self = .sea   // SEA or unknown
         }
     }
+
+    /// Strict variant: nil when LTA gives no occupancy code (rather than
+    /// defaulting to `.sea`). Used for the 2nd/3rd buses, where an absent
+    /// Load should read as "crowd unknown", not a falsely confident "seats".
+    init?(ltaStrict raw: String?) {
+        switch (raw ?? "").uppercased() {
+        case "SEA": self = .sea
+        case "SDA": self = .sda
+        case "LSD": self = .lsd
+        default:    return nil
+        }
+    }
 }
 
 extension Deck {
@@ -164,7 +187,9 @@ extension LTAArrivalService {
             thirdDate: NextBus3.arrivalDate,
             // Live bus GPS (monitored only) → honest Distance sort on Stop.
             busLat: (NextBus.lat ?? 0) != 0 ? NextBus.lat : nil,
-            busLon: (NextBus.lon ?? 0) != 0 ? NextBus.lon : nil
+            busLon: (NextBus.lon ?? 0) != 0 ? NextBus.lon : nil,
+            followingLoad: Load(ltaStrict: NextBus2.Load),
+            thirdLoad: Load(ltaStrict: NextBus3.Load)
         )
     }
 }

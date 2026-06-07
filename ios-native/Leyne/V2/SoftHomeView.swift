@@ -201,7 +201,14 @@ struct SoftHomeView: View {
             onTap: { fb.select(); m.addRecent(name); onOpenStop(code) }
         )
         // Long-press menu (matches the mockup): the card lifts as the preview.
-        .contextMenu {
+        // Long-press → a peek of the stop (mini live-arrivals view) + actions.
+        .contextMenu(menuItems: {
+            Button {
+                fb.select(); m.addRecent(name); onOpenStop(code)
+            } label: {
+                Label("Open Stop", systemImage: "arrow.up.forward")
+            }
+            Divider()
             Button {
                 fb.select(); m.togglePin(code: code)
             } label: {
@@ -234,7 +241,9 @@ struct SoftHomeView: View {
             } label: {
                 Label("Hide From Nearby", systemImage: "eye.slash")
             }
-        }
+        }, preview: {
+            stopPreview(code: code, name: name)
+        })
     }
 
     // MARK: Context-menu actions
@@ -289,13 +298,13 @@ struct SoftHomeView: View {
         .accessibilityLabel("Live updates. Arrival times update every few seconds. Tap to refresh.")
     }
 
-    /// Nearby stops (closest first). Pins are excluded — they live on the
-    /// Favourites tab.
+    /// Nearby stops (closest first). Saved stops are kept — "nearby" means
+    /// physically near you regardless of saved status (they also appear on the
+    /// Saved tab). Only stops the user explicitly hid are dropped.
     private var nearbyStops: [NearbyStop] {
-        let pinned = Set(m.pins.map(\.code))
         let hidden = m.hiddenNearby
         return ds.nearby
-            .filter { !pinned.contains($0.stopCode) && !hidden.contains($0.stopCode) }
+            .filter { !hidden.contains($0.stopCode) }
             .sorted { $0.distanceM < $1.distanceM }
     }
 
@@ -352,6 +361,67 @@ struct SoftHomeView: View {
     /// `liveServices` already returns the stop's services sorted by ETA, so a
     /// stable partition into favourites + the rest preserves the soonest-first
     /// order inside each group.
+    /// A compact "peek" of a stop for the long-press preview — the stop name and
+    /// its live arrivals (service no · crowd · ETA), like a miniature Stop view.
+    private func stopPreview(code: String, name: String) -> some View {
+        let services = m.liveServices(code: code, tracked: [])
+            .sorted { $0.no.localizedStandardCompare($1.no) == .orderedAscending }
+        let road = ds.roadName(code)
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(t.sans(16, weight: .bold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                Text(road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)")
+                    .font(t.mono(11))
+                    .foregroundStyle(t.dim)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            Rectangle().fill(t.line).frame(height: 1)
+
+            if services.isEmpty {
+                Text("No live arrivals right now")
+                    .font(t.sans(13))
+                    .foregroundStyle(t.dim)
+                    .padding(16)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(services.prefix(7).enumerated()), id: \.element.id) { i, s in
+                        let eta = fmtETA(s.etaSec)
+                        if i > 0 {
+                            Rectangle().fill(t.line).frame(height: 1).padding(.leading, 16)
+                        }
+                        HStack(spacing: 10) {
+                            Text(s.no)
+                                .font(t.mono(15, weight: .bold))
+                                .foregroundStyle(t.fg)
+                                .frame(minWidth: 42, alignment: .leading)
+                            CrowdMeter(load: s.load, t: t, showLabel: false)
+                            Spacer(minLength: 8)
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text(eta.big)
+                                    .font(t.mono(15, weight: .bold))
+                                    .foregroundStyle(eta.big == "Arr" ? t.soon : t.fg)
+                                Text(eta.small)
+                                    .font(t.sans(11))
+                                    .foregroundStyle(t.dim)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                    }
+                }
+            }
+        }
+        .frame(width: 300)
+        .background(t.surface)
+    }
+
     private func rankedArrivals(_ code: String) -> [RankedArrival] {
         let services = m.liveServices(code: code, tracked: [])
         func isFav(_ s: Service) -> Bool {

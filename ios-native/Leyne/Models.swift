@@ -57,6 +57,11 @@ struct Service: Identifiable, Equatable {
     /// sort — nearest bus first; nil (ghost / no telemetry) sorts last.
     var busLat: Double? = nil
     var busLon: Double? = nil
+    /// Crowd level of the 2nd / 3rd buses (LTA `NextBus2/3.Load`). Strict —
+    /// nil when LTA gives no occupancy code, so the Bus view's next-buses
+    /// columns show "unknown" honestly instead of defaulting to "seats".
+    var followingLoad: Load? = nil
+    var thirdLoad: Load? = nil
     var id: String { no }
 }
 
