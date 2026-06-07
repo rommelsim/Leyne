@@ -8,11 +8,11 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Leyne 2.4.3 · iOS (21) · 2026-06-08
+## Leyne 2.5.0 · iOS (21) · 2026-06-08
 
-**2026-06-08 — iOS Archive (2.4.3, build 21):** iOS-only release continuing the
-2.4.x redesign — reworks the Bus view into a single glanceable dashboard and
-refines Nearby. No Android changes this round.
+**2026-06-08 — iOS Archive (2.5.0, build 21):** iOS-only release that reworks the
+Bus view into a single glanceable dashboard and refines Nearby — the bus-view
+redesign that began in the 2.4.x line. No Android changes this round.
 
 - **Bus view → one-screen dashboard:** ETA, stops-away, deck type, crowd, the
   next two arrivals, a compact route strip (origin → bus → your stop →

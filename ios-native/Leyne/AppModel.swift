@@ -84,7 +84,7 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
-    "2.4.3": WhatsNewEntry(
+    "2.5.0": WhatsNewEntry(
         headline: "Your bus, all on one screen.",
         items: [
             WhatsNewItem(
