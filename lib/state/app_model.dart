@@ -498,6 +498,13 @@ class AppModel extends ChangeNotifier {
     _alerts = [..._alerts]..removeAt(idx);
     _persistAlerts();
     await NotificationsService.shared.cancelAlert(removed);
+    // Arrival alerts are paired with the ongoing-tracking notification (the bus
+    // view starts both together). Any removal path — including Manage alerts —
+    // must end that companion too, or it lingers with no in-app way to stop it.
+    if (removed.kind == AlertKind.arrival &&
+        _ongoingKey == _liveKey(removed.busNo, removed.stopCode)) {
+      await _stopOngoingTracker();
+    }
     await rescheduleIfNeeded();
     notifyListeners();
   }
@@ -659,12 +666,50 @@ class AppModel extends ChangeNotifier {
   }
 
   // ─── Tick: smooth countdown + keep visible stops fresh ──
+  /// Arrival-alert ids seen with the bus still inbound. Gate for
+  /// [_clearFulfilledArrivalAlerts] so a freshly-set alert on a bus that's
+  /// momentarily at the stop isn't cleared on the same tick it's created.
+  final Set<String> _arrivalsSeenInbound = {};
+
+  /// Removes arrival alerts whose tracked bus has reached the stop. The bus's
+  /// locally-computed ETA holds at 0 from arrival until the next feed refresh,
+  /// so the per-second tick reliably catches the window. Only alerts seen
+  /// inbound first are cleared. [removeAlert] also stops the paired ongoing
+  /// tracker, keeping both surfaces in sync.
+  void _clearFulfilledArrivalAlerts() {
+    final fulfilled = <String>[];
+    for (final a in _alerts) {
+      if (a.kind != AlertKind.arrival) continue;
+      final matches = liveServices(a.stopCode, tracked: [a.busNo]);
+      if (matches.isEmpty) continue; // bus not in the feed this tick — wait
+      if (matches.first.etaSec > 0) {
+        _arrivalsSeenInbound.add(a.id);
+      } else if (_arrivalsSeenInbound.contains(a.id)) {
+        fulfilled.add(a.id);
+      }
+    }
+    for (final id in fulfilled) {
+      _arrivalsSeenInbound.remove(id);
+      unawaited(removeAlert(id));
+    }
+  }
+
   void _onTick() {
     tick++;
     final codes = <String>{for (final p in _pins) p.code};
     for (final c in codes) {
       _ds.ensureArrivals(c);
     }
+    // Keep every arrival-alert stop fresh (not just pinned ones) so the
+    // scheduler and the one-shot clear below read current arrivalDates.
+    for (final a in _alerts) {
+      if (a.kind == AlertKind.arrival) _ds.ensureArrivals(a.stopCode);
+    }
+    // One-shot arrival alerts: once the tracked bus reaches the stop, the alert
+    // has done its job — clear it (and its paired ongoing tracker, via
+    // removeAlert) so it doesn't linger in Manage alerts or silently re-arm for
+    // the next bus. Matches the ongoing tracker, which finalises on arrival.
+    _clearFulfilledArrivalAlerts();
     // Re-arm scheduled arrival alerts every ~10 s — LTA's arrivalDate
     // values drift, and a coarse cadence is enough because notification
     // fire times are absolute (zonedSchedule registers an exact alarm

@@ -321,11 +321,18 @@ final class DataStore: ObservableObject {
         }
     }
 
-    /// Warm arrivals for the visible nearby stops so expanding is instant.
-    // Warm only the closest few (nearby is distance-sorted) so a user-tapped
-    // expand isn't queued behind a 12-request prefetch wave.
+    /// Warm arrivals for ALL visible nearby stops so every card shows its live
+    /// buses up front, without the user having to open each stop first.
+    ///
+    /// This used to warm only the closest 5 to avoid a request burst, but that
+    /// left every card past the 5th showing "No live arrivals right now" until
+    /// it was opened (opening a stop calls `ensureArrivals` for it, which is
+    /// why a visited stop filled in on return). The `inflight` + `lastFetched`
+    /// freshness guards in `ensureArrivals` dedupe repeat calls, and each fetch
+    /// is its own concurrent `Task`, so a user-tapped stop is never queued
+    /// behind the wave. `nearby` is already capped at 12.
     func prefetchNearbyArrivals() {
-        for s in nearby.prefix(5) { ensureArrivals(stop: s.stopCode, silent: true) }
+        for s in nearby { ensureArrivals(stop: s.stopCode, silent: true) }
     }
 
     // ─── Search (Buses + Stops, both live) ────────────────

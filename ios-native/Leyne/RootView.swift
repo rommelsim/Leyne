@@ -80,6 +80,9 @@ struct RootView: View {
                 // Preload an App Open ad so one is ready for the first warm
                 // foreground (it never shows on this cold launch).
                 AppOpenAdManager.shared.preload()
+                // Preload an Interstitial so one is ready when the user first
+                // backs out of a Stop / Bus detail.
+                InterstitialAdManager.shared.preload()
                 let status = await NotificationsManager.shared.currentStatus()
                 if status == .notDetermined && m.notificationsEnabled {
                     await m.setNotificationsEnabled(true)

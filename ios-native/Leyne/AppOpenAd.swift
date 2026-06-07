@@ -137,6 +137,11 @@ final class AppOpenAdManager: NSObject {
             aoaLog.notice("App Open skip: within frequency cap")
             return
         }
+        // Shared cross-format gap — don't stack right after an Interstitial.
+        guard FullScreenAdGate.gapElapsed() else {
+            aoaLog.notice("App Open skip: within shared full-screen gap")
+            return
+        }
 
         guard !isShowing else { return }
         // No fresh ad ready — drop any stale one and load for next time.
@@ -151,6 +156,7 @@ final class AppOpenAdManager: NSObject {
         // Record BEFORE presenting so a present-failure still counts against the
         // cap (don't hammer the user with retries).
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastShownKey)
+        FullScreenAdGate.markShown()
         self.ad = nil   // hand ownership to the present() lifecycle
         aoaLog.notice("App Open present")
         ad.present(from: root)

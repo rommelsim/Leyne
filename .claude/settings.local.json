@@ -143,7 +143,11 @@
       "Bash(curl -s https://rommelsim.github.io/Leyne/app-ads.txt)",
       "Bash(xcodebuild -list -project Leyne.xcodeproj)",
       "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build CODE_SIGNING_ALLOWED=NO -quiet)",
-      "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build CODE_SIGNING_ALLOWED=NO)"
+      "Bash(xcodebuild -project Leyne.xcodeproj -scheme Leyne -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Debug build CODE_SIGNING_ALLOWED=NO)",
+      "Bash(dart analyze *)",
+      "Bash(grep -c \"PBXFileSystemSynchronizedRootGroup\" Leyne.xcodeproj/project.pbxproj)",
+      "Bash(grep -c \"AppOpenAd.swift\" Leyne.xcodeproj/project.pbxproj)",
+      "Bash(grep -c \"AdBanner.swift\" Leyne.xcodeproj/project.pbxproj)"
     ]
   }
 }

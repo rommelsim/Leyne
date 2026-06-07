@@ -11,7 +11,27 @@ import 'soft_search_screen.dart';
 import 'soft_settings_screen.dart';
 import 'soft_stop_screen.dart';
 import '../../services/app_open_ad.dart';
+import '../../services/interstitial_ad.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
+
+/// Route name tagged on Stop / Bus detail routes so the navigator observer can
+/// recognise a detail-view exit (and ignore other pops, e.g. the search route).
+const String _kDetailRouteName = 'detail';
+
+/// Fires an interstitial attempt whenever a Stop / Bus detail route is popped.
+/// Hooking the navigator (not just each onBack button) means the back button,
+/// the Android system back, and the predictive-back gesture all trigger it —
+/// they all route through Navigator.pop → didPop. The manager's own guards
+/// decide whether an ad actually shows, so a stray pop is harmless.
+class _InterstitialOnExitObserver extends NavigatorObserver {
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route.settings.name == _kDetailRouteName) {
+      InterstitialAdManager.instance.maybeShowOnExit();
+    }
+    super.didPop(route, previousRoute);
+  }
+}
 
 class SoftRoot extends StatefulWidget {
   const SoftRoot({super.key});
@@ -23,6 +43,7 @@ class SoftRoot extends StatefulWidget {
 class _SoftRootState extends State<SoftRoot> {
   SoftTab _tab = SoftTab.home;
   final _navKey = GlobalKey<NavigatorState>();
+  final _exitObserver = _InterstitialOnExitObserver();
   late final AppLifecycleListener _lifecycle;
 
   @override
@@ -35,6 +56,9 @@ class _SoftRootState extends State<SoftRoot> {
     // All other guards (frequency cap, notification/deep-link suppression,
     // master switches) live in the manager.
     AppOpenAdManager.instance.preloadWhenReady();
+    // Interstitial ad — preload so one is ready when the user backs out of a
+    // Stop / Bus detail (the navigator observer fires the show attempt).
+    InterstitialAdManager.instance.preloadWhenReady();
     _lifecycle = AppLifecycleListener(
       onResume: () => AppOpenAdManager.instance.showIfAvailable(),
     );
@@ -71,6 +95,7 @@ class _SoftRootState extends State<SoftRoot> {
   /// the per-stop arrival flow leaves it false for the narrow approach window.
   void _pushBus(String stopCode, String svc, {bool fullRoute = false}) {
     _navKey.currentState?.push(MaterialPageRoute(
+      settings: const RouteSettings(name: _kDetailRouteName),
       builder: (_) => SoftBusScreen(
         stopCode: stopCode,
         svc: svc,
@@ -84,6 +109,7 @@ class _SoftRootState extends State<SoftRoot> {
 
   void _pushStop(String code) {
     _navKey.currentState?.push(MaterialPageRoute(
+      settings: const RouteSettings(name: _kDetailRouteName),
       builder: (_) => SoftStopScreen(
         stopCode: code,
         onBack: () => _navKey.currentState?.pop(),
@@ -91,6 +117,7 @@ class _SoftRootState extends State<SoftRoot> {
         onTab: _handleTab,
         tabSelection: _tab,
         onSeeAll: () => _navKey.currentState?.push(MaterialPageRoute(
+          settings: const RouteSettings(name: _kDetailRouteName),
           builder: (_) => SoftStopScreen(
             stopCode: code,
             showAll: true,
@@ -109,6 +136,7 @@ class _SoftRootState extends State<SoftRoot> {
   Widget build(BuildContext context) {
     return Navigator(
       key: _navKey,
+      observers: [_exitObserver],
       onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => _rootTab()),
     );
   }

@@ -123,11 +123,24 @@ struct SoftRoot: View {
             .zIndex(100)
             .allowsHitTesting(mapHandoff != .none)
         }
+        // Interstitial ad: each tab owns its own NavigationStack, so a Stop/Bus
+        // exit shows up as that tab's path shrinking. Observing the paths
+        // (rather than each onBack button) means the back button, the system
+        // back, AND the edge-swipe-back gesture all trigger the attempt — they
+        // all pop the bound path. The manager's guards decide whether one shows.
+        .onChange(of: homeStack) { old, new in handleStackPop(old, new) }
+        .onChange(of: favouritesStack) { old, new in handleStackPop(old, new) }
+        .onChange(of: searchStack) { old, new in handleStackPop(old, new) }
+        .onChange(of: settingsStack) { old, new in handleStackPop(old, new) }
         // Notification / Spotlight deep links arrive via AppModel.openCard.
         // Route them into the Home tab's stack, then clear so the same
         // trigger fires the next tap.
         .onChange(of: m.openCard) { _, card in
             guard let c = card else { return }
+            // This replaces the Home stack programmatically — tell the
+            // interstitial manager so the resulting shrink isn't read as a
+            // user back-exit (they tapped a notification, not "back").
+            InterstitialAdManager.shared.suppressNextExit()
             tab = .home
             if let svc = c.initialSelectedNo, !svc.isEmpty {
                 homeStack = [.stop(c.stopCode), .bus(stopCode: c.stopCode, svc: svc)]
@@ -135,6 +148,21 @@ struct SoftRoot: View {
                 homeStack = [.stop(c.stopCode)]
             }
             m.openCard = nil
+        }
+    }
+
+    /// Fires an interstitial attempt when a tab's nav path shrinks and the
+    /// removed top was a Stop or Bus detail — i.e. the user backed out of a
+    /// detail view. Growing paths (drill-in, deep-link) and tab switches are
+    /// ignored. The manager's own guards (caps, gates, deep-link suppression)
+    /// decide whether an ad actually shows.
+    private func handleStackPop(_ old: [SoftRoute], _ new: [SoftRoute]) {
+        guard new.count < old.count, let removed = old.last else { return }
+        switch removed {
+        case .stop, .bus:
+            InterstitialAdManager.shared.maybeShowOnExit(model: m)
+        case .search:
+            break
         }
     }
 

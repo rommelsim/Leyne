@@ -96,13 +96,17 @@ struct ManageAlertsView: View {
         }
         .padding(.vertical, 4)
         .listRowBackground(t.surface)
-        .swipeActions(edge: .trailing) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) {
                 fb.tap()
                 m.removeAlert(id: a.id)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            // The List's `.tint(t.accent)` (for the EditButton) otherwise
+            // bleeds into this swipe button, overriding the default system red
+            // and rendering the trash glyph invisible. Pin it red explicitly.
+            .tint(.red)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(rowTitle(a)), \(a.stopName), "

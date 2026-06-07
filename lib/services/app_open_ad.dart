@@ -26,6 +26,7 @@ import '../state/app_model.dart';
 import '../widgets/ad_banner.dart'
     show kLyneAdsEnabled, kLyneScreenshotMode, kLyneAdsTest;
 import 'ad_consent.dart';
+import 'full_screen_ad_gate.dart';
 
 class AppOpenAdManager {
   AppOpenAdManager._();
@@ -127,6 +128,9 @@ class AppOpenAdManager {
     final last = DateTime.fromMillisecondsSinceEpoch(lastMs);
     if (DateTime.now().difference(last) < _minInterval) return;
 
+    // Shared cross-format gap — don't stack right after an Interstitial.
+    if (!await FullScreenAdGate.gapElapsed()) return;
+
     if (_isShowing) return;
     // No fresh ad ready — drop any stale one and load for next time.
     if (_ad == null || _isExpired) {
@@ -159,6 +163,7 @@ class AppOpenAdManager {
     // Record BEFORE showing so a present-failure still counts against the cap
     // (don't hammer the user with retries).
     await prefs.setInt(_lastShownKey, DateTime.now().millisecondsSinceEpoch);
+    await FullScreenAdGate.markShown();
     _ad = null; // hand ownership to the show() lifecycle
     ad.show();
   }

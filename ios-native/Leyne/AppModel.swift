@@ -679,6 +679,15 @@ final class AppModel: ObservableObject {
         persistAlerts()
         NotificationsManager.shared.cancelAlert(removed)
         rearmAlertNotifications()
+        // Arrival alerts are paired with a lock-screen Live Activity — SoftBusView's
+        // combined affordance starts both together and cancels both together. Any
+        // OTHER removal path (Manage alerts swipe/Edit) must end the companion too,
+        // or the Live Activity is left running on the lock screen with no in-app way
+        // to stop it. Match the running activity by its bus+stop key.
+        if removed.kind == .arrival,
+           liveActivityKey == Self.liveKey(bus: removed.busNo, stopCode: removed.stopCode) {
+            stopLiveActivity()
+        }
     }
 
     /// Removes the alert matching (kind, bus, stop), if any.
@@ -752,6 +761,34 @@ final class AppModel: ObservableObject {
         showOnboarding = true
     }
 
+    /// Arrival-alert ids we've seen with the bus still inbound. Gate for
+    /// [clearFulfilledArrivalAlerts] so a freshly-set alert on a bus that's
+    /// momentarily at the stop isn't cleared the instant it's created.
+    private var arrivalsSeenInbound: Set<String> = []
+
+    /// Removes arrival alerts whose tracked bus has reached the stop. The
+    /// bus's locally-computed `etaSec` holds at 0 from arrival until the next
+    /// feed refresh, so the per-second tick reliably catches the window. Only
+    /// alerts previously seen inbound are cleared (so setting an alert never
+    /// removes it on the same tick). `removeAlert` also ends the paired Live
+    /// Activity, keeping both surfaces in sync.
+    private func clearFulfilledArrivalAlerts() {
+        var fulfilled: [String] = []
+        for a in alerts where a.kind == .arrival {
+            guard let svc = liveServices(code: a.stopCode, tracked: [a.busNo]).first
+            else { continue }   // bus not in the feed this tick — wait for it
+            if svc.etaSec > 0 {
+                arrivalsSeenInbound.insert(a.id)
+            } else if arrivalsSeenInbound.contains(a.id) {
+                fulfilled.append(a.id)
+            }
+        }
+        for id in fulfilled {
+            arrivalsSeenInbound.remove(id)
+            removeAlert(id: id)
+        }
+    }
+
     // ─── Tick: smooth countdown + keep visible stops fresh ─
     private func onTick() {
         tick &+= 1
@@ -762,6 +799,14 @@ final class AppModel: ObservableObject {
         // Keep every alert's stop fresh (not just pinned ones) so the
         // scheduler reads current arrivalDates for un-pinned alert stops.
         for a in alerts where a.kind == .arrival { ds.ensureArrivals(stop: a.stopCode) }
+
+        // One-shot arrival alerts: once the tracked bus actually reaches the
+        // stop, the alert has done its job — clear it (and its paired Live
+        // Activity, via removeAlert) so it doesn't linger in Manage alerts or
+        // silently re-arm for the next bus. Matches the Live Activity, which
+        // already auto-ends on arrival, and the "Notify me before IT arrives"
+        // copy.
+        clearFulfilledArrivalAlerts()
 
         // Reschedule arrival-alert notifications every ~10 s — LTA's
         // arrivalDate values drift, and a coarse cadence is enough since
