@@ -17,10 +17,10 @@ and rendered in Material 3 (no cross-platform idiom bleed). Maps stay iOS-only
 Output: `build/app/outputs/bundle/release/app-release.aab`.
 
 - **Bus view → one-screen dashboard:** ETA, stops-away, deck type, crowd, the
-  next two arrivals, a compact route strip (origin → bus → your stop →
-  destination), and first/last bus are all visible without scrolling (a flex
-  layout lets the route strip fill the screen). The hero shows the arrival
-  number, "N stops away", and a crowd meter together.
+  next two arrivals, a horizontal route-progress bar (origin → bus → your stop →
+  terminus, green up to the bus) with the bus's between-stops location and the
+  upcoming stops, and first/last bus are all visible without scrolling. The hero
+  shows the arrival number, "N stops away", and a crowd meter together.
 - **Full route on tap:** tapping the live module raises a bottom-sheet card
   with the full route timeline + the bus's position along it; the timeline
   folds away the long run to the terminus behind a "Show N more stops" toggle.

@@ -6,16 +6,16 @@
 //   1. Top bar — back · bell (boarding alert) · save · ⋯ (manage alerts/share)
 //   2. Title   — "Bus {svc}" + "Towards {dest}" + LIVE
 //   3. Hero    — ETA + stops-away + crowd meter, then deck/wheelchair + next two
-//   4. Live    — compact route strip (origin→bus→your stop→terminus) filling the
-//                screen; tap to open the full-route card.
+//   4. Live    — a HORIZONTAL route-progress bar (origin → bus → your stop →
+//                terminus, green up to the bus) spanning the width, with the
+//                bus's "between X and Y" location and the upcoming stops below.
+//                Tap to open the full-route card.
 //   5. Footer  — first / last bus today
 //
-// "Stops away" / the strip's bus position come from the estimated bus index
-// (live GPS snapped to the nearest route stop, else an ETA estimate) — no map
-// rendering, so no flutter_map / tiles.
+// "Stops away" / the bus position come from the estimated bus index (live GPS
+// snapped to the nearest route stop, else an ETA estimate) — no map rendering.
 
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -73,7 +73,6 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   Timer? _ticker;
 
   // ── Transient confirmation toast ─────────────────────────────────────
-  // Says what a tapped top-bar button just did, then clears itself.
   ({IconData icon, String text})? _toast;
   Timer? _toastTimer;
 
@@ -87,8 +86,6 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     });
     _ticker = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (!mounted) return;
-      // Self-throttled to the 25 s freshness window; refreshes the ETA + the
-      // strip's "stops away" via the DataStore listener.
       DataStore.shared.ensureArrivals(widget.stopCode);
     });
   }
@@ -696,11 +693,16 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     return 'On the way to your stop';
   }
 
-  // ── 4. Live module — the route strip (no map on Android) ───────────────
+  // ── 4. Live module — horizontal route progress (no map on Android) ─────
   Widget _buildLiveModule(LyneTheme t) {
     final dir = _currentDir;
-    final hasStrip =
-        dir != null && dir.stops.isNotEmpty && _estimatedBusIndex() != null;
+    final nodes = dir == null ? const <_ProgNode>[] : _routeProgressNodes(dir);
+    final hasProgress = nodes.length >= 2;
+    final between = (dir != null && hasProgress) ? _betweenCaption(dir) : null;
+    final upcoming =
+        (dir != null && hasProgress) ? _upcomingStops(dir) : const <String>[];
+    final remaining = _stopsRemaining();
+
     return Material(
       color: t.surface,
       borderRadius: BorderRadius.circular(18),
@@ -716,34 +718,79 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
           child: Column(
             children: [
-              Expanded(
-                child: Center(
-                  child: SingleChildScrollView(
-                    child: hasStrip
-                        ? SizedBox(width: 264, child: _liveRouteStrip(dir))
-                        : _routePlaceholder(t),
+              if (hasProgress) ...[
+                Row(
+                  children: [
+                    Text(
+                      'ROUTE PROGRESS',
+                      style: t
+                          .mono(10, weight: FontWeight.w600, color: t.dim)
+                          .copyWith(letterSpacing: 1),
+                    ),
+                    const Spacer(),
+                    if (remaining != null)
+                      Text(
+                        remaining == 0
+                            ? 'Arriving'
+                            : '$remaining stop${remaining == 1 ? '' : 's'} away',
+                        style:
+                            t.sans(12, weight: FontWeight.w600, color: t.soon),
+                      ),
+                  ],
+                ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (ctx, c) => SingleChildScrollView(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: c.maxHeight),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildRouteProgress(t, nodes),
+                            if (between != null) ...[
+                              const SizedBox(height: 16),
+                              Text(
+                                between,
+                                style: t.sans(12, color: t.dim),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                            if (upcoming.isNotEmpty) ...[
+                              const SizedBox(height: 18),
+                              _comingUp(t, upcoming),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ] else
+                Expanded(child: Center(child: _routePlaceholder(t))),
               const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'VIEW FULL ROUTE',
-                    style: t
-                        .mono(9, weight: FontWeight.w600, color: t.faint)
-                        .copyWith(letterSpacing: 0.8),
-                  ),
-                  const SizedBox(width: 3),
-                  Icon(Icons.keyboard_arrow_up_rounded,
-                      size: 13, color: t.faint),
-                ],
-              ),
+              _viewFullRouteHint(t),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _viewFullRouteHint(LyneTheme t) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          'VIEW FULL ROUTE',
+          style: t
+              .mono(9, weight: FontWeight.w600, color: t.faint)
+              .copyWith(letterSpacing: 0.8),
+        ),
+        const SizedBox(width: 3),
+        Icon(Icons.keyboard_arrow_up_rounded, size: 13, color: t.faint),
+      ],
     );
   }
 
@@ -758,172 +805,216 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  // ── Compact route strip ───────────────────────────────────────────────
-  List<_StripNode> _stripNodes(RouteDirection dir) {
+  // ── Horizontal route progress ─────────────────────────────────────────
+  // Origin → bus → your stop → terminus, laid out left-to-right across the
+  // full width; the line is green up to the bus, grey after.
+  List<_ProgNode> _routeProgressNodes(RouteDirection dir) {
     final stops = dir.stops;
     final busIdx0 = _estimatedBusIndex();
     if (stops.isEmpty || busIdx0 == null) return const [];
     final youIdx = dir.youIndex.clamp(0, stops.length - 1);
     final busIdx = busIdx0.clamp(0, youIdx);
-    final n = (youIdx - busIdx).clamp(0, stops.length);
-
-    final nodes = <_StripNode>[];
-    if (busIdx > 0) {
-      nodes.add(_StripNode(_StripKind.origin, stops.first.name, null));
-    }
-    final busSub = n == 0 ? 'At your stop' : '$n stop${n == 1 ? '' : 's'} away';
-    nodes.add(_StripNode(_StripKind.bus, 'Bus ${widget.svc}', busSub));
-    nodes.add(_StripNode(_StripKind.you, 'Your stop',
-        DataStore.shared.stopName(widget.stopCode)));
+    final nodes = <_ProgNode>[];
+    if (busIdx > 0) nodes.add(_ProgNode(_ProgKind.origin, stops.first.name));
+    nodes.add(_ProgNode(_ProgKind.bus, 'Bus ${widget.svc}'));
+    nodes.add(const _ProgNode(_ProgKind.you, 'Your stop'));
     if (youIdx < stops.length - 1) {
-      nodes.add(_StripNode(_StripKind.dest, stops.last.name, null));
+      nodes.add(_ProgNode(_ProgKind.dest, stops.last.name));
     }
     return nodes;
   }
 
-  Widget _liveRouteStrip(RouteDirection dir) {
-    final nodes = _stripNodes(dir);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < nodes.length; i++) _stripRow(nodes, i),
-      ],
-    );
+  /// Stops the bus still passes before reaching yours (in order).
+  List<String> _upcomingStops(RouteDirection dir) {
+    final busIdx0 = _estimatedBusIndex();
+    if (busIdx0 == null) return const [];
+    final youIdx = dir.youIndex.clamp(0, dir.stops.length - 1);
+    final busIdx = busIdx0.clamp(0, youIdx);
+    final out = <String>[];
+    for (var i = busIdx + 1; i < youIdx; i++) {
+      out.add(dir.stops[i].name);
+    }
+    return out;
   }
 
-  Widget _stripRow(List<_StripNode> nodes, int i) {
-    final t = context.t;
-    final node = nodes[i];
-    final isLast = i == nodes.length - 1;
+  String? _betweenCaption(RouteDirection dir) {
+    final busIdx0 = _estimatedBusIndex();
+    if (busIdx0 == null || dir.stops.isEmpty) return null;
+    final busIdx = busIdx0.clamp(0, dir.stops.length - 1);
+    final nextIdx = (busIdx + 1).clamp(0, dir.stops.length - 1);
+    if (nextIdx == busIdx) return null;
+    return 'Between ${dir.stops[busIdx].name} and ${dir.stops[nextIdx].name}';
+  }
+
+  // Green covers the line up to and including the bus; grey after.
+  bool _reached(_ProgKind k) => k == _ProgKind.origin || k == _ProgKind.bus;
+
+  Widget _buildRouteProgress(LyneTheme t, List<_ProgNode> nodes) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: 24,
-          height: isLast ? 24 : 42,
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.topCenter,
-            children: [
-              if (!isLast)
-                Positioned(
-                  top: 12,
-                  child: SizedBox(
-                    width: 3,
-                    height: 42,
-                    child: _stripConnector(node.kind),
+        for (var i = 0; i < nodes.length; i++)
+          Expanded(
+            child: Column(
+              children: [
+                SizedBox(
+                  height: 28,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              height: 3,
+                              color: i == 0
+                                  ? Colors.transparent
+                                  : (_reached(nodes[i].kind) ? t.soon : t.line),
+                            ),
+                          ),
+                          Expanded(
+                            child: Container(
+                              height: 3,
+                              color: i == nodes.length - 1
+                                  ? Colors.transparent
+                                  : (_reached(nodes[i + 1].kind)
+                                      ? t.soon
+                                      : t.line),
+                            ),
+                          ),
+                        ],
+                      ),
+                      _progDot(t, nodes[i].kind),
+                    ],
                   ),
                 ),
-              _stripDot(node.kind),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(
-              top: (node.kind == _StripKind.bus || node.kind == _StripKind.you)
-                  ? 0
-                  : 3,
+                const SizedBox(height: 7),
+                Text(
+                  nodes[i].label,
+                  style: t.sans(
+                    11,
+                    weight: nodes[i].kind == _ProgKind.bus ||
+                            nodes[i].kind == _ProgKind.you
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                    color: nodes[i].kind == _ProgKind.bus
+                        ? t.soon
+                        : (nodes[i].kind == _ProgKind.origin ||
+                                nodes[i].kind == _ProgKind.dest)
+                            ? t.dim
+                            : t.fg,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
-            child: _stripLabel(node, t),
           ),
-        ),
       ],
     );
   }
 
-  Widget _stripConnector(_StripKind afterKind) {
-    final t = context.t;
-    if (afterKind == _StripKind.bus) {
-      return Center(child: Container(width: 2.5, color: t.soon));
-    }
-    return CustomPaint(
-      painter: _DashedVLinePainter(color: t.faint, strokeWidth: 1.5),
-    );
-  }
-
-  Widget _stripDot(_StripKind kind) {
-    final t = context.t;
-    Widget inner;
+  Widget _progDot(LyneTheme t, _ProgKind kind) {
     switch (kind) {
-      case _StripKind.origin:
-        inner = Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: t.surface,
-            shape: BoxShape.circle,
-            border: Border.all(color: t.faint, width: 1.5),
-          ),
-        );
-      case _StripKind.bus:
-        inner = Container(
-          width: 22,
-          height: 22,
+      case _ProgKind.origin:
+        return Container(
+          width: 16,
+          height: 16,
           alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: t.soon,
-            shape: BoxShape.circle,
-            border: Border.all(color: t.surface, width: 2),
-          ),
-          child: Icon(Icons.directions_bus_rounded,
-              size: 10, color: t.contrastFg),
+          decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
+          child: Icon(Icons.check_rounded, size: 10, color: t.contrastFg),
         );
-      case _StripKind.you:
-        inner = Container(
-          width: 15,
-          height: 15,
+      case _ProgKind.bus:
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: t.soon.withValues(alpha: 0.22),
+                shape: BoxShape.circle,
+              ),
+            ),
+            Container(
+              width: 22,
+              height: 22,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: t.soon,
+                shape: BoxShape.circle,
+                border: Border.all(color: t.surface, width: 2),
+              ),
+              child: Icon(Icons.directions_bus_rounded,
+                  size: 11, color: t.contrastFg),
+            ),
+          ],
+        );
+      case _ProgKind.you:
+        return Container(
+          width: 16,
+          height: 16,
           decoration: BoxDecoration(
             color: t.surface,
             shape: BoxShape.circle,
             border: Border.all(color: t.soon, width: 3),
           ),
         );
-      case _StripKind.dest:
-        inner = Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: t.dim, shape: BoxShape.circle),
+      case _ProgKind.dest:
+        return Container(
+          width: 13,
+          height: 13,
+          decoration: BoxDecoration(
+            color: t.surface,
+            shape: BoxShape.circle,
+            border: Border.all(color: t.dim, width: 1.5),
+          ),
         );
     }
-    return SizedBox(width: 24, height: 24, child: Center(child: inner));
   }
 
-  Widget _stripLabel(_StripNode node, LyneTheme t) {
-    switch (node.kind) {
-      case _StripKind.origin:
-      case _StripKind.dest:
-        return Text(
-          node.title,
-          style: t.mono(11, color: t.faint),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        );
-      case _StripKind.bus:
-      case _StripKind.you:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+  Widget _comingUp(LyneTheme t, List<String> stops) {
+    final shown = stops.take(4).toList();
+    final extra = stops.length - shown.length;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'COMING UP',
+          style: t
+              .mono(9, weight: FontWeight.w600, color: t.faint)
+              .copyWith(letterSpacing: 1),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          alignment: WrapAlignment.center,
           children: [
-            Text(
-              node.title,
-              style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (node.sub != null)
-              Text(
-                node.sub!,
-                style: t.sans(12,
-                    color: node.kind == _StripKind.bus ? t.soon : t.dim),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            for (final s in shown) _stopChip(t, s),
+            if (extra > 0) _stopChip(t, '+$extra more', muted: true),
           ],
-        );
-    }
+        ),
+      ],
+    );
+  }
+
+  Widget _stopChip(LyneTheme t, String label, {bool muted = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: t.surfaceHi,
+        borderRadius: BorderRadius.circular(LyneRadius.full),
+      ),
+      child: Text(
+        label,
+        style: t.sans(12,
+            weight: FontWeight.w500, color: muted ? t.faint : t.dim),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
   }
 
   // ── Route card (bottom sheet — full route) ─────────────────────────────
@@ -1075,14 +1166,13 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   }
 }
 
-// ─── Route strip model ────────────────────────────────────────────────────────
-enum _StripKind { origin, bus, you, dest }
+// ─── Route progress model ─────────────────────────────────────────────────────
+enum _ProgKind { origin, bus, you, dest }
 
-class _StripNode {
-  const _StripNode(this.kind, this.title, this.sub);
-  final _StripKind kind;
-  final String title;
-  final String? sub;
+class _ProgNode {
+  const _ProgNode(this.kind, this.label);
+  final _ProgKind kind;
+  final String label;
 }
 
 // ─── Circle icon button (top bar) ─────────────────────────────────────────────
@@ -1131,49 +1221,5 @@ class _CircleButton extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-// ─── Dashed vertical rail (route strip) ───────────────────────────────────────
-/// Paints a vertical dashed line — the inactive rail in the compact route strip.
-class _DashedVLinePainter extends CustomPainter {
-  _DashedVLinePainter({required this.color, required this.strokeWidth});
-
-  final Color color;
-  final double strokeWidth;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    final x = size.width / 2;
-    final path = ui.Path()
-      ..moveTo(x, 0)
-      ..lineTo(x, size.height);
-    _drawDashedPath(canvas, path, paint, dash: 2, gap: 4);
-  }
-
-  @override
-  bool shouldRepaint(_DashedVLinePainter old) =>
-      old.color != color || old.strokeWidth != strokeWidth;
-}
-
-void _drawDashedPath(
-  Canvas canvas,
-  ui.Path source,
-  Paint paint, {
-  required double dash,
-  required double gap,
-}) {
-  for (final metric in source.computeMetrics()) {
-    var distance = 0.0;
-    while (distance < metric.length) {
-      final next = (distance + dash).clamp(0.0, metric.length);
-      canvas.drawPath(metric.extractPath(distance, next), paint);
-      distance = next + gap;
-    }
   }
 }
