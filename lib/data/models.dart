@@ -161,6 +161,50 @@ Eta fmtEta(int sec) {
 String fmtDistance(int metres) =>
     metres < 1000 ? '${metres}m' : '${(metres / 1000).toStringAsFixed(1)}km';
 
+// ─── Natural service-number ordering ───────────────────────────────────
+
+/// Natural ("Finder"-style) comparison so bus numbers order the way riders
+/// expect: 2 < 10 < 53 < 53M < 98 < 98A < 170 < NR7. Digit runs compare by
+/// value; a shorter token sorts before its suffixed sibling ("53" < "53M");
+/// digit runs sort before letter runs ("170" < "NR7"). Mirrors the iOS
+/// `localizedStandardCompare` used on SoftStopView / SoftBusView.
+int naturalCompare(String a, String b) {
+  int ia = 0, ib = 0;
+  bool isDigit(int c) => c >= 0x30 && c <= 0x39;
+  while (ia < a.length && ib < b.length) {
+    final ca = a.codeUnitAt(ia), cb = b.codeUnitAt(ib);
+    if (isDigit(ca) && isDigit(cb)) {
+      // Span both digit runs and compare them by numeric magnitude.
+      var ja = ia, jb = ib;
+      while (ja < a.length && isDigit(a.codeUnitAt(ja))) {
+        ja++;
+      }
+      while (jb < b.length && isDigit(b.codeUnitAt(jb))) {
+        jb++;
+      }
+      var sa = ia; // strip leading zeros for magnitude compare
+      while (sa < ja - 1 && a.codeUnitAt(sa) == 0x30) {
+        sa++;
+      }
+      var sb = ib;
+      while (sb < jb - 1 && b.codeUnitAt(sb) == 0x30) {
+        sb++;
+      }
+      final la = ja - sa, lb = jb - sb;
+      if (la != lb) return la - lb; // more digits ⇒ larger number
+      final cmp = a.substring(sa, ja).compareTo(b.substring(sb, jb));
+      if (cmp != 0) return cmp;
+      ia = ja;
+      ib = jb;
+    } else {
+      if (ca != cb) return ca - cb; // '1'(0x31) < 'N'(0x4E) ⇒ digits first
+      ia++;
+      ib++;
+    }
+  }
+  return (a.length - ia) - (b.length - ib);
+}
+
 // ─── Bus operating hours (BusRoutes WD/SAT/SUN first & last) ───────────
 
 /// Minutes-since-midnight of an `HHMM` string. '0530' → 330.

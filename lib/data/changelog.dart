@@ -30,6 +30,32 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.5.0': WhatsNewEntry(
+    headline: 'Your bus, all on one screen.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.directions_bus_rounded,
+        title: 'Everything at a glance',
+        body: 'The bus view is now one glanceable screen — arrival time, stops '
+            'away, how full it is, the route, a live map, and the first & last '
+            'bus — with no scrolling. Tap the route or the map to open the '
+            'full card.',
+      ),
+      WhatsNewItem(
+        icon: Icons.touch_app_rounded,
+        title: 'Peek a nearby stop',
+        body: 'Press and hold any stop in Nearby for a quick look at its live '
+            'arrivals, then open it in full if it\'s the one you want.',
+      ),
+      WhatsNewItem(
+        icon: Icons.format_list_numbered_rounded,
+        title: 'Tidier lists, and fixes',
+        body: 'A stop now lists its buses by number, your saved stops stay '
+            'visible in Nearby, and the route folds away the long stretch to '
+            'the terminus — plus polish and fixes.',
+      ),
+    ],
+  ),
   '2.4.2': WhatsNewEntry(
     headline: 'Alerts that fit your trip.',
     items: [

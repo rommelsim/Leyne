@@ -28,6 +28,8 @@ class RouteTimeline extends StatefulWidget {
     required this.alightId,
     required this.onAlight,
     this.now,
+    this.selectable = true,
+    this.embedded = false,
   });
 
   final String svc;
@@ -35,6 +37,15 @@ class RouteTimeline extends StatefulWidget {
   final String? alightId;
   final ValueChanged<String?> onAlight;
   final DateTime? now;
+
+  /// When false the list is a read-only viewer: no "tap to be alerted" hint
+  /// and rows aren't tappable (alight selection disabled). Used in the bus
+  /// view's route card, which is a glanceable viewer, not an editor.
+  final bool selectable;
+
+  /// When true, drop the inner card chrome (padding + surface) so the list
+  /// sits flush inside its parent — e.g. embedded in the route bottom sheet.
+  final bool embedded;
 
   /// Beyond this many stops the leading run is collapsed behind a "show
   /// earlier stops" node so a long route stays scannable. Kept in sync with
@@ -54,6 +65,10 @@ class _RouteTimelineState extends State<RouteTimeline> {
   // (often long) bus→terminus list can be folded away.
   bool _routeShown = true;
 
+  // Whether the stops past your stop (→ terminus) are revealed. Long routes
+  // start with the tail folded so the card opens on bus → your stop.
+  bool _tailExpanded = false;
+
   @override
   Widget build(BuildContext context) {
     final t = context.t;
@@ -69,8 +84,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
     final showAhead = hereIdx >= 0 && boardIdx > hereIdx;
     final aheadCount = showAhead ? boardIdx - hereIdx : 0;
 
-    final showHint =
-        widget.alightId == null &&
+    final showHint = widget.selectable &&
         stops.any((s) => s.state == SoftRouteStopState.next);
 
     // Long-route collapse: fold the lead-in (everything more than 2 stops
@@ -91,12 +105,31 @@ class _RouteTimelineState extends State<RouteTimeline> {
     final canCollapse = stops.length > RouteTimeline.maxVisible && keepFrom >= 2;
     final startIdx = (canCollapse && !_expanded) ? keepFrom : 0;
 
+    // Trailing collapse: fold the run from past your stop → terminus so the
+    // card opens on the part you care about (bus → your stop). Anchor = the
+    // furthest important stop — boarding (or the live bus if no boarding),
+    // pushed to the alight target when one is further along.
+    final alightIdx = widget.alightId == null
+        ? -1
+        : stops.indexWhere((s) => s.id == widget.alightId);
+    final boardOrHere = boardIdx >= 0 ? boardIdx : hereIdx;
+    final tailAnchorIdx = boardOrHere > alightIdx ? boardOrHere : alightIdx;
+    final tailKeepTo = tailAnchorIdx < 0
+        ? stops.length - 1
+        : (tailAnchorIdx + 2).clamp(0, stops.length - 1);
+    final canCollapseTail =
+        tailAnchorIdx >= 0 && (stops.length - 1 - tailKeepTo) >= 2;
+    final effectiveEndIdx =
+        (canCollapseTail && !_tailExpanded) ? tailKeepTo : stops.length - 1;
+
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-      ),
+      padding: EdgeInsets.all(widget.embedded ? 0 : 16),
+      decoration: widget.embedded
+          ? null
+          : BoxDecoration(
+              color: t.surface,
+              borderRadius: BorderRadius.circular(LyneRadius.md),
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -152,12 +185,19 @@ class _RouteTimelineState extends State<RouteTimeline> {
             // The collapse node sits at the visual top when active; the first
             // rendered stop then keeps its top connector so the line is unbroken.
             if (canCollapse) _collapseNode(context, hiddenCount: keepFrom),
-            for (var i = startIdx; i < stops.length; i++)
+            for (var i = startIdx; i <= effectiveEndIdx; i++)
               _row(
                 context,
                 stops[i],
                 !canCollapse && i == startIdx,
                 i == stops.length - 1,
+              ),
+            // The long tail past your stop folds away; tapping reveals it.
+            if (canCollapseTail)
+              _tailCollapseNode(
+                context,
+                hiddenCount: stops.length - 1 - tailKeepTo,
+                terminus: stops.isNotEmpty ? stops.last.name : 'the end',
               ),
           ],
         ],
@@ -219,6 +259,67 @@ class _RouteTimelineState extends State<RouteTimeline> {
     );
   }
 
+  /// Trailing counterpart to [_collapseNode] — folds the stops between your
+  /// stop and the terminus. The connector enters from the top; nothing below.
+  Widget _tailCollapseNode(
+    BuildContext context, {
+    required int hiddenCount,
+    required String terminus,
+  }) {
+    final t = context.t;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () => setState(() => _tailExpanded = !_tailExpanded),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 24,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Connector only while collapsed; when expanded the terminus
+                  // above is the line's end, so this is a plain "hide" control.
+                  if (!_tailExpanded)
+                    Column(
+                      children: [
+                        Expanded(
+                          child: Center(
+                            child: Container(width: 2, color: t.line),
+                          ),
+                        ),
+                        const Expanded(child: SizedBox()),
+                      ],
+                    ),
+                  Icon(
+                    _tailExpanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 16,
+                    color: t.dim,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
+                child: Text(
+                  _tailExpanded
+                      ? 'Hide later stops'
+                      : 'Show $hiddenCount more stop${hiddenCount == 1 ? "" : "s"} to $terminus',
+                  style: t.sans(13, weight: FontWeight.w500, color: t.dim),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _row(BuildContext context, SoftRouteStop stop, bool first, bool last) {
     final t = context.t;
     final upcoming =
@@ -232,7 +333,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(6),
-      onTap: upcoming
+      onTap: (upcoming && widget.selectable)
           ? () => widget.onAlight(widget.alightId == stop.id ? null : stop.id)
           : null,
       child: IntrinsicHeight(

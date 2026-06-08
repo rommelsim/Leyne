@@ -55,7 +55,10 @@ class SoftStopScreen extends StatefulWidget {
 }
 
 class _SoftStopScreenState extends State<SoftStopScreen> {
-  _StopSort _sort = _StopSort.arrival;
+  // Default to bus-number order so a stop's services read like a roster
+  // (2, 10, 53, 53M, 98A, NR7) rather than reshuffling on every ETA tick.
+  // Matches iOS SoftStopView. ETA / distance remain in the sort menu.
+  _StopSort _sort = _StopSort.busNo;
 
   /// Inline expand state for the grouped arrivals list. Opened from a
   /// "see all" entry (widget.showAll) starts expanded.
@@ -897,12 +900,9 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
       case _StopSort.distance:
         out.sort((a, b) => _busDistance(a).compareTo(_busDistance(b)));
       case _StopSort.busNo:
-        out.sort((a, b) {
-          final na = int.tryParse(a.no.replaceAll(RegExp(r'\D'), ''));
-          final nb = int.tryParse(b.no.replaceAll(RegExp(r'\D'), ''));
-          if (na != null && nb != null && na != nb) return na.compareTo(nb);
-          return a.no.compareTo(b.no);
-        });
+        // Natural order: 2 < 10 < 53 < 53M < 98A < NR7 (letter-prefixed night
+        // services last) — the old digit-strip put "NR7" in the 7s.
+        out.sort((a, b) => naturalCompare(a.no, b.no));
     }
     return out;
   }

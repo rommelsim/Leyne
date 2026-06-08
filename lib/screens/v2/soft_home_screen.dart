@@ -9,7 +9,9 @@
 //   → "Live updates" banner
 //   → empty state (when no nearby stops)
 //
-// Pinned stops live on the Saved tab — NOT rendered here.
+// Saved stops live on the Saved tab but ALSO appear here when they're near
+// you — Nearby reflects what's around you, so saving never removes a stop
+// from it (iOS parity). Long-press a card for a quick stop-view peek.
 
 import 'package:flutter/material.dart';
 
@@ -143,12 +145,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     }
   }
 
-  /// Nearby stops sorted by distance, de-duped against pinned. Capped at 12
-  /// total (1 closest + 11 others).
-  List<NearbyStop> _nearbyStops(Set<String> pinnedCodes) {
-    final base = DataStore.shared.nearby
-        .where((s) => !pinnedCodes.contains(s.stopCode))
-        .toList()
+  /// Nearby stops sorted by distance, capped at 12 (1 closest + 11 others).
+  /// Saved/pinned stops are intentionally kept — Nearby reflects what's around
+  /// you, so saving a stop must never make it vanish from here (iOS parity).
+  List<NearbyStop> _nearbyStops() {
+    final base = [...DataStore.shared.nearby]
       ..sort((a, b) => a.distanceM.compareTo(b.distanceM));
     return base.take(12).toList();
   }
@@ -162,6 +163,29 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
       DataStore.shared.updateNearby(loc.lat, loc.lon);
     }
     DataStore.shared.prefetchNearbyArrivals();
+  }
+
+  /// Long-press peek — a Material take on the iOS context-menu preview: the
+  /// stop's live arrivals at a glance, with one tap to open it fully. Replaces
+  /// the old long-press, which did nothing useful.
+  void _showStopPeek(BuildContext context, NearbyStop stop) {
+    final t = context.t;
+    DataStore.shared.ensureArrivals(stop.stopCode);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: t.surface,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) => _StopPeekSheet(
+        stop: stop,
+        onOpen: () {
+          Navigator.of(sheetCtx).pop();
+          widget.onOpenStop(stop.stopCode);
+        },
+      ),
+    );
   }
 
   List<_Item> _buildItems({
@@ -231,8 +255,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
           ]),
           builder: (context, _) {
             final pins = AppModel.shared.pins;
-            final pinnedCodes = pins.map((p) => p.code).toSet();
-            final nearby = _nearbyStops(pinnedCodes);
+            final nearby = _nearbyStops();
             final visibleAlerts = DataStore.shared.trainAlerts
                 .where((a) => !_dismissedAlerts.contains(a.id))
                 .toList();
@@ -274,6 +297,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
             stop: stop,
             highlight: highlight,
             onTap: () => widget.onOpenStop(stop.stopCode),
+            onLongPress: () => _showStopPeek(context, stop),
           ),
         ),
       _AlertItem(:final alert) => _mrtAlertCard(context, alert),
@@ -524,11 +548,13 @@ class _NearbyCard extends StatelessWidget {
     required this.stop,
     required this.highlight,
     required this.onTap,
+    this.onLongPress,
   });
 
   final NearbyStop stop;
   final bool highlight;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -546,6 +572,7 @@ class _NearbyCard extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(18),
@@ -889,5 +916,176 @@ class _EmptyState extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ─── Long-press stop peek ────────────────────────────────────────────────────
+
+/// A compact "mini stop view" shown on long-press — the stop's identity and its
+/// soonest live arrivals (number · destination · crowd · ETA), with one button
+/// to open the full stop. Material counterpart to the iOS context-menu preview.
+class _StopPeekSheet extends StatelessWidget {
+  const _StopPeekSheet({required this.stop, required this.onOpen});
+
+  final NearbyStop stop;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    final code = stop.stopCode;
+    final name = stop.stopName.isEmpty ? code : stop.stopName;
+    final road = DataStore.shared.roadName(code);
+    final subtitle = road.isEmpty ? 'Stop $code' : 'Stop $code · $road';
+
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              name,
+              style: t.sans(20, weight: FontWeight.w700, color: t.fg),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 3),
+            Text(subtitle, style: t.mono(12.5, color: t.dim)),
+            const SizedBox(height: 14),
+            // Live arrivals — AppModel.shared drives the 1-second ETA tick.
+            ListenableBuilder(
+              listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
+              builder: (context, _) => _arrivals(context, t, code),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onOpen,
+                style: FilledButton.styleFrom(
+                  backgroundColor: t.accent,
+                  foregroundColor: t.onAccent,
+                ),
+                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                label: const Text('Open stop'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _arrivals(BuildContext context, LyneTheme t, String code) {
+    final now = DateTime.now();
+    final feed = Freshness.from(DataStore.shared.lastRefresh(code));
+    final raw = [...DataStore.shared.servicesFor(code)]
+      ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
+    final shown = raw.take(6).toList();
+    if (shown.isEmpty) {
+      return Row(
+        children: [
+          const ConfidenceDot(confidence: ArrivalConfidence.stale, size: 6),
+          const SizedBox(width: 7),
+          Text('No live arrivals right now',
+              style: t.mono(12, color: t.faint)),
+        ],
+      );
+    }
+    return Column(
+      children: [
+        for (var i = 0; i < shown.length; i++) ...[
+          if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
+          _row(t, shown[i], now, feed),
+        ],
+      ],
+    );
+  }
+
+  Widget _row(LyneTheme t, Service s, DateTime now, Freshness feed) {
+    final sec = _liveSec(s, now);
+    final conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed);
+    final badge = serviceBadgeColors(etaSec: sec, confidence: conf, t: t);
+    final eta = fmtEta(sec);
+    final arriving = eta.big == 'Arr';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        children: [
+          Container(
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: badge.fill,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(s.no,
+                style: t.sans(15, weight: FontWeight.w700, color: badge.fg)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              s.dest.isEmpty ? 'Bus ${s.no}' : 'To ${s.dest}',
+              style: t.sans(13.5, weight: FontWeight.w500, color: t.fg),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          _crowdDot(t, s.load),
+          const SizedBox(width: 10),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                arriving ? 'Arr' : eta.big,
+                style: t.mono(17,
+                    weight: FontWeight.w600,
+                    color: etaColor(etaSec: sec, confidence: conf, t: t)),
+              ),
+              if (!arriving) ...[
+                const SizedBox(width: 3),
+                Text(eta.small, style: t.mono(10, color: t.dim)),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Tiny crowd cue — green seats / amber standing / red crowded, matching the
+  /// app-wide occupancy semantics.
+  Widget _crowdDot(LyneTheme t, Load load) {
+    final (Color dotColor, String label) = switch (load) {
+      Load.sea => (t.soon, 'Seats'),
+      Load.sda => (t.warn, 'Standing'),
+      Load.lsd => (t.crit, 'Crowded'),
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: t.sans(11, color: t.dim)),
+      ],
+    );
+  }
+
+  static int _liveSec(Service s, DateTime now) {
+    if (s.arrivalDate != null) {
+      return s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30);
+    }
+    return s.etaSec;
   }
 }
