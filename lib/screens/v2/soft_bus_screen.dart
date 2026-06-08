@@ -1062,6 +1062,9 @@ class _SoftBusScreenState extends State<SoftBusScreen>
       ),
       clipBehavior: Clip.antiAlias,
       child: Row(
+        // Stretch children to full height: the map panel is an all-Positioned
+        // Stack, which would otherwise collapse to zero height (blank map).
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (hasStrip) ...[
             SizedBox(
