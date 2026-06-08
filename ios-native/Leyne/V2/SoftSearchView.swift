@@ -1,6 +1,6 @@
 // SoftSearchView — Leyne Search tab: a first-class surface with a large
-// "Search" title, a prominent field, a recent-searches list, a Browse
-// shortcut grid, and results auto-split into Services + Bus stops.
+// "Search" title, a prominent field, a recent-searches list, and results
+// auto-split into Services + Bus stops.
 // Input kind is auto-detected (no mode tabs); a 6-digit query geocodes
 // via OneMap and lists nearby stops. All real search logic is preserved.
 
@@ -27,10 +27,6 @@ struct SoftSearchView: View {
     @State private var postalFailed = false
 
     private var t: Theme { m.t }
-
-    private let examples: [(value: String, kind: String)] = [
-        ("17179", "code"), ("120338", "postal"), ("Clementi", "place"), ("96", "bus"),
-    ]
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
     private var isPostal: Bool { detectQueryKind(trimmed).kind == "postal" }
@@ -172,16 +168,41 @@ struct SoftSearchView: View {
         }
     }
 
-    // MARK: Empty state — recents + browse grid
+    // MARK: Empty state — recent searches (no Browse grid)
 
     @ViewBuilder private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            if !m.recents.isEmpty {
+        if m.recents.isEmpty {
+            searchPrompt
+        } else {
+            VStack(alignment: .leading, spacing: 24) {
                 recentsSection
             }
-            browseSection
+            .padding(.top, 4)
         }
-        .padding(.top, 4)
+    }
+
+    /// Quiet empty-state prompt shown when there are no recent searches. The
+    /// Browse grid was removed — its tiles seeded hard-coded example queries
+    /// (17179 / 96 / Clementi) that read as placeholder data.
+    private var searchPrompt: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 36, weight: .regular))
+                .foregroundStyle(t.faint)
+                .padding(.bottom, 6)
+            Text("Find a stop, bus or place")
+                .font(t.sans(15, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .multilineTextAlignment(.center)
+            Text("Search by stop name, 5-digit stop code, bus number, or 6-digit postal code.")
+                .font(t.sans(12))
+                .foregroundStyle(t.dim)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 56)
+        .padding(.horizontal, 24)
     }
 
     // MARK: Recent searches — vertical list with swipe-to-remove
@@ -261,89 +282,6 @@ struct SoftSearchView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(PressScaleButtonStyle())
-    }
-
-    // MARK: Browse grid — 2×2 shortcut tiles
-
-    private var browseSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Eyebrow(text: "Browse", t: t).padding(.leading, 2)
-
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 12),
-                          GridItem(.flexible(), spacing: 12)],
-                spacing: 12
-            ) {
-                browseTile(
-                    symbol: "location.fill",
-                    label: "Nearby",
-                    accent: t.meBlue
-                ) {
-                    // Nearby taps back to Home's nearby list via onClose.
-                    fb.select()
-                    onClose()
-                }
-
-                browseTile(
-                    symbol: "mappin.and.ellipse",
-                    label: "Stops",
-                    accent: t.soon
-                ) {
-                    // Seeds the field with a canonical 5-digit stop code example
-                    // and triggers the search path immediately.
-                    fb.tap()
-                    query = examples.first(where: { $0.kind == "code" })?.value ?? "17179"
-                }
-
-                browseTile(
-                    symbol: "bus.fill",
-                    label: "Services",
-                    accent: Color(hex: "E0683A")
-                ) {
-                    // Seeds with a bus service number example.
-                    fb.tap()
-                    query = examples.first(where: { $0.kind == "bus" })?.value ?? "96"
-                }
-
-                browseTile(
-                    symbol: "building.2",
-                    label: "Places",
-                    accent: t.dim
-                ) {
-                    // Seeds with a place-name example.
-                    fb.tap()
-                    query = examples.first(where: { $0.kind == "place" })?.value ?? "Clementi"
-                }
-            }
-        }
-    }
-
-    private func browseTile(
-        symbol: String,
-        label: String,
-        accent: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(accent)
-                Spacer(minLength: 0)
-                Text(label)
-                    .font(t.sans(14, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(1)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(t.line, lineWidth: 1)
-            )
         }
         .buttonStyle(PressScaleButtonStyle())
     }
