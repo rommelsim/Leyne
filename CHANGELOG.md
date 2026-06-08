@@ -8,10 +8,10 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Leyne 2.5.0 · Android (35) · 2026-06-08
+## Leyne 2.5.0 · Android (36) · 2026-06-08
 
-**2026-06-08 — Android AAB (2.5.0, build 35):** _(build 34 was already used on
-Play; rebuilt with versionCode 35.)_ brings the 2.5.0 bus-view
+**2026-06-08 — Android AAB (2.5.0, build 36):** _(versionCodes 34–35 were
+already used on Play; rebuilt with versionCode 36.)_ brings the 2.5.0 bus-view
 redesign and Nearby/Stop refinements to Android, ported from the iOS release
 and rendered in Material 3 (no cross-platform idiom bleed). Maps stay iOS-only
 — the Android bus view shows the route, not a map (avoids paid map SDKs).
@@ -35,6 +35,10 @@ Output: `build/app/outputs/bundle/release/app-release.aab`.
 - **Nearby keeps your saved stops:** saving a stop no longer removes it from
   Nearby; long-press any nearby stop for a mini stop-view peek (live arrivals +
   crowd) with one tap to open it.
+- **Search:** removed the Browse shortcut tiles — they injected hard-coded
+  example queries (17179 / 96 / Clementi) that read as placeholder data. Search
+  now shows your recent searches (or a quiet prompt) and the field auto-detects
+  a stop name, stop code, bus number, or postal code.
 
 ## Leyne 2.5.0 · iOS (21) · 2026-06-08
 

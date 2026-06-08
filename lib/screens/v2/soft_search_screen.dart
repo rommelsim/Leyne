@@ -4,8 +4,9 @@
 //   • 6-digit all-numeric query → postal geocode flow (OneMap → nearby stops).
 //   • All other queries         → Services section + Bus stops section together.
 // Mirrors SoftSearchView.swift's layout: large "Search" title, animated
-// Cancel button, prominent field (mic visual only), Recent searches vertical
-// list, and a 2×2 Browse shortcut grid.
+// Cancel button, prominent field (mic visual only), and a Recent searches
+// list. (The Browse example-tile grid was removed — it injected hard-coded
+// example queries that read as placeholder/mock data.)
 
 import 'package:flutter/material.dart';
 
@@ -23,12 +24,6 @@ import '../../widgets/v2/soft_tab_bar.dart';
 /// Singapore postal code. All other non-empty queries go through the combined
 /// Services + Bus stops path.
 bool detectIsPostal(String q) => RegExp(r'^\d{6}$').hasMatch(q);
-
-// Example values used by the Browse tiles.  Mirrors _examples in the old
-// empty state; the kind tag drives Browse tile routing (see _emptyState).
-const _exampleStop    = '17179';   // 5-digit stop code
-const _exampleBus     = '96';      // bus service number
-const _examplePlace   = 'Clementi'; // place name
 
 class SoftSearchScreen extends StatefulWidget {
   const SoftSearchScreen({
@@ -330,24 +325,40 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   Widget _emptyStateContent(BuildContext context) {
     final t = context.t;
     final recents = AppModel.shared.recents;
+    // No Browse grid — it injected hard-coded example queries (17179 / 96 /
+    // Clementi) that read as placeholder data. With nothing recent, show a
+    // quiet prompt; the auto-detecting field does the rest.
+    if (recents.isEmpty) return _searchPrompt(context, t);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Recent searches ───────────────────────────────────
-          // Shown only when the list is non-empty.
-          // Mirrors SoftSearchView.swift recentsSection (lines 188-265).
-          if (recents.isNotEmpty) ...[
-            _recentsSection(context, t, recents),
-            const SizedBox(height: 24),
-          ],
+      child: _recentsSection(context, t, recents),
+    );
+  }
 
-          // ── Browse grid ───────────────────────────────────────
-          // Always shown. 2×2 shortcut tiles.
-          // Mirrors SoftSearchView.swift browseSection (lines 269-320).
-          _browseSection(context, t),
-        ],
+  /// Quiet empty-state prompt shown when there are no recent searches.
+  Widget _searchPrompt(BuildContext context, LyneTheme t) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.search_rounded, size: 40, color: t.faint),
+            const SizedBox(height: 12),
+            Text(
+              'Find a stop, bus or place',
+              style: t.sans(15, weight: FontWeight.w600, color: t.fg),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Search by stop name, 5-digit stop code, bus number, '
+              'or 6-digit postal code.',
+              style: t.sans(12, color: t.dim),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -448,115 +459,6 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
                   padding: const EdgeInsets.all(4),
                   child: Icon(Icons.close, size: 16, color: t.faint),
                 ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Browse section ───────────────────────────────────────────
-  // 2×2 grid of shortcut tiles. Each tile fills the field and runs the
-  // existing search path — no dead buttons.
-  //
-  // Tile wiring:
-  //   Nearby   → onClose() returns to Home's nearby list (no search needed).
-  //   Stops    → fills field with _exampleStop ("17179") → stopcode search.
-  //   Services → fills field with _exampleBus  ("96")    → bus search.
-  //   Places   → fills field with _examplePlace("Clementi") → text search.
-  Widget _browseSection(BuildContext context, LyneTheme t) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Eyebrow('Browse'),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 2.0,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            _browseTile(
-              context,
-              t,
-              icon: Icons.near_me,
-              label: 'Nearby',
-              accent: LyneSignal.meBlue,
-              onTap: widget.onClose,
-            ),
-            _browseTile(
-              context,
-              t,
-              icon: Icons.location_on,
-              label: 'Stops',
-              accent: t.soon,
-              onTap: () {
-                setState(() => _ctrl.text = _exampleStop);
-                _onQueryChanged();
-              },
-            ),
-            _browseTile(
-              context,
-              t,
-              icon: Icons.directions_bus,
-              label: 'Services',
-              accent: const Color(0xFFE0683A),
-              onTap: () {
-                setState(() => _ctrl.text = _exampleBus);
-                _onQueryChanged();
-              },
-            ),
-            _browseTile(
-              context,
-              t,
-              icon: Icons.location_city,
-              label: 'Places',
-              accent: t.dim,
-              onTap: () {
-                setState(() => _ctrl.text = _examplePlace);
-                _onQueryChanged();
-              },
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _browseTile(
-    BuildContext context,
-    LyneTheme t, {
-    required IconData icon,
-    required String label,
-    required Color accent,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: t.line),
-            borderRadius: BorderRadius.circular(LyneRadius.md),
-          ),
-          padding: const EdgeInsets.all(16),
-          alignment: Alignment.centerLeft,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Icon(icon, size: 22, color: accent),
-              Text(
-                label,
-                style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
