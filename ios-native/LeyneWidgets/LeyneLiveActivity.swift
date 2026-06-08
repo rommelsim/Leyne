@@ -14,20 +14,25 @@ private func dyn(dark: UIColor, light: UIColor) -> Color {
         trait.userInterfaceStyle == .dark ? dark : light
     })
 }
-// V2 "Soft" palette — mirrors Lyne/Theme.swift (Theme.dark / .light).
-// dim alpha nudged to 0.60 to match the app and stay legible on-glass.
+// Monochrome to match the app (Leyne/Theme.swift): a near-black / off-white
+// BASE (`ink` ≈ Theme.bg) with a pure white / near-black FOREGROUND
+// (`paper` ≈ Theme.accent). `green` (≈ Theme.soon) is a SEMANTIC accent ONLY —
+// reserved for the arrival moment ("Bus is here" / the arrived ETA / the bus
+// landing on your stop), never the resting palette. The Live Activity used to
+// read as green-dominant; the app is monochrome, so this brings it in line.
 private let ink = dyn(
-    dark:  UIColor(red: 0x15/255, green: 0x20/255, blue: 0x1C/255, alpha: 1),
-    light: UIColor(red: 0xF4/255, green: 0xEF/255, blue: 0xE7/255, alpha: 1))
+    dark:  UIColor(red: 0x0F/255, green: 0x0F/255, blue: 0x0F/255, alpha: 1),
+    light: UIColor(red: 0xF2/255, green: 0xF2/255, blue: 0xF2/255, alpha: 1))
 private let paper = dyn(
-    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 1),
-    light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 1))
+    dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1),
+    light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1))
+/// Arrival accent ONLY — mirrors Theme.soon. Absent from the resting palette.
 private let green = dyn(
-    dark:  UIColor(red: 0x8E/255, green: 0xE6/255, blue: 0xC0/255, alpha: 1),
-    light: UIColor(red: 0x2D/255, green: 0x7A/255, blue: 0x5A/255, alpha: 1))
+    dark:  UIColor(red: 0x3D/255, green: 0xD6/255, blue: 0x8C/255, alpha: 1),
+    light: UIColor(red: 0x1A/255, green: 0xA2/255, blue: 0x51/255, alpha: 1))
 private let dim = dyn(
-    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.60),
-    light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.60))
+    dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.55),
+    light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.55))
 
 private func etaText(_ s: LeyneActivityAttributes.ContentState) -> String {
     s.arrived ? "Now" : (s.etaMinutes <= 0 ? "Arr" : "\(s.etaMinutes)")
@@ -72,8 +77,9 @@ private enum LivePhase {
         case .enroute:     return "Next stop"
         }
     }
-    /// Green = the confident "it's basically here" states; en-route stays neutral.
-    var isGreen: Bool { self != .enroute }
+    /// Green is the arrival accent ONLY — the resting palette is monochrome,
+    /// so only "Bus is here" tints green; approaching / en-route stay neutral.
+    var isGreen: Bool { self == .here }
 }
 
 private func phase(_ s: LeyneActivityAttributes.ContentState) -> LivePhase {
@@ -109,7 +115,8 @@ private func journeyProgress(_ s: LeyneActivityAttributes.ContentState) -> Doubl
 }
 
 // ─── Route progress track ────────────────────────────────────────────
-// A capsule rail with the travelled portion filled green, a bus glyph at the
+// A capsule rail with the travelled portion filled (monochrome until arrival,
+// then green), a bus glyph at the
 // bus's position, and your stop as the node at the right end. When the bus
 // arrives the glyph lands on the node.
 private struct JourneyTrack: View {
@@ -120,28 +127,31 @@ private struct JourneyTrack: View {
     var body: some View {
         let busR: CGFloat = compact ? 8 : 11
         let h = busR * 2
+        // Monochrome rail until the bus actually arrives, then it pops green —
+        // the only place the track shows colour.
+        let tint = arrived ? green : paper
         GeometryReader { geo in
             let w = geo.size.width
             let usable = max(0, w - busR)          // keep the bus glyph inside
             let x = min(usable, max(busR, usable * progress))
             ZStack(alignment: .leading) {
                 Capsule().fill(dim.opacity(0.35)).frame(height: 3)
-                Capsule().fill(green).frame(width: x, height: 3)
+                Capsule().fill(tint).frame(width: x, height: 3)
 
                 // Destination node — your stop — at the rail's right end.
                 ZStack {
                     Circle().fill(ink)
-                    Circle().strokeBorder(green, lineWidth: 2)
+                    Circle().strokeBorder(tint, lineWidth: 2)
                     Image(systemName: "smallcircle.filled.circle")
                         .font(.system(size: busR))
-                        .foregroundStyle(green)
+                        .foregroundStyle(tint)
                 }
                 .frame(width: h, height: h)
                 .position(x: w - busR, y: h / 2)
 
                 // The bus, travelling left→right toward the node.
                 ZStack {
-                    Circle().fill(green)
+                    Circle().fill(tint)
                     Image(systemName: "bus.fill")
                         .font(.system(size: busR * 0.9, weight: .bold))
                         .foregroundStyle(ink)
@@ -169,9 +179,9 @@ struct LeyneLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     Text(context.attributes.busNo)
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(ink)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(green, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .background(paper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -219,7 +229,7 @@ struct LeyneLiveActivity: Widget {
                 // the expanded badge; the compact rail is about "a bus is coming".
                 Image(systemName: "bus.fill")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(green)
+                    .foregroundStyle(context.state.arrived ? green : paper)
                     .widgetAccentable()
                     .widgetURL(busURL(context.attributes))
             } compactTrailing: {
@@ -231,11 +241,11 @@ struct LeyneLiveActivity: Widget {
             } minimal: {
                 Text(context.attributes.busNo)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(green)
+                    .foregroundStyle(context.state.arrived ? green : paper)
                     .widgetAccentable()
                     .widgetURL(busURL(context.attributes))
             }
-            .keylineTint(green)
+            .keylineTint(context.state.arrived ? green : paper)
         }
     }
 }
@@ -251,9 +261,9 @@ private struct LockScreenView: View {
             HStack(spacing: 9) {
                 Text(attributes.busNo)
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ink)
                     .padding(.horizontal, 7).frame(minWidth: 34, minHeight: 24)
-                    .background(green, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(paper, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 Text("Towards \(attributes.dest)")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(dim).lineLimit(1)
@@ -280,7 +290,7 @@ private struct LockScreenView: View {
             if !detail.isEmpty {
                 Text(detail)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(p == .enroute ? dim : green)
+                    .foregroundStyle(p == .enroute ? dim : paper)
                     .padding(.top, 2)
             }
 

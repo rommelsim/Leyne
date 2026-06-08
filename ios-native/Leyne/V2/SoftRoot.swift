@@ -182,14 +182,29 @@ struct SoftRoot: View {
                 .softTopEdgeBlur()
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: SoftRoute.self) { route in
-                    routeView(route, path: path)
-                        .adBannerGutter()
-                        .softTopEdgeBlur()
-                        .toolbar(.hidden, for: .navigationBar)
-                        // Tab bar stays visible on pushed Stop / Bus detail
-                        // pages so the user can switch tabs without backing out.
-                        .enableSwipeBack()
+                    routeDestination(route, path: path)
                 }
+        }
+    }
+
+    /// A pushed destination with the standard chrome. The bottom ad-banner
+    /// gutter is applied to every destination EXCEPT `.stop`, which carries its
+    /// own inline 300×250 MREC instead — mounting both would double up ads on
+    /// one screen.
+    @ViewBuilder
+    private func routeDestination(_ route: SoftRoute,
+                                  path: Binding<[SoftRoute]>) -> some View {
+        let content = routeView(route, path: path)
+            .softTopEdgeBlur()
+            .toolbar(.hidden, for: .navigationBar)
+            // Tab bar stays visible on pushed Stop / Bus detail pages so the
+            // user can switch tabs without backing out.
+            .enableSwipeBack()
+        switch route {
+        case .stop:
+            content
+        default:
+            content.adBannerGutter()
         }
     }
 

@@ -1263,8 +1263,32 @@ final class AppModel: ObservableObject {
                      stopsAway: stopsAway, arrived: arrived, monitored: monitored)
     }
 
+    // ─── Live Activity polling cadence + safety bounds ────
+    private static let kLivePollInterval: UInt64 = 15_000_000_000  // 15 s
+    /// Hard backstop on a single activity's lifetime (~60 min). A bus we never
+    /// see arrive (wrong match, feed quirk) must not pin a Live Activity to the
+    /// lock screen indefinitely.
+    private static let kLiveMaxPolls = 240
+    /// ETA (seconds) at/under which the tracked bus counts as "close". Once
+    /// seen close, a sudden disappearance or ETA jump means it has arrived.
+    private static let kLiveCloseSec = 120
+    /// Consecutive empty snapshots tolerated before treating the service as
+    /// ended (covers brief feed gaps between buses).
+    private static let kLiveMaxMisses = 4
+
     /// Polls real LTA every ~15 s and pushes updates into the Live Activity,
-    /// then ends it shortly after the bus arrives.
+    /// then ends it once the tracked bus arrives.
+    ///
+    /// Arrival is detected three ways, because LTA almost never reports the
+    /// tracked bus at exactly 0 s — it drops it and the feed rolls to the
+    /// *following* bus:
+    ///   1. ETA reaches 0 (rare, but handled).
+    ///   2. After the bus has been close (≤ `kLiveCloseSec`), the ETA jumps far
+    ///      UP — the feed rolled to the next bus, i.e. ours just left.
+    ///   3. After it's been close, the service vanishes from the feed.
+    /// Previously only (1) was checked, so the activity silently re-tracked the
+    /// next bus and never cleared — the bug this fixes. The poll cap is the
+    /// final backstop.
     private func startLivePolling(busNo: String, stopCode: String) {
         liveActivityTask?.cancel()
         liveActivityTask = Task { [weak self] in
@@ -1273,50 +1297,84 @@ final class AppModel: ObservableObject {
             if let r = await self.ds.route(service: busNo, stopCode: stopCode) {
                 routeYou = r.youIndex
             }
+            var lastEta = Int.max / 2  // previous poll's ETA (seconds); halved
+                                       // so `lastEta + …` can't overflow
+            var sawClose = false    // bus has been inside the close window
+            var misses = 0          // consecutive empty snapshots
+            var polls = 0
+
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: Self.kLivePollInterval)
                 if Task.isCancelled { return }
+                polls += 1
+
                 guard let snap = await self.ds.liveServiceSnapshot(
-                    serviceNo: busNo, stopCode: stopCode) else { continue }
+                    serviceNo: busNo, stopCode: stopCode) else {
+                    misses += 1
+                    // (3) Vanished after being close → it arrived. Vanished
+                    // while still far for several polls → service likely ended.
+                    if sawClose || misses >= Self.kLiveMaxMisses {
+                        await self.finishLiveActivityAsArrived(monitored: true)
+                        return
+                    }
+                    continue
+                }
+                misses = 0
+                let eta = snap.etaSec
+
+                // (2) ETA rolled far up after being close, or (1) hit zero.
+                let rolledToNextBus =
+                    sawClose && eta > lastEta + Self.kLiveCloseSec && eta > 150
+                if eta <= 0 || rolledToNextBus {
+                    await self.finishLiveActivityAsArrived(monitored: snap.monitored)
+                    return
+                }
+
+                if eta <= Self.kLiveCloseSec { sawClose = true }
+                lastEta = eta
+
                 // Stops-away MUST match what SoftBusView shows, or the Live
                 // Activity (Dynamic Island / Lock Screen) and the app disagree.
                 // SoftBusView derives the bus index from the ETA (~90 s/stop),
-                // so stopsRemaining ≈ round(etaSec / 90); we replicate that here
-                // rather than the old GPS-nearest-stop method, which produced a
-                // different number from the same feed.
+                // so stopsRemaining ≈ round(etaSec / 90); we replicate that here.
                 var stopsAway = -1
                 if let you = routeYou {
-                    let fromEta = Int((Double(max(0, snap.etaSec)) / 90.0).rounded())
+                    let fromEta = Int((Double(max(0, eta)) / 90.0).rounded())
                     stopsAway = max(0, min(you, fromEta))
                 }
-                let state = self.liveState(etaSec: snap.etaSec, stopsAway: stopsAway,
+                let state = self.liveState(etaSec: eta, stopsAway: stopsAway,
                                            monitored: snap.monitored)
                 await self.liveActivity?.update(
                     ActivityContent(state: state, staleDate: Date().addingTimeInterval(120)))
-                if snap.etaSec <= 0 {
-                    // Show "Bus is here" for a few seconds while still active
-                    // (visible in both the Dynamic Island and Lock Screen),
-                    // then dismiss IMMEDIATELY. `.default` kept the ENDED
-                    // activity on the Lock Screen for up to ~4h while iOS drops
-                    // ended activities from the Dynamic Island at once — so an
-                    // arrived bus lingered as a stale Lock-Screen ghost (still
-                    // showing the previous bus) that was absent from the
-                    // Dynamic Island. `.immediate` clears both surfaces together.
-                    try? await Task.sleep(nanoseconds: 6_000_000_000)
-                    await self.liveActivity?.end(
-                        ActivityContent(state: state, staleDate: nil),
-                        dismissalPolicy: .immediate)
-                    await MainActor.run {
-                        self.liveActivityEndObserver?.cancel()
-                        self.liveActivityEndObserver = nil
-                        self.liveActivity = nil
-                        self.liveActivityKey = nil
-                        self.liveActivityOn = false
-                    }
+
+                if polls >= Self.kLiveMaxPolls {
+                    await self.finishLiveActivityAsArrived(monitored: snap.monitored)
                     return
                 }
             }
         }
+    }
+
+    /// Pushes a final "Bus is here" state, holds it briefly on both the Lock
+    /// Screen and Dynamic Island, then dismisses IMMEDIATELY so nothing
+    /// lingers. `.immediate` clears both surfaces together — `.default` left an
+    /// ended activity stuck on the Lock Screen for hours. The activity is
+    /// captured up front so a Live Activity started for a different bus during
+    /// the 6 s hold isn't ended or cleared by mistake.
+    private func finishLiveActivityAsArrived(monitored: Bool) async {
+        guard let act = liveActivity else { return }
+        let arrived = liveState(etaSec: 0, stopsAway: 0, monitored: monitored)
+        await act.update(ActivityContent(state: arrived, staleDate: nil))
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+        await act.end(ActivityContent(state: arrived, staleDate: nil),
+                      dismissalPolicy: .immediate)
+        guard liveActivity?.id == act.id else { return }  // superseded meanwhile
+        liveActivityEndObserver?.cancel()
+        liveActivityEndObserver = nil
+        liveActivityTask = nil
+        liveActivity = nil
+        liveActivityKey = nil
+        liveActivityOn = false
     }
 }
 

@@ -10,9 +10,15 @@ import SwiftUI
 /// Programmatic push targets for the settings nav rows.
 private enum SettingsDest: Hashable { case manageAlerts, hiddenStops, about }
 
+/// Where the "Buy me a coffee" row opens — the Stripe Payment Link for the
+/// "Support Leyne" product (accepts PayNow + cards + Apple Pay, settles SGD to
+/// bank). Leyne is ad-funded, not paywalled; this is an optional way to chip in.
+private let kCoffeeURL = URL(string: "https://buy.stripe.com/6oU3cv5689oB3PI6R68so00")!
+
 struct SoftSettingsView: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
+    @Environment(\.openURL) private var openURL
 
     let onTab: (SoftTab) -> Void
 
@@ -83,6 +89,19 @@ struct SoftSettingsView: View {
                 } label: {
                     rowLabel(icon: "info.circle", title: "About", detail: nil)
                         .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(rowBG)
+
+                // Buy me a coffee → opens the donation link in the browser. An
+                // optional, friendly way to support development; the app is
+                // ad-funded, not paywalled. Monochrome row + external-link arrow
+                // to match the design language (no loud branded button).
+                Button {
+                    fb.tap()
+                    openURL(kCoffeeURL)
+                } label: {
+                    coffeeRow
                 }
                 .buttonStyle(.plain)
                 .listRowBackground(rowBG)
@@ -234,6 +253,28 @@ struct SoftSettingsView: View {
             // sits on top of the detail value like "System" / "English".
             chevron
         }
+    }
+
+    /// "Buy me a coffee" support row — icon chip, title + subtitle, and an
+    /// external-link arrow (instead of a chevron) to signal it leaves the app.
+    private var coffeeRow: some View {
+        HStack(spacing: 10) {
+            iconChip("cup.and.saucer.fill")
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Buy me a coffee")
+                    .font(t.sans(15, weight: .medium))
+                    .foregroundStyle(t.fg)
+                Text("Support Leyne's development")
+                    .font(t.sans(12))
+                    .foregroundStyle(t.dim)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "arrow.up.forward")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(t.faint)
+        }
+        .contentShape(Rectangle())
+        .accessibilityLabel("Buy me a coffee. Opens in browser.")
     }
 
     private func toggleRow(icon: String, title: String,

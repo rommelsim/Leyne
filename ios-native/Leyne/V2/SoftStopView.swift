@@ -52,6 +52,7 @@ struct SoftStopView: View {
                     topBar
                     titleBlock
                     arrivalSection
+                    stopAd
                     Color.clear.frame(height: 40)
                 }
                 .padding(.horizontal, 16)
@@ -227,6 +228,19 @@ struct SoftStopView: View {
             activeAlertsCard
             sectionHeader
             arrivalContent
+        }
+    }
+
+    /// Inline 300×250 medium rectangle, centred below the arrivals. This screen
+    /// replaces the bottom banner gutter with this single MREC (SoftRoot omits
+    /// the gutter for `.stop`), so the Stop screen shows exactly one ad.
+    /// `MediumRectAd` self-suppresses when ads are off / in screenshot mode.
+    @ViewBuilder
+    private var stopAd: some View {
+        if AdConfig.adsEnabled && !AdConfig.screenshotMode {
+            MediumRectAd()
+                .frame(maxWidth: .infinity)   // centre the fixed 300pt block
+                .padding(.top, 4)
         }
     }
 

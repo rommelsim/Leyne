@@ -27,6 +27,19 @@ struct RouteStop: Identifiable, Equatable {
     var time: String? = nil
 }
 
+/// True when a bus stop sits at an MRT/LRT station. There's no bus-stop→station
+/// dataset from LTA, but SG stop descriptions tag these with the "Stn" token
+/// (e.g. "Bishan Stn", "Opp Serangoon Stn", "Bef Bugis Stn Exit C"), so the
+/// name is the signal. Word-boundaried so ordinary names ("Stadium", "Newton")
+/// don't false-positive; an explicit "MRT"/"LRT" also qualifies. Conservative
+/// by design — it surfaces a station only when we're confident, never invents
+/// one ("if have", not "always").
+func stopServesMRT(_ name: String) -> Bool {
+    let lower = name.lowercased()
+    if lower.contains("mrt") || lower.contains("lrt") { return true }
+    return lower.range(of: #"\bstn\b"#, options: .regularExpression) != nil
+}
+
 struct RouteTimeline: View {
     let t: Theme
     let svc: String
@@ -272,10 +285,11 @@ struct RouteTimeline: View {
                 .frame(width: 24)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Text(stop.name)
                             .font(t.sans(14, weight: resolved == .past ? .regular : .medium))
                             .foregroundStyle(resolved == .past ? t.faint : t.fg)
+                        if stopServesMRT(stop.name) { mrtBadge }
                         Spacer(minLength: 0)
                     }
                     // Stop code as a dim mono subline (e.g. "42071"). `id` is
@@ -375,6 +389,23 @@ struct RouteTimeline: View {
         case .here:  return t.soon
         default:     return t.dim
         }
+    }
+
+    /// Subtle MRT-station marker — a tram glyph + "MRT" chip. Monochrome
+    /// (t.dim on t.surfaceHi) so it reads as a neutral wayfinding attribute,
+    /// not a live signal (green stays reserved for proximity/arrival).
+    private var mrtBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "tram.fill")
+                .font(.system(size: 8.5, weight: .bold))
+            Text("MRT")
+                .font(t.mono(8, weight: .bold))
+                .tracking(0.5)
+        }
+        .foregroundStyle(t.dim)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(t.surfaceHi, in: Capsule())
+        .accessibilityLabel("MRT station")
     }
 
     @ViewBuilder

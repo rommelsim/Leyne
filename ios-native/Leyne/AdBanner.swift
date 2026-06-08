@@ -71,6 +71,22 @@ enum AdConfig {
         : "ca-app-pub-5864511655536507/9782205994"  // leyne-acct prod
     #endif
 
+    // 300×250 medium rectangle (MREC), used for the inline Stop-screen
+    // placement. DEBUG / forced-test serve Google's test unit (it returns a
+    // creative matching whatever AdSize is requested, including 300×250).
+    // RELEASE should ideally use a DEDICATED AdMob MREC unit; until one is
+    // created in the console this falls back to the production banner unit (an
+    // ad unit isn't bound to one size, so it still serves a 300×250), so the
+    // placement works out of the box. TODO: create a dedicated 300×250 unit and
+    // swap its ID in here for cleaner reporting + fill.
+    #if DEBUG
+    static let mrecUnitID = "ca-app-pub-3940256099942544/2934735716"
+    #else
+    static let mrecUnitID = forceTestUnitForRelease
+        ? "ca-app-pub-3940256099942544/2934735716"  // Google test unit
+        : "ca-app-pub-5864511655536507/9782205994"  // leyne-acct prod (shared)
+    #endif
+
     /// Extra devices to force into TEST ads even in a RELEASE build (rarely
     /// needed — DEBUG already serves test ads everywhere). Leave empty.
     static let testDeviceIdentifiers: [String] = []
@@ -252,16 +268,16 @@ private final class BannerHostView: UIView {
     // One-shot layout logger (unchanged from original).
     private var loggedLayoutOnce = false
 
-    override init(frame: CGRect) {
-        banner = BannerView(adSize: AdConfig.adaptiveBannerAdSize)
-        super.init(frame: frame)
-        adLog.notice("BannerHostView init")
+    init(adSize: AdSize) {
+        banner = BannerView(adSize: adSize)
+        super.init(frame: .zero)
+        adLog.notice("BannerHostView init \(NSCoder.string(for: adSize.size), privacy: .public)")
         backgroundColor = .clear
         banner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(banner)
         NSLayoutConstraint.activate([
-            banner.widthAnchor.constraint(equalToConstant: AdConfig.adaptiveBannerWidth),
-            banner.heightAnchor.constraint(equalToConstant: AdConfig.adaptiveBannerHeight),
+            banner.widthAnchor.constraint(equalToConstant: adSize.size.width),
+            banner.heightAnchor.constraint(equalToConstant: adSize.size.height),
             banner.centerXAnchor.constraint(equalTo: centerXAnchor),
             banner.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -425,12 +441,17 @@ private final class BannerHostView: UIView {
 /// visible tab ever requests an ad (the TabView keeps only the selected tab
 /// in the window), so multiple hosts stay AdMob-policy-clean.
 private struct BannerAdView: UIViewRepresentable {
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    /// Creative size + ad unit. Defaults are the anchored-adaptive banner; the
+    /// Stop-screen MREC passes 300×250 + `AdConfig.mrecUnitID`.
+    let adSize: AdSize
+    let unitID: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(adSize: adSize) }
 
     func makeUIView(context: Context) -> BannerHostView {
         let host = context.coordinator.host
         let banner = host.banner
-        banner.adUnitID = AdConfig.bannerUnitID
+        banner.adUnitID = unitID
         banner.delegate = context.coordinator
         // Wire the onReady closure: called by dispatchLoad() each time a
         // fresh request should go out. rootViewController is set immediately
@@ -448,7 +469,8 @@ private struct BannerAdView: UIViewRepresentable {
     /// view's lifetime.
     @MainActor
     final class Coordinator: NSObject, BannerViewDelegate {
-        let host = BannerHostView(frame: .zero)
+        let host: BannerHostView
+        init(adSize: AdSize) { host = BannerHostView(adSize: adSize) }
 
         func bannerViewDidReceiveAd(_ bannerView: BannerView) {
             adLog.notice("Banner loaded \(bannerView.adUnitID ?? "?")")
@@ -511,11 +533,36 @@ struct AdBanner: View {
             // content. surfaceHi == hero-card colour, so it reads as part
             // of the design language, not a stray panel.
             m.t.surfaceHi
-            BannerAdView()
+            BannerAdView(adSize: AdConfig.adaptiveBannerAdSize,
+                         unitID: AdConfig.bannerUnitID)
                 .frame(width: AdConfig.adaptiveBannerWidth,
                        height: AdConfig.adaptiveBannerHeight)
         }
         .frame(maxWidth: .infinity, minHeight: AdConfig.adaptiveBannerHeight)
+    }
+}
+
+/// Fixed 300×250 medium rectangle (MREC) for an inline content placement — the
+/// Stop screen mounts one in place of the bottom banner. Heavier than the
+/// anchored banner, so use at most one per screen. Reserves its 300×250
+/// footprint and shows the surface tint until the creative loads (matching
+/// `AdBanner`). Self-suppresses when ads are disabled or in screenshot mode, so
+/// callers can mount it unconditionally.
+struct MediumRectAd: View {
+    @EnvironmentObject private var m: AppModel
+    var body: some View {
+        if !AdConfig.adsEnabled || AdConfig.screenshotMode {
+            EmptyView()
+        } else {
+            ZStack {
+                m.t.surfaceHi
+                BannerAdView(adSize: AdSizeMediumRectangle,
+                             unitID: AdConfig.mrecUnitID)
+                    .frame(width: 300, height: 250)
+            }
+            .frame(width: 300, height: 250)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
     }
 }
 

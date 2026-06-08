@@ -47,6 +47,11 @@ extension View {
                                                 style: .continuous))
                     .padding(.horizontal, 16)
                     .padding(.bottom, 4)
+                    // Stay pinned to the bottom gutter when a keyboard opens
+                    // (e.g. the Search tab). Without this the inset rides up
+                    // above the keyboard and the banner appears to float in the
+                    // middle of the screen.
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
             }
         } else {
             self

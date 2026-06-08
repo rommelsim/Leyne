@@ -69,6 +69,11 @@ struct SoftBusView: View {
     }
     @State private var toast: Toast?
 
+    /// One-shot guard for the "~1 min away" gentle haptic. Re-arms once the ETA
+    /// climbs back past ~75 s (the feed rolled to the next bus), so each
+    /// incoming bus buzzes exactly once.
+    @State private var didBuzzOneMin = false
+
     /// Drives the glide/creep + recency aging.
     private let ticker = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
@@ -164,6 +169,7 @@ struct SoftBusView: View {
             // `ensureArrivals` self-throttles to the 25 s freshness window.
             ds.ensureArrivals(stop: stopCode)
             recomputePlot()
+            buzzIfApproaching()
         }
         .onChange(of: serviceRouteData) { _, _ in recomputePlot() }
         .onChange(of: selectedDirIndex) { _, _ in recomputePlot() }
@@ -1262,6 +1268,20 @@ struct SoftBusView: View {
             x.followingSec = max(x.etaSec, Int(f.timeIntervalSince(now)))
         }
         return x
+    }
+
+    /// One gentle nudge as the tracked bus crosses ~1 minute out, so you can
+    /// look up without a loud alert. Fires once per approach; `didBuzzOneMin`
+    /// re-arms once the ETA climbs back past ~75 s (the feed has rolled to the
+    /// next bus). Foreground-only by nature — this view is on screen, which is
+    /// exactly when the nudge is useful (background haptics don't play anyway).
+    private func buzzIfApproaching() {
+        guard let eta = liveService()?.etaSec else { return }
+        if eta > 0 && eta <= 60 {
+            if !didBuzzOneMin { didBuzzOneMin = true; fb.approachingSoon() }
+        } else if eta > 75 {
+            didBuzzOneMin = false
+        }
     }
 
     private func loadRoute() {

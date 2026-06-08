@@ -33,6 +33,12 @@ final class Feedback: ObservableObject {
         vibrate(.soft)
     }
 
+    /// Bus ~1 minute away — one gentle nudge so you can look up without a loud
+    /// alert. Soft intensity (same as arrival); callers fire it once per approach.
+    func approachingSoon() {
+        vibrate(.soft)
+    }
+
     // ─── Haptics ──────────────────────────────────────────────
     private func vibrate(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         guard haptic else { return }
