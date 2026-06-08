@@ -8,6 +8,17 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.5.1 · iOS (22) · 2026-06-08
+
+**2026-06-08 — iOS Archive (2.5.1, build 22):** iOS patch. The App Store 2.5.0
+train was closed (already approved), so the Search Browse-tile removal couldn't
+ship under 2.5.0 and goes out as 2.5.1 instead.
+
+- **Search:** removed the Browse shortcut tiles — they seeded hard-coded example
+  queries (17179 / 96 / Clementi) that read as placeholder data. Search now
+  shows recent searches, or a quiet "Find a stop, bus or place" prompt. (Parity
+  with the same Android change.)
+
 ## Leyne 2.5.0 · Android (37) · 2026-06-08
 
 **2026-06-08 — Android AAB (2.5.0, build 37):** _(versionCodes 34–36 were
