@@ -12,30 +12,28 @@ entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
 **2026-06-08 — Android AAB (2.5.0, build 34):** brings the 2.5.0 bus-view
 redesign and Nearby/Stop refinements to Android, ported from the iOS release
-and rendered in Material 3 (no cross-platform idiom bleed). Output:
-`build/app/outputs/bundle/release/app-release.aab`.
+and rendered in Material 3 (no cross-platform idiom bleed). Maps stay iOS-only
+— the Android bus view shows the route, not a map (avoids paid map SDKs).
+Output: `build/app/outputs/bundle/release/app-release.aab`.
 
 - **Bus view → one-screen dashboard:** ETA, stops-away, deck type, crowd, the
   next two arrivals, a compact route strip (origin → bus → your stop →
-  destination), a live map preview, and first/last bus are all visible without
-  scrolling (a flex layout lets the live module fill the screen). The hero
-  shows the arrival number, "N stops away", and a crowd meter together.
-- **Route & map open as cards:** tapping the route strip raises a bottom-sheet
-  card with the full route timeline + the bus's position; tapping the map opens
-  a half-height map sheet with recenter-on-bus and centre-on-me controls (no
-  Done button — drag down to dismiss). The route timeline folds away the long
-  run to the terminus behind a "Show N more stops" toggle.
+  destination), and first/last bus are all visible without scrolling (a flex
+  layout lets the route strip fill the screen). The hero shows the arrival
+  number, "N stops away", and a crowd meter together.
+- **Full route on tap:** tapping the live module raises a bottom-sheet card
+  with the full route timeline + the bus's position along it; the timeline
+  folds away the long run to the terminus behind a "Show N more stops" toggle.
 - **Top-bar alerts with feedback:** a bell toggles the boarding alert and a bus
   glyph saves the service, each confirmed by an in-app toast; the ⋯ menu holds
   Manage alerts + Share. The tap-a-stop "remind me to get off" flow was removed
-  for parity with iOS (the alert plumbing is kept).
+  for parity with iOS (the alert plumbing is kept). The top-bar buttons are flat
+  (no drop shadow) and the overflow "⋯" renders as a single clean circle.
 - **Stops list by bus number:** a stop now defaults to natural bus-number order
   (2 < 10 < 53 < 53M < 98A < NR7) instead of reshuffling on every ETA tick.
 - **Nearby keeps your saved stops:** saving a stop no longer removes it from
   Nearby; long-press any nearby stop for a mini stop-view peek (live arrivals +
   crowd) with one tap to open it.
-- **Map honesty:** the "You" pin is hidden when the fix is implausibly far
-  (>50 km) so the camera can't zoom out across the globe.
 
 ## Leyne 2.5.0 · iOS (21) · 2026-06-08
 

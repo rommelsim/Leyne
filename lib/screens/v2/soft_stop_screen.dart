@@ -224,56 +224,55 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     return Semantics(
       label: 'Sort options',
       button: true,
-      child: Material(
+      // A single bordered circle (surface fill + 1px line) — the old outer
+      // Material(CircleBorder) wrapper rendered a second ring around the icon.
+      child: PopupMenuButton<_StopSort>(
+        tooltip: 'Sort options',
+        padding: EdgeInsets.zero,
         color: t.surface,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: PopupMenuButton<_StopSort>(
-          tooltip: 'Sort options',
-          icon: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: t.line, width: 1),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(LyneRadius.md),
+        ),
+        onSelected: (v) => setState(() => _sort = v),
+        itemBuilder: (_) => [
+          PopupMenuItem(
+            value: _StopSort.arrival,
+            child: _sortItem(
+              context,
+              icon: Icons.access_time_rounded,
+              label: 'By ETA',
+              selected: _sort == _StopSort.arrival,
             ),
-            alignment: Alignment.center,
-            child: Icon(Icons.more_horiz, size: 20, color: t.fg),
           ),
-          color: t.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(LyneRadius.md),
+          PopupMenuItem(
+            value: _StopSort.busNo,
+            child: _sortItem(
+              context,
+              icon: Icons.tag_rounded,
+              label: 'By bus number',
+              selected: _sort == _StopSort.busNo,
+            ),
           ),
-          onSelected: (v) => setState(() => _sort = v),
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              value: _StopSort.arrival,
-              child: _sortItem(
-                context,
-                icon: Icons.access_time_rounded,
-                label: 'By ETA',
-                selected: _sort == _StopSort.arrival,
-              ),
+          PopupMenuItem(
+            value: _StopSort.distance,
+            child: _sortItem(
+              context,
+              icon: Icons.location_on_outlined,
+              label: 'By distance',
+              selected: _sort == _StopSort.distance,
             ),
-            PopupMenuItem(
-              value: _StopSort.busNo,
-              child: _sortItem(
-                context,
-                icon: Icons.tag_rounded,
-                label: 'By bus number',
-                selected: _sort == _StopSort.busNo,
-              ),
-            ),
-            PopupMenuItem(
-              value: _StopSort.distance,
-              child: _sortItem(
-                context,
-                icon: Icons.location_on_outlined,
-                label: 'By distance',
-                selected: _sort == _StopSort.distance,
-              ),
-            ),
-          ],
+          ),
+        ],
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: t.surface,
+            shape: BoxShape.circle,
+            border: Border.all(color: t.line, width: 1),
+          ),
+          alignment: Alignment.center,
+          child: Icon(Icons.more_horiz, size: 20, color: t.fg),
         ),
       ),
     );

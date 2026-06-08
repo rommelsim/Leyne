@@ -37,9 +37,8 @@ const Map<String, WhatsNewEntry> kChangelog = {
         icon: Icons.directions_bus_rounded,
         title: 'Everything at a glance',
         body: 'The bus view is now one glanceable screen — arrival time, stops '
-            'away, how full it is, the route, a live map, and the first & last '
-            'bus — with no scrolling. Tap the route or the map to open the '
-            'full card.',
+            'away, how full it is, the route, and the first & last bus — with '
+            'no scrolling. Tap the route to open the full route card.',
       ),
       WhatsNewItem(
         icon: Icons.touch_app_rounded,
