@@ -8,10 +8,10 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Leyne 2.5.0 · Android (36) · 2026-06-08
+## Leyne 2.5.0 · Android (37) · 2026-06-08
 
-**2026-06-08 — Android AAB (2.5.0, build 36):** _(versionCodes 34–35 were
-already used on Play; rebuilt with versionCode 36.)_ brings the 2.5.0 bus-view
+**2026-06-08 — Android AAB (2.5.0, build 37):** _(versionCodes 34–36 were
+already used on Play; rebuilt with versionCode 37.)_ brings the 2.5.0 bus-view
 redesign and Nearby/Stop refinements to Android, ported from the iOS release
 and rendered in Material 3 (no cross-platform idiom bleed). Maps stay iOS-only
 — the Android bus view shows the route, not a map (avoids paid map SDKs).
