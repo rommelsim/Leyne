@@ -8,6 +8,25 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.5.1 · Android (38) · 2026-06-09
+
+**2026-06-09 — Android AAB (2.5.1, build 38):** _(versionName lifted 2.5.0 →
+2.5.1 to match the iOS train; versionCode 38, as 37 is already on Play.)_ Closes
+three iOS-only gaps so the Android feature set tracks iOS. Ported to Flutter /
+Material 3 (no cross-platform idiom bleed). Output:
+`build/app/outputs/bundle/release/app-release.aab`.
+
+- **Support Leyne:** new "Buy me a coffee" row in Settings opens the Stripe
+  donation page in the browser (PayNow + cards + Google Pay). Optional supporter
+  tier — the app stays ad-funded, not paywalled. Parity with iOS.
+- **Stop screen ad:** the Stop screen now shows a single inline 300×250 panel
+  below the arrivals instead of the bottom banner, so there's exactly one ad on
+  that screen (parity with iOS). Every other screen keeps its bottom banner.
+- **Long-press a nearby stop** for quick actions: save/unsave, set an arrival
+  alert for the soonest bus, open it in Maps, copy the stop code, or **hide it
+  from Nearby**. Hidden stops are managed under Settings → Hidden stops (swipe
+  or tap to bring one back); the row only appears once you've hidden something.
+
 ## Leyne 2.5.1 · iOS (22) · 2026-06-08
 
 **2026-06-08 — iOS Archive (2.5.1, build 22):** iOS patch. The App Store 2.5.0

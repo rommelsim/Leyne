@@ -147,7 +147,9 @@
       "Bash(dart analyze *)",
       "Bash(grep -c \"PBXFileSystemSynchronizedRootGroup\" Leyne.xcodeproj/project.pbxproj)",
       "Bash(grep -c \"AppOpenAd.swift\" Leyne.xcodeproj/project.pbxproj)",
-      "Bash(grep -c \"AdBanner.swift\" Leyne.xcodeproj/project.pbxproj)"
+      "Bash(grep -c \"AdBanner.swift\" Leyne.xcodeproj/project.pbxproj)",
+      "Bash(grep -v \".dart$\")",
+      "Bash(grep -v \".png$\")"
     ]
   }
 }

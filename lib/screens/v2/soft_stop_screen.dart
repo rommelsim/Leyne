@@ -19,6 +19,7 @@ import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../state/bus_alert.dart';
 import '../../theme.dart';
+import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/notify_confirm.dart';
 import '../../widgets/v2/notify_when_sheet.dart';
@@ -80,9 +81,12 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
+      // Bare tab bar (no anchored banner): the Stop screen carries its ad as an
+      // inline 300×250 MREC below the arrivals instead, so exactly one ad shows
+      // here — iOS parity (SoftRoot omits the bottom gutter for `.stop`).
       bottomNavigationBar:
           (widget.onTab != null && widget.tabSelection != null)
-              ? SoftBottomBar(
+              ? SoftTabBar(
                   selection: widget.tabSelection!, onSelect: widget.onTab!)
               : null,
       body: SafeArea(
@@ -115,6 +119,8 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   const SizedBox(height: 20),
                   // ── Arrivals section ────────────────────────────────────
                   _arrivalSection(context, state, sorted, isPinned),
+                  // ── Inline 300×250 MREC (this screen's single ad) ───────
+                  const MediumRectAd(),
                 ],
               ),
             );

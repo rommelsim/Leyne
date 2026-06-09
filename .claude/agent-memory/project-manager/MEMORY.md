@@ -2,3 +2,4 @@
 - [Project risks](project-risks.md) — top risks with likelihoods, impacts, mitigations; R0/R0b are new Android launch blockers
 - [Next actions](next-actions.md) — prioritized task list; Android Sprint 0 items prepended as launch blockers
 - [Android quality roadmap](android-quality-roadmap.md) — full 36-finding remediation plan, 4 sprints + native XL items; 2026-05-30 audit
+- [Growth roadmap](growth-roadmap.md) — DAU→ad revenue strategy; Phase 0 analytics, Phase 1 quick wins, Phase 2 Android widgets, Phase 3 backend+push; RICE scores; 2026-06-09

@@ -7,13 +7,21 @@
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 import '../about_screen.dart';
+import 'hidden_stops_screen.dart';
 import 'manage_alerts_screen.dart';
+
+/// Where the "Buy me a coffee" row opens — the Stripe Payment Link for the
+/// "Support Leyne" product (accepts PayNow + cards + Google Pay, settles SGD to
+/// bank). Leyne is ad-funded, not paywalled; this is an optional way to chip in.
+/// Shared with the iOS build (SoftSettingsView.swift `kCoffeeURL`).
+const String _kCoffeeUrl = 'https://buy.stripe.com/6oU3cv5689oB3PI6R68so00';
 
 class SoftSettingsScreen extends StatefulWidget {
   const SoftSettingsScreen({super.key, required this.onTab});
@@ -253,6 +261,23 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                     detail: _themeLabel(m.themeMode),
                     onTap: _showAppearanceSheet,
                   ),
+                  // Hidden stops → HiddenStopsScreen. Only surfaces once the
+                  // user has hidden something from Nearby (long-press → Hide
+                  // from Nearby). Mirrors iOS SoftSettingsView.
+                  if (m.hiddenNearby.isNotEmpty) ...[
+                    _divider(context),
+                    _navRow(
+                      context,
+                      icon: Icons.visibility_off_outlined,
+                      title: 'Hidden stops',
+                      detail: '${m.hiddenNearby.length}',
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const HiddenStopsScreen(),
+                        ),
+                      ),
+                    ),
+                  ],
                   _divider(context),
                   // About → AboutScreen
                   _navRow(
@@ -265,6 +290,11 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                       ),
                     ),
                   ),
+                  _divider(context),
+                  // Buy me a coffee → opens the Stripe donation link in the
+                  // browser. Optional supporter tier; the app is ad-funded, not
+                  // paywalled. Mirrors iOS SoftSettingsView coffee row.
+                  _coffeeRow(context),
                 ]),
 
                 const SizedBox(height: 24),
@@ -365,6 +395,56 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
             Icon(Icons.chevron_right, color: t.faint, size: 18),
           ],
         ),
+      ),
+    );
+  }
+
+  /// "Buy me a coffee" support row — icon chip, title + subtitle, and an
+  /// external-link arrow (instead of a chevron) to signal it leaves the app.
+  /// Mirrors iOS SoftSettingsView coffeeRow.
+  Widget _coffeeRow(BuildContext context) {
+    final t = context.t;
+    return InkWell(
+      onTap: _openCoffee,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            _iconChip(context, Icons.local_cafe_outlined),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Buy me a coffee',
+                    style: t.sans(15, weight: FontWeight.w500, color: t.fg),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    "Support Leyne's development",
+                    style: t.sans(12, color: t.dim),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.north_east_rounded, color: t.faint, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCoffee() async {
+    final uri = Uri.parse(_kCoffeeUrl);
+    if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Couldn't open the donation page"),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

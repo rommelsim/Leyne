@@ -14,14 +14,20 @@
 // from it (iOS parity). Long-press a card for a quick stop-view peek.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
 import '../../data/geo.dart';
 import '../../data/models.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
+import '../../state/bus_alert.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
+import '../../widgets/v2/notify_confirm.dart';
+import '../../widgets/v2/notify_when_sheet.dart';
 import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -148,8 +154,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   /// Nearby stops sorted by distance, capped at 12 (1 closest + 11 others).
   /// Saved/pinned stops are intentionally kept — Nearby reflects what's around
   /// you, so saving a stop must never make it vanish from here (iOS parity).
+  /// Stops the user hid (long-press → "Hide from Nearby") are filtered out;
+  /// they're restorable from Settings → Hidden stops.
   List<NearbyStop> _nearbyStops() {
     final base = [...DataStore.shared.nearby]
+      ..removeWhere((s) => AppModel.shared.isHiddenNearby(s.stopCode))
       ..sort((a, b) => a.distanceM.compareTo(b.distanceM));
     return base.take(12).toList();
   }
@@ -166,8 +175,9 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   }
 
   /// Long-press peek — a Material take on the iOS context-menu preview: the
-  /// stop's live arrivals at a glance, with one tap to open it fully. Replaces
-  /// the old long-press, which did nothing useful.
+  /// stop's live arrivals at a glance plus the quick actions from the iOS
+  /// context menu (pin, arrival alerts, open on map, copy code, hide), with
+  /// one tap to open the stop fully.
   void _showStopPeek(BuildContext context, NearbyStop stop) {
     final t = context.t;
     DataStore.shared.ensureArrivals(stop.stopCode);
@@ -175,6 +185,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
       context: context,
       backgroundColor: t.surface,
       showDragHandle: true,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -184,6 +195,100 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
           Navigator.of(sheetCtx).pop();
           widget.onOpenStop(stop.stopCode);
         },
+        onArrivalAlerts: () {
+          Navigator.of(sheetCtx).pop();
+          _quickArrivalAlerts(stop);
+        },
+        onOpenMaps: () {
+          Navigator.of(sheetCtx).pop();
+          _openOnMaps(stop);
+        },
+        onCopyCode: () {
+          Navigator.of(sheetCtx).pop();
+          _copyCode(stop.stopCode);
+        },
+        onHide: () {
+          Navigator.of(sheetCtx).pop();
+          AppModel.shared.hideFromNearby(stop.stopCode);
+        },
+      ),
+    );
+  }
+
+  /// Quick arrival alert from the long-press menu — targets the stop's soonest
+  /// service (mirrors the iOS "Arrival Alerts" action, which targets the
+  /// soonest bus). Falls back to opening the stop when nothing is live yet so
+  /// the user can still pick a bus. Reuses the Stop screen's alert flow.
+  Future<void> _quickArrivalAlerts(NearbyStop stop) async {
+    final code = stop.stopCode;
+    DataStore.shared.ensureArrivals(code);
+    final now = DateTime.now();
+    int liveSec(Service s) => s.arrivalDate != null
+        ? s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
+        : s.etaSec;
+    final services = [...DataStore.shared.servicesFor(code)]
+      ..sort((a, b) => liveSec(a).compareTo(liveSec(b)));
+    if (services.isEmpty) {
+      widget.onOpenStop(code); // nothing live yet — let them pick in the stop
+      return;
+    }
+    final bus = services.first;
+    final stopName = DataStore.shared.stopName(code);
+    final result = await showNotifyWhenSheet(
+      context,
+      kind: AlertKind.arrival,
+      busNo: bus.no,
+      stopName: stopName,
+      dest: bus.dest,
+    );
+    if (result == null || !mounted) return;
+    await AppModel.shared.upsertAlert(BusAlert(
+      kind: AlertKind.arrival,
+      busNo: bus.no,
+      stopCode: code,
+      stopName: stopName,
+      dest: bus.dest,
+      leadMinutes: result.lead,
+    ));
+    if (!mounted) return;
+    await showNotifyConfirm(
+      context,
+      kind: AlertKind.arrival,
+      busNo: bus.no,
+      stopCode: code,
+      stopName: stopName,
+      leadMinutes: result.lead,
+      onManageAll: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
+      ),
+    );
+  }
+
+  /// Open the stop's location in the device's default maps app. Mirrors the
+  /// iOS "Open on Map" action. Uses a geo: URI (label = stop name), falling
+  /// back to a Google Maps web search if no maps app handles geo:.
+  Future<void> _openOnMaps(NearbyStop stop) async {
+    final s = DataStore.shared.stopByCode[stop.stopCode];
+    final name = stop.stopName.isEmpty ? stop.stopCode : stop.stopName;
+    if (s != null) {
+      final geo = Uri.parse('geo:${s.latitude},${s.longitude}'
+          '?q=${s.latitude},${s.longitude}(${Uri.encodeComponent(name)})');
+      if (await launchUrl(geo, mode: LaunchMode.externalApplication)) return;
+    }
+    final web = Uri.parse('https://www.google.com/maps/search/?api=1'
+        '&query=${Uri.encodeComponent(name)}');
+    await launchUrl(web, mode: LaunchMode.externalApplication);
+  }
+
+  /// Copy the stop code to the clipboard (iOS "Copy Stop Code").
+  void _copyCode(String code) {
+    Clipboard.setData(ClipboardData(text: code));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Stop code $code copied'),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -925,10 +1030,21 @@ class _EmptyState extends StatelessWidget {
 /// soonest live arrivals (number · destination · crowd · ETA), with one button
 /// to open the full stop. Material counterpart to the iOS context-menu preview.
 class _StopPeekSheet extends StatelessWidget {
-  const _StopPeekSheet({required this.stop, required this.onOpen});
+  const _StopPeekSheet({
+    required this.stop,
+    required this.onOpen,
+    required this.onArrivalAlerts,
+    required this.onOpenMaps,
+    required this.onCopyCode,
+    required this.onHide,
+  });
 
   final NearbyStop stop;
   final VoidCallback onOpen;
+  final VoidCallback onArrivalAlerts;
+  final VoidCallback onOpenMaps;
+  final VoidCallback onCopyCode;
+  final VoidCallback onHide;
 
   @override
   Widget build(BuildContext context) {
@@ -959,7 +1075,53 @@ class _StopPeekSheet extends StatelessWidget {
               listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
               builder: (context, _) => _arrivals(context, t, code),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
+            Divider(height: 1, thickness: 1, color: t.line),
+            const SizedBox(height: 6),
+            // Quick actions — the iOS context-menu set. Pin reflects live state,
+            // so it lives inside a ListenableBuilder on AppModel.
+            ListenableBuilder(
+              listenable: AppModel.shared,
+              builder: (context, _) {
+                final pinned = AppModel.shared.isPinned(code);
+                return Column(
+                  children: [
+                    _actionRow(
+                      t,
+                      icon: pinned ? Icons.star_rounded : Icons.star_outline_rounded,
+                      label: pinned ? 'Remove from Saved' : 'Add to Saved',
+                      onTap: () => AppModel.shared.togglePin(code),
+                    ),
+                    _actionRow(
+                      t,
+                      icon: Icons.notifications_none_rounded,
+                      label: 'Arrival alerts',
+                      onTap: onArrivalAlerts,
+                    ),
+                    _actionRow(
+                      t,
+                      icon: Icons.map_outlined,
+                      label: 'Open on Maps',
+                      onTap: onOpenMaps,
+                    ),
+                    _actionRow(
+                      t,
+                      icon: Icons.copy_rounded,
+                      label: 'Copy stop code',
+                      onTap: onCopyCode,
+                    ),
+                    _actionRow(
+                      t,
+                      icon: Icons.visibility_off_outlined,
+                      label: 'Hide from Nearby',
+                      onTap: onHide,
+                      destructive: true,
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -972,6 +1134,32 @@ class _StopPeekSheet extends StatelessWidget {
                 label: const Text('Open stop'),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One quick-action row: leading icon + label, full-width tap target.
+  /// Destructive actions (Hide) read in the critical colour.
+  Widget _actionRow(
+    LyneTheme t, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool destructive = false,
+  }) {
+    final color = destructive ? t.crit : t.fg;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 14),
+            Text(label, style: t.sans(15, weight: FontWeight.w500, color: color)),
           ],
         ),
       ),

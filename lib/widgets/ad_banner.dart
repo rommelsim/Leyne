@@ -81,6 +81,21 @@ String _bannerUnitId() {
   return 'ca-app-pub-5864511655536507/6513878972';
 }
 
+/// Resolve the 300×250 MREC ad unit ID. Same gating as the banner.
+///   • DEBUG or LYNE_ADS_TEST=true: Google's universal test unit (it serves a
+///     test creative matching whatever AdSize is requested, including 300×250).
+///   • RELEASE: reuses the production banner unit for now — an AdMob unit isn't
+///     bound to one size, so it still serves a 300×250. Mirrors iOS, which
+///     reuses its banner unit for the Stop-screen MREC.
+///     TODO: create a dedicated 300×250 unit in AdMob and swap it in here (and
+///     on iOS) so MREC vs banner performance can be reported separately.
+String _mrecUnitId() {
+  if (kDebugMode || kLyneAdsTest) {
+    return 'ca-app-pub-3940256099942544/6300978111';
+  }
+  return 'ca-app-pub-5864511655536507/6513878972';
+}
+
 class AdBanner extends StatefulWidget {
   const AdBanner({super.key});
 
@@ -209,6 +224,90 @@ class _AdBannerState extends State<AdBanner> {
                 child: AdWidget(ad: _ad!),
               )
             : null,
+      ),
+    );
+  }
+}
+
+/// Fixed 300×250 medium rectangle (MREC) for an inline content placement — the
+/// Stop screen shows one of these instead of the bottom anchored banner, so the
+/// screen carries exactly one ad (iOS parity). Mirrors the iOS `MediumRectAd`.
+///
+/// Renders nothing (zero-size) until both AdConsent.started AND the ad loads —
+/// it sits at the end of the scroll content, so deferring keeps an empty 250pt
+/// gap from ever showing when fill fails or while consent is still resolving.
+/// Self-suppresses when ads are off (master switch) or in screenshot mode.
+class MediumRectAd extends StatefulWidget {
+  const MediumRectAd({super.key});
+
+  @override
+  State<MediumRectAd> createState() => _MediumRectAdState();
+}
+
+class _MediumRectAdState extends State<MediumRectAd> {
+  BannerAd? _ad;
+  bool _loaded = false;
+  Timer? _retry;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kLyneAdsEnabled || kLyneScreenshotMode) return;
+    _attemptLoad();
+  }
+
+  void _attemptLoad() {
+    if (!AdConsent.started) {
+      _retry?.cancel();
+      _retry = Timer(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
+        _attemptLoad();
+      });
+      return;
+    }
+    final ad = BannerAd(
+      adUnitId: _mrecUnitId(),
+      size: AdSize.mediumRectangle, // 300×250
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          if (!mounted) return;
+          setState(() => _loaded = true);
+        },
+        onAdFailedToLoad: (ad, error) {
+          ad.dispose();
+          if (kDebugMode) {
+            // ignore: avoid_print
+            print('[ads] MREC failed: ${error.message}');
+          }
+        },
+      ),
+    );
+    _ad = ad;
+    ad.load();
+  }
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    _ad?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!kLyneAdsEnabled || kLyneScreenshotMode || !_loaded || _ad == null) {
+      return const SizedBox.shrink();
+    }
+    // Centre the fixed 300×250 block with breathing room above it.
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Center(
+        child: SizedBox(
+          width: _ad!.size.width.toDouble(),
+          height: _ad!.size.height.toDouble(),
+          child: AdWidget(ad: _ad!),
+        ),
       ),
     );
   }

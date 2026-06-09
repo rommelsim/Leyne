@@ -45,6 +45,7 @@ const _kLastSeenVersionKey = 'lyne.lastSeenVersion';
 const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
 const _kHapticsKey = 'lyne.haptics';
 const _kAlertsKey = 'lyne.alerts'; // JSON list of BusAlert (notifs redesign)
+const _kHiddenNearbyKey = 'lyne.hiddenNearby'; // stop codes hidden from Nearby
 
 /// The currently-armed on-bus alert: which bus, where to alight, when
 /// the heads-up notification fires. Single ride at a time — see
@@ -407,6 +408,34 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Hidden-from-Nearby stops (persisted) ────────────────────
+  // Stop codes the user has hidden from the Home/Nearby list via the
+  // long-press "Hide from Nearby" action. Restored from Settings → Hidden
+  // stops. Mirrors iOS AppModel.hiddenNearby. Independent of pins — a hidden
+  // stop can still be saved (it just won't surface in Nearby).
+  Set<String> _hiddenNearby = <String>{};
+  Set<String> get hiddenNearby => Set.unmodifiable(_hiddenNearby);
+
+  bool isHiddenNearby(String code) => _hiddenNearby.contains(code);
+
+  void _persistHiddenNearby() {
+    _prefs?.setStringList(_kHiddenNearbyKey, _hiddenNearby.toList());
+  }
+
+  /// Hide a stop from the Nearby list. No-op if already hidden.
+  void hideFromNearby(String code) {
+    if (!_hiddenNearby.add(code)) return;
+    _persistHiddenNearby();
+    notifyListeners();
+  }
+
+  /// Restore a previously hidden stop (Settings → Hidden stops).
+  void unhideNearby(String code) {
+    if (!_hiddenNearby.remove(code)) return;
+    _persistHiddenNearby();
+    notifyListeners();
+  }
+
   // ─── FavServices (persisted, 2.4.0) ──────────────────────────
   List<FavService> _favServices = const [];
   List<FavService> get favServices => List.unmodifiable(_favServices);
@@ -557,6 +586,8 @@ class AppModel extends ChangeNotifier {
       } catch (_) {/* corrupt — start empty */}
     }
     _recents = _prefs!.getStringList(_kRecentsKey) ?? const [];
+    _hiddenNearby = (_prefs!.getStringList(_kHiddenNearbyKey) ?? const [])
+        .toSet();
     // Load favourite services (2.4.0).
     final favRaw = _prefs!.getString(_kFavServicesKey);
     if (favRaw != null) {
