@@ -200,8 +200,8 @@ struct RouteTimeline: View {
                 Text(expanded
                      ? "Hide earlier stops"
                      : "Show \(hiddenCount) earlier stop\(hiddenCount == 1 ? "" : "s")")
-                    .font(t.sans(13, weight: .medium))
-                    .foregroundStyle(t.dim)
+                    .font(t.sans(13, weight: .semibold))
+                    .foregroundStyle(t.fg)
                     .padding(.bottom, 14)
                     .padding(.top, 2)
                 Spacer(minLength: 0)
@@ -239,8 +239,8 @@ struct RouteTimeline: View {
                 Text(tailExpanded
                      ? "Hide later stops"
                      : "Show \(hiddenCount) more stop\(hiddenCount == 1 ? "" : "s") to \(terminus)")
-                    .font(t.sans(13, weight: .medium))
-                    .foregroundStyle(t.dim)
+                    .font(t.sans(13, weight: .semibold))
+                    .foregroundStyle(t.fg)
                     .padding(.top, 2)
                     .padding(.bottom, 4)
                 Spacer(minLength: 0)
@@ -288,35 +288,58 @@ struct RouteTimeline: View {
                 }
                 .frame(width: 24)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(stop.name)
-                            .font(t.sans(14, weight: resolved == .past ? .regular : .medium))
-                            .foregroundStyle(resolved == .past ? t.faint : t.fg)
-                        // Generic MRT/LRT tag only when we can't resolve specific
-                        // line code(s) (the colour-coded pill below).
-                        if mrt == nil && stopServesMRT(stop.name) { mrtBadge }
-                        Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 4) {
+                    let isBoard = resolved == .board
+                    // Name + code block. Name + rail pill sit side-by-side when
+                    // they fit, else the pill drops to its own line (no truncation).
+                    VStack(alignment: .leading, spacing: 2) {
+                        let name = Text(stop.name)
+                            .font(t.sans(14, weight: resolved == .past ? .regular
+                                                    : (isBoard ? .bold : .semibold)))
+                            .foregroundStyle(resolved == .past ? t.dim
+                                             : (isBoard ? t.soon : t.fg))
+                        Group {
+                            if let mrt {
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(spacing: 6) { name; mrtStationPill(mrt) }
+                                    VStack(alignment: .leading, spacing: 3) { name; mrtStationPill(mrt) }
+                                }
+                            } else if stopServesMRT(stop.name) {
+                                HStack(spacing: 6) { name; mrtBadge }
+                            } else {
+                                name
+                            }
+                        }
+                        // Stop code as a dim mono subline (e.g. "42071"). `id` is
+                        // the LTA stop code; only show it when it differs from the
+                        // displayed name so we never echo a code that *is* the name.
+                        if stop.id != stop.name {
+                            Text(stop.id)
+                                .font(t.mono(10))
+                                .foregroundStyle(t.faint)
+                        }
                     }
-                    // Colour-coded rail-station pill ("[EW23] Clementi"), shown
-                    // when the stop resolves to a known MRT/LRT station.
-                    if let mrt {
-                        mrtStationPill(mrt)
-                            .padding(.top, 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Boarding stop: a soft green highlight fill (no outline) plus
+                    // the green name above marks it as "your stop" unmistakably.
+                    .padding(.leading, isBoard ? 10 : 0)
+                    .padding(.trailing, isBoard ? 8 : 0)
+                    .padding(.vertical, isBoard ? 6 : 0)
+                    .background(alignment: .leading) {
+                        if isBoard {
+                            HStack(spacing: 0) {
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(t.soon)
+                                    .frame(width: 3)
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(t.soonBg)
+                            }
+                        }
                     }
-                    // Stop code as a dim mono subline (e.g. "42071"). `id` is
-                    // the LTA stop code; only show it when it differs from the
-                    // displayed name so we never echo a code that *is* the name.
-                    if stop.id != stop.name {
-                        Text(stop.id)
-                            .font(t.mono(10))
-                            .foregroundStyle(t.faint)
-                    }
+                    .accessibilityValue(isBoard ? "Your boarding stop" : "")
                     switch resolved {
                     case .here:
-                        chip("BUS HERE NOW", filled: false)
-                    case .board:
-                        chip("THIS STOP", filled: true)
+                        chip("BUS HERE NOW", filled: true)
                     case .alight:
                         chip("🔔 ALIGHT", filled: true)
                     default:
@@ -329,7 +352,7 @@ struct RouteTimeline: View {
                 Spacer(minLength: 8)
                 if let time = stop.time {
                     Text(time)
-                        .font(t.mono(12, weight: resolved == .next ? .regular : .semibold))
+                        .font(t.mono(12, weight: resolved == .next ? .medium : .semibold))
                         .foregroundStyle(timeColor(resolved))
                         .lineLimit(1)
                         .padding(.top, 1)
@@ -359,20 +382,16 @@ struct RouteTimeline: View {
                     .foregroundStyle(t.contrastFg)
             }
         case .here:
-            // The bus, right now — green with a bus glyph.
+            // The bus, right now — green with a bus glyph and a pulsing halo.
+            BusHereDot(t: t)
+        case .board:
+            // Your stop — a bold filled green target with a person glyph.
             ZStack {
-                Circle().fill(t.soon.opacity(0.25)).frame(width: 22, height: 22)
+                Circle().fill(t.soon.opacity(0.22)).frame(width: 22, height: 22)
                 Circle().fill(t.soon).frame(width: 18, height: 18)
-                Image(systemName: "bus.fill")
+                Image(systemName: "figure.wave")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(t.contrastFg)
-            }
-        case .board:
-            // Your stop — a green ring.
-            ZStack {
-                Circle().fill(t.soon.opacity(0.18)).frame(width: 18, height: 18)
-                Circle().strokeBorder(t.soon, lineWidth: 2.5).frame(width: 13, height: 13)
-                    .background(Circle().fill(t.surface))
             }
         case .alight:
             ZStack {
@@ -399,7 +418,7 @@ struct RouteTimeline: View {
         switch state {
         case .past:  return t.faint
         case .here:  return t.soon
-        default:     return t.dim
+        default:     return t.fg
         }
     }
 
@@ -448,6 +467,39 @@ struct RouteTimeline: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(code.color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    /// The live bus marker — green dot with a bus glyph and a continuously
+    /// rippling halo so the bus's position is findable at a glance. Honours
+    /// Reduce Motion by falling back to the static halo.
+    private struct BusHereDot: View {
+        let t: Theme
+        @State private var pulsing = false
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            ZStack {
+                if reduceMotion {
+                    Circle().fill(t.soon.opacity(0.25)).frame(width: 22, height: 22)
+                } else {
+                    Circle()
+                        .fill(t.soon.opacity(0.45))
+                        .frame(width: 22, height: 22)
+                        .scaleEffect(pulsing ? 1.9 : 1.0)
+                        .opacity(pulsing ? 0 : 0.6)
+                }
+                Circle().fill(t.soon).frame(width: 18, height: 18)
+                Image(systemName: "bus.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(t.contrastFg)
+            }
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                    pulsing = true
+                }
+            }
+        }
     }
 
     @ViewBuilder

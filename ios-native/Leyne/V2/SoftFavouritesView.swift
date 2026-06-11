@@ -517,7 +517,8 @@ private struct FavStopCard: View {
 
     private var identityBlock: some View {
         HStack(spacing: 12) {
-            // Pin tile with gold star badge (all saved stops are pinned)
+            // Pin tile — the place glyph. Star badge removed: everything in
+            // this tab is already saved, so the badge added no signal.
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(t.surfaceHi)
@@ -526,14 +527,6 @@ private struct FavStopCard: View {
                     .foregroundStyle(t.fg)
             }
             .frame(width: 46, height: 46)
-            .overlay(alignment: .topTrailing) {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(t.accent)
-                    .padding(2)
-                    .background(t.surface, in: Circle())
-                    .offset(x: 5, y: -5)
-            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(name)

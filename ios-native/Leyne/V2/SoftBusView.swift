@@ -130,7 +130,9 @@ struct SoftBusView: View {
                 firstLastFooter
             }
             .padding(.horizontal, 16)
-            .padding(.top, 6)
+            // Leave room below the sheet's drag grabber so the title doesn't
+            // crowd it and the card stays easy to grab and drag down.
+            .padding(.top, 52)
             .padding(.bottom, 10)
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }

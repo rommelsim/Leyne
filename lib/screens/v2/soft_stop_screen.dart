@@ -148,10 +148,126 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           ),
         ),
         const Spacer(),
+        // ETA colour legend info button.
+        _infoButton(context),
+        const SizedBox(width: 8),
         // Star menu — pin/unpin this stop or save a specific bus here,
         // without leaving the page (replaces the old save-sheet-only flow).
         _starMenu(context, isPinned),
         // Sort moved out of the top bar into a visible pill above the list.
+      ],
+    );
+  }
+
+  /// Small info button — tapping opens the ETA colour legend sheet.
+  Widget _infoButton(BuildContext context) {
+    final t = context.t;
+    return Semantics(
+      label: 'ETA colour guide',
+      button: true,
+      child: Material(
+        color: t.surface,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => _showEtaLegend(context),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: t.line, width: 1),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.info_outline_rounded, size: 20, color: t.fg),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ETA colour legend — compact bottom sheet explaining the three tiers.
+  void _showEtaLegend(BuildContext context) {
+    final t = context.t;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: t.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle bar
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: t.line,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'ETA colours',
+              style: t.sans(17, weight: FontWeight.w700, color: t.fg),
+            ),
+            const SizedBox(height: 16),
+            _legendRow(
+              t,
+              color: t.soon,
+              label: 'Arriving soon',
+              detail: 'Under 9 minutes',
+            ),
+            const SizedBox(height: 14),
+            _legendRow(
+              t,
+              color: t.mid,
+              label: 'On its way',
+              detail: '9 – 16 minutes',
+            ),
+            const SizedBox(height: 14),
+            _legendRow(
+              t,
+              color: t.dim,
+              label: 'Further out',
+              detail: '16+ min or schedule only',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _legendRow(
+    LyneTheme t, {
+    required Color color,
+    required String label,
+    required String detail,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label,
+                style: t.sans(14, weight: FontWeight.w600, color: t.fg)),
+            Text(detail, style: t.mono(12, color: t.dim)),
+          ],
+        ),
       ],
     );
   }
@@ -182,7 +298,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             ),
             alignment: Alignment.center,
             child: Icon(
-              isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+              isPinned ? Icons.star_rounded : Icons.star_outline_rounded,
               size: 20,
               color: isPinned ? t.soon : t.fg,
             ),
@@ -638,11 +754,24 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
               // before truncating so "To Kampong Bahru Ter" reads in full.
               // The badge, time columns and bell keep their intrinsic width.
               Expanded(
-                child: Text(
-                  bus.dest.isEmpty ? 'Bus ${bus.no}' : 'To ${bus.dest}',
-                  style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      bus.dest.isEmpty ? 'Bus ${bus.no}' : 'To ${bus.dest}',
+                      style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    // WAB / deck indicators — only shown when arrival data is
+                    // confirmed live or stale (not for timetable-only ghosts).
+                    if (_showServiceAttrs(conf) &&
+                        (bus.wab || bus.deck != Deck.sd)) ...[
+                      const SizedBox(height: 3),
+                      _serviceAttrs(t, bus, conf),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
@@ -651,6 +780,36 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Whether to surface WAB / deck attributes. Only for confirmed arrivals —
+  /// timetable-only ghost buses don't carry reliable per-trip attributes.
+  bool _showServiceAttrs(ArrivalConfidence conf) =>
+      conf == ArrivalConfidence.live || conf == ArrivalConfidence.stale;
+
+  /// Small inline row of service attribute chips: wheelchair (WAB) and
+  /// deck type when it's not plain single-deck. Colour is dim so it never
+  /// competes with the ETA. Shown only when [_showServiceAttrs] is true.
+  Widget _serviceAttrs(LyneTheme t, Service bus, ArrivalConfidence conf) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (bus.wab) ...[
+          Semantics(
+            label: 'Wheelchair accessible',
+            excludeSemantics: true,
+            child: Icon(Icons.accessible_rounded, size: 13, color: t.dim),
+          ),
+        ],
+        if (bus.wab && bus.deck != Deck.sd) const SizedBox(width: 5),
+        if (bus.deck != Deck.sd) ...[
+          Text(
+            bus.deck == Deck.dd ? 'Double-deck' : 'Bendy',
+            style: t.mono(10, color: t.faint),
+          ),
+        ],
+      ],
     );
   }
 

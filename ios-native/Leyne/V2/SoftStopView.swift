@@ -40,6 +40,7 @@ struct SoftStopView: View {
     // header chevron, but no longer presented from the per-bus button.
     @State private var alertToast: ArrivalAlertToastState?
     @State private var showManage = false
+    @State private var showETALegend = false
 
     /// How many services to show before the "Show more" expander kicks in.
     private let collapsedCount = 6
@@ -113,6 +114,12 @@ struct SoftStopView: View {
         }
         // One-tap arrival-alert Undo toast.
         .arrivalAlertToastOverlay(state: $alertToast, t: t)
+        // ETA colour legend sheet.
+        .sheet(isPresented: $showETALegend) {
+            ETALegendSheet(t: t)
+                .presentationDetents([.height(280)])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     // MARK: - Top bar
@@ -129,13 +136,13 @@ struct SoftStopView: View {
 
             Spacer(minLength: 0)
 
-            // Save toggle — pins/unpins this stop. A map-pin glyph fills when
-            // saved; to save a specific bus instead, open the bus and toggle
-            // its (bus-glyph) save there.
+            // Save toggle — pins/unpins this stop. A star fills when saved;
+            // to save a specific bus instead, open the bus and toggle its
+            // (bus-glyph) save there.
             Button {
                 fb.select(); m.togglePin(code: stopCode)
             } label: {
-                Image(systemName: isPinned ? "mappin.circle.fill" : "mappin.circle")
+                Image(systemName: isPinned ? "star.fill" : "star")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isPinned ? t.soon : t.fg)
                     .frame(width: 44, height: 44)
@@ -145,6 +152,13 @@ struct SoftStopView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isPinned ? "\(stopName) saved. Tap to remove."
                                          : "Save stop \(stopName)")
+
+            // ETA colour legend — explains green/amber/grey thresholds.
+            Button { fb.tap(); showETALegend = true } label: {
+                circleButton(icon: "info.circle")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("ETA colour guide")
 
         }
         .padding(.top, 4)
@@ -492,6 +506,7 @@ struct SoftStopView: View {
     private func busRow(_ bus: Service) -> some View {
         let conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed)
         let badge = serviceBadgeColors(etaSec: bus.etaSec, confidence: conf, t: t)
+        let isLive = conf == .live || conf == .stale
 
         return Button {
             fb.select()
@@ -501,14 +516,36 @@ struct SoftStopView: View {
                 ServiceBadge(svc: bus.no, t: t, size: .md,
                              fillOverride: badge.fill, fgOverride: badge.fg)
 
-                Text(destLabel(bus))
-                    .font(t.sans(14, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
+                // Destination + accessibility/vehicle glyphs
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(destLabel(bus))
+                        .font(t.sans(14, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // WAB / double-deck indicators — only shown for live/stale
+                    // arrivals. Quiet secondary tint so they never fight the ETA.
+                    if isLive && (bus.wab || bus.deck == .DD) {
+                        HStack(spacing: 6) {
+                            if bus.wab {
+                                Image(systemName: "figure.roll")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(t.dim)
+                                    .accessibilityLabel("Wheelchair accessible")
+                            }
+                            if bus.deck == .DD {
+                                Image(systemName: "bus.doubledecker")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(t.dim)
+                                    .accessibilityLabel("Double-deck bus")
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
 
                 Spacer(minLength: 8)
 
@@ -703,5 +740,74 @@ struct SoftStopView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+// MARK: - ETA Legend Sheet
+
+/// Compact sheet explaining ETA colour thresholds. Presented from the
+/// info button in the stop screen top bar.
+private struct ETALegendSheet: View {
+    let t: Theme
+
+    private struct Row {
+        let color: (Theme) -> Color
+        let label: String
+        let detail: String
+    }
+
+    private let rows: [Row] = [
+        Row(color: { $0.soon },
+            label: "Green",
+            detail: "Arriving within 9 min"),
+        Row(color: { $0.mid },
+            label: "Amber",
+            detail: "9 – 16 min away"),
+        Row(color: { $0.dim },
+            label: "Grey",
+            detail: "16+ min or schedule only"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("ETA Colours")
+                .font(t.sans(20, weight: .bold))
+                .foregroundStyle(t.fg)
+
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                    if i > 0 {
+                        Rectangle().fill(t.line).frame(height: 1)
+                            .padding(.leading, 44)
+                    }
+                    HStack(spacing: 14) {
+                        Circle()
+                            .fill(row.color(t))
+                            .frame(width: 12, height: 12)
+                            .frame(width: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.label)
+                                .font(t.sans(15, weight: .semibold))
+                                .foregroundStyle(t.fg)
+                            Text(row.detail)
+                                .font(t.sans(13))
+                                .foregroundStyle(t.dim)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                }
+            }
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Text("Colour applies to live and recently-live arrivals only. Scheduled-only times always show grey.")
+                .font(t.sans(12))
+                .foregroundStyle(t.faint)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(t.bg.ignoresSafeArea())
     }
 }

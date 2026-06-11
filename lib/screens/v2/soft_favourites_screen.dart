@@ -290,7 +290,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         if (_segment == _Segment.all) ...[
           Row(
             children: [
-              Icon(Icons.push_pin_rounded, size: 14, color: t.soon),
+              Icon(Icons.star_rounded, size: 14, color: t.soon),
               const SizedBox(width: 6),
               Text(
                 'Saved stops',
@@ -867,37 +867,17 @@ class _FavStopCard extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // 46×46 pin tile — gold star badge always shown (all stops here are pinned).
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: t.surfaceHi,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.location_on, size: 20, color: t.fg),
-            ),
-            Positioned(
-              top: -4,
-              right: -4,
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: t.surface,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.star,
-                  size: 11,
-                  color: Color(0xFFF5B500),
-                ),
-              ),
-            ),
-          ],
+        // 46×46 place tile — location glyph. Star badge removed: everything
+        // in this tab is already saved, so the badge adds noise without info.
+        Container(
+          width: 46,
+          height: 46,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: t.surfaceHi,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(Icons.location_on, size: 20, color: t.fg),
         ),
         const SizedBox(width: 12),
         Expanded(

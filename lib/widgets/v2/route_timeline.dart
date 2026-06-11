@@ -264,7 +264,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
                 _expanded
                     ? 'Hide earlier stops'
                     : 'Show $hiddenCount earlier stop${hiddenCount == 1 ? "" : "s"}',
-                style: t.sans(13, weight: FontWeight.w500, color: t.dim),
+                style: t.sans(13, weight: FontWeight.w500, color: t.accent),
               ),
             ),
           ],
@@ -323,8 +323,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
                 child: Text(
                   _tailExpanded
                       ? 'Hide later stops'
-                      : 'Show $hiddenCount more stop${hiddenCount == 1 ? "" : "s"} to $terminus',
-                  style: t.sans(13, weight: FontWeight.w500, color: t.dim),
+                      : 'Show all $hiddenCount stop${hiddenCount == 1 ? "" : "s"} to $terminus',
+                  style: t.sans(13, weight: FontWeight.w500, color: t.accent),
                 ),
               ),
             ),
@@ -362,6 +362,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
               width: 24,
               child: Stack(
                 alignment: Alignment.center,
+                // The bus marker's pulsing halo paints past the 24px rail.
+                clipBehavior: Clip.none,
                 children: [
                   Column(
                     children: [
@@ -398,64 +400,94 @@ class _RouteTimelineState extends State<RouteTimeline> {
             Expanded(
               child: Padding(
                 padding: EdgeInsets.only(bottom: last ? 0 : 14, top: 2),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+                child: Builder(
+                  builder: (context) {
+                    final isBoard = resolved == SoftRouteStopState.board;
+                    final nameText = Text(
+                      stop.name,
+                      style: t.sans(
+                        14,
+                        weight: resolved == SoftRouteStopState.past
+                            ? FontWeight.w400
+                            : (isBoard ? FontWeight.w700 : FontWeight.w600),
+                        color: resolved == SoftRouteStopState.past
+                            ? t.dim
+                            : (isBoard ? t.soon : t.fg),
+                      ),
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
-                          child: Text(
-                            stop.name,
-                            style: t.sans(
-                              14,
-                              weight: resolved == SoftRouteStopState.past
-                                  ? FontWeight.w400
-                                  : FontWeight.w500,
-                              color: resolved == SoftRouteStopState.past
-                                  ? t.faint
-                                  : t.fg,
-                            ),
+                        // Name + code block. Boarding stop gets a soft green
+                        // highlight fill + left accent bar (no outline).
+                        Container(
+                          padding: isBoard
+                              ? const EdgeInsets.fromLTRB(9, 6, 8, 6)
+                              : EdgeInsets.zero,
+                          decoration: isBoard
+                              ? BoxDecoration(
+                                  color: t.soonBg,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border(
+                                    left: BorderSide(color: t.soon, width: 3),
+                                  ),
+                                )
+                              : null,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Name + rail pill wrap onto a second line
+                                  // when they can't share one — no truncation.
+                                  Expanded(
+                                    child: Wrap(
+                                      spacing: 6,
+                                      runSpacing: 3,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        nameText,
+                                        if (mrt != null)
+                                          _mrtStationPill(t, mrt)
+                                        else if (stopServesMRT(stop.name))
+                                          _mrtBadge(t),
+                                      ],
+                                    ),
+                                  ),
+                                  if (resolved == SoftRouteStopState.next &&
+                                      stop.etaMin != null) ...[
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _clockETA(stop.etaMin!),
+                                      style: t.mono(
+                                        12,
+                                        weight: FontWeight.w500,
+                                        color: t.fg,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              // Dim mono stop-code subline when the code differs
+                              // from the displayed name — parity with iOS.
+                              if (stop.id != stop.name) ...[
+                                const SizedBox(height: 1),
+                                Text(stop.id,
+                                    style: t.mono(10, color: t.faint)),
+                              ],
+                            ],
                           ),
                         ),
-                        // Generic MRT/LRT tag only when we can't resolve the
-                        // station to specific line code(s) (the pill below).
-                        if (mrt == null && stopServesMRT(stop.name)) ...[
-                          const SizedBox(width: 6),
-                          _mrtBadge(t),
-                        ],
-                        const Spacer(),
-                        if (resolved == SoftRouteStopState.next &&
-                            stop.etaMin != null)
-                          Text(
-                            _clockETA(stop.etaMin!),
-                            style: t.mono(
-                              12,
-                              weight: FontWeight.w500,
-                              color: t.dim,
-                            ),
-                          ),
+                        const SizedBox(height: 2),
+                        if (resolved == SoftRouteStopState.here)
+                          _chip(t, 'BUS HERE NOW', filled: true),
+                        if (resolved == SoftRouteStopState.alight)
+                          _alightChip(t),
                       ],
-                    ),
-                    // Colour-coded rail-station pill ("[EW23] Clementi"), shown
-                    // when the stop resolves to a known MRT/LRT station.
-                    if (mrt != null) ...[
-                      const SizedBox(height: 5),
-                      _mrtStationPill(t, mrt),
-                    ],
-                    // Dim mono stop-code subline when the code differs from
-                    // the displayed name — parity with iOS RouteTimeline.swift.
-                    if (stop.id != stop.name) ...[
-                      const SizedBox(height: 1),
-                      Text(stop.id, style: t.mono(10, color: t.faint)),
-                    ],
-                    const SizedBox(height: 2),
-                    if (resolved == SoftRouteStopState.here)
-                      _chip(t, 'BUS HERE NOW', filled: false),
-                    // Change 7: "THIS STOP" aligns with iOS chip label (was "BOARD").
-                    if (resolved == SoftRouteStopState.board)
-                      _chip(t, 'THIS STOP', filled: true),
-                    if (resolved == SoftRouteStopState.alight) _alightChip(t),
-                  ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -477,7 +509,10 @@ class _RouteTimelineState extends State<RouteTimeline> {
           child: Icon(Icons.check_rounded, size: 10, color: t.contrastFg),
         );
       case SoftRouteStopState.here:
-        // The bus, right now — green with a bus glyph.
+        // The bus, right now — green with a bus glyph and a pulsing halo.
+        return _BusHereDot(t: t);
+      case SoftRouteStopState.board:
+        // Your stop — a bold filled green target with a person glyph.
         return Stack(
           alignment: Alignment.center,
           children: [
@@ -485,7 +520,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
               width: 22,
               height: 22,
               decoration: BoxDecoration(
-                color: t.soon.withValues(alpha: 0.25),
+                color: t.soon.withValues(alpha: 0.22),
                 shape: BoxShape.circle,
               ),
             ),
@@ -494,31 +529,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
               height: 18,
               alignment: Alignment.center,
               decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
-              child: Icon(Icons.directions_bus_rounded, size: 11, color: t.contrastFg),
-            ),
-          ],
-        );
-      case SoftRouteStopState.board:
-        // Your stop — a green ring.
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                color: t.soon.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-              ),
-            ),
-            Container(
-              width: 13,
-              height: 13,
-              decoration: BoxDecoration(
-                color: t.surface,
-                shape: BoxShape.circle,
-                border: Border.all(color: t.soon, width: 2.5),
-              ),
+              child: Icon(Icons.directions_walk_rounded,
+                  size: 11, color: t.contrastFg),
             ),
           ],
         );
@@ -705,5 +717,86 @@ class _RouteTimelineState extends State<RouteTimeline> {
     final h = target.hour.toString().padLeft(2, '0');
     final m = target.minute.toString().padLeft(2, '0');
     return '$h:$m';
+  }
+}
+
+/// The live bus marker — green dot with a bus glyph and a continuously
+/// rippling halo so the bus's position is findable at a glance. Honours
+/// the system reduce-motion setting by falling back to the static halo.
+/// Mirrors iOS RouteTimeline.swift `BusHereDot`.
+class _BusHereDot extends StatefulWidget {
+  const _BusHereDot({required this.t});
+
+  final LyneTheme t;
+
+  @override
+  State<_BusHereDot> createState() => _BusHereDotState();
+}
+
+class _BusHereDotState extends State<_BusHereDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  );
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.t;
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    if (reduceMotion) {
+      _pulse.stop();
+    } else if (!_pulse.isAnimating) {
+      _pulse.repeat();
+    }
+    return Stack(
+      alignment: Alignment.center,
+      clipBehavior: Clip.none,
+      children: [
+        if (reduceMotion)
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: t.soon.withValues(alpha: 0.25),
+              shape: BoxShape.circle,
+            ),
+          )
+        else
+          AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, _) {
+              // Transform.scale paints outside the 22px box without
+              // affecting layout, so the ripple never shifts the row.
+              final v = Curves.easeOut.transform(_pulse.value);
+              return Transform.scale(
+                scale: 1 + 0.9 * v,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: t.soon.withValues(alpha: 0.45 * (1 - v)),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              );
+            },
+          ),
+        Container(
+          width: 18,
+          height: 18,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
+          child:
+              Icon(Icons.directions_bus_rounded, size: 11, color: t.contrastFg),
+        ),
+      ],
+    );
   }
 }
