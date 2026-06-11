@@ -25,8 +25,8 @@ import '../../data/bus_progress.dart';
 import '../../data/data_store.dart';
 import '../../data/models.dart';
 import '../../state/app_model.dart';
-import '../../state/bus_alert.dart';
 import '../../theme.dart';
+import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/route_timeline.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -295,9 +295,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                 ? 'Boarding alert on for bus ${widget.svc}. Tap to cancel.'
                 : 'Notify me before bus ${widget.svc} reaches this stop',
             child: Icon(
-              boardingOn
-                  ? Icons.notifications_active_rounded
-                  : Icons.notifications_none_rounded,
+              boardingOn ? Icons.visibility : Icons.visibility_outlined,
               size: 20,
               color: boardingOn ? t.soon : t.fg,
             ),
@@ -402,46 +400,15 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       null;
 
   Future<void> _toggleBoardingAlert() async {
-    final m = AppModel.shared;
-    final existing = m.alertFor(
-      kind: AlertKind.arrival,
+    // One-tap toggle + Undo snackbar (shared with Home/Stop). Adding enables
+    // notifications on first use; the lock-screen live view is automatic.
+    await toggleArrivalAlert(
       busNo: widget.svc,
       stopCode: widget.stopCode,
+      stopName: DataStore.shared.stopName(widget.stopCode),
+      dest: _liveService()?.dest ?? '',
     );
-    if (existing != null) {
-      await m.removeAlert(existing.id);
-      if (m.isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode)) {
-        await m.toggleOngoing(
-          busNo: widget.svc,
-          stopCode: widget.stopCode,
-          stopName: DataStore.shared.stopName(widget.stopCode),
-        );
-      }
-      _showToast(Icons.notifications_off_rounded,
-          'Boarding alert off for Bus ${widget.svc}');
-    } else {
-      final live = _liveService();
-      await m.upsertAlert(BusAlert(
-        kind: AlertKind.arrival,
-        busNo: widget.svc,
-        stopCode: widget.stopCode,
-        stopName: DataStore.shared.stopName(widget.stopCode),
-        dest: live?.dest ?? '',
-        boardStopCode: widget.stopCode,
-        leadMinutes: AlertTiming.defaultLead(AlertKind.arrival),
-      ));
-      if (live != null &&
-          m.notificationsEnabled &&
-          !m.isOngoingActive(busNo: widget.svc, stopCode: widget.stopCode)) {
-        await m.toggleOngoing(
-          busNo: widget.svc,
-          stopCode: widget.stopCode,
-          stopName: DataStore.shared.stopName(widget.stopCode),
-        );
-      }
-      _showToast(Icons.notifications_active_rounded,
-          "Boarding alert on — we'll buzz you before Bus ${widget.svc} arrives");
-    }
+    if (mounted) setState(() {});
   }
 
   void _toggleServiceSaved() {

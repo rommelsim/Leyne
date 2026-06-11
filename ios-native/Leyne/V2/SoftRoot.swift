@@ -132,10 +132,13 @@ struct SoftRoot: View {
         .onChange(of: favouritesStack) { old, new in handleStackPop(old, new) }
         .onChange(of: searchStack) { old, new in handleStackPop(old, new) }
         .onChange(of: settingsStack) { old, new in handleStackPop(old, new) }
-        // Notification / Spotlight deep links arrive via AppModel.openCard.
-        // Route them into the Home tab's stack, then clear so the same
-        // trigger fires the next tap.
-        .onChange(of: m.openCard) { _, card in
+        // Notification / Spotlight / Live Activity deep links arrive via
+        // AppModel.openCard. Route them into the Home tab's stack, then clear so
+        // the same trigger fires the next tap. `initial: true` is essential for
+        // COLD launches (tapping a Live Activity from a suspended/killed app):
+        // onOpenURL sets openCard before this observer attaches, so without the
+        // initial pass the deep link is silently dropped and nothing navigates.
+        .onChange(of: m.openCard, initial: true) { _, card in
             guard let c = card else { return }
             // This replaces the Home stack programmatically — tell the
             // interstitial manager so the resulting shrink isn't read as a

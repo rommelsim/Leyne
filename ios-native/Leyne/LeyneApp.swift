@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreSpotlight
 import UserNotifications
+import StoreKit
 
 @main
 struct LeyneApp: App {
@@ -115,11 +116,57 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
         // Tap is taking the user to a stop/bus — skip the App Open ad on the
         // foreground this triggers (hop to the main actor for the manager).
         Task { @MainActor in AppOpenAdManager.shared.suppressNextPresentation() }
+        // A useful-notification tap is the strongest "this app delivered value"
+        // signal — count it toward the App Store ratings prompt (fires once, on
+        // the 2nd such moment).
+        Task { @MainActor in ReviewPrompt.recordValueMomentAndMaybeAsk() }
         let userInfo = response.notification.request.content.userInfo
         NotificationCenter.default.post(
             name: .leyneOpenStopFromNotification,
             object: nil,
             userInfo: userInfo)
         completionHandler()
+    }
+}
+
+/// ReviewPrompt — asks for an App Store rating at the moment of proven value.
+///
+/// The strongest in-app signal that Leyne delivered value is the user TAPPING a
+/// useful arrival/alight notification. We count those "value moments" and, on
+/// the 2nd one, fire Apple's `requestReview` flow once per install. Asking at a
+/// high-sentiment moment maximises 4–5★ responses. StoreKit itself caps the
+/// prompt to ~3×/365 days, so this never nags; our guard just ensures one
+/// high-quality ask. Mirrors the Android `ReviewPrompt` (review_prompt.dart).
+enum ReviewPrompt {
+    private static let valueMomentsKey = "leyne.review.valueMoments"
+    private static let requestedKey = "leyne.review.requested"
+    /// Ask on the Nth qualifying value moment — not a cold first-tap ask.
+    private static let askOnMoment = 2
+
+    @MainActor
+    static func recordValueMomentAndMaybeAsk() {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: requestedKey) { return }
+
+        let moments = defaults.integer(forKey: valueMomentsKey) + 1
+        defaults.set(moments, forKey: valueMomentsKey)
+        guard moments >= askOnMoment else { return }
+
+        guard let scene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive })
+            as? UIWindowScene else { return }
+
+        // Let the user land on their bus first — the prompt arrives a beat
+        // after the value, not on top of the navigation.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            if #available(iOS 16.0, *) {
+                AppStore.requestReview(in: scene)
+            } else {
+                SKStoreReviewController.requestReview(in: scene)
+            }
+        }
+        // Mark asked regardless of whether StoreKit chose to show the sheet —
+        // we gave it our one high-quality opportunity.
+        defaults.set(true, forKey: requestedKey)
     }
 }

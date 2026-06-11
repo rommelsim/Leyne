@@ -14,7 +14,6 @@
 
 import SwiftUI
 import MapKit
-import ActivityKit
 
 /// How confident we are about the bus's *position* on the map (distinct from
 /// the arrival-time confidence, which the status pill carries).
@@ -47,6 +46,7 @@ struct SoftBusView: View {
     let onBack: () -> Void
 
     @State private var showManage = false
+    @State private var alertToast: ArrivalAlertToastState?
     @State private var showMap = false
     @State private var showRouteCard = false
     @State private var serviceRouteData: ServiceRoute?
@@ -135,6 +135,7 @@ struct SoftBusView: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
         .overlay(alignment: .top) { toastView }
+        .arrivalAlertToastOverlay(state: $alertToast, t: t)
         .background(t.bg.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -253,15 +254,16 @@ struct SoftBusView: View {
 
             Spacer(minLength: 0)
 
-            // Boarding alert toggle — buzz me before this bus reaches this stop
-            // (also starts lock-screen tracking). Bell fills when armed.
+            // Boarding alert toggle — buzz me before this bus reaches this stop.
+            // Eye ("watch this bus") fills when armed; bell is reserved for the
+            // app's notification settings/inbox, not a single watched bus.
             Button {
                 toggleBoardingAlert()
             } label: {
-                Image(systemName: boardingAlertOn ? "bell.fill" : "bell")
+                Image(systemName: boardingAlertOn ? "eye.fill" : "eye")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(boardingAlertOn ? t.soon : t.fg)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(t.surface, in: Circle())
                     .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
             }
@@ -277,7 +279,7 @@ struct SoftBusView: View {
                 Image(systemName: serviceSaved ? "bus.fill" : "bus")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(serviceSaved ? t.soon : t.fg)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(t.surface, in: Circle())
                     .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
             }
@@ -319,7 +321,7 @@ struct SoftBusView: View {
         Image(systemName: symbol)
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(t.fg)
-            .frame(width: 40, height: 40)
+            .frame(width: 44, height: 44)
             .background(t.surface, in: Circle())
             .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
     }
@@ -982,30 +984,17 @@ struct SoftBusView: View {
         m.alert(kind: .arrival, busNo: svc, stopCode: stopCode) != nil
     }
 
-    /// Toggle the boarding alert from the top-bar bell: arm an arrival alert at
-    /// this stop (default lead) plus a best-effort lock-screen Live Activity, or
-    /// cancel both. Quiet — no confirmation sheet (manage via the overflow menu).
+    /// Toggle the boarding alert from the top-bar bell: arm or cancel an arrival
+    /// alert at this stop via the shared one-tap helper. Shows an Undo toast so
+    /// the user can immediately reverse an accidental tap. The lock-screen Live
+    /// Activity follows automatically via AppModel.autoTrackSoonestAlert.
     private func toggleBoardingAlert() {
         fb.select()
-        if let a = m.alert(kind: .arrival, busNo: svc, stopCode: stopCode) {
-            m.removeAlert(id: a.id)
-            if let s = liveService(), m.isLiveActivityActive(s, stopCode: stopCode) {
-                m.toggleLiveActivity(s, stopName: ds.stopName(stopCode), stopCode: stopCode)
-            }
-            showToast("bell.slash.fill", "Boarding alert off for Bus \(svc)")
-        } else {
-            let alert = BusAlert(
-                kind: .arrival, busNo: svc, stopCode: stopCode,
-                stopName: ds.stopName(stopCode), dest: liveService()?.dest ?? "",
-                boardStopCode: stopCode,
-                leadMinutes: AlertTiming.defaultLead(.arrival))
-            m.upsertAlert(alert)
-            if let s = liveService(),
-               ActivityAuthorizationInfo().areActivitiesEnabled,
-               !m.isLiveActivityActive(s, stopCode: stopCode) {
-                m.toggleLiveActivity(s, stopName: ds.stopName(stopCode), stopCode: stopCode)
-            }
-            showToast("bell.fill", "Boarding alert on — we'll buzz you before Bus \(svc) reaches this stop")
+        withAnimation(.easeInOut(duration: 0.25)) {
+            alertToast = m.toggleArrivalAlertWithToast(
+                busNo: svc, stopCode: stopCode,
+                stopName: ds.stopName(stopCode),
+                dest: liveService()?.dest ?? "")
         }
     }
 

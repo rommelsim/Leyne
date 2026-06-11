@@ -10,6 +10,7 @@
 // per-bus bell alerts, notification banner, showAll/onSeeAll, refresh.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 
 import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
@@ -17,15 +18,12 @@ import '../../data/geo.dart';
 import '../../data/models.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
-import '../../state/bus_alert.dart';
 import '../../theme.dart';
 import '../../widgets/ad_banner.dart';
+import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
-import '../../widgets/v2/notify_confirm.dart';
-import '../../widgets/v2/notify_when_sheet.dart';
 import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
-import 'manage_alerts_screen.dart';
 import '../notifications_screen.dart';
 
 class SoftStopScreen extends StatefulWidget {
@@ -119,8 +117,11 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   const SizedBox(height: 20),
                   // ── Arrivals section ────────────────────────────────────
                   _arrivalSection(context, state, sorted, isPinned),
-                  // ── Inline 300×250 MREC (this screen's single ad) ───────
-                  const MediumRectAd(),
+                  // ── Inline 300×250 MREC ─────────────────────────────────
+                  // Normal view: a single ad at the end of the content. The
+                  // full "See all" view instead drops one ad mid-list (in
+                  // _arrivalsList) so the long list carries exactly one ad too.
+                  if (!widget.showAll) const MediumRectAd(),
                 ],
               ),
             );
@@ -150,9 +151,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         // Star menu — pin/unpin this stop or save a specific bus here,
         // without leaving the page (replaces the old save-sheet-only flow).
         _starMenu(context, isPinned),
-        const SizedBox(width: 10),
-        // Sort overflow — PopupMenuButton with three sort options.
-        _sortOverflow(context),
+        // Sort moved out of the top bar into a visible pill above the list.
       ],
     );
   }
@@ -225,15 +224,15 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
 
   /// Overflow menu — exposes the three sort options (mirrors the iOS sort
   /// Menu). PopupMenuButton fires setState so the list re-sorts immediately.
-  Widget _sortOverflow(BuildContext context) {
+  /// A visible pill (current order + swap icon), sitting above the list — moved
+  /// out of the top-bar overflow so sorting is one easy tap.
+  Widget _sortPill(BuildContext context) {
     final t = context.t;
     return Semantics(
-      label: 'Sort options',
+      label: 'Sort arrivals',
       button: true,
-      // A single bordered circle (surface fill + 1px line) — the old outer
-      // Material(CircleBorder) wrapper rendered a second ring around the icon.
       child: PopupMenuButton<_StopSort>(
-        tooltip: 'Sort options',
+        tooltip: 'Sort arrivals',
         padding: EdgeInsets.zero,
         color: t.surface,
         shape: RoundedRectangleBorder(
@@ -270,15 +269,21 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           ),
         ],
         child: Container(
-          width: 44,
-          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
             color: t.surface,
-            shape: BoxShape.circle,
+            borderRadius: BorderRadius.circular(99),
             border: Border.all(color: t.line, width: 1),
           ),
-          alignment: Alignment.center,
-          child: Icon(Icons.more_horiz, size: 20, color: t.fg),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.swap_vert_rounded, size: 15, color: t.fg),
+              const SizedBox(width: 5),
+              Text(_sortLabel,
+                  style: t.sans(13, weight: FontWeight.w600, color: t.fg)),
+            ],
+          ),
         ),
       ),
     );
@@ -406,19 +411,16 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           _emptyCard(context, state.errorMessage ?? "Couldn't reach LTA")
         else ...[
           ..._activeAlertRows(context),
-          if (!isPinned) ...[
-            _hintRow(context),
-            const SizedBox(height: 12),
-          ],
           _arrivalsList(context, sorted),
         ],
       ],
     );
   }
 
-  /// Inline "Notify me when" rows — one per active arrival alert at this stop.
-  /// Each shows the bus + lead subtitle with a switch that removes the alert
-  /// (off) or re-opens the sheet to reconfigure (on).
+  /// "Watching" section — the buses at this stop the user is being notified
+  /// about. One row each: bus + destination, with a ✕ to stop watching (Undo
+  /// snackbar). The fixed "3 & 1 min" timing isn't repeated per row (it's the
+  /// same for every alert); the eyebrow says it once.
   List<Widget> _activeAlertRows(BuildContext context) {
     final t = context.t;
     final mine = AppModel.shared.alerts
@@ -427,6 +429,24 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         .toList();
     if (mine.isEmpty) return const [];
     return [
+      Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 8),
+        child: Row(
+          children: [
+            Text(
+              'WATCHING',
+              style: t
+                  .mono(11, weight: FontWeight.w700, color: t.soon)
+                  .copyWith(letterSpacing: 1.2),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'alerted 3 & 1 min before',
+              style: t.mono(10, color: t.dim).copyWith(letterSpacing: 0.2),
+            ),
+          ],
+        ),
+      ),
       Container(
         decoration: BoxDecoration(
           color: t.soonBg,
@@ -437,38 +457,41 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             for (var i = 0; i < mine.length; i++) ...[
               if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+                padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
                 child: Row(
                   children: [
-                    Icon(Icons.notifications_active_rounded,
-                        size: 18, color: t.soon),
+                    Icon(Icons.visibility, size: 18, color: t.soon),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Notify me when · Bus ${mine[i].busNo}',
-                            style:
-                                t.sans(13, weight: FontWeight.w600, color: t.fg),
+                      child: Text.rich(
+                        TextSpan(children: [
+                          TextSpan(
+                            text: 'Bus ${mine[i].busNo}',
+                            style: t.sans(14,
+                                weight: FontWeight.w700, color: t.fg),
                           ),
-                          Text(
-                            AlertTiming.leadRowSubtitle(mine[i].leadMinutes),
-                            style: t.sans(12, color: t.dim),
-                          ),
-                        ],
+                          if (mine[i].dest.isNotEmpty)
+                            TextSpan(
+                              text: '  ·  To ${mine[i].dest}',
+                              style: t.sans(13, color: t.dim),
+                            ),
+                        ]),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Switch(
-                      value: true,
-                      activeThumbColor: t.soon,
-                      onChanged: (v) {
-                        if (!v) {
-                          AppModel.shared.removeAlert(mine[i].id);
-                        } else {
-                          _openArrivalSheet(mine[i].busNo, mine[i].dest);
-                        }
-                      },
+                    // Row exists only while the alert does, so a toggle is
+                    // meaningless (off → vanishes). ✕ stops watching, with Undo.
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Stop watching Bus ${mine[i].busNo}',
+                      icon: Icon(Icons.close_rounded, size: 20, color: t.dim),
+                      onPressed: () => toggleArrivalAlert(
+                        busNo: mine[i].busNo,
+                        stopCode: mine[i].stopCode,
+                        stopName: mine[i].stopName,
+                        dest: mine[i].dest,
+                      ),
                     ),
                   ],
                 ),
@@ -485,10 +508,27 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
   /// title block's walk/distance row.)
   Widget _sectionHeader(BuildContext context) {
     final t = context.t;
-    return Text(
-      'All arriving buses',
-      style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+    return Row(
+      children: [
+        Text(
+          'Arrivals',
+          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+        ),
+        const Spacer(),
+        _sortPill(context),
+      ],
     );
+  }
+
+  String get _sortLabel {
+    switch (_sort) {
+      case _StopSort.arrival:
+        return 'ETA';
+      case _StopSort.busNo:
+        return 'Bus no.';
+      case _StopSort.distance:
+        return 'Distance';
+    }
   }
 
   // ── Arrivals list ─────────────────────────────────────────────────────────
@@ -497,41 +537,72 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
   /// then a "Show more" expander past [_collapsedCount]. Mirrors iOS
   /// SoftStopView's "All arriving buses" list.
   Widget _arrivalsList(BuildContext context, List<Service> sorted) {
-    final t = context.t;
     final canCollapse = sorted.length > _collapsedCount;
     final shown = (_expanded || !canCollapse)
         ? sorted
         : sorted.take(_collapsedCount).toList();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Material(
-          color: t.surface,
+    // Full "See all" view: drop ONE inline ad at the list's midpoint so it
+    // rides along with content the user is actively scrolling, rather than
+    // stacking another at the bottom. Only worth splitting once there are
+    // enough rows. The normal view keeps its single bottom MREC instead.
+    final injectAd = widget.showAll && shown.length >= 6;
+
+    // SlidableAutoCloseBehavior: opening one row's Notify action closes any
+    // other open one (shared 'arrivals' group tag).
+    return SlidableAutoCloseBehavior(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (injectAd) ...[
+            _arrivalsCard(context, shown.sublist(0, shown.length ~/ 2),
+                canCollapse: false, total: sorted.length),
+            const MediumRectAd(),
+            const SizedBox(height: 16),
+            _arrivalsCard(context, shown.sublist(shown.length ~/ 2),
+                canCollapse: canCollapse, total: sorted.length),
+          ] else
+            _arrivalsCard(context, shown,
+                canCollapse: canCollapse, total: sorted.length),
+          const SizedBox(height: 16),
+          _footer(context),
+        ],
+      ),
+    );
+  }
+
+  /// One grouped arrivals card: a row per service split by hairline dividers,
+  /// plus the "Show more" expander when [canCollapse]. Pulled out of
+  /// [_arrivalsList] so the full view can render two cards with an ad between.
+  Widget _arrivalsCard(
+    BuildContext context,
+    List<Service> rows, {
+    required bool canCollapse,
+    required int total,
+  }) {
+    final t = context.t;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          clipBehavior: Clip.antiAlias,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: t.line, width: 1),
-            ),
-            child: Column(
-              children: [
-                for (var i = 0; i < shown.length; i++) ...[
-                  if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
-                  _busRow(context, shown[i]),
-                ],
-                if (canCollapse) ...[
-                  Divider(height: 1, thickness: 1, color: t.line),
-                  _showMoreRow(context, sorted.length),
-                ],
-              ],
-            ),
-          ),
+          border: Border.all(color: t.line, width: 1),
         ),
-        const SizedBox(height: 16),
-        _footer(context),
-      ],
+        child: Column(
+          children: [
+            for (var i = 0; i < rows.length; i++) ...[
+              if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
+              _swipeNotify(context, rows[i], _busRow(context, rows[i])),
+            ],
+            if (canCollapse) ...[
+              Divider(height: 1, thickness: 1, color: t.line),
+              _showMoreRow(context, total),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -576,8 +647,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
               ),
               const SizedBox(width: 8),
               _etaColumns(t, etas, conf),
-              const SizedBox(width: 4),
-              _rowBell(context, bus),
             ],
           ),
         ),
@@ -585,9 +654,10 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  /// Per-bus bell — opens the arrival NotifyWhenSheet for this service. Fills
-  /// when an arrival alert already exists for this bus at this stop.
-  Widget _rowBell(BuildContext context, Service bus) {
+  /// Wrap a bus row so swiping it RIGHT reveals a Notify/Stop action (replaces
+  /// the old side bell). Tapping the row still opens the bus; the swipe arms or
+  /// removes the arrival alert in one gesture, with an Undo snackbar.
+  Widget _swipeNotify(BuildContext context, Service bus, Widget child) {
     final t = context.t;
     final on = AppModel.shared.alertFor(
           kind: AlertKind.arrival,
@@ -595,69 +665,28 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           stopCode: widget.stopCode,
         ) !=
         null;
-    return IconButton(
-      visualDensity: VisualDensity.compact,
-      tooltip: on ? 'Alerting for bus ${bus.no}' : 'Notify me about bus ${bus.no}',
-      icon: Icon(
-        on
-            ? Icons.notifications_active_rounded
-            : Icons.notifications_none_rounded,
-        size: 20,
-        color: on ? t.soon : t.dim,
+    return Slidable(
+      key: ValueKey('notify-${bus.no}'),
+      groupTag: 'arrivals',
+      endActionPane: ActionPane(
+        motion: const DrawerMotion(),
+        extentRatio: 0.3,
+        children: [
+          SlidableAction(
+            onPressed: (_) => toggleArrivalAlert(
+              busNo: bus.no,
+              stopCode: widget.stopCode,
+              stopName: DataStore.shared.stopName(widget.stopCode),
+              dest: bus.dest,
+            ),
+            backgroundColor: on ? t.surfaceHi : t.soon,
+            foregroundColor: on ? t.fg : t.onAccent,
+            icon: on ? Icons.visibility_off : Icons.visibility,
+            label: on ? 'Stop' : 'Notify',
+          ),
+        ],
       ),
-      onPressed: () => _openArrivalSheet(bus.no, bus.dest),
-    );
-  }
-
-  /// Open the arrival "Notify me when" sheet for [busNo]. If an alert already
-  /// exists, removing it is the natural toggle (tap the active row); here we
-  /// always (re)configure: pick a lead, create the alert, then confirm.
-  Future<void> _openArrivalSheet(String busNo, String dest) async {
-    final stopName = DataStore.shared.stopName(widget.stopCode);
-    final result = await showNotifyWhenSheet(
-      context,
-      kind: AlertKind.arrival,
-      busNo: busNo,
-      stopName: stopName,
-      dest: dest,
-    );
-    if (result == null || !mounted) return;
-    final lead = result.lead;
-    await AppModel.shared.upsertAlert(BusAlert(
-      kind: AlertKind.arrival,
-      busNo: busNo,
-      stopCode: widget.stopCode,
-      stopName: stopName,
-      dest: dest,
-      leadMinutes: lead,
-    ));
-    // Live Activity analog: start the ongoing tracker when opted in, there's a
-    // live service for this bus, notifications are enabled, and one isn't
-    // already running for this bus.
-    if (result.liveActivity &&
-        AppModel.shared.notificationsEnabled &&
-        AppModel.shared
-            .liveServices(widget.stopCode)
-            .any((s) => s.no == busNo) &&
-        !AppModel.shared
-            .isOngoingActive(busNo: busNo, stopCode: widget.stopCode)) {
-      await AppModel.shared.toggleOngoing(
-        busNo: busNo,
-        stopCode: widget.stopCode,
-        stopName: stopName,
-      );
-    }
-    if (!mounted) return;
-    await showNotifyConfirm(
-      context,
-      kind: AlertKind.arrival,
-      busNo: busNo,
-      stopCode: widget.stopCode,
-      stopName: stopName,
-      leadMinutes: lead,
-      onManageAll: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
-      ),
+      child: child,
     );
   }
 
@@ -837,24 +866,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             'Bus arrival times are estimates from LTA and may vary.',
             style: t.sans(11, color: t.faint),
             textAlign: TextAlign.center,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Hint row (unpinned state) ─────────────────────────────────────────────
-
-  Widget _hintRow(BuildContext context) {
-    final t = context.t;
-    return Row(
-      children: [
-        Icon(Icons.notifications_active_outlined, size: 14, color: t.accent),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'Tap the bell on a bus to be alerted ~1 min before it arrives.',
-            style: t.mono(11, color: t.dim),
           ),
         ),
       ],

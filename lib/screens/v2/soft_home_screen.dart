@@ -17,20 +17,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
 import '../../data/geo.dart';
 import '../../data/models.dart';
+import '../../data/weather_store.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
-import '../../state/bus_alert.dart';
 import '../../theme.dart';
+import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
-import '../../widgets/v2/notify_confirm.dart';
-import '../../widgets/v2/notify_when_sheet.dart';
 import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
+import '../../widgets/v2/weather_header.dart';
 import 'manage_alerts_screen.dart';
 
 class SoftHomeScreen extends StatefulWidget {
@@ -51,6 +50,8 @@ class SoftHomeScreen extends StatefulWidget {
 // ── Item types for the flat ListView.builder index ──────────────────────────
 
 sealed class _Item {}
+
+class _WeatherItem extends _Item {}
 
 class _HeaderItem extends _Item {}
 
@@ -83,7 +84,8 @@ class _EmptyItem extends _Item {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SoftHomeScreenState extends State<SoftHomeScreen> {
+class _SoftHomeScreenState extends State<SoftHomeScreen>
+    with WidgetsBindingObserver {
   final Set<String> _dismissedAlerts = {};
 
   // ── Walk-minute memoisation cache ─────────────────────────────────────────
@@ -92,6 +94,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     LocationService.shared.addListener(_onLocationChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _warm();
@@ -100,6 +103,9 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
       if (loc != null) {
         DataStore.shared.updateNearby(loc.lat, loc.lon);
         _rebuildWalkCache();
+        // Warm the weather store on first render; this is a no-op if the
+        // snapshot is already fresh (e.g. app is still in the same session).
+        WeatherStore.shared.refreshIfStale(lat: loc.lat, lon: loc.lon);
       }
       DataStore.shared.prefetchNearbyArrivals();
     });
@@ -107,8 +113,23 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     LocationService.shared.removeListener(_onLocationChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Force-refresh weather when the user brings the app to the foreground,
+      // matching how other apps update stale data after a background gap.
+      final loc = LocationService.shared.lastLocation;
+      WeatherStore.shared.refreshIfStale(
+        force: true,
+        lat: loc?.lat,
+        lon: loc?.lon,
+      );
+    }
   }
 
   void _onLocationChanged() {
@@ -234,33 +255,12 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     }
     final bus = services.first;
     final stopName = DataStore.shared.stopName(code);
-    final result = await showNotifyWhenSheet(
-      context,
-      kind: AlertKind.arrival,
-      busNo: bus.no,
-      stopName: stopName,
-      dest: bus.dest,
-    );
-    if (result == null || !mounted) return;
-    await AppModel.shared.upsertAlert(BusAlert(
-      kind: AlertKind.arrival,
+    // One tap arms the alert (3 & 1 min) with an Undo snackbar — no sheet.
+    await toggleArrivalAlert(
       busNo: bus.no,
       stopCode: code,
       stopName: stopName,
       dest: bus.dest,
-      leadMinutes: result.lead,
-    ));
-    if (!mounted) return;
-    await showNotifyConfirm(
-      context,
-      kind: AlertKind.arrival,
-      busNo: bus.no,
-      stopCode: code,
-      stopName: stopName,
-      leadMinutes: result.lead,
-      onManageAll: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
-      ),
     );
   }
 
@@ -299,6 +299,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
   }) {
     final items = <_Item>[];
 
+    // Weather hero sits above the greeting when a snapshot is available.
+    if (WeatherStore.shared.snapshot != null) {
+      items.add(_WeatherItem());
+      items.add(_GapItem(8));
+    }
     items.add(_HeaderItem());
     items.add(_GapItem(6));
     items.add(_LiveRowItem());
@@ -357,6 +362,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
           listenable: Listenable.merge([
             DataStore.shared,
             LocationService.shared,
+            WeatherStore.shared,
           ]),
           builder: (context, _) {
             final pins = AppModel.shared.pins;
@@ -393,6 +399,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen> {
     required List<Pin> pins,
   }) {
     return switch (item) {
+      _WeatherItem() => const WeatherHeader(),
       _HeaderItem() => _header(context),
       _LiveRowItem() => _liveRow(context),
       _GapItem(:final height) => SizedBox(height: height),
@@ -1094,7 +1101,7 @@ class _StopPeekSheet extends StatelessWidget {
                     ),
                     _actionRow(
                       t,
-                      icon: Icons.notifications_none_rounded,
+                      icon: Icons.visibility_outlined,
                       label: 'Arrival alerts',
                       onTap: onArrivalAlerts,
                     ),

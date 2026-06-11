@@ -7,6 +7,8 @@
 //   in-app toggle for now (legacy followed the system too).
 // • Warns at debug time if LTA_API_KEY is missing.
 
+import 'dart:async';
+
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -25,6 +27,7 @@ import 'services/app_open_ad.dart';
 import 'services/deep_link_service.dart';
 import 'services/location_service.dart';
 import 'services/notifications.dart';
+import 'services/review_prompt.dart';
 import 'state/app_model.dart';
 import 'theme.dart';
 
@@ -68,6 +71,10 @@ void main() async {
       busNo = parts[1];
     }
     if (stopCode == null) return;
+    // A useful-notification tap is the strongest "this app delivered value"
+    // signal — count it toward the Play Store ratings prompt (fires once, on
+    // the 2nd such moment). Fire-and-forget; never blocks navigation.
+    unawaited(ReviewPrompt.recordValueMomentAndMaybeAsk());
     final navigator = _navigatorKey.currentState;
     if (navigator == null) return;
     final code = stopCode;

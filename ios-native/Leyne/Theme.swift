@@ -125,15 +125,18 @@ struct Theme: Equatable {
         accent: Color(hex: "FFFFFF"),
         live: Color(hex: "FFFFFF"),
         liveBg: Color(hex: "242424"),
-        warn: Color(hex: "F4B870"),
-        warnBg: Color(hex: "F4B870").opacity(0.16),
-        crit: Color(hex: "F08F7C"),
-        critBg: Color(hex: "F08F7C").opacity(0.16),
+        // Fully monochrome — colour is reserved for MRT line pills. Severity /
+        // proximity read from a white lightness scale + icons, not hue:
+        // soon (arriving) = brightest, mid/warn = grey, crit = bright + ⚠ icon.
+        warn: Color(hex: "FFFFFF").opacity(0.72),
+        warnBg: Color(hex: "FFFFFF").opacity(0.10),
+        crit: Color(hex: "FFFFFF"),
+        critBg: Color(hex: "FFFFFF").opacity(0.14),
         onAccent: Color(hex: "111111"),
-        soon: Color(hex: "3DD68C"),
-        soonBg: Color(hex: "3DD68C").opacity(0.16),
-        mid: Color(hex: "F4B870"),
-        midBg: Color(hex: "F4B870").opacity(0.16)
+        soon: Color(hex: "FFFFFF"),
+        soonBg: Color(hex: "FFFFFF").opacity(0.12),
+        mid: Color(hex: "FFFFFF").opacity(0.55),
+        midBg: Color(hex: "FFFFFF").opacity(0.10)
     )
 
     // White & black light mode — mirrors the bus-view card (white surface,
@@ -157,15 +160,16 @@ struct Theme: Equatable {
         accent: Color(hex: "111111"),
         live: Color(hex: "111111"),
         liveBg: Color(hex: "EDEDED"),
-        warn: Color(hex: "A0631A"),
-        warnBg: Color(hex: "A0631A").opacity(0.14),
-        crit: Color(hex: "A4422F"),
-        critBg: Color(hex: "A4422F").opacity(0.14),
+        // Fully monochrome (see dark mode) — colour reserved for MRT pills.
+        warn: Color(hex: "111111").opacity(0.72),
+        warnBg: Color(hex: "111111").opacity(0.08),
+        crit: Color(hex: "111111"),
+        critBg: Color(hex: "111111").opacity(0.10),
         onAccent: Color(hex: "FFFFFF"),
-        soon: Color(hex: "1AA251"),
-        soonBg: Color(hex: "1AA251").opacity(0.12),
-        mid: Color(hex: "C2740A"),
-        midBg: Color(hex: "C2740A").opacity(0.12)
+        soon: Color(hex: "111111"),
+        soonBg: Color(hex: "111111").opacity(0.08),
+        mid: Color(hex: "111111").opacity(0.55),
+        midBg: Color(hex: "111111").opacity(0.08)
     )
 
     /// iOS 26 Liquid Glass surface used for the floating tab bar and

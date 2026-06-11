@@ -708,6 +708,10 @@ final class AppModel: ObservableObject {
     /// and re-arms notifications. For destination alerts, pass a `fireAt` so
     /// the one-shot can be scheduled at the absolute computed moment (the
     /// caller — SoftBusView — has the boarding ETA to compute it).
+    ///
+    /// A1: if notification permission has never been requested (.notDetermined),
+    /// we request it here so the very first alert the user creates activates
+    /// delivery immediately — they never need to find Notifications in Settings.
     func upsertAlert(_ alert: BusAlert, fireAt: Date? = nil) {
         if let i = alerts.firstIndex(where: { $0.id == alert.id }) {
             alerts[i] = alert
@@ -718,7 +722,21 @@ final class AppModel: ObservableObject {
         if alert.kind == .destination, let fireAt {
             NotificationsManager.shared.scheduleDestinationAlert(alert, fireAt: fireAt)
         }
-        rearmAlertNotifications()
+        // Request authorization lazily on the first alert creation so users
+        // who never set an alert are never prompted (standard UX pattern).
+        // If already determined (granted or denied) this is a no-op path.
+        if notificationAuth == .notDetermined {
+            Task {
+                let granted = await NotificationsManager.shared.requestAuthorization()
+                notificationAuth = await NotificationsManager.shared.currentStatus()
+                if granted {
+                    notificationsEnabled = true
+                }
+                rearmAlertNotifications()
+            }
+        } else {
+            rearmAlertNotifications()
+        }
     }
 
     /// Removes the alert with this id (and cancels its pending notification).
@@ -728,11 +746,10 @@ final class AppModel: ObservableObject {
         persistAlerts()
         NotificationsManager.shared.cancelAlert(removed)
         rearmAlertNotifications()
-        // Arrival alerts are paired with a lock-screen Live Activity — SoftBusView's
-        // combined affordance starts both together and cancels both together. Any
-        // OTHER removal path (Manage alerts swipe/Edit) must end the companion too,
-        // or the Live Activity is left running on the lock screen with no in-app way
-        // to stop it. Match the running activity by its bus+stop key.
+        // When the removed alert was the one the Live Activity is currently
+        // tracking, stop the activity so it doesn't linger with no alert behind it.
+        // autoTrackSoonestAlert will re-point it at the next-best alert on the next
+        // tick if one exists.
         if removed.kind == .arrival,
            liveActivityKey == Self.liveKey(bus: removed.busNo, stopCode: removed.stopCode) {
             stopLiveActivity()
@@ -743,6 +760,39 @@ final class AppModel: ObservableObject {
     func removeAlerts(kind: AlertKind, busNo: String, stopCode: String) {
         if let a = alert(kind: kind, busNo: busNo, stopCode: stopCode) {
             removeAlert(id: a.id)
+        }
+    }
+
+    // MARK: - One-tap arrival alert toggle
+
+    /// The outcome of a single `toggleArrivalAlert` call, so the caller can
+    /// show the right Undo toast without independently querying state.
+    enum ArrivalAlertToggleResult {
+        case armed(BusAlert)    // alert was just created
+        case removed(BusAlert)  // alert was just removed (carry it for undo)
+    }
+
+    /// Toggles the arrival alert for (busNo, stopCode):
+    ///   • if one exists, removes it and returns `.removed(alert)`;
+    ///   • if none exists, creates one (lead 1) and returns `.armed(alert)`.
+    ///
+    /// This is the single shared path used by the Stop view per-bus control,
+    /// the Bus view top-bar bell, and any future one-tap entry points.
+    /// The Live Activity follows automatically via `autoTrackSoonestAlert`.
+    @discardableResult
+    func toggleArrivalAlert(busNo: String, stopCode: String,
+                            stopName: String, dest: String) -> ArrivalAlertToggleResult {
+        if let existing = alert(kind: .arrival, busNo: busNo, stopCode: stopCode) {
+            removeAlert(id: existing.id)
+            return .removed(existing)
+        } else {
+            let a = BusAlert(
+                kind: .arrival, busNo: busNo, stopCode: stopCode,
+                stopName: stopName, dest: dest,
+                boardStopCode: stopCode,
+                leadMinutes: AlertTiming.defaultLead(.arrival))
+            upsertAlert(a)
+            return .armed(a)
         }
     }
 
@@ -864,9 +914,51 @@ final class AppModel: ObservableObject {
             rearmAlertNotifications()
         }
 
+        // Gentle haptic when an alerted bus crosses ~1 minute away (A4).
+        // Fires once per approach per alert; re-arms when the ETA rises back
+        // above 90 s (the feed rolled to the next bus).
+        if haptic { buzzApproachingAlertedBuses() }
+
+        // Auto-track the soonest alerted bus on the lock-screen Live Activity
+        // every ~5 s. Runs alongside the existing Live Activity ETA refresh loop;
+        // the loop handles per-poll updates while this method handles hand-offs.
+        if tick % 5 == 0 {
+            autoTrackSoonestAlert()
+        }
+
+        // If notifications are disabled and a Live Activity is still running,
+        // stop it — no alerts means no bus to track.
+        if !notificationsEnabled, liveActivity != nil {
+            stopLiveActivity()
+        }
+
         // Pull MRT/LRT disruption alerts on a slow cadence. The DataStore
         // itself enforces the 60 s gate; tick just gives it a heartbeat.
         ds.refreshTrainAlertsIfStale()
+    }
+
+    // ─── A4: approach haptic ───────────────────────────────
+
+    /// Per-alert deduplication: tracks which alert ids have already buzzed for
+    /// the current approach. Cleared (re-armed) when the ETA rises above 90 s.
+    private var buzzedAlertIds: Set<String> = []
+
+    /// Fires one medium-impact haptic when a bus with an arrival alert crosses
+    /// ≤60 s ETA. Deduplicated per alert id; re-arms once ETA > 90 s so each
+    /// incoming bus triggers exactly one buzz. Mirrors Flutter's _buzzApproachingBuses.
+    private func buzzApproachingAlertedBuses() {
+        for a in alerts where a.kind == .arrival {
+            let svcs = liveServices(code: a.stopCode, tracked: [a.busNo])
+            guard let s = svcs.first else { continue }
+            if s.etaSec <= 60 {
+                if !buzzedAlertIds.contains(a.id) {
+                    buzzedAlertIds.insert(a.id)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+            } else if s.etaSec > 90 {
+                buzzedAlertIds.remove(a.id)
+            }
+        }
     }
 
     // ─── Arrival-alert notifications (public surface) ─────
@@ -887,6 +979,8 @@ final class AppModel: ObservableObject {
         } else {
             notificationsEnabled = false
             NotificationsManager.shared.clearAll()
+            // No notifications → no alerts to track on the lock screen.
+            stopLiveActivity()
         }
     }
 
@@ -1156,11 +1250,67 @@ final class AppModel: ObservableObject {
 
     // ─── Real iOS Live Activity (ActivityKit) ─────────────
 
-    /// Single entry point for the Start/Stop toggle: ends the Live Activity if
-    /// it's already running for this bus, otherwise starts it.
-    func toggleLiveActivity(_ s: Service, stopName: String, stopCode: String) {
-        if isLiveActivityActive(s, stopCode: stopCode) { stopLiveActivity() }
-        else { startLiveActivity(s, stopName: stopName, stopCode: stopCode) }
+    /// Automatic: called from onTick every ~5 s. Finds the arrival-alerted bus
+    /// with the smallest live ETA > 0 ("soonest") and, if it differs from the
+    /// current Live Activity target, hands the single Live Activity off to it.
+    ///
+    /// Non-interference contract:
+    ///   • Returns early if notifications are not enabled/authorized.
+    ///   • If the currently-tracked bus is mid-finalise (ETA ≤ 0 but still present
+    ///     in the feed), leaves it alone — the existing polling loop will show the
+    ///     "Arriving now" finale and call finishLiveActivityAsArrived.
+    ///   • If no alert has ETA > 0, does NOT stop the tracker — a momentary feed
+    ///     gap should not kill the live view. Teardown is owned by the miss-counter
+    ///     / arrival-finale / removeAlert.
+    private func autoTrackSoonestAlert() {
+        // Needs notifications enabled and authorized.
+        guard notificationsEnabled,
+              notificationAuth == .authorized || notificationAuth == .provisional
+        else { return }
+
+        // If the current tracked bus is at ETA ≤ 0 but still in the live feed,
+        // it's in the arriving-now finale. Don't preempt it.
+        if let key = liveActivityKey {
+            let parts = key.split(separator: "|", maxSplits: 1)
+            if parts.count == 2 {
+                let currentStop = String(parts[0])
+                let currentBus  = String(parts[1])
+                let svcs = liveServices(code: currentStop, tracked: [currentBus])
+                if let s = svcs.first, s.etaSec <= 0 {
+                    // Bus is here / just past — leave the finale running.
+                    return
+                }
+            }
+        }
+
+        // Scan all arrival alerts for the one with the smallest ETA > 0.
+        var soonestAlert: BusAlert? = nil
+        var soonestEta = Int.max
+        for a in alerts where a.kind == .arrival {
+            let svcs = liveServices(code: a.stopCode, tracked: [a.busNo])
+            guard let s = svcs.first, s.etaSec > 0 else { continue }
+            if s.etaSec < soonestEta {
+                soonestEta = s.etaSec
+                soonestAlert = a
+            }
+        }
+
+        guard let best = soonestAlert else {
+            // No alert with a live ETA — leave whatever is running alone.
+            return
+        }
+
+        let desiredKey = Self.liveKey(bus: best.busNo, stopCode: best.stopCode)
+        guard liveActivityKey != desiredKey else {
+            // Already tracking the right bus — nothing to change.
+            return
+        }
+
+        // Hand off to the soonest bus.
+        let svcs = liveServices(code: best.stopCode, tracked: [best.busNo])
+        guard let s = svcs.first else { return }
+        let stopName = best.stopName.isEmpty ? ds.stopName(best.stopCode) : best.stopName
+        startLiveActivity(s, stopName: stopName, stopCode: best.stopCode)
     }
 
     func startLiveActivity(_ s: Service, stopName: String, stopCode: String) {
@@ -1398,31 +1548,23 @@ final class NotificationsManager {
 
     private let center = UNUserNotificationCenter.current()
 
-    /// Two arrival tiers, mirroring the design: an early heads-up while the
-    /// bus is still a few minutes out, then the imminent "arriving soon" nudge
-    /// for the final approach. The displayed minutes are derived from these
-    /// leads (lead/60), so the copy and the fire time can never drift apart.
-    private let imminentLeadSec: TimeInterval = 60     // "arriving soon"
-    private let headsUpLeadSec: TimeInterval = 300     // "5 min away"
-    /// Don't bother with a heads-up if it would land within this gap of the
-    /// imminent nudge — two pings seconds apart is noise, not signal.
-    private let minTierGapSec: TimeInterval = 120
-
-    /// Notifications whose identifier carries one of these prefixes belong to
-    /// us; the orphan-sweep / clearAll only touch our own requests.
-    private let imminentPrefix = "arrival."
-    private let headsUpPrefix  = "headsup."
-    private var arrivalPrefixes: [String] { [imminentPrefix, headsUpPrefix] }
+    /// Arrival alerts fire at two fixed leads: 3 min and 1 min before the bus
+    /// reaches the stop, matching AlertTiming.arrivalLeads. Each lead gets its
+    /// own identifier so they can be scheduled and cancelled independently.
+    private let arrivalPrefix = "arrival."
+    private var arrivalPrefixes: [String] { [arrivalPrefix] }
 
     /// Destination ("reach my stop") one-shots. Keyed off the BusAlert id.
     private let destinationPrefix = "destination."
 
-    private func imminentId(stopCode: String, busNo: String) -> String {
-        "\(imminentPrefix)\(stopCode).\(busNo)"
+    /// Unique id for one arrival-alert notification at a given lead.
+    private func arrivalId(stopCode: String, busNo: String, lead: Int) -> String {
+        "\(arrivalPrefix)\(stopCode).\(busNo).\(lead)"
     }
-    private func headsUpId(stopCode: String, busNo: String) -> String {
-        "\(headsUpPrefix)\(stopCode).\(busNo)"
-    }
+
+    // Legacy headsup prefix — kept only so cancelAlert can sweep old requests
+    // left by previous builds; no new notifications are written under it.
+    private let legacyHeadsUpPrefix = "headsup."
     /// Stable per-alert request id. Slashes/@ in the id are fine for UN.
     private func destinationId(_ alert: BusAlert) -> String {
         "\(destinationPrefix)\(alert.busNo).\(alert.stopCode)"
@@ -1451,9 +1593,9 @@ final class NotificationsManager {
         }
     }
 
-    /// Cancels every pending arrival alert we own (both tiers).
+    /// Cancels every pending arrival alert we own.
     func clearAll() {
-        let prefixes = arrivalPrefixes
+        let prefixes = arrivalPrefixes + [legacyHeadsUpPrefix]
         center.getPendingNotificationRequests { reqs in
             let ids = reqs.map(\.identifier).filter { id in
                 prefixes.contains { id.hasPrefix($0) }
@@ -1543,11 +1685,11 @@ final class NotificationsManager {
     }
 
     /// Recomputes the desired ARRIVAL schedule from the user's alerts and the
-    /// live cards. Each arrival alert fires `lead` minutes before its bus's
-    /// live ETA at its stop. Idempotent: replaces requests with the same id
-    /// and cancels any pending arrival alerts whose alert no longer exists.
-    /// Destination one-shots are left alone (scheduled separately, at an
-    /// absolute moment, by `scheduleDestinationAlert`).
+    /// live cards. Each arrival alert schedules TWO notifications — at 3 min
+    /// and at 1 min before the bus's live ETA (AlertTiming.arrivalLeads).
+    /// Leads whose fire time is already in the past are skipped; the nearer
+    /// one still fires. Idempotent: UN replaces requests with the same id.
+    /// Destination one-shots are left alone (owned by scheduleDestinationAlert).
     func scheduleArrivalAlerts(alerts: [BusAlert], cards: [CardModel]) {
         var desired: [(id: String, content: UNNotificationContent, trigger: UNNotificationTrigger)] = []
         let now = Date()
@@ -1563,20 +1705,22 @@ final class NotificationsManager {
                 ? (card.stopName.isEmpty ? card.label : card.stopName)
                 : alert.stopName
 
-            // Fire `lead` minutes before the live ETA. Already inside the
-            // window (or arrived) → nothing to schedule this round.
-            let fireAt = AlertTiming.arrivalFireAt(arrives, leadMinutes: alert.leadMinutes)
-            let interval = fireAt.timeIntervalSince(now)
-            guard interval > 1 else { continue }
-            desired.append((
-                id: imminentId(stopCode: alert.stopCode, busNo: alert.busNo),
-                content: arrivalContent(
-                    busNo: alert.busNo, stopCode: alert.stopCode, stopName: stopLabel,
-                    title: AlertTiming.arrivalTitle(alert.busNo),
-                    body: AlertTiming.arrivalBody(stopName: stopLabel,
-                                                  leadMinutes: alert.leadMinutes)),
-                trigger: UNTimeIntervalNotificationTrigger(
-                    timeInterval: interval, repeats: false)))
+            // Schedule one request per lead (3 min and 1 min). Skip any whose
+            // fire time is already past or less than 1 s away.
+            for lead in AlertTiming.arrivalLeads {
+                let fireAt = AlertTiming.arrivalFireAt(arrives, leadMinutes: lead)
+                let interval = fireAt.timeIntervalSince(now)
+                guard interval > 1 else { continue }
+                desired.append((
+                    id: arrivalId(stopCode: alert.stopCode, busNo: alert.busNo, lead: lead),
+                    content: arrivalContent(
+                        busNo: alert.busNo, stopCode: alert.stopCode, stopName: stopLabel,
+                        title: AlertTiming.arrivalTitle(alert.busNo, leadMinutes: lead),
+                        body: AlertTiming.arrivalBody(stopName: stopLabel,
+                                                      leadMinutes: lead)),
+                    trigger: UNTimeIntervalNotificationTrigger(
+                        timeInterval: interval, repeats: false)))
+            }
         }
 
         // Cancel orphans first so the system's pending list stays clean,
@@ -1646,15 +1790,23 @@ final class NotificationsManager {
         return content
     }
 
-    /// Cancels the pending notification(s) for one alert (used on delete).
+    /// Cancels all pending notifications for one alert (used on delete).
+    /// For arrival alerts this removes BOTH the 3-min and 1-min requests,
+    /// plus any legacy single-lead or headsup requests from older builds.
     func cancelAlert(_ alert: BusAlert) {
-        let id = alert.kind == .arrival
-            ? imminentId(stopCode: alert.stopCode, busNo: alert.busNo)
-            : destinationId(alert)
-        // Arrival also had a legacy heads-up companion in older builds —
-        // sweep it too so a deleted arrival alert leaves nothing behind.
-        let headsUp = headsUpId(stopCode: alert.stopCode, busNo: alert.busNo)
-        center.removePendingNotificationRequests(withIdentifiers: [id, headsUp])
+        var ids: [String]
+        if alert.kind == .arrival {
+            // Both current leads.
+            ids = AlertTiming.arrivalLeads.map {
+                arrivalId(stopCode: alert.stopCode, busNo: alert.busNo, lead: $0)
+            }
+            // Legacy identifiers from previous builds — sweep them too.
+            ids.append("\(arrivalPrefix)\(alert.stopCode).\(alert.busNo)")
+            ids.append("\(legacyHeadsUpPrefix)\(alert.stopCode).\(alert.busNo)")
+        } else {
+            ids = [destinationId(alert)]
+        }
+        center.removePendingNotificationRequests(withIdentifiers: ids)
     }
 
     /// Shared arrival-alert content. Title + body come from `AlertTiming` so

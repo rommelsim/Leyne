@@ -36,20 +36,25 @@ final class AlertTimingTests: XCTestCase {
     }
 
     func testCopy() {
-        XCTAssertEqual(AlertTiming.arrivalTitle("153"), "Bus 153 arriving soon")
+        XCTAssertEqual(AlertTiming.arrivalTitle("153", leadMinutes: 3),
+                       "🕒 Bus 153 — 3 min away")
+        XCTAssertEqual(AlertTiming.arrivalTitle("153", leadMinutes: 1),
+                       "🚍 Bus 153 — arriving now")
         XCTAssertEqual(
-            AlertTiming.arrivalBody(stopName: "Farrer Rd Stn Exit B", leadMinutes: 5),
-            "Farrer Rd Stn Exit B · 5 min to arrival")
+            AlertTiming.arrivalBody(stopName: "Farrer Rd Stn Exit B", leadMinutes: 3),
+            "Heading to Farrer Rd Stn Exit B")
         XCTAssertEqual(
-            AlertTiming.arrivalBody(stopName: "X", leadMinutes: 1), "X · Arriving now")
+            AlertTiming.arrivalBody(stopName: "X", leadMinutes: 1), "Get ready — X")
         XCTAssertEqual(AlertTiming.destinationTitle(), "Your stop is next")
         XCTAssertEqual(
             AlertTiming.destinationBody(destName: "Hougang Ctrl Int", leadMinutes: 10),
             "Hougang Ctrl Int · Arriving in 10 min")
+        // Arrival alerts fire at fixed dual leads (3 min + 1 min); the lead arg
+        // is ignored for arrival copy.
         XCTAssertEqual(
             AlertTiming.summary(kind: .arrival, busNo: "153",
                                 stopName: "Farrer Rd Stn Exit B", leadMinutes: 5),
-            "We'll notify you 5 min before Bus 153 arrives at Farrer Rd Stn Exit B.")
+            "We'll notify you 3 min and again 1 min before Bus 153 arrives at Farrer Rd Stn Exit B.")
         XCTAssertEqual(
             AlertTiming.summary(kind: .destination, busNo: "165",
                                 stopName: "Hougang Ctrl Int", leadMinutes: 10),
@@ -61,5 +66,12 @@ final class AlertTimingTests: XCTestCase {
         XCTAssertEqual(AlertTiming.leadLabel(5), "5 minutes before")
         XCTAssertEqual(AlertTiming.leadRowSubtitle(5), "5 min before arrival")
         XCTAssertEqual(AlertTiming.leadRowSubtitle(1), "When arriving")
+    }
+
+    func testFixedArrivalLeads() {
+        // Arrival alerts no longer let the user pick a lead — they always fire
+        // at 3 min then 1 min before arrival.
+        XCTAssertEqual(AlertTiming.arrivalLeads, [3, 1])
+        XCTAssertEqual(AlertTiming.arrivalRowSubtitle, "3 & 1 min before arrival")
     }
 }

@@ -42,10 +42,16 @@ enum AppOpenAdConfig {
         : "ca-app-pub-5864511655536507/4093216883"   // leyne-acct prod App Open
     #endif
 
-    /// Frequency cap — at most one App Open ad per this window. 4h matches
-    /// AdMob's "best performance for apps opened more than once every 4h" and
-    /// keeps brief in-and-out returns ad-free; a genuine new session triggers it.
-    static let minInterval: TimeInterval = 4 * 60 * 60
+    /// Cold-launch App Open ad gate.
+    /// Set to `false` to disable the cold-launch presentation entirely.
+    /// Warm-resume (background → foreground) is unaffected by this flag.
+    /// Revert to `true` to re-enable cold-launch ads if needed.
+    static let coldLaunchEnabled: Bool = false
+
+    /// Frequency cap — at most one App Open ad per this window. 6h keeps
+    /// quick in-and-out returns ad-free while still catching genuine new
+    /// sessions (raised from 4h to reduce launch friction).
+    static let minInterval: TimeInterval = 6 * 60 * 60
 
     /// App Open creatives expire 4h after load (AdMob). Drop + reload past this.
     static let maxCacheAge: TimeInterval = 4 * 60 * 60
@@ -72,9 +78,12 @@ final class AppOpenAdManager: NSObject {
     /// present one App Open ad once it's loaded — bounded to a short window
     /// after launch so a late creative never covers content the user is already
     /// using. Skipped on the very first launch (don't greet a new user with an
-    /// ad). All the usual guards (4h cap, onboarding/splash, deep-link
-    /// suppression, cross-format gap) still apply inside `showIfReady`.
+    /// ad). All the usual guards (cap, onboarding/splash, deep-link suppression,
+    /// cross-format gap) still apply inside `showIfReady`.
+    /// Gated by `AppOpenAdConfig.coldLaunchEnabled` — set that to `false` to
+    /// disable cold-launch ads without touching warm-resume behaviour.
     func showOnColdLaunch(model: AppModel) async {
+        guard AppOpenAdConfig.coldLaunchEnabled else { return }
         guard AdConfig.adsEnabled, !AdConfig.screenshotMode else { return }
         let d = UserDefaults.standard
         guard d.bool(forKey: coldLaunchedKey) else {

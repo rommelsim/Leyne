@@ -56,10 +56,11 @@ class _SoftRootState extends State<SoftRoot> {
     // All other guards (frequency cap, notification/deep-link suppression,
     // master switches) live in the manager.
     AppOpenAdManager.instance.preloadWhenReady();
-    // Cold-launch App Open: SoftRoot mounts only past onboarding, so this is
-    // the launch-into-main-UI gate. Shows one ad shortly after launch (never on
-    // the very first launch); the 4h cap + suppression guards live in the
-    // manager. Warm returns are handled by the onResume listener below.
+    // Cold-launch App Open is currently DISABLED in the manager
+    // (AppOpenAdManager._coldLaunchEnabled = false) so opening the app never
+    // greets the user with an ad — tester feedback that launch ads were too
+    // aggressive. The call is kept (it no-ops) so re-enabling is a one-flag
+    // change. Warm returns are handled by the onResume listener below.
     AppOpenAdManager.instance.showOnColdLaunch();
     // Interstitial ad — preload so one is ready when the user backs out of a
     // Stop / Bus detail (the navigator observer fires the show attempt).

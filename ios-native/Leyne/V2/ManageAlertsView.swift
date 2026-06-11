@@ -84,7 +84,7 @@ struct ManageAlertsView: View {
                     .font(t.sans(15, weight: .semibold))
                     .foregroundStyle(t.fg)
                     .lineLimit(1)
-                Text("\(a.stopName) · \(AlertTiming.leadRowSubtitle(a.leadMinutes))")
+                Text("\(a.stopName) · \(a.kind == .arrival ? AlertTiming.arrivalRowSubtitle : AlertTiming.leadRowSubtitle(a.leadMinutes))")
                     .font(t.sans(12))
                     .foregroundStyle(t.dim)
                     .lineLimit(1)
@@ -110,7 +110,7 @@ struct ManageAlertsView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(rowTitle(a)), \(a.stopName), "
-            + "\(AlertTiming.leadRowSubtitle(a.leadMinutes))")
+            + "\(a.kind == .arrival ? AlertTiming.arrivalRowSubtitle : AlertTiming.leadRowSubtitle(a.leadMinutes))")
     }
 
     /// Title: the bus number for arrival (you're waiting for that service),

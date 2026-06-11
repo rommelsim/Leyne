@@ -47,10 +47,19 @@ class AppOpenAdManager {
 
   String get _unitId => (kDebugMode || kLyneAdsTest) ? _testUnit : _prodUnit;
 
-  /// Frequency cap — at most one App Open ad per this window. 4h matches
-  /// AdMob's "best performance for apps opened more than once every 4h" and
-  /// keeps brief in-and-out returns ad-free; a genuine new session triggers it.
-  static const Duration _minInterval = Duration(hours: 4);
+  /// When false, NO App Open ad is shown on a cold launch — opening the app
+  /// never greets the user with a full-screen ad. Set false on tester feedback
+  /// that launch ads were too aggressive (QOL: "reduce advertisement esp upon
+  /// app launch"). Warm foreground returns after the [_minInterval] window can
+  /// still show one (rare), so some revenue is preserved. Flip to true to
+  /// restore cold-launch presentation.
+  static const bool _coldLaunchEnabled = false;
+
+  /// Frequency cap — at most one App Open ad per this window. Raised from 4h to
+  /// 6h alongside disabling the cold-launch ad, so even warm-return ads are
+  /// infrequent (tester feedback: too many ads on launch). A genuine new
+  /// session after a long break can still trigger one.
+  static const Duration _minInterval = Duration(hours: 6);
 
   /// App Open creatives expire 4h after load (AdMob). Drop + reload past this.
   static const Duration _maxCacheAge = Duration(hours: 4);
@@ -128,6 +137,10 @@ class AppOpenAdManager {
   /// [showIfAvailable].
   Future<void> showOnColdLaunch() async {
     if (!kLyneAdsEnabled || kLyneScreenshotMode) return;
+    // Cold-launch App Open ads are disabled (see [_coldLaunchEnabled]) so the
+    // app never opens straight into an ad. We still mark the first-launch flag
+    // below so flipping the toggle back on later behaves correctly.
+    if (!_coldLaunchEnabled) return;
     final prefs = await SharedPreferences.getInstance();
     if (!(prefs.getBool(_coldLaunchedKey) ?? false)) {
       await prefs.setBool(_coldLaunchedKey, true); // first launch — no ad

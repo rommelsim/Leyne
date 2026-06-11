@@ -163,7 +163,11 @@ class _ManageAlertsScreenState extends State<ManageAlertsScreen> {
     final title = isDest
         ? (a.dest.isNotEmpty ? a.dest : a.stopName)
         : a.stopName;
-    final subtitle = '${a.stopName} · ${AlertTiming.leadRowSubtitle(a.leadMinutes)}';
+    // Arrival alerts fire at fixed dual leads; destination keeps its lead copy.
+    final leadText = isDest
+        ? AlertTiming.leadRowSubtitle(a.leadMinutes)
+        : AlertTiming.arrivalRowSubtitle;
+    final subtitle = '${a.stopName} · $leadText';
 
     final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),

@@ -529,7 +529,7 @@ private struct FavStopCard: View {
             .overlay(alignment: .topTrailing) {
                 Image(systemName: "star.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color(hex: "F5B500"))
+                    .foregroundStyle(t.accent)
                     .padding(2)
                     .background(t.surface, in: Circle())
                     .offset(x: 5, y: -5)

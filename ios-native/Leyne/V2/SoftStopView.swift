@@ -4,8 +4,11 @@
 // service list matching SoftNearbyStopCard's visual language. Each card has a
 // green service badge, destination + following arrivals, and a prominent ETA
 // pill. Confidence: "~" whisper only for ghost arrivals — never over-honesty.
+//
+// Swipe gestures:
+//   Bus arrival row → leading swipe (right): Notify / Stop Notify
+//   The trailing side is reserved for destructive delete (unused here).
 
-import ActivityKit
 import SwiftUI
 
 /// How the stop's arrivals are ordered.
@@ -30,10 +33,12 @@ struct SoftStopView: View {
     @State private var sort: StopSort = .service
     @State private var expanded = false
 
-    // "Notify me when" flow — the service the sheet is being set for, the
-    // just-set alert driving the confirmation, and the Manage-alerts route.
-    @State private var notifySvc: Service?
-    @State private var confirmAlert: BusAlert?
+    // One-tap arrival-alert toggle state.
+    // The sheet flow (NotifyWhenSheet + NotifyConfirmView) has been replaced by
+    // a direct toggle + an Undo toast. The Manage-alerts sheet is still reachable
+    // from the active-alerts card's per-row toggle (remove) or the section
+    // header chevron, but no longer presented from the per-bus button.
+    @State private var alertToast: ArrivalAlertToastState?
     @State private var showManage = false
 
     /// How many services to show before the "Show more" expander kicks in.
@@ -47,62 +52,58 @@ struct SoftStopView: View {
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            ScrollView {
+            VStack(spacing: 0) {
+                // Fixed top bar + title block — outside the List so they don't
+                // scroll. Both are already vertically compact; no clipping risk.
                 VStack(alignment: .leading, spacing: 20) {
                     topBar
                     titleBlock
-                    arrivalSection
-                    stopAd
-                    Color.clear.frame(height: 40)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+                .padding(.bottom, 4)
+
+                // WATCHING — pinned ABOVE the List (not a List row). Keeping it
+                // out of the List means toggling an alert never inserts/removes a
+                // List row, so the arrival rows don't fly up/down on the diff;
+                // the pinned block just appears/disappears as a clean unit.
+                if hasAlertsHere {
+                    watchingCard
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                }
+
+                // Scrollable content as a List so each bus row is individually
+                // swipeable (SwiftUI .swipeActions requires a List context).
+                List {
+                    // ── Arrivals header + sort ─────────────────────────────
+                    sectionHeaderRow
+
+                    // ── Arrivals ───────────────────────────────────────────
+                    arrivalRows
+
+                    // ── Bottom padding ─────────────────────────────────────
+                    Color.clear.frame(height: 40)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets())
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(t.bg)
+                .refreshable { await ds.refreshArrivals(stop: stopCode) }
             }
-            .refreshable { await ds.refreshArrivals(stop: stopCode) }
         }
         .onAppear { ds.ensureArrivals(stop: stopCode) }
-        // "Notify me when" arrival sheet for the picked service.
-        .sheet(item: $notifySvc) { svc in
-            NotifyWhenSheet(
-                kind: .arrival, busNo: svc.no, stopName: stopName,
-                initialLead: m.alert(kind: .arrival, busNo: svc.no,
-                                     stopCode: stopCode)?.leadMinutes,
-                onCancel: { notifySvc = nil },
-                onDone: { lead, liveActivity in
-                    let alert = BusAlert(
-                        kind: .arrival, busNo: svc.no, stopCode: stopCode,
-                        stopName: stopName, dest: svc.dest, boardStopCode: stopCode,
-                        leadMinutes: lead)
-                    m.upsertAlert(alert)
-                    // Optionally start the lock-screen Live Activity for this
-                    // live service (only when ActivityKit is enabled + not
-                    // already tracking this bus at this stop).
-                    if liveActivity,
-                       ActivityAuthorizationInfo().areActivitiesEnabled,
-                       !m.isLiveActivityActive(svc, stopCode: stopCode) {
-                        m.toggleLiveActivity(svc, stopName: stopName, stopCode: stopCode)
-                    }
-                    notifySvc = nil
-                    confirmAlert = alert
-                })
-            .environmentObject(m)
-            .environmentObject(fb)
-        }
-        // "You'll be notified!" confirmation, then a route into Manage alerts.
-        .sheet(item: $confirmAlert) { alert in
-            NotifyConfirmView(
-                alert: alert,
-                onClose: { confirmAlert = nil },
-                onManageAll: { confirmAlert = nil; showManage = true })
-            .environmentObject(m)
-            .environmentObject(fb)
-        }
+        // Manage all alerts (reachable from the active-alerts card header).
         .sheet(isPresented: $showManage) {
             NavigationStack { ManageAlertsView() }
                 .environmentObject(m)
                 .environmentObject(fb)
                 .environmentObject(ds)
         }
+        // One-tap arrival-alert Undo toast.
+        .arrivalAlertToastOverlay(state: $alertToast, t: t)
     }
 
     // MARK: - Top bar
@@ -136,18 +137,6 @@ struct SoftStopView: View {
             .accessibilityLabel(isPinned ? "\(stopName) saved. Tap to remove."
                                          : "Save stop \(stopName)")
 
-            // Sort menu — exposes the three sort options.
-            Menu {
-                Picker("Sort by", selection: $sort) {
-                    Label("By ETA", systemImage: "clock").tag(StopSort.arrival)
-                    Label("By bus number", systemImage: "number").tag(StopSort.service)
-                    Label("By distance", systemImage: "location").tag(StopSort.distance)
-                }
-            } label: {
-                circleButton(icon: "ellipsis")
-            }
-            .onTapGesture { fb.tap() }
-            .accessibilityLabel("Sort options")
         }
         .padding(.top, 4)
     }
@@ -221,58 +210,66 @@ struct SoftStopView: View {
         }
     }
 
-    // MARK: - Section header + arrivals
+    // MARK: - List rows
 
-    private var arrivalSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            activeAlertsCard
-            sectionHeader
-            arrivalContent
-        }
+    /// "WATCHING" section — each active alert at this stop is one List row
+    /// wrapped in the same surface card look as before. The entire block is
+    /// True when ≥1 arrival alert is set for this stop (drives the pinned
+    /// WATCHING card's visibility).
+    private var hasAlertsHere: Bool {
+        m.alerts.contains { $0.kind == .arrival && $0.stopCode == stopCode }
     }
 
-    /// Inline 300×250 medium rectangle, centred below the arrivals. This screen
-    /// replaces the bottom banner gutter with this single MREC (SoftRoot omits
-    /// the gutter for `.stop`), so the Stop screen shows exactly one ad.
-    /// `MediumRectAd` self-suppresses when ads are off / in screenshot mode.
-    @ViewBuilder
-    private var stopAd: some View {
-        if AdConfig.adsEnabled && !AdConfig.screenshotMode {
-            MediumRectAd()
-                .frame(maxWidth: .infinity)   // centre the fixed 300pt block
-                .padding(.top, 4)
-        }
-    }
-
-    /// Arrival alerts already set at this stop, each as a "Notify me when"
-    /// row (bus + lead) with a Toggle to switch it off. Hidden when none.
-    @ViewBuilder
-    private var activeAlertsCard: some View {
+    /// The "WATCHING" card — buses being alerted at this stop. Pinned ABOVE the
+    /// List (see body), NOT a List row, so toggling it never reflows the arrival
+    /// rows. Each row has a ✕ to stop watching (with an Undo toast).
+    private var watchingCard: some View {
         let active = m.alerts.filter { $0.kind == .arrival && $0.stopCode == stopCode }
-        if !active.isEmpty {
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("WATCHING")
+                    .font(t.mono(11, weight: .bold)).tracking(1.2)
+                    .foregroundStyle(t.soon)
+                Text("alerted 3 & 1 min before")
+                    .font(t.mono(10)).foregroundStyle(t.dim)
+            }
+            .padding(.leading, 2)
             VStack(spacing: 0) {
                 ForEach(Array(active.enumerated()), id: \.element.id) { i, a in
                     if i > 0 { rowDivider }
                     HStack(spacing: 12) {
-                        Image(systemName: "bell.fill")
+                        Image(systemName: "eye.fill")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(t.soon)
                             .frame(width: 32, height: 32)
                             .background(t.soonBg,
                                         in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Notify me when")
-                                .font(t.sans(12))
-                                .foregroundStyle(t.dim)
-                            Text("Bus \(a.busNo) · \(AlertTiming.leadRowSubtitle(a.leadMinutes))")
-                                .font(t.sans(14, weight: .semibold))
+                        HStack(spacing: 6) {
+                            Text("Bus \(a.busNo)")
+                                .font(t.sans(14, weight: .bold))
                                 .foregroundStyle(t.fg)
-                                .lineLimit(1)
+                            if !a.dest.isEmpty {
+                                Text("· To \(a.dest)")
+                                    .font(t.sans(13))
+                                    .foregroundStyle(t.dim)
+                                    .lineLimit(1)
+                            }
                         }
                         Spacer(minLength: 8)
-                        SoftToggle(t: t, value: Binding(
-                            get: { true },
-                            set: { on in if !on { m.removeAlert(id: a.id) } }))
+                        // Remove (✕) button — removes with an Undo toast.
+                        Button {
+                            alertToast = m.toggleArrivalAlertWithToast(
+                                busNo: a.busNo, stopCode: a.stopCode,
+                                stopName: a.stopName, dest: a.dest)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(t.dim)
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove alert for Bus \(a.busNo)")
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -284,117 +281,236 @@ struct SoftStopView: View {
         }
     }
 
-    /// Section title above the grouped arrivals list.
-    private var sectionHeader: some View {
-        Text("All arriving buses")
-            .font(t.sans(15, weight: .semibold))
-            .foregroundStyle(t.dim)
-            .padding(.leading, 2)
+    /// Swipe hint: shown only when no alerts are active at this stop.
+    /// Arrivals header — short title + a visible Sort control (replaces the old
+    /// top-right "..." overflow, which only carried sort). Sits right above the
+    /// list so it's easy to reach.
+    private var sectionHeaderRow: some View {
+        HStack(spacing: 8) {
+            Text("Arrivals")
+                .font(t.sans(15, weight: .semibold))
+                .foregroundStyle(t.dim)
+            Spacer(minLength: 8)
+            sortMenu
+        }
+        .padding(.leading, 2)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
+    /// Sort control — a pill showing the current order; tap to change it.
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort by", selection: $sort) {
+                Label("By ETA", systemImage: "clock").tag(StopSort.arrival)
+                Label("By bus number", systemImage: "number").tag(StopSort.service)
+                Label("By distance", systemImage: "location").tag(StopSort.distance)
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(sortLabel)
+                    .font(t.sans(13, weight: .semibold))
+            }
+            .foregroundStyle(t.fg)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(t.surface, in: Capsule())
+            .overlay(Capsule().stroke(t.line, lineWidth: 1))
+        }
+        .onTapGesture { fb.tap() }
+        .accessibilityLabel("Sort arrivals")
+    }
+
+    private var sortLabel: String {
+        switch sort {
+        case .arrival:  return "ETA"
+        case .service:  return "Bus no."
+        case .distance: return "Distance"
+        }
+    }
+
+    /// All arrival content emitted directly as List rows.
     @ViewBuilder
-    private var arrivalContent: some View {
+    private var arrivalRows: some View {
         switch ds.arrivals[stopCode] {
         case .some(.loaded(let services)) where !services.isEmpty:
             let sorted = sortedServices(services)
             let canCollapse = sorted.count > collapsedCount
             let shown = (expanded || !canCollapse) ? sorted
                                                    : Array(sorted.prefix(collapsedCount))
-            VStack(spacing: 0) {
-                ForEach(Array(shown.enumerated()), id: \.element.no) { i, bus in
-                    if i > 0 { rowDivider }
+
+            // Mid-list ad injection: when the full list is expanded with ≥6 rows,
+            // split at the midpoint and insert ONE ad between the halves.
+            // This replaces the bottom MREC (stopAdRow hides itself via isShowingMidAd).
+            let midIdx = isShowingMidAd ? max(1, shown.count / 2) : shown.count
+
+            // ── First half of rows ──────────────────────────────────────
+            ForEach(Array(shown.prefix(midIdx).enumerated()), id: \.element.no) { i, bus in
+                busRow(bus)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        let isOn = m.alert(kind: .arrival, busNo: bus.no, stopCode: stopCode) != nil
+                        Button {
+                            fb.select()
+                            // No withAnimation here: animating the List re-layout
+                            // (WATCHING row inserting / hint removing) made the
+                            // per-row cards slide over each other. Apply instantly.
+                            alertToast = m.toggleArrivalAlertWithToast(
+                                busNo: bus.no, stopCode: stopCode,
+                                stopName: stopName, dest: bus.dest)
+                        } label: {
+                            Label(isOn ? "Stop" : "Notify",
+                                  systemImage: isOn ? "eye.slash.fill" : "eye.fill")
+                        }
+                        .tint(isOn ? .secondary : t.soon)
+                    }
+            }
+
+            // ── Mid-list ad (expanded ≥6 rows only) ────────────────────
+            if isShowingMidAd {
+                MediumRectAd()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
+            // ── Second half of rows (only when mid-ad is active) ────────
+            if isShowingMidAd {
+                ForEach(Array(shown.dropFirst(midIdx).enumerated()), id: \.element.no) { i, bus in
                     busRow(bus)
-                }
-                if canCollapse {
-                    rowDivider
-                    showMoreRow(total: sorted.count)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            let isOn = m.alert(kind: .arrival, busNo: bus.no, stopCode: stopCode) != nil
+                            Button {
+                                fb.select()
+                                alertToast = m.toggleArrivalAlertWithToast(
+                                    busNo: bus.no, stopCode: stopCode,
+                                    stopName: stopName, dest: bus.dest)
+                            } label: {
+                                Label(isOn ? "Stop" : "Notify",
+                                      systemImage: isOn ? "eye.slash.fill" : "eye.fill")
+                            }
+                            .tint(isOn ? .secondary : t.soon)
+                        }
                 }
             }
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(t.line, lineWidth: 1))
+
+            // ── Show more/less ──────────────────────────────────────────
+            if canCollapse {
+                showMoreRow(total: sorted.count)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+
+            // ── Footer ──────────────────────────────────────────────────
             footer
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+            // ── Bottom MREC (collapsed state or short list) ─────────────
+            stopAdRow
+
         case .some(.empty):
             emptyArrivals(message: "No buses in operation right now.")
+                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         case .some(.error(let e)):
             emptyArrivals(message: e)
+                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         default:
             ProgressView()
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 32)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
     }
 
-    /// Full-bleed hairline separating rows inside the grouped card.
+    /// Inline 300×250 medium rectangle below the arrivals.
+    /// When the full list is expanded (≥6 rows), the ad is injected at the
+    /// midpoint of the list instead (see `arrivalRows`) so the stop screen
+    /// always shows exactly ONE ad total. `MediumRectAd` self-suppresses when
+    /// ads are off / in screenshot mode.
+    @ViewBuilder
+    private var stopAdRow: some View {
+        if AdConfig.adsEnabled && !AdConfig.screenshotMode && !isShowingMidAd {
+            MediumRectAd()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    /// True when the expanded full list is shown AND there are enough rows to
+    /// warrant the midpoint injection (≥6). In this mode the bottom ad is
+    /// hidden and the mid-list ad takes its place.
+    private var isShowingMidAd: Bool {
+        guard expanded, AdConfig.adsEnabled, !AdConfig.screenshotMode else { return false }
+        guard case .some(.loaded(let services)) = ds.arrivals[stopCode] else { return false }
+        return services.count >= 6
+    }
+
+    /// Full-bleed hairline separating rows inside the grouped WATCHING card.
     private var rowDivider: some View {
         Rectangle().fill(t.line).frame(height: 1)
     }
 
     // MARK: - Bus row
 
-    /// One service row inside the grouped card: badge · destination · its next
-    /// three arrival times in columns. The whole row opens the bus view.
+    /// One service row — a self-contained surface card with bus badge, destination,
+    /// and up to three ETA columns. Trailing notify button removed; use leading
+    /// swipe (right) to toggle arrival alert instead.
     private func busRow(_ bus: Service) -> some View {
         let conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed)
         let badge = serviceBadgeColors(etaSec: bus.etaSec, confidence: conf, t: t)
-        let notifyOn = m.alert(kind: .arrival, busNo: bus.no, stopCode: stopCode) != nil
 
-        return HStack(spacing: 8) {
-            // Main area opens the bus view.
-            Button {
-                fb.select()
-                onOpenBus(bus.no)
-            } label: {
-                HStack(spacing: 12) {
-                    ServiceBadge(svc: bus.no, t: t, size: .md,
-                                 fillOverride: badge.fill, fgOverride: badge.fg)
+        return Button {
+            fb.select()
+            onOpenBus(bus.no)
+        } label: {
+            HStack(spacing: 12) {
+                ServiceBadge(svc: bus.no, t: t, size: .md,
+                             fillOverride: badge.fill, fgOverride: badge.fg)
 
-                    Text(destLabel(bus))
-                        .font(t.sans(14, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                        // Destination is the flexible element: wrap to two lines
-                        // before truncating so "To Kampong Bahru Ter" reads in
-                        // full. It out-prioritises the (intrinsic) ETA columns.
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .layoutPriority(1)
+                Text(destLabel(bus))
+                    .font(t.sans(14, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
 
-                    Spacer(minLength: 8)
+                Spacer(minLength: 8)
 
-                    // Time columns hug their intrinsic width and never grow at
-                    // the destination's expense.
-                    etaColumns(bus, confidence: conf)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                .padding(.leading, 16)
-                .padding(.vertical, 14)
-                .contentShape(Rectangle())
+                etaColumns(bus, confidence: conf)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .buttonStyle(PressScaleButtonStyle())
-            .accessibilityLabel("Bus \(bus.no) to \(bus.dest), \(arrivalA11y(bus, conf))")
-            .accessibilityHint("Opens bus \(bus.no)")
-
-            // Trailing notify affordance — opens the arrival "Notify me when"
-            // sheet (or jumps straight to it pre-filled when an alert exists).
-            Button {
-                fb.select()
-                notifySvc = bus
-            } label: {
-                Image(systemName: notifyOn ? "bell.fill" : "bell")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(notifyOn ? t.soon : t.dim)
-                    .frame(width: 40, height: 40)
-                    .background(notifyOn ? AnyShapeStyle(t.soonBg) : AnyShapeStyle(t.surfaceHi),
-                                in: Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(.trailing, 12)
-            .accessibilityLabel(notifyOn
-                ? "Edit arrival alert for bus \(bus.no)"
-                : "Notify me when bus \(bus.no) arrives")
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(t.surface,
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("Bus \(bus.no) to \(bus.dest), \(arrivalA11y(bus, conf))")
+        .accessibilityHint("Opens bus \(bus.no)")
     }
 
     /// Up to three arrival columns ("Arr · 13 · 24 min") split by hairlines.
@@ -443,7 +559,7 @@ struct SoftStopView: View {
         .frame(minWidth: 30)
     }
 
-    /// "Show more" / "Show less" expander at the foot of the grouped card.
+    /// "Show more" / "Show less" expander row.
     private func showMoreRow(total: Int) -> some View {
         Button {
             fb.tap()
@@ -460,7 +576,9 @@ struct SoftStopView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .contentShape(Rectangle())
+            .background(t.surface,
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel(expanded ? "Show fewer buses" : "Show all \(total) buses")

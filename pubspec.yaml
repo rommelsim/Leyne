@@ -34,6 +34,7 @@ dependencies:
     sdk: flutter
 
   http: ^1.6.0
+  flutter_slidable: ^3.1.0 # swipe-to-Notify on bus rows
   geolocator: ^14.0.2
   shared_preferences: ^2.5.5
   google_mobile_ads: ^8.0.0
@@ -46,6 +47,11 @@ dependencies:
   latlong2: ^0.9.1
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.0
+  # In-app ratings prompt (Google Play In-App Review API on Android). Fired at
+  # a moment of proven value — after the user taps a useful arrival
+  # notification — to lift store rating → ranking → organic installs. The OS
+  # rate-limits the dialog; our own guard only asks once per install.
+  in_app_review: ^2.0.10
   # Material You wallpaper-derived palette on Android 12+ (API 31+).
   # On older Android, returns null and we fall back to the static
   # LyneTheme palette. See lib/main.dart.

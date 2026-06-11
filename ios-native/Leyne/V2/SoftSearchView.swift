@@ -121,6 +121,8 @@ struct SoftSearchView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 15))
                         .foregroundStyle(t.dim)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else {
@@ -129,13 +131,14 @@ struct SoftSearchView: View {
                 Image(systemName: "mic")
                     .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(t.faint)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 15)
         .frame(height: 52)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(query.isEmpty ? t.line : t.accent.opacity(0.6), lineWidth: 1)
         )
     }

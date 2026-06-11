@@ -182,7 +182,9 @@ struct LeyneLiveActivity: Widget {
                         .foregroundStyle(ink)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(paper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .padding(.leading, 4)
+                        // Inset from the island's rounded edge so the pill doesn't
+                        // hug / clip the corner.
+                        .padding(.leading, 12)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
@@ -196,7 +198,7 @@ struct LeyneLiveActivity: Widget {
                                 .font(.system(size: 10)).foregroundStyle(dim)
                         }
                     }
-                    .padding(.trailing, 6)
+                    .padding(.trailing, 10)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     // .widgetURL here makes the expanded info area tap → Bus view.
@@ -239,7 +241,10 @@ struct LeyneLiveActivity: Widget {
                     .foregroundStyle(context.state.arrived ? green : paper)
                     .widgetURL(busURL(context.attributes))
             } minimal: {
-                Text(context.attributes.busNo)
+                // The minimal view (multiple Live Activities) is the tiniest notch
+                // presentation — show the ETA, the one thing worth a glance, rather
+                // than the bus number (identity lives in the compact/expanded views).
+                Text(confPrefix(context.state) + etaText(context.state))
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(context.state.arrived ? green : paper)
                     .widgetAccentable()
@@ -257,7 +262,8 @@ private struct LockScreenView: View {
     var body: some View {
         let p = phase(state)
         VStack(alignment: .leading, spacing: 0) {
-            // Header — service badge + destination.
+            // Header — service badge + destination + the ETA (the at-a-glance
+            // number; the lock-screen card carried none before this).
             HStack(spacing: 9) {
                 Text(attributes.busNo)
                     .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -267,7 +273,17 @@ private struct LockScreenView: View {
                 Text("Towards \(attributes.dest)")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(dim).lineLimit(1)
-                Spacer(minLength: 0)
+                Spacer(minLength: 6)
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(confPrefix(state) + etaText(state))
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(state.arrived ? green : paper)
+                        .lineLimit(1)
+                    if !state.arrived && state.etaMinutes > 0 {
+                        Text("min")
+                            .font(.system(size: 10)).foregroundStyle(dim)
+                    }
+                }
             }
 
             Spacer(minLength: 10)

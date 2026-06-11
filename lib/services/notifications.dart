@@ -309,8 +309,12 @@ class NotificationsService {
 
   static int _notifIdFor(String identifier) => identifier.hashCode & 0x7fffffff;
 
-  static String _arrivalIdentifier(BusAlert a) =>
-      '$_idPrefix${a.stopCode}.${a.busNo}';
+  // Arrival alerts fire at two fixed leads (3 min + 1 min), so the identifier
+  // carries the lead so the two requests are distinct and swept independently.
+  // The tap payload is the same string; main.dart parses parts[1]/[2] (stop /
+  // bus) and ignores any trailing lead segment, so routing is unaffected.
+  static String _arrivalIdentifier(BusAlert a, int lead) =>
+      '$_idPrefix${a.stopCode}.${a.busNo}.$lead';
 
   static String _destinationIdentifier(BusAlert a) =>
       '$_alightIdPrefix${a.busNo}.${a.stopCode}';
@@ -337,17 +341,24 @@ class NotificationsService {
       }
       final arrivalDate = _liveArrivalDate(arrivals, a.stopCode, a.busNo);
       if (arrivalDate == null) continue;
-      final fireAt = AlertTiming.arrivalFireAt(arrivalDate, a.leadMinutes);
-      if (!fireAt.isAfter(now.add(const Duration(seconds: 1)))) continue;
-      final identifier = _arrivalIdentifier(a);
-      keepIds.add(identifier);
-      await _zonedSchedule(
-        identifier: identifier,
-        fireAt: fireAt,
-        title: AlertTiming.arrivalTitle(a.busNo),
-        body: AlertTiming.arrivalBody(a.stopName, a.leadMinutes),
-        groupKey: 'leyne.arrivals.${a.stopCode}',
-      );
+      // Fixed dual reminder — 3 min before AND 1 min before (AlertTiming
+      // .arrivalLeads). Each lead is its own scheduled notification with a
+      // distinct identifier so they fire (and get swept) independently. A lead
+      // whose fire time has already passed (the bus is already closer than that
+      // lead) is skipped; the nearer reminder still fires.
+      for (final lead in AlertTiming.arrivalLeads) {
+        final fireAt = AlertTiming.arrivalFireAt(arrivalDate, lead);
+        if (!fireAt.isAfter(now.add(const Duration(seconds: 1)))) continue;
+        final identifier = _arrivalIdentifier(a, lead);
+        keepIds.add(identifier);
+        await _zonedSchedule(
+          identifier: identifier,
+          fireAt: fireAt,
+          title: AlertTiming.arrivalTitle(a.busNo, lead),
+          body: AlertTiming.arrivalBody(a.stopName, lead),
+          groupKey: 'leyne.arrivals.${a.stopCode}',
+        );
+      }
     }
 
     // Orphan sweep — cancel any pending request we own (arrival OR destination
@@ -380,13 +391,17 @@ class NotificationsService {
     );
   }
 
-  /// Cancel the pending request backing [a] (used when an alert is removed).
+  /// Cancel the pending request(s) backing [a] (used when an alert is removed).
+  /// Arrival alerts have two pending requests (one per fixed lead) to cancel.
   Future<void> cancelAlert(BusAlert a) async {
     if (!_initialized) return;
-    final identifier = a.kind == AlertKind.arrival
-        ? _arrivalIdentifier(a)
-        : _destinationIdentifier(a);
-    await _plugin.cancel(_notifIdFor(identifier));
+    if (a.kind == AlertKind.arrival) {
+      for (final lead in AlertTiming.arrivalLeads) {
+        await _plugin.cancel(_notifIdFor(_arrivalIdentifier(a, lead)));
+      }
+    } else {
+      await _plugin.cancel(_notifIdFor(_destinationIdentifier(a)));
+    }
   }
 
   /// Live arrival time for [busNo] at [stopCode] from the arrivals store, or

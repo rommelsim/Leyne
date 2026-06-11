@@ -47,11 +47,12 @@ void main() {
 
   group('notification copy', () {
     test('arrival', () {
-      expect(AlertTiming.arrivalTitle('153'), 'Bus 153 arriving soon');
-      expect(AlertTiming.arrivalBody('Farrer Rd Stn Exit B', 5),
-          'Farrer Rd Stn Exit B · 5 min to arrival');
+      expect(AlertTiming.arrivalTitle('153', 3), '🕒 Bus 153 — 3 min away');
+      expect(AlertTiming.arrivalTitle('153', 1), '🚍 Bus 153 — arriving now');
+      expect(AlertTiming.arrivalBody('Farrer Rd Stn Exit B', 3),
+          'Heading to Farrer Rd Stn Exit B');
       expect(AlertTiming.arrivalBody('Farrer Rd Stn Exit B', 1),
-          'Farrer Rd Stn Exit B · Arriving now');
+          'Get ready — Farrer Rd Stn Exit B');
     });
     test('destination', () {
       expect(AlertTiming.destinationTitle(), 'Your stop is next');
@@ -59,13 +60,16 @@ void main() {
           'Hougang Ctrl Int · Arriving in 10 min');
     });
     test('sheet summary', () {
+      // Arrival alerts fire at fixed dual leads (3 min + 1 min); the lead arg
+      // is ignored for arrival copy.
       expect(
         AlertTiming.summary(
             kind: AlertKind.arrival,
             busNo: '153',
             stopName: 'Farrer Rd Stn Exit B',
             leadMinutes: 5),
-        "We'll notify you 5 min before Bus 153 arrives at Farrer Rd Stn Exit B.",
+        "We'll notify you 3 min and again 1 min before Bus 153 arrives at "
+        "Farrer Rd Stn Exit B.",
       );
       expect(
         AlertTiming.summary(
@@ -81,6 +85,12 @@ void main() {
       expect(AlertTiming.leadLabel(5), '5 minutes before');
       expect(AlertTiming.leadRowSubtitle(5), '5 min before arrival');
       expect(AlertTiming.leadRowSubtitle(1), 'When arriving');
+    });
+    test('fixed arrival leads', () {
+      // Arrival alerts no longer let the user pick a lead — they always fire
+      // at 3 min then 1 min before arrival.
+      expect(AlertTiming.arrivalLeads, [3, 1]);
+      expect(AlertTiming.arrivalRowSubtitle, '3 & 1 min before arrival');
     });
   });
 }

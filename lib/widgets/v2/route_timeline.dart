@@ -3,9 +3,23 @@
 
 import 'package:flutter/material.dart';
 import '../../data/bus_progress.dart';
+import '../../data/mrt_stations.dart';
 import '../../theme.dart';
 
 enum SoftRouteStopState { past, here, board, next, alight }
+
+/// True when a bus stop sits at an MRT/LRT station. There's no bus-stop→station
+/// dataset from LTA, but SG stop descriptions tag these with the "Stn" token
+/// (e.g. "Bishan Stn", "Opp Serangoon Stn", "Bef Bugis Stn Exit C"), so the
+/// name is the signal. Word-boundaried so ordinary names ("Stadium", "Newton")
+/// don't false-positive; an explicit "MRT"/"LRT" also qualifies. Conservative
+/// by design — surfaces a station only when confident ("if have", not always).
+/// Mirrors iOS RouteTimeline.swift `stopServesMRT`.
+bool stopServesMRT(String name) {
+  final lower = name.toLowerCase();
+  if (lower.contains('mrt') || lower.contains('lrt')) return true;
+  return RegExp(r'\bstn\b').hasMatch(lower);
+}
 
 class SoftRouteStop {
   const SoftRouteStop({
@@ -330,6 +344,10 @@ class _RouteTimelineState extends State<RouteTimeline> {
         : (stop.state == SoftRouteStopState.alight
               ? SoftRouteStopState.next
               : stop.state);
+    // If this stop sits at a rail station, resolve its line code(s) so we can
+    // show a colour-coded pill ("[EW23] Clementi"). Falls back to the generic
+    // MRT tag for "Stn" names we can't map.
+    final mrt = resolveMrtStation(stop.name);
 
     return InkWell(
       borderRadius: BorderRadius.circular(6),
@@ -385,7 +403,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
                   children: [
                     Row(
                       children: [
-                        Expanded(
+                        Flexible(
                           child: Text(
                             stop.name,
                             style: t.sans(
@@ -399,6 +417,13 @@ class _RouteTimelineState extends State<RouteTimeline> {
                             ),
                           ),
                         ),
+                        // Generic MRT/LRT tag only when we can't resolve the
+                        // station to specific line code(s) (the pill below).
+                        if (mrt == null && stopServesMRT(stop.name)) ...[
+                          const SizedBox(width: 6),
+                          _mrtBadge(t),
+                        ],
+                        const Spacer(),
                         if (resolved == SoftRouteStopState.next &&
                             stop.etaMin != null)
                           Text(
@@ -411,6 +436,12 @@ class _RouteTimelineState extends State<RouteTimeline> {
                           ),
                       ],
                     ),
+                    // Colour-coded rail-station pill ("[EW23] Clementi"), shown
+                    // when the stop resolves to a known MRT/LRT station.
+                    if (mrt != null) ...[
+                      const SizedBox(height: 5),
+                      _mrtStationPill(t, mrt),
+                    ],
                     // Dim mono stop-code subline when the code differs from
                     // the displayed name — parity with iOS RouteTimeline.swift.
                     if (stop.id != stop.name) ...[
@@ -529,6 +560,95 @@ class _RouteTimelineState extends State<RouteTimeline> {
   // detached from the bus's trail.
   Color _connector(LyneTheme t, SoftRouteStopState state) =>
       BusProgress.connectorIsGreen(state) ? t.soon : t.line;
+
+  /// Subtle MRT-station marker — a tram glyph + "MRT" chip. Monochrome
+  /// (t.dim on t.surfaceHi) so it reads as a neutral wayfinding attribute, not
+  /// a live signal (green stays reserved for proximity/arrival). Mirrors the
+  /// iOS RouteTimeline.swift `mrtBadge`.
+  Widget _mrtBadge(LyneTheme t) {
+    return Semantics(
+      label: 'MRT station',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: t.surfaceHi,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.tram, size: 9, color: t.dim),
+            const SizedBox(width: 3),
+            Text(
+              'MRT',
+              style: t
+                  .mono(8, weight: FontWeight.w700, color: t.dim)
+                  .copyWith(letterSpacing: 0.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Colour-coded rail-station pill: one line-coloured code chip per line
+  /// (e.g. green "EW23", or "EW24"+"NS1" for an interchange) followed by the
+  /// station name. Single-line stations tint the pill with the line colour so
+  /// it reads as, e.g., a "green pill"; interchanges stay neutral. Mirrors the
+  /// iOS RouteTimeline.swift `mrtStationPill`.
+  Widget _mrtStationPill(LyneTheme t, MrtStation mrt) {
+    final tint = mrt.codes.length == 1 ? mrt.codes.first.color : null;
+    return Semantics(
+      label: 'MRT station ${mrt.name}, '
+          '${mrt.codes.map((c) => c.code).join(", ")}',
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
+        decoration: BoxDecoration(
+          color: tint != null
+              ? tint.withValues(alpha: 0.14)
+              : t.surfaceHi,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final code in mrt.codes) ...[
+              _codeChip(code),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                mrt.name,
+                style: t.sans(12, weight: FontWeight.w600, color: t.fg),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A single station-code roundel — white code on the line's brand colour.
+  Widget _codeChip(MrtCode code) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: code.color,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        code.code,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
 
   Widget _chip(LyneTheme t, String text, {required bool filled}) {
     return Container(

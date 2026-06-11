@@ -256,6 +256,10 @@ struct RouteTimeline: View {
         let resolved: RouteStopState = (alightId == stop.id && isUpcoming)
             ? .alight
             : (stop.state == .alight ? .next : stop.state)
+        // If this stop sits at a rail station, resolve its line code(s) so we can
+        // show a colour-coded pill ("[EW23] Clementi"). Falls back to the generic
+        // MRT tag for "Stn" names we can't map.
+        let mrt = resolveMrtStation(stop.name)
 
         Button {
             if isUpcoming {
@@ -289,8 +293,16 @@ struct RouteTimeline: View {
                         Text(stop.name)
                             .font(t.sans(14, weight: resolved == .past ? .regular : .medium))
                             .foregroundStyle(resolved == .past ? t.faint : t.fg)
-                        if stopServesMRT(stop.name) { mrtBadge }
+                        // Generic MRT/LRT tag only when we can't resolve specific
+                        // line code(s) (the colour-coded pill below).
+                        if mrt == nil && stopServesMRT(stop.name) { mrtBadge }
                         Spacer(minLength: 0)
+                    }
+                    // Colour-coded rail-station pill ("[EW23] Clementi"), shown
+                    // when the stop resolves to a known MRT/LRT station.
+                    if let mrt {
+                        mrtStationPill(mrt)
+                            .padding(.top, 3)
                     }
                     // Stop code as a dim mono subline (e.g. "42071"). `id` is
                     // the LTA stop code; only show it when it differs from the
@@ -406,6 +418,36 @@ struct RouteTimeline: View {
         .padding(.horizontal, 5).padding(.vertical, 2)
         .background(t.surfaceHi, in: Capsule())
         .accessibilityLabel("MRT station")
+    }
+
+    /// Colour-coded rail-station pill: one line-coloured code chip per line
+    /// (e.g. green "EW23", or "EW24"+"NS1" for an interchange) then the station
+    /// name. Single-line stations tint the pill with the line colour so it reads
+    /// as, e.g., a "green pill"; interchanges stay neutral. Mirrors the Flutter
+    /// RouteTimeline `_mrtStationPill`.
+    private func mrtStationPill(_ mrt: MrtStation) -> some View {
+        let tint = mrt.codes.count == 1 ? mrt.codes.first?.color : nil
+        return HStack(spacing: 6) {
+            ForEach(mrt.codes, id: \.code) { mrtCodeChip($0) }
+            Text(mrt.name)
+                .font(t.sans(12, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .lineLimit(1)
+        }
+        .padding(.leading, 4).padding(.trailing, 10)
+        .padding(.vertical, 4)
+        .background(tint?.opacity(0.14) ?? t.surfaceHi, in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("MRT station \(mrt.name), \(mrt.codes.map(\.code).joined(separator: ", "))")
+    }
+
+    /// A single station-code roundel — white code on the line's brand colour.
+    private func mrtCodeChip(_ code: MrtCode) -> some View {
+        Text(code.code)
+            .font(t.sans(10.5, weight: .heavy))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(code.color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     @ViewBuilder

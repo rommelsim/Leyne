@@ -58,43 +58,25 @@ void main() {
     mockChannels();
   });
 
-  group('Ongoing tracker lifecycle', () {
-    test('activates for a key; the same tap deactivates', () async {
+  group('Live tracker (automatic)', () {
+    // The manual toggleOngoing API was removed — the single lock-screen live
+    // view now auto-follows the soonest-arriving alerted bus, driven by the
+    // tick off live arrivals (exercised via on-device/integration testing).
+    // These cover the reachable invariants.
+    test('no tracker by default', () async {
       final m = AppModel.forTesting();
       await m.load();
-      expect(m.isOngoingActive(busNo: '65', stopCode: '53061'), isFalse);
-      expect(m.ongoingKey, isNull);
-
-      await m.toggleOngoing(busNo: '65', stopCode: '53061', stopName: 'Stop');
-      expect(m.ongoingKey, '65@53061');
-      expect(m.isOngoingActive(busNo: '65', stopCode: '53061'), isTrue);
-
-      await m.toggleOngoing(busNo: '65', stopCode: '53061', stopName: 'Stop');
       expect(m.ongoingKey, isNull);
       expect(m.isOngoingActive(busNo: '65', stopCode: '53061'), isFalse);
     });
 
-    test('starting a different bus replaces the previous tracker (one at a time)',
+    test('disabling notifications leaves no tracker (regression: leak fix)',
         () async {
       final m = AppModel.forTesting();
       await m.load();
-      await m.toggleOngoing(busNo: '65', stopCode: '53061', stopName: 'Stop');
-      await m.toggleOngoing(busNo: '88', stopCode: '53061', stopName: 'Stop');
-      expect(m.ongoingKey, '88@53061');
-      expect(m.isOngoingActive(busNo: '65', stopCode: '53061'), isFalse);
-      expect(m.isOngoingActive(busNo: '88', stopCode: '53061'), isTrue);
-    });
-
-    test('disabling notifications stops the tracker (regression: leak fix)',
-        () async {
-      final m = AppModel.forTesting();
-      await m.load();
-      await m.toggleOngoing(busNo: '65', stopCode: '53061', stopName: 'Stop');
-      expect(m.ongoingKey, isNotNull);
-
       await m.setNotificationsEnabled(false);
       expect(m.ongoingKey, isNull,
-          reason: 'an ongoing tracker must not survive notifications being '
+          reason: 'an ongoing tracker must never survive notifications being '
               'turned off — it could never fire');
     });
   });

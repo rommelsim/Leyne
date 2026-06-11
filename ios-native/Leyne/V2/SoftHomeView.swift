@@ -1,18 +1,12 @@
-// SoftHomeView — Leyne Home ("Stops near you"): greeting + title with a
-// filter/map action pair, a NEAR YOU · LIVE status line, then the single
-// closest stop highlighted in its own "Closest to you" section, the rest
-// under "Other nearby stops", and a live-updates footer. Each card shows the
-// stop's identity and its soonest service's next three arrivals.
+// SoftHomeView — Leyne Home ("Stops near you"): weather + greeting + title
+// with a filter/map action pair, a NEAR YOU · LIVE status line, then the
+// single closest stop highlighted in its own "Closest to you" section, the
+// rest under "Other nearby stops", and a live-updates footer. Each card shows
+// the stop's identity and its soonest service's next three arrivals.
 
 import SwiftUI
 import MapKit
 import UIKit
-
-/// Identifies the stop a long-press "Arrival Alerts" sheet is open for.
-private struct AlertTarget: Identifiable {
-    let code: String
-    var id: String { code }
-}
 
 struct SoftHomeView: View {
     @EnvironmentObject var m: AppModel
@@ -27,8 +21,9 @@ struct SoftHomeView: View {
     /// Drives the push to the central alerts list from the header bell.
     @State private var showAlerts = false
 
-    /// Stop whose long-press "Arrival Alerts" sheet is open (nil = none).
-    @State private var alertTarget: AlertTarget?
+    /// Active arrival-alert toast (one-tap "Arrival Alerts" from the long-press
+    /// menu), nil when none is showing.
+    @State private var alertToast: ArrivalAlertToastState?
 
     let onTab: (SoftTab) -> Void
     let onOpenStop: (String) -> Void
@@ -87,35 +82,48 @@ struct SoftHomeView: View {
         .navigationDestination(isPresented: $showAlerts) {
             ManageAlertsView().toolbar(.hidden, for: .tabBar)
         }
-        // Long-press "Arrival Alerts" → stop-level sheet (targets the soonest bus).
-        .sheet(item: $alertTarget) { target in
-            StopAlertSheet(
-                stopCode: target.code,
-                stopName: ds.stopName(target.code),
-                road: ds.roadName(target.code),
-                onClose: { alertTarget = nil })
-            .environmentObject(m)
-            .environmentObject(fb)
-            .presentationDetents([.medium, .large])
+        // Long-press "Arrival Alerts" arms the soonest bus in ONE tap (no sheet);
+        // a toast with Undo confirms it.
+        .arrivalAlertToastOverlay(state: $alertToast, t: t)
+    }
+
+    /// One-tap "Arrival Alerts" (long-press menu): arm the stop's soonest live
+    /// bus and confirm with an Undo toast. Falls back to opening the stop when
+    /// nothing is live yet so the user can still pick a bus (Android parity).
+    private func quickArrivalAlert(code: String) {
+        ds.ensureArrivals(stop: code)
+        guard let soonest = m.liveServices(code: code, tracked: []).first else {
+            onOpenStop(code)
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.25)) {
+            alertToast = m.toggleArrivalAlertWithToast(
+                busNo: soonest.no, stopCode: code,
+                stopName: ds.stopName(code), dest: soonest.dest)
         }
     }
 
     // MARK: Header / live row
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Eyebrow(text: greeting, t: t)
+        VStack(alignment: .leading, spacing: 6) {
+            // Weather + greeting + clock — degrades invisibly when
+            // WeatherKit is unavailable (WeatherHeader shows only the
+            // greeting row in that case).
+            WeatherHeader(t: t)
+                .padding(.horizontal, -16)  // bleed to scroll-view edge
+
+            HStack(alignment: .center, spacing: 12) {
                 Text("Stops near you")
                     .font(t.sans(33, weight: .bold))
                     .foregroundStyle(t.fg)
                     .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                alertButton
             }
-            Spacer(minLength: 8)
-            alertButton
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 8)
+        .padding(.top, 4)
     }
 
     /// Top-right bell → the central alerts list, with a count badge when the
@@ -128,7 +136,7 @@ struct SoftHomeView: View {
             Image(systemName: "bell.fill")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(t.fg)
-                .frame(width: 42, height: 42)
+                .frame(width: 44, height: 44)
                 .background(t.surface, in: Circle())
                 .overlay(Circle().stroke(t.line, lineWidth: 1))
                 .overlay(alignment: .topTrailing) {
@@ -216,7 +224,7 @@ struct SoftHomeView: View {
                       systemImage: m.isPinned(code) ? "star.slash" : "star")
             }
             Button {
-                fb.select(); alertTarget = AlertTarget(code: code)
+                fb.select(); quickArrivalAlert(code: code)
             } label: {
                 Label("Arrival Alerts", systemImage: "bell")
             }
@@ -442,15 +450,6 @@ struct SoftHomeView: View {
         ds.prefetchNearbyArrivals()
     }
 
-    private var greeting: String {
-        let h = Calendar.current.component(.hour, from: Date())
-        switch h {
-        case 5..<12:  return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default:      return "Good night"
-        }
-    }
 }
 
 // MARK: - Nearby stop card
@@ -574,7 +573,7 @@ struct SoftNearbyStopCard: View {
             if a.fav {
                 Image(systemName: "star.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color(hex: "F5B500"))
+                    .foregroundStyle(t.accent)
                     .accessibilityLabel("Favourite")
             }
             Text(destLabel(s.dest))

@@ -364,7 +364,11 @@ struct DetailView: View {
 
             let liveOn = m.isLiveActivityActive(s, stopCode: card.stopCode)
             Button {
-                m.toggleLiveActivity(s, stopName: card.stopName, stopCode: card.stopCode)
+                if m.isLiveActivityActive(s, stopCode: card.stopCode) {
+                    m.stopLiveActivity()
+                } else {
+                    m.startLiveActivity(s, stopName: card.stopName, stopCode: card.stopCode)
+                }
             } label: {
                 HStack(spacing: 12) {
                     HStack(spacing: 10) {

@@ -13,6 +13,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/alert_timing.dart';
@@ -20,6 +21,7 @@ import '../data/changelog.dart';
 import '../data/data_store.dart';
 import '../data/geo.dart';
 import '../data/models.dart';
+import '../data/weather_store.dart';
 import '../services/location_service.dart';
 import '../services/notifications.dart';
 import 'bus_alert.dart';
@@ -509,6 +511,16 @@ class AppModel extends ChangeNotifier {
       _alerts = [..._alerts, a];
     }
     _persistAlerts();
+    // Setting an alert IS the opt-in to notifications. If they're not enabled
+    // yet (e.g. the user skipped the onboarding prompt, or never visited
+    // Settings ▸ Notifications), turn them on now — this requests
+    // POST_NOTIFICATIONS + exact-alarm permission and schedules the pending
+    // alerts. Without this the alert is stored but NEVER fires, which is
+    // exactly the "Android notifications don't work" report: scheduling is
+    // gated behind `_notificationsEnabled`, and it defaults to off.
+    if (!_notificationsEnabled) {
+      await setNotificationsEnabled(true);
+    }
     if (a.kind == AlertKind.destination &&
         destinationFireAt != null &&
         _notificationsEnabled) {
@@ -702,6 +714,32 @@ class AppModel extends ChangeNotifier {
   /// momentarily at the stop isn't cleared on the same tick it's created.
   final Set<String> _arrivalsSeenInbound = {};
 
+  /// Arrival-alert ids already given the "1 minute away" buzz this approach, so
+  /// the gentle haptic fires once per bus (not every tick) and re-arms for the
+  /// next bus once this one has departed. See [_buzzApproachingBuses].
+  final Set<String> _buzzedOneMin = {};
+
+  /// Gently buzz once when a bus we're alerting on drops to ~1 minute away,
+  /// while the app is in the foreground. Mirrors the lock-screen alert's lead
+  /// with an in-app cue. Respects the haptics setting. The notification's own
+  /// vibration covers the backgrounded case (the channel enables vibration).
+  void _buzzApproachingBuses() {
+    if (!_hapticsEnabled) return;
+    for (final a in _alerts) {
+      if (a.kind != AlertKind.arrival) continue;
+      final matches = liveServices(a.stopCode, tracked: [a.busNo]);
+      if (matches.isEmpty) continue; // not in the feed this tick — leave as-is
+      final eta = matches.first.etaSec;
+      if (eta > 90) {
+        // Bus is comfortably away (or the next one has rolled in) — re-arm.
+        _buzzedOneMin.remove(a.id);
+      } else if (eta <= 60 && eta > 0 && !_buzzedOneMin.contains(a.id)) {
+        _buzzedOneMin.add(a.id);
+        HapticFeedback.mediumImpact();
+      }
+    }
+  }
+
   /// Removes arrival alerts whose tracked bus has reached the stop. The bus's
   /// locally-computed ETA holds at 0 from arrival until the next feed refresh,
   /// so the per-second tick reliably catches the window. Only alerts seen
@@ -741,6 +779,8 @@ class AppModel extends ChangeNotifier {
     // removeAlert) so it doesn't linger in Manage alerts or silently re-arm for
     // the next bus. Matches the ongoing tracker, which finalises on arrival.
     _clearFulfilledArrivalAlerts();
+    // Gentle in-app buzz the moment an alerted bus reaches ~1 minute away.
+    _buzzApproachingBuses();
     // Re-arm scheduled arrival alerts every ~10 s — LTA's arrivalDate
     // values drift, and a coarse cadence is enough because notification
     // fire times are absolute (zonedSchedule registers an exact alarm
@@ -751,10 +791,23 @@ class AppModel extends ChangeNotifier {
     // Pull MRT/LRT disruption alerts on a slow cadence. DataStore
     // enforces a 60 s gate internally so this call is cheap.
     _ds.refreshTrainAlertsIfStale();
-    // Keep the ongoing tracker's ETA current. ETA shows whole minutes, so
-    // a 5 s cadence is plenty and avoids re-`show()`ing every second.
-    if (_ongoingKey != null && tick % 5 == 0) {
-      _refreshOngoing();
+    // Refresh weather on a slow cadence (~1 min tick, 15 min inner gate).
+    // Passes the current location so the nearest-area/station resolution
+    // stays accurate as the user moves. Silently no-ops when location is
+    // absent or the cache is fresh.
+    if (tick % 60 == 0) {
+      final loc = _loc.lastLocation;
+      WeatherStore.shared.refreshIfStale(
+        lat: loc?.lat,
+        lon: loc?.lon,
+      );
+    }
+    // Live tracker (single, automatic): point it at the soonest-arriving
+    // alerted bus and push its ETA. A 5 s cadence is plenty (ETA shows whole
+    // minutes) and avoids re-`show()`ing every second.
+    if (_notificationsEnabled && tick % 5 == 0) {
+      _autoTrackSoonestAlert();
+      if (_ongoingKey != null) _refreshOngoing();
     }
     notifyListeners();
   }
@@ -1001,25 +1054,58 @@ class AppModel extends ChangeNotifier {
     await NotificationsService.shared.stopOngoing();
   }
 
-  /// Start (or stop, if already running for this bus) the ongoing tracking
-  /// notification. Caller should only surface this when notifications are
-  /// enabled — without POST_NOTIFICATIONS the OS silently drops it.
-  Future<void> toggleOngoing({
-    required String busNo,
-    required String stopCode,
-    required String stopName,
-  }) async {
-    if (isOngoingActive(busNo: busNo, stopCode: stopCode)) {
-      await _stopOngoingTracker();
-    } else {
-      // Replace any tracker for a different bus (one at a time, like iOS).
-      await NotificationsService.shared.stopOngoing();
-      _ongoingKey = _liveKey(busNo, stopCode);
-      _ongoingMisses = 0;
-      _ds.ensureArrivals(stopCode, force: true);
-      await _refreshOngoing();
+  /// Automatically point the single live tracker at the soonest-arriving bus
+  /// that has an arrival alert, handing off as the soonest changes. The
+  /// lock-screen live view "just follows your next bus" — one at a time, to
+  /// match the platform's single Live Activity — so the user never has to (and
+  /// can't accidentally) pick it per-bus. Push alerts remain unlimited and
+  /// independent of this.
+  ///
+  /// Driven from [_onTick]. Deliberately conservative about STOPPING: when no
+  /// alerted bus is currently inbound it leaves any running tracker alone and
+  /// lets [_refreshOngoing]'s miss-counter / the arrival finale finalise it, so
+  /// a momentary feed gap doesn't kill the live view.
+  void _autoTrackSoonestAlert() {
+    if (!_notificationsEnabled) return;
+
+    // If the current live bus is mid-finalise ("arriving now"), let
+    // [_refreshOngoing] show that final state and clear the key before we hand
+    // off to the next bus — don't preempt the finale.
+    final current = _ongoingKey;
+    if (current != null) {
+      final at = current.indexOf('@');
+      if (at > 0) {
+        final cb = current.substring(0, at);
+        final cs = current.substring(at + 1);
+        final cur = liveServices(cs).where((s) => s.no == cb);
+        if (cur.isNotEmpty && cur.first.etaSec <= 0) return;
+      }
     }
-    notifyListeners();
+
+    BusAlert? soonest;
+    var soonestEta = 1 << 30;
+    for (final a in _alerts) {
+      if (a.kind != AlertKind.arrival) continue;
+      final matches = liveServices(a.stopCode, tracked: [a.busNo]);
+      if (matches.isEmpty) continue;
+      final eta = matches.first.etaSec;
+      if (eta <= 0) continue; // arrived — the arrival flow finalises this one
+      if (eta < soonestEta) {
+        soonestEta = eta;
+        soonest = a;
+      }
+    }
+
+    // No alerted bus inbound right now — leave any running tracker to the
+    // miss-counter / removeAlert to tear down, rather than fighting them.
+    if (soonest == null) return;
+
+    final key = _liveKey(soonest.busNo, soonest.stopCode);
+    if (_ongoingKey != key) {
+      _ongoingKey = key;
+      _ongoingMisses = 0;
+      _ds.ensureArrivals(soonest.stopCode, force: true);
+    }
   }
 
   /// Pushes the current ETA into the ongoing notification, or finalises it
