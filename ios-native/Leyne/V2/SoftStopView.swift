@@ -70,7 +70,11 @@ struct SoftStopView: View {
                 if hasAlertsHere {
                     watchingCard
                         .padding(.horizontal, 16)
+                        .padding(.top, 14)   // breathing room below the walk row
                         .padding(.bottom, 8)
+                        // Slides down from the title block as you start watching
+                        // (and back up when you stop) — see the .animation below.
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
                 // Scrollable content as a List so each bus row is individually
@@ -93,6 +97,11 @@ struct SoftStopView: View {
                 .background(t.bg)
                 .refreshable { await ds.refreshArrivals(stop: stopCode) }
             }
+            // Animate the WATCHING card sliding in/out (and the list shifting
+            // down/up) when you start/stop watching your first/last bus here.
+            // Keyed to hasAlertsHere so only this transition animates — the List
+            // rows themselves never re-diff (WATCHING is pinned, not a row).
+            .animation(.easeInOut(duration: 0.3), value: hasAlertsHere)
         }
         .onAppear { ds.ensureArrivals(stop: stopCode) }
         // Manage all alerts (reachable from the active-alerts card header).
@@ -366,7 +375,9 @@ struct SoftStopView: View {
                             Label(isOn ? "Stop" : "Notify",
                                   systemImage: isOn ? "eye.slash.fill" : "eye.fill")
                         }
-                        .tint(isOn ? .secondary : t.soon)
+                        // Fixed greys (not t.soon): the swipe label is auto-white,
+                        // and t.soon is white in dark mode → white-on-white blank.
+                        .tint(isOn ? Color(white: 0.32) : .gray)
                     }
             }
 
@@ -398,7 +409,9 @@ struct SoftStopView: View {
                                 Label(isOn ? "Stop" : "Notify",
                                       systemImage: isOn ? "eye.slash.fill" : "eye.fill")
                             }
-                            .tint(isOn ? .secondary : t.soon)
+                            // Fixed greys (not t.soon): the swipe label is auto-white,
+                        // and t.soon is white in dark mode → white-on-white blank.
+                        .tint(isOn ? Color(white: 0.32) : .gray)
                         }
                 }
             }

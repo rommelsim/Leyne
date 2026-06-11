@@ -29,13 +29,29 @@ struct SoftToggle: View {
     let t: Theme
     @Binding var value: Bool
 
-    // Native SwiftUI Toggle so the control adopts the system (iOS 26 Liquid
-    // Glass) switch design automatically, instead of a hand-drawn capsule.
-    // Tinted with the semantic green to match the redesign's on-state.
+    // Custom monochrome switch. A native Toggle tinted with t.soon goes
+    // white-on-white in dark mode (the system thumb is always white, and
+    // t.soon/accent is white in dark) — the knob vanishes. We draw our own so
+    // both states read in both modes: ON = accent-filled track with a
+    // contrasting onAccent thumb; OFF = subtle track with a dim thumb.
     var body: some View {
-        Toggle("", isOn: $value)
-            .labelsHidden()
-            .tint(t.soon)
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { value.toggle() }
+        } label: {
+            ZStack(alignment: value ? .trailing : .leading) {
+                Capsule()
+                    .fill(value ? t.accent : t.surfaceHi)
+                    .overlay(Capsule().stroke(t.line, lineWidth: 1))
+                    .frame(width: 46, height: 28)
+                Circle()
+                    .fill(value ? t.onAccent : t.dim)
+                    .frame(width: 22, height: 22)
+                    .padding(3)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(value ? "On" : "Off")
     }
 }
 

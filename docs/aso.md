@@ -1,6 +1,7 @@
 # Leyne — App Store Optimization (ASO) playbook
 
 Synthesized from the 2026-06-09 growth review. ASO is the only growth lever
+that compounds on every *future* organic install, costs nothing ongoing, and is
 a one-afternoon job for a solo dev. Do this before/alongside the widget builds.
 
 Target search intent (SG): people typing **"bus arrival", "bus timing", "sg

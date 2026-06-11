@@ -26,26 +26,24 @@ struct WeatherHeader: View {
     @EnvironmentObject private var loc: LocationManager
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Backdrop — only when we have weather data
+        // Just the readout. The ambient weather wash lives at the SoftHomeView
+        // root (a sibling of the ScrollView) so it can ignore the safe area
+        // cleanly and stay put as content scrolls — see `WeatherBackdrop`.
+        // Anchoring it here, inside the scrolling header, is what made it read
+        // as a discrete bar.
+        VStack(alignment: .leading, spacing: 6) {
+            greetingRow
             if let snap = ws.snapshot {
-                WeatherBackdrop(bucket: snap.bucket, isDark: t.isDark)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                greetingRow
-                if let snap = ws.snapshot {
-                    weatherRow(snap)
-                    if let attrURL = ws.attributionURL {
-                        attributionLine(url: attrURL)
-                    }
+                weatherRow(snap)
+                if let attrURL = ws.attributionURL {
+                    attributionLine(url: attrURL)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
         .onAppear {
             if let loc = loc.location {
                 ws.fetchIfNeeded(location: loc)
@@ -154,42 +152,43 @@ struct WeatherHeader: View {
 
 // MARK: - WeatherBackdrop
 
-/// A subtle greyscale gradient behind the top hero area.
-/// Condition → opacity tuning (never more than 0.12 in light, 0.18 in dark):
-///   clearDay   — very faint warm-light illusion via near-white top
-///   clearNight — deep-black fade
-///   cloudy     — mid-grey
-///   rain       — darker grey, slightly stronger
+/// A barely-there greyscale ambient wash pinned to the very top of the screen.
 ///
-/// The gradient fades completely to `.clear` at the bottom so it blends
-/// seamlessly into the card content beneath the header.
+/// Mounted at the SoftHomeView root (a sibling of the ScrollView) with
+/// `.ignoresSafeArea()`, so it fills full-bleed from above the status bar and
+/// stays put as content scrolls — ambient top lighting, not a band tied to the
+/// header. The single linear ramp reaches `.clear` at ~38 % of the screen
+/// height — a long, edge-free fade that's fully gone before the first card, so
+/// there's no visible boundary anywhere.
+///
+/// Condition → peak opacity (kept very low; the peak sits behind the status bar
+/// and is already fading by the time it reaches the readout, so the visible
+/// tint is a fraction of these numbers). Strict monochrome: white tint in dark,
+/// black tint in light, zero hue.
 struct WeatherBackdrop: View {
     let bucket: WeatherBucket
     let isDark: Bool
 
     var body: some View {
         LinearGradient(
-            colors: [topColor, .clear],
+            stops: [
+                .init(color: topColor, location: 0.0),
+                .init(color: .clear,  location: 0.38)
+            ],
             startPoint: .top,
             endPoint: .bottom
         )
-        .ignoresSafeArea(edges: .top)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var topColor: Color {
-        // All values are greyscale opacity-only — zero hue.
+        // Greyscale opacity-only — zero hue.
         let opacity: Double
         switch bucket {
-        case .clearDay:
-            opacity = isDark ? 0.08 : 0.06
-        case .clearNight:
-            opacity = isDark ? 0.16 : 0.08
-        case .cloudy:
-            opacity = isDark ? 0.12 : 0.07
-        case .rain:
-            opacity = isDark ? 0.18 : 0.10
+        case .clearDay:   opacity = isDark ? 0.07  : 0.045
+        case .clearNight: opacity = isDark ? 0.12  : 0.06
+        case .cloudy:     opacity = isDark ? 0.09  : 0.055
+        case .rain:       opacity = isDark ? 0.13  : 0.07
         }
         // Dark mode: white tint; light mode: black tint — stays monochrome.
         return (isDark ? Color.white : Color.black).opacity(opacity)

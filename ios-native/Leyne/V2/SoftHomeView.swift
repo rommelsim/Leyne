@@ -13,6 +13,7 @@ struct SoftHomeView: View {
     @EnvironmentObject var fb: Feedback
     @EnvironmentObject var ds: DataStore
     @StateObject private var loc = LocationManager.shared
+    @ObservedObject private var ws = WeatherService.shared
 
     /// Line codes the user has tapped to dismiss this session. Cleared
     /// when the app cold-starts so a new disruption surfaces again.
@@ -485,7 +486,8 @@ struct SoftNearbyStopCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 if highlight { closestBadge.padding(.bottom, 12) }
                 identityRow
-                Rectangle().fill(t.line).frame(height: 1).padding(.vertical, 12)
+                Rectangle().fill(t.line).frame(height: 1)
+                    .padding(.vertical, 14)
                 if arrivals.isEmpty {
                     quietRow
                 } else {
@@ -636,7 +638,9 @@ struct SoftNearbyStopCard: View {
         .overlay(alignment: .top) {
             Rectangle().fill(t.line).frame(height: 1)
         }
-        .padding(.top, 2)
+        // Gap between the last bus pill and this divider (was 2 → pill bottom
+        // touched the line above "View all buses").
+        .padding(.top, 14)
     }
 
     private var quietRow: some View {

@@ -8,6 +8,49 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.6.0 · iOS (23) · 2026-06-11
+
+**2026-06-11 — iOS Archive (2.6.0, build 23):** A design + features release. Leyne
+goes fully monochrome, gains a weather/time hero on Home, and reworks arrival
+alerts around a one-swipe gesture with a clearer notification + Live Activity
+flow. Colour is now reserved for MRT lines (a future addition). _Android stays on
+2.5.1 this round — the monochrome theme isn't ported yet, so Android moves to
+2.6.0 once that parity lands._
+
+- **Monochrome throughout:** the green/amber/salmon palette is gone — every
+  screen is now greyscale, including the warn/critical states, so ETAs and the
+  service you're after carry the emphasis. Colour is held back for MRT lines.
+  (`Theme.swift`)
+- **Weather + time on Home:** the header greets you with the time and a local
+  forecast — temperature, condition, and a near-term rain hint — over a subtle
+  ambient top wash that shifts with the weather (no hard edge; sits behind the
+  status bar). WeatherKit on device, with a free NEA / data.gov.sg fallback so it
+  populates everywhere, including the Simulator. (`WeatherHeader.swift`,
+  `WeatherService.swift`, `SoftHomeView.swift`)
+- **Swipe to set an arrival alert:** swipe a bus row left to arm an alert in one
+  tap — no sheet — confirmed by a toast with Undo. Alerts always fire at both 3
+  min and 1 min before arrival (the lead-time picker is gone).
+  (`SoftStopView.swift`, `AppModel.swift`, `AlertTiming.swift`)
+- **Clearer notifications:** restructured copy that leads with the bus and stop,
+  with a distinct icon for the 1-min vs 3-min heads-up. (`AlertTiming.swift`)
+- **Live Activity that carries the ETA:** the Lock Screen and Dynamic Island now
+  show the live ETA, tapping it opens the bus you're watching (even from a cold
+  launch), and it automatically follows the soonest alerted bus when you're
+  tracking more than one. (`LeyneLiveActivity.swift`, `SoftRoot.swift`)
+- **Gentle haptic** when your bus is a minute away. (`AppModel.swift`)
+- **MRT stations on the route:** stops that serve an MRT station now show a
+  station pill on the route timeline, where the data exists. (`MrtStations.swift`,
+  `RouteTimeline.swift`)
+- **Fewer ads, better placed:** fewer ads at launch, and the full arrival list
+  carries a single inline panel mid-list instead of stacking banners.
+- **Sort/filter + arrivals header:** the stop's sort options moved from the ⋯
+  menu into a visible filter button above the arrivals list, now titled simply
+  "Arrivals". (`SoftStopView.swift`)
+- **Fixes & polish:** dark-mode contrast fixes (swipe action, toggles), the bus
+  pill no longer touches the divider on Home, and the bus row → Watching
+  transition is animated with proper vertical spacing. (`SoftStopView.swift`,
+  `SoftHomeView.swift`, `SoftPrimitives.swift`)
+
 ## Leyne 2.5.1 · Android (38) · 2026-06-09
 
 **2026-06-09 — Android AAB (2.5.1, build 38):** _(versionName lifted 2.5.0 →

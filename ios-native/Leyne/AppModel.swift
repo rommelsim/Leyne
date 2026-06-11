@@ -84,6 +84,33 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.6.0": WhatsNewEntry(
+        headline: "A calmer look — plus weather and one-swipe alerts.",
+        items: [
+            WhatsNewItem(
+                icon: "circle.lefthalf.filled",
+                title: "A calmer, monochrome look",
+                body: "Leyne is now clean black-and-white throughout, so arrival "
+                    + "times and the bus you're after stay front and centre. "
+                    + "(Colour returns when trains arrive.)"
+            ),
+            WhatsNewItem(
+                icon: "cloud.sun.fill",
+                title: "Weather and time on Home",
+                body: "The Home screen now opens with the time and your local "
+                    + "forecast — temperature, conditions, and a heads-up when "
+                    + "rain's on the way."
+            ),
+            WhatsNewItem(
+                icon: "bell.badge.fill",
+                title: "Swipe to get notified",
+                body: "Swipe a bus to set an arrival alert in one tap — you'll be "
+                    + "buzzed at 3 minutes and again at 1 minute away. Clearer "
+                    + "notifications, and a Live Activity that shows the ETA on "
+                    + "your Lock Screen and opens the right bus when tapped."
+            ),
+        ]
+    ),
     "2.5.0": WhatsNewEntry(
         headline: "Your bus, all on one screen.",
         items: [

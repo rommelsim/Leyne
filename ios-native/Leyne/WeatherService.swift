@@ -115,16 +115,21 @@ final class WeatherService: ObservableObject {
                 rainHint: rainHint,
                 bucket: bucket(for: current)
             )
+            return  // WeatherKit succeeded — done.
         } catch {
-            // Unauthorized, not provisioned, or network failure — degrade silently.
-            log.info("WeatherKit fetch skipped: \(error.localizedDescription)")
-            // Do NOT clear an existing snapshot on transient errors so the last
-            // reading persists until a successful refresh.
-            if snapshot == nil {
-                // First-ever fetch failed — stay nil (no weather UI).
-            }
+            // Unauthorized (capability not provisioned / Simulator without iCloud)
+            // or network failure — fall through to the NEA fallback below so the
+            // weather header still populates everywhere.
+            log.info("WeatherKit unavailable, trying NEA: \(error.localizedDescription)")
         }
 #endif
+        // Fallback: NEA / data.gov.sg (free, no key, Singapore-only). Works on
+        // the Simulator and before WeatherKit is provisioned. Apple attribution
+        // is intentionally NOT shown for NEA data (it stays nil).
+        if let nea = await fetchNEA(location: location) {
+            lastFetchDate = Date()
+            snapshot = nea
+        }
     }
 
     // MARK: - Helpers
@@ -165,6 +170,86 @@ final class WeatherService: ObservableObject {
         return "\(label) ~\(display)\(ampm)"
     }
 
+    // MARK: - NEA fallback (data.gov.sg)
+
+    /// Builds a WeatherSnapshot from NEA's free 2-hour forecast + air-temperature
+    /// APIs (no key). Picks the area/station nearest the user. Returns nil on any
+    /// failure so the header simply stays hidden.
+    private func fetchNEA(location: CLLocation) async -> WeatherSnapshot? {
+        async let fData = neaGet("https://api.data.gov.sg/v1/environment/2-hour-weather-forecast")
+        async let tData = neaGet("https://api.data.gov.sg/v1/environment/air-temperature")
+        guard
+            let forecastData = await fData,
+            let tempData = await tData,
+            let forecast = try? JSONDecoder().decode(NEAForecast.self, from: forecastData),
+            let temp = try? JSONDecoder().decode(NEATemp.self, from: tempData)
+        else { return nil }
+
+        let lat = location.coordinate.latitude
+        let lon = location.coordinate.longitude
+
+        // Nearest area's forecast text.
+        guard
+            let area = forecast.area_metadata.min(by: {
+                sqDist($0.label_location.latitude, $0.label_location.longitude, lat, lon)
+                    < sqDist($1.label_location.latitude, $1.label_location.longitude, lat, lon)
+            }),
+            let text = forecast.items.first?.forecasts.first(where: { $0.area == area.name })?.forecast
+        else { return nil }
+
+        // Nearest station's temperature.
+        guard
+            let station = temp.metadata.stations.min(by: {
+                sqDist($0.location.latitude, $0.location.longitude, lat, lon)
+                    < sqDist($1.location.latitude, $1.location.longitude, lat, lon)
+            }),
+            let reading = temp.items.first?.readings.first(where: { $0.station_id == station.id })
+        else { return nil }
+
+        let lower = text.lowercased()
+        let isRain = lower.contains("rain") || lower.contains("shower") || lower.contains("thundery") || lower.contains("drizzle")
+        let isClear = lower.contains("fair") || lower.contains("sunny") || lower.contains("clear")
+        let isPartly = lower.contains("partly")
+        let hour = Calendar.current.component(.hour, from: Date())
+        let isNight = !(6...18).contains(hour)
+
+        let bucket: WeatherBucket = isRain ? .rain
+            : (isClear && !isPartly ? (isNight ? .clearNight : .clearDay) : .cloudy)
+        let symbol: String
+        if isRain {
+            symbol = lower.contains("thundery") ? "cloud.bolt.rain.fill" : "cloud.rain.fill"
+        } else if isClear && !isPartly {
+            symbol = isNight ? "moon.stars.fill" : "sun.max.fill"
+        } else if isPartly {
+            symbol = isNight ? "cloud.moon.fill" : "cloud.sun.fill"
+        } else {
+            symbol = "cloud.fill"
+        }
+
+        return WeatherSnapshot(
+            tempC: Int(reading.value.rounded()),
+            symbolName: symbol,
+            conditionLabel: text,
+            rainHint: isRain ? "rain expected soon" : nil,
+            bucket: bucket
+        )
+    }
+
+    private func neaGet(_ urlString: String) async -> Data? {
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            return data
+        } catch { return nil }
+    }
+
+    /// Squared lat/lon distance — fine for "nearest within Singapore".
+    private func sqDist(_ aLat: Double, _ aLon: Double, _ bLat: Double, _ bLon: Double) -> Double {
+        let dLat = aLat - bLat, dLon = aLon - bLon
+        return dLat * dLat + dLon * dLon
+    }
+
     /// Maps the current condition to a greyscale backdrop bucket.
     private func bucket(for current: CurrentWeather) -> WeatherBucket {
         let isDaytime = current.isDaylight
@@ -188,3 +273,24 @@ final class WeatherService: ObservableObject {
 private typealias WKWeatherService = WeatherKit.WeatherService
 private typealias HourWeather = WeatherKit.HourWeather
 #endif
+
+// MARK: - NEA response models (data.gov.sg, free, no key)
+
+private struct NEAForecast: Decodable {
+    struct LatLon: Decodable { let latitude: Double; let longitude: Double }
+    struct Area: Decodable { let name: String; let label_location: LatLon }
+    struct AreaForecast: Decodable { let area: String; let forecast: String }
+    struct Item: Decodable { let forecasts: [AreaForecast] }
+    let area_metadata: [Area]
+    let items: [Item]
+}
+
+private struct NEATemp: Decodable {
+    struct LatLon: Decodable { let latitude: Double; let longitude: Double }
+    struct Station: Decodable { let id: String; let location: LatLon }
+    struct Reading: Decodable { let station_id: String; let value: Double }
+    struct Meta: Decodable { let stations: [Station] }
+    struct Item: Decodable { let readings: [Reading] }
+    let metadata: Meta
+    let items: [Item]
+}
