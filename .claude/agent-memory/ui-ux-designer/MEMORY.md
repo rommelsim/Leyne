@@ -6,3 +6,4 @@
 - [Slide-to-Unpin Spec](project_slide_to_unpin_spec.md) — per-platform gesture spec, button-removal verdict, undo, discoverability, a11y, edit-mode interplay — 2026-05-30
 - [SoftBusView Audit](project_softbusview_audit.md) — P0–P2 findings: "Arr" clip, map/caption contradiction, notify+LiveActivity confusion, FOLLOWING label — 2026-05-30
 - [Habit Loop & Retention Strategy](project_habit_loop.md) — trigger gap analysis, commute card concept, notification plan, share ETA virality, ratings timing — 2026-06-09
+- [Leyne Design Direction 2026](project_leyne_design_direction.md) — identity color strategy, real Liquid Glass adoption, animation plan, nav restructure, widget elevation, Live Activity — 2026-06-11

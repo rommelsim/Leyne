@@ -44,6 +44,14 @@ struct SoftStopView: View {
     /// How many services to show before the "Show more" expander kicks in.
     private let collapsedCount = 6
 
+    /// Large-title collapse state, driven by scroll position (native
+    /// navigation-bar behaviour, hand-rolled because the nav bar is hidden):
+    /// `scrolledUnder` fades the glass backdrop in as soon as any content
+    /// slides beneath the bar; `collapsed` swaps in the compact inline title
+    /// once the large title has scrolled away.
+    @State private var scrolledUnder = false
+    @State private var collapsed = false
+
     private var t: Theme { m.t }
     private var feed: Freshness { Freshness.from(ds.lastRefresh(stopCode)) }
     private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
@@ -52,50 +60,75 @@ struct SoftStopView: View {
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Fixed top bar + title block — outside the List so they don't
-                // scroll. Both are already vertically compact; no clipping risk.
-                VStack(alignment: .leading, spacing: 20) {
-                    topBar
-                    titleBlock
+            // Scrollable content as a List so each bus row is individually
+            // swipeable (SwiftUI .swipeActions requires a List context).
+            List {
+                // ── Large title — scrolls away, collapsing into the inline
+                //    bar title, mirroring the native large-title behaviour. ──
+                titleBlock
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                // ── Arrivals header + sort ─────────────────────────────
+                sectionHeaderRow
+
+                // ── Arrivals ───────────────────────────────────────────
+                arrivalRows
+
+                // ── Bottom padding ─────────────────────────────────────
+                Color.clear.frame(height: 40)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(t.bg)
+            .refreshable { await ds.refreshArrivals(stop: stopCode) }
+            // Drives the large-title collapse: backdrop fades in the moment
+            // content slides under the bar; the inline title appears once the
+            // large title has scrolled past. State only flips on transitions,
+            // so the List isn't re-evaluated per scroll frame.
+            .onScrollGeometryChange(for: CGFloat.self, of: { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            }) { _, y in
+                let under = y > 2
+                let collapse = y > 64
+                if under != scrolledUnder {
+                    withAnimation(.easeInOut(duration: 0.15)) { scrolledUnder = under }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-
-                // WATCHING — pinned ABOVE the List (not a List row). Keeping it
-                // out of the List means toggling an alert never inserts/removes a
-                // List row, so the arrival rows don't fly up/down on the diff;
-                // the pinned block just appears/disappears as a clean unit.
-                if hasAlertsHere {
-                    watchingCard
-                        .padding(.horizontal, 16)
-                        .padding(.top, 14)   // breathing room below the walk row
-                        .padding(.bottom, 8)
-                        // Slides down from the title block as you start watching
-                        // (and back up when you stop) — see the .animation below.
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                if collapse != collapsed {
+                    withAnimation(.easeInOut(duration: 0.2)) { collapsed = collapse }
                 }
+            }
+            // Pinned bar as a top safe-area inset: the title row + arrival
+            // rows scroll UNDERNEATH it, visibly blurring through the iOS 26
+            // Liquid Glass bar. The backdrop is clear while the large title
+            // shows (native large-title look) and fades in on scroll.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    compactBar
 
-                // Scrollable content as a List so each bus row is individually
-                // swipeable (SwiftUI .swipeActions requires a List context).
-                List {
-                    // ── Arrivals header + sort ─────────────────────────────
-                    sectionHeaderRow
-
-                    // ── Arrivals ───────────────────────────────────────────
-                    arrivalRows
-
-                    // ── Bottom padding ─────────────────────────────────────
-                    Color.clear.frame(height: 40)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets())
+                    // WATCHING — pinned in the header (not a List row). Keeping
+                    // it out of the List means toggling an alert never inserts/
+                    // removes a List row, so the arrival rows don't fly up/down
+                    // on the diff; the block appears/disappears as a clean unit.
+                    if hasAlertsHere {
+                        watchingCard
+                            .padding(.horizontal, 16)
+                            .padding(.top, 10)
+                            .padding(.bottom, 8)
+                            // Slides down from the bar as you start watching
+                            // (and back up when you stop).
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .background(t.bg)
-                .refreshable { await ds.refreshArrivals(stop: stopCode) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    t.glassBar().ignoresSafeArea(edges: .top)
+                        .opacity(scrolledUnder || hasAlertsHere ? 1 : 0)
+                }
             }
             // Animate the WATCHING card sliding in/out (and the list shifting
             // down/up) when you start/stop watching your first/last bus here.
@@ -117,6 +150,32 @@ struct SoftStopView: View {
 
     // MARK: - Top bar
 
+    /// The pinned bar: back/pin buttons with the compact inline title rising
+    /// into the centre once the large title scrolls away — the same handoff
+    /// a native navigation bar performs.
+    private var compactBar: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                Text(stopName)
+                    .font(t.sans(16, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                Text("Stop \(stopCode)")
+                    .font(t.mono(10))
+                    .foregroundStyle(t.dim)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 56)   // clear of the 44pt circles
+            .opacity(collapsed ? 1 : 0)
+            .offset(y: collapsed ? 0 : 6)
+            .accessibilityHidden(!collapsed)
+
+            topBar
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 6)
+    }
+
     /// Back · (spacer) · star · ellipsis — circular 44×44 buttons.
     private var topBar: some View {
         HStack(spacing: 10) {
@@ -137,7 +196,7 @@ struct SoftStopView: View {
             } label: {
                 Image(systemName: isPinned ? "mappin.circle.fill" : "mappin.circle")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isPinned ? t.soon : t.fg)
+                    .foregroundStyle(isPinned ? t.identity : t.fg)
                     .frame(width: 44, height: 44)
                     .background(t.surface, in: Circle())
                     .overlay(Circle().stroke(t.line, lineWidth: 1))
@@ -295,12 +354,21 @@ struct SoftStopView: View {
     /// top-right "..." overflow, which only carried sort). Sits right above the
     /// list so it's easy to reach.
     private var sectionHeaderRow: some View {
-        HStack(spacing: 8) {
-            Text("Arrivals")
-                .font(t.sans(15, weight: .semibold))
-                .foregroundStyle(t.dim)
-            Spacer(minLength: 8)
-            sortMenu
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Arrivals")
+                    .font(t.sans(15, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                Spacer(minLength: 8)
+                sortMenu
+            }
+            // Discoverability whisper — surfaces the swipe gesture to users who
+            // never try it. Gone the moment the first alert is set here.
+            if !hasAlertsHere {
+                Text("Swipe a bus left to get an alert when it's 3 minutes away")
+                    .font(t.sans(12))
+                    .foregroundStyle(t.faint)
+            }
         }
         .padding(.leading, 2)
         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
@@ -372,7 +440,7 @@ struct SoftStopView: View {
                                 busNo: bus.no, stopCode: stopCode,
                                 stopName: stopName, dest: bus.dest)
                         } label: {
-                            Label(isOn ? "Stop" : "Notify",
+                            Label(isOn ? "Stop" : "Alert me",
                                   systemImage: isOn ? "eye.slash.fill" : "eye.fill")
                         }
                         // Fixed greys (not t.soon): the swipe label is auto-white,
@@ -406,7 +474,7 @@ struct SoftStopView: View {
                                     busNo: bus.no, stopCode: stopCode,
                                     stopName: stopName, dest: bus.dest)
                             } label: {
-                                Label(isOn ? "Stop" : "Notify",
+                                Label(isOn ? "Stop" : "Alert me",
                                       systemImage: isOn ? "eye.slash.fill" : "eye.fill")
                             }
                             // Fixed greys (not t.soon): the swipe label is auto-white,

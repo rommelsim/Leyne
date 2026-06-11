@@ -1,7 +1,7 @@
 // Home Screen widgets: live next-bus arrivals for one (Small/Medium) or two
-// (Large) pinned stops. The widget reads as a snippet of the app — same
-// cream/parchment surface, mono digits, mint left-edge pill for arriving
-// rows — so muscle memory transfers from in-app PinnedCardView.
+// (Large) pinned stops. The widget reads as a snippet of the app — the same
+// monochrome surfaces, mono digits, and arrival-green signal as the app's
+// Theme — so muscle memory transfers from in-app PinnedCardView.
 //
 // Self-contained: the widget extension can't import the app module. It
 // reads pinned stops from the shared App Group and calls LTA DataMall

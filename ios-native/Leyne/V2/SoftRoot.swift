@@ -1,8 +1,10 @@
-// SoftRoot — Leyne 2.0 root composition. Wraps Home / Nearby / Settings
-// in a NavigationStack so child views (Stop / Bus / Search) push with
-// UIKit's native slide-from-trailing animation + edge-swipe back
-// gesture. AppModel.openCard observation drives notification /
-// Spotlight deep-link pushes onto the stack.
+// SoftRoot — Leyne single-screen composition. Home (Nearby) is the ONLY
+// full-screen view; everything else — Search, Saved, Settings, Stop, Bus —
+// presents as a card (sheet) over the home canvas, navigating internally
+// with native pushes (Search → Stop → Bus all inside one card). The bottom
+// tab bar is gone: Search is a field at the top of Home, Saved/Settings are
+// buttons beside it. AppModel.openCard observation drives notification /
+// Spotlight / Live Activity deep-link cards.
 
 import SwiftUI
 import UIKit
@@ -45,18 +47,48 @@ enum SoftRoute: Hashable {
     case search
 }
 
+/// Which card is presented over the home canvas. One card at a time; deeper
+/// drill-downs (Search → Stop → Bus) push inside the card's own stack.
+enum RootCard: Identifiable, Hashable {
+    case search
+    case saved
+    case settings
+    case stop(String)
+    case bus(stopCode: String, svc: String, fullRoute: Bool = false)
+
+    var id: String {
+        switch self {
+        case .search:               return "search"
+        case .saved:                return "saved"
+        case .settings:             return "settings"
+        case .stop(let c):          return "stop-\(c)"
+        case .bus(let c, let s, _): return "bus-\(c)-\(s)"
+        }
+    }
+
+    /// Cards whose dismissal counts as "backing out of a detail" for the
+    /// interstitial manager.
+    var isDetail: Bool {
+        switch self {
+        case .stop, .bus: return true
+        default:          return false
+        }
+    }
+}
+
 struct SoftRoot: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
 
-    @State private var tab: SoftTab = .home
-    // One navigation stack per tab so a drill-down in Home doesn't follow
-    // the user over to Nearby or Search. The native TabView preserves each
-    // path across tab switches, matching iOS's standard tab behaviour.
-    @State private var homeStack: [SoftRoute] = []
-    @State private var favouritesStack: [SoftRoute] = []
-    @State private var settingsStack: [SoftRoute] = []
-    @State private var searchStack: [SoftRoute] = []
+    /// The presented card + the navigation path INSIDE it.
+    @State private var card: RootCard?
+    @State private var cardPath: [SoftRoute] = []
+    /// Stop cards open at .medium (Maps-style peek, home visible behind) and
+    /// promote to .large when a bus is pushed; everything else is .large.
+    @State private var cardDetent: PresentationDetent = .large
+    /// What was on screen when the sheet dismissed (sheet's onDismiss runs
+    /// after `card` is already nil).
+    @State private var lastPresented: RootCard?
     @State private var mapHandoff: MapHandoffKind = .none
 
     private var t: Theme { m.t }
@@ -65,56 +97,25 @@ struct SoftRoot: View {
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            // Native TabView with four inline labelled tabs — Home ·
-            // Favourites · Settings · Search — matching the 2.4.0 mockup's
-            // standard bottom bar. Search is a normal tab (not the detached
-            // `.search` role circle) so it reads as the fourth labelled item.
-            // Each tab owns a NavigationStack so child pushes (Stop / Bus)
-            // keep the native slide + edge-swipe-back. Selection tint is the
-            // location blue used across the redesign.
-            TabView(selection: $tab) {
-                Tab("Nearby", systemImage: "location.fill", value: SoftTab.home) {
-                    navStack($homeStack) {
-                        SoftHomeView(
-                            onTab: { tab = $0 },
-                            onOpenStop: { homeStack.append(.stop($0)) },
-                            onOpenSearch: { tab = .search }
-                        )
-                    }
-                }
-                Tab("Saved", systemImage: "star.fill", value: SoftTab.favourites) {
-                    navStack($favouritesStack) {
-                        SoftFavouritesView(
-                            onOpenStop: { favouritesStack.append(.stop($0)) },
-                            onOpenBus: { code, svc in
-                                favouritesStack.append(.bus(stopCode: code, svc: svc))
-                            },
-                            onOpenSearch: { tab = .search }
-                        )
-                    }
-                }
-                Tab("Search", systemImage: "magnifyingglass", value: SoftTab.search) {
-                    navStack($searchStack) {
-                        SoftSearchView(
-                            onClose: { tab = .home },
-                            onOpenStop: { searchStack.append(.stop($0)) },
-                            onOpenBus: { stopCode, svcNo in
-                                searchStack.append(.bus(stopCode: stopCode,
-                                                        svc: svcNo,
-                                                        fullRoute: true))
-                            }
-                        )
-                    }
-                }
-                Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
-                    navStack($settingsStack) {
-                        SoftSettingsView(onTab: { tab = $0 })
-                    }
-                }
+            // Home — the single full-screen canvas. Keeps a bare
+            // NavigationStack only for its in-place pushes (the alerts list).
+            NavigationStack {
+                SoftHomeView(
+                    onTab: { open(tab: $0) },
+                    onOpenStop: { present(.stop($0)) },
+                    onOpenSearch: { present(.search) },
+                    onOpenBus: { code, svc in
+                        present(.bus(stopCode: code, svc: svc))
+                    },
+                    onOpenSaved: { present(.saved) },
+                    onOpenSettings: { present(.settings) }
+                )
+                .adBannerGutter()
+                .softTopEdgeBlur()
+                .toolbar(.hidden, for: .navigationBar)
             }
-            .tint(t.meBlue)
 
-            // Map handoff toast overlays the whole stack.
+            // Map handoff toast overlays everything.
             VStack {
                 MapHandoffToast(t: t, kind: $mapHandoff)
                     .padding(.top, 8)
@@ -123,42 +124,83 @@ struct SoftRoot: View {
             .zIndex(100)
             .allowsHitTesting(mapHandoff != .none)
         }
-        // Interstitial ad: each tab owns its own NavigationStack, so a Stop/Bus
-        // exit shows up as that tab's path shrinking. Observing the paths
-        // (rather than each onBack button) means the back button, the system
-        // back, AND the edge-swipe-back gesture all trigger the attempt — they
-        // all pop the bound path. The manager's guards decide whether one shows.
-        .onChange(of: homeStack) { old, new in handleStackPop(old, new) }
-        .onChange(of: favouritesStack) { old, new in handleStackPop(old, new) }
-        .onChange(of: searchStack) { old, new in handleStackPop(old, new) }
-        .onChange(of: settingsStack) { old, new in handleStackPop(old, new) }
+        .sheet(item: $card, onDismiss: cardDismissed) { c in
+            cardContent(c)
+        }
+        // Interstitial ad: a Bus exit inside a card shows up as the card's
+        // path shrinking; observing the path means the back button AND the
+        // edge-swipe-back both trigger the attempt. Card dismissal itself is
+        // handled in `cardDismissed`. The manager's guards decide whether one
+        // actually shows.
+        .onChange(of: cardPath) { old, new in
+            handleStackPop(old, new)
+            // Bus needs the full card — promote a medium Stop peek when
+            // drilling into a bus.
+            if pathHasBus(new) { cardDetent = .large }
+        }
         // Notification / Spotlight / Live Activity deep links arrive via
-        // AppModel.openCard. Route them into the Home tab's stack, then clear so
-        // the same trigger fires the next tap. `initial: true` is essential for
-        // COLD launches (tapping a Live Activity from a suspended/killed app):
-        // onOpenURL sets openCard before this observer attaches, so without the
-        // initial pass the deep link is silently dropped and nothing navigates.
-        .onChange(of: m.openCard, initial: true) { _, card in
-            guard let c = card else { return }
-            // This replaces the Home stack programmatically — tell the
-            // interstitial manager so the resulting shrink isn't read as a
-            // user back-exit (they tapped a notification, not "back").
+        // AppModel.openCard. Present them as a Stop card (with the Bus pushed
+        // when the link names a service), then clear so the same trigger
+        // fires the next tap. `initial: true` is essential for COLD launches
+        // (tapping a Live Activity from a suspended/killed app): onOpenURL
+        // sets openCard before this observer attaches, so without the initial
+        // pass the deep link is silently dropped and nothing navigates.
+        .onChange(of: m.openCard, initial: true) { _, oc in
+            guard let oc else { return }
+            // Programmatic present — tell the interstitial manager so a
+            // subsequent dismiss isn't read as a user back-exit (they tapped
+            // a notification, not "back").
             InterstitialAdManager.shared.suppressNextExit()
-            tab = .home
-            if let svc = c.initialSelectedNo, !svc.isEmpty {
-                homeStack = [.stop(c.stopCode), .bus(stopCode: c.stopCode, svc: svc)]
+            if let svc = oc.initialSelectedNo, !svc.isEmpty {
+                present(.stop(oc.stopCode),
+                        path: [.bus(stopCode: oc.stopCode, svc: svc)])
             } else {
-                homeStack = [.stop(c.stopCode)]
+                present(.stop(oc.stopCode))
             }
             m.openCard = nil
         }
     }
 
-    /// Fires an interstitial attempt when a tab's nav path shrinks and the
+    // MARK: - Card presentation
+
+    /// Presents (or swaps to) a card, resetting its internal path. Stop cards
+    /// peek at .medium; anything else (or a pre-loaded deep path) is .large.
+    private func present(_ c: RootCard, path: [SoftRoute] = []) {
+        cardPath = path
+        if case .stop = c, path.isEmpty {
+            cardDetent = .medium
+        } else {
+            cardDetent = .large
+        }
+        lastPresented = c
+        card = c
+    }
+
+    /// Maps legacy SoftTab requests (Settings' / Home's onTab links) onto
+    /// the card model.
+    private func open(tab: SoftTab) {
+        switch tab {
+        case .search:          present(.search)
+        case .favourites:      present(.saved)
+        case .settings:        present(.settings)
+        case .home, .nearby:   card = nil
+        }
+    }
+
+    private func cardDismissed() {
+        // Backing out of a Stop/Bus card — or a card whose stack had drilled
+        // into one — is the ad moment the tabbed app keyed off nav pops.
+        let sawDetail = (lastPresented?.isDetail ?? false)
+        cardPath = []
+        lastPresented = nil
+        if sawDetail {
+            InterstitialAdManager.shared.maybeShowOnExit(model: m)
+        }
+    }
+
+    /// Fires an interstitial attempt when the card's path shrinks and the
     /// removed top was a Stop or Bus detail — i.e. the user backed out of a
-    /// detail view. Growing paths (drill-in, deep-link) and tab switches are
-    /// ignored. The manager's own guards (caps, gates, deep-link suppression)
-    /// decide whether an ad actually shows.
+    /// detail inside the card. Growing paths (drill-in) are ignored.
     private func handleStackPop(_ old: [SoftRoute], _ new: [SoftRoute]) {
         guard new.count < old.count, let removed = old.last else { return }
         switch removed {
@@ -169,76 +211,115 @@ struct SoftRoot: View {
         }
     }
 
-    /// Wraps a tab's root in a NavigationStack bound to that tab's path,
-    /// registering the shared route destinations. The ad-banner gutter is
-    /// applied to the root *and* every pushed detail view, so the banner
-    /// stays visible on Stop / Bus pages too. Each mount point owns its own
-    /// banner host (see `BannerAdView`); the host's `window != nil` gate
-    /// means only the on-screen view ever requests an ad, so the extra
-    /// gutters stay AdMob-policy-clean.
+    private func pathHasBus(_ p: [SoftRoute]) -> Bool {
+        p.contains {
+            if case .bus = $0 { return true }
+            return false
+        }
+    }
+
+    // MARK: - Card content
+
     @ViewBuilder
-    private func navStack<Root: View>(_ path: Binding<[SoftRoute]>,
-                                      @ViewBuilder root: () -> Root) -> some View {
-        NavigationStack(path: path) {
-            root()
-                .adBannerGutter()
+    private func cardContent(_ c: RootCard) -> some View {
+        NavigationStack(path: $cardPath) {
+            cardRoot(c)
                 .softTopEdgeBlur()
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: SoftRoute.self) { route in
-                    routeDestination(route, path: path)
+                    routeDestination(route)
                 }
         }
+        .presentationDetents(detents(for: c), selection: $cardDetent)
+        .presentationDragIndicator(.visible)
+        .presentationBackground(t.bg)
     }
 
-    /// A pushed destination with the standard chrome. The bottom ad-banner
-    /// gutter is applied to every destination EXCEPT `.stop`, which carries its
-    /// own inline 300×250 MREC instead — mounting both would double up ads on
-    /// one screen.
-    @ViewBuilder
-    private func routeDestination(_ route: SoftRoute,
-                                  path: Binding<[SoftRoute]>) -> some View {
-        let content = routeView(route, path: path)
-            .softTopEdgeBlur()
-            .toolbar(.hidden, for: .navigationBar)
-            // Tab bar stays visible on pushed Stop / Bus detail pages so the
-            // user can switch tabs without backing out.
-            .enableSwipeBack()
-        switch route {
-        case .stop:
-            content
-        default:
-            content.adBannerGutter()
-        }
+    private func detents(for c: RootCard) -> Set<PresentationDetent> {
+        if case .stop = c { return [.medium, .large] }
+        return [.large]
     }
 
+    /// The root view of each card. Dismissal closures clear `card`; deeper
+    /// navigation pushes onto the card's own path.
     @ViewBuilder
-    private func routeView(_ route: SoftRoute,
-                           path: Binding<[SoftRoute]>) -> some View {
-        let pop = { if !path.wrappedValue.isEmpty { path.wrappedValue.removeLast() } }
-        switch route {
-        case .stop(let code):
-            SoftStopView(stopCode: code,
-                         onBack: pop,
-                         onOpenBus: { svc in path.wrappedValue.append(.bus(stopCode: code, svc: svc)) })
-        case .bus(let code, let svc, let fullRoute):
-            SoftBusView(stopCode: code, svc: svc, fullRoute: fullRoute, onBack: pop)
+    private func cardRoot(_ c: RootCard) -> some View {
+        switch c {
         case .search:
-            // Legacy route — Search is now a first-class tab. Kept so any
-            // stale path still resolves; route taps into the same stack.
             SoftSearchView(
-                onClose: pop,
-                // Append on top of search (don't pop it first) so Back returns
-                // to the results, then Back again leaves search — matching the
-                // first-class search tab's behavior.
-                onOpenStop: { code in
-                    path.wrappedValue.append(.stop(code))
-                },
+                onClose: { card = nil },
+                onOpenStop: { cardPath.append(.stop($0)) },
                 onOpenBus: { stopCode, svcNo in
-                    path.wrappedValue.append(.bus(stopCode: stopCode,
-                                                   svc: svcNo,
-                                                   fullRoute: true))
+                    cardPath.append(.bus(stopCode: stopCode, svc: svcNo,
+                                         fullRoute: true))
                 }
             )
+            .adBannerGutter()
+        case .saved:
+            SoftFavouritesView(
+                onOpenStop: { cardPath.append(.stop($0)) },
+                onOpenBus: { code, svc in
+                    cardPath.append(.bus(stopCode: code, svc: svc))
+                },
+                onOpenSearch: { present(.search) }
+            )
+            .adBannerGutter()
+        case .settings:
+            SoftSettingsView(onTab: { open(tab: $0) })
+                .adBannerGutter()
+        case .stop(let code):
+            // No banner gutter — the Stop screen carries its own inline MREC.
+            SoftStopView(stopCode: code,
+                         onBack: { card = nil },
+                         onOpenBus: { svc in
+                             cardPath.append(.bus(stopCode: code, svc: svc))
+                         })
+        case .bus(let code, let svc, let fullRoute):
+            SoftBusView(stopCode: code, svc: svc, fullRoute: fullRoute,
+                        onBack: { card = nil })
+                .adBannerGutter()
+        }
+    }
+
+    /// A destination pushed INSIDE a card. The bottom ad-banner gutter is
+    /// applied to every destination EXCEPT `.stop`, which carries its own
+    /// inline 300×250 MREC instead — mounting both would double up ads on
+    /// one screen.
+    @ViewBuilder
+    private func routeDestination(_ route: SoftRoute) -> some View {
+        let pop = { if !cardPath.isEmpty { cardPath.removeLast() } }
+        let content = Group {
+            switch route {
+            case .stop(let code):
+                SoftStopView(stopCode: code,
+                             onBack: pop,
+                             onOpenBus: { svc in
+                                 cardPath.append(.bus(stopCode: code, svc: svc))
+                             })
+            case .bus(let code, let svc, let fullRoute):
+                SoftBusView(stopCode: code, svc: svc, fullRoute: fullRoute,
+                            onBack: pop)
+            case .search:
+                // Legacy route — Search is a card now. Kept so any stale path
+                // still resolves; taps route into the same card stack.
+                SoftSearchView(
+                    onClose: pop,
+                    onOpenStop: { cardPath.append(.stop($0)) },
+                    onOpenBus: { stopCode, svcNo in
+                        cardPath.append(.bus(stopCode: stopCode, svc: svcNo,
+                                             fullRoute: true))
+                    }
+                )
+            }
+        }
+        .softTopEdgeBlur()
+        .toolbar(.hidden, for: .navigationBar)
+        .enableSwipeBack()
+
+        if case .stop = route {
+            content
+        } else {
+            content.adBannerGutter()
         }
     }
 }

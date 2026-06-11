@@ -63,8 +63,19 @@ struct SoftSearchView: View {
             }
         }
         .onAppear {
-            // Don't auto-focus: the keyboard should appear only when the user
-            // taps the field, not the moment the Search tab opens (user-reported).
+            // Auto-focus: this card is raised by tapping Home's search FIELD,
+            // so the user has already declared intent to type — bring the
+            // keyboard up with the card. (The old no-auto-focus rule was for
+            // the Search TAB, where landing on the tab wasn't typing intent.)
+            // Delay one beat so the sheet's presentation animation finishes
+            // before the keyboard animates in.
+            // Skip on pop-back from a result (query already typed) — don't
+            // shove the keyboard at someone reviewing their results.
+            if query.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    focused = true
+                }
+            }
             // Warm the large, lazy BusRoutes dataset while the user browses, so
             // tapping a bus result opens the route view immediately instead of
             // blocking on a cold fetch (originStop + serviceRoute both need it).

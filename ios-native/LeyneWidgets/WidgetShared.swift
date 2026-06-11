@@ -10,30 +10,35 @@ import SwiftUI
 import UIKit
 
 // ─── Palette — dynamic, mirrors Theme.light / Theme.dark ─────────────
-// dim/faint alphas are nudged up vs the app (0.60 / 0.45) for legibility at
-// widget scale on unpredictable wallpapers; liveBg is the solid Soft fill.
+// EXACTLY the app's monochrome surfaces (#F2F2F2 / #0F0F0F, ink foregrounds)
+// so the widget is the app, miniaturized — the old warm-parchment palette
+// read as a different product on the Home Screen. dim/faint alphas are
+// nudged up vs the app (0.60 / 0.45) for legibility at widget scale on
+// unpredictable wallpapers. `wLive` is the SEMANTIC arrival green only
+// (mirrors the Live Activity's accent) — never the resting palette.
 func wDyn(light: UIColor, dark: UIColor) -> Color {
     Color(uiColor: UIColor { trait in
         trait.userInterfaceStyle == .dark ? dark : light
     })
 }
-let wBg      = wDyn(light: UIColor(red: 0xF4/255, green: 0xEF/255, blue: 0xE7/255, alpha: 1),
-                    dark:  UIColor(red: 0x15/255, green: 0x20/255, blue: 0x1C/255, alpha: 1))
-let wFg      = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 1),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 1))
-let wDim     = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.60),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.60))
-let wFaint   = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.45),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.45))
-let wLine    = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.10),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.08))
-let wLive    = wDyn(light: UIColor(red: 0x2D/255, green: 0x7A/255, blue: 0x5A/255, alpha: 1),
-                    dark:  UIColor(red: 0x8E/255, green: 0xE6/255, blue: 0xC0/255, alpha: 1))
-let wLiveBg  = wDyn(light: UIColor(red: 0xE8/255, green: 0xF5/255, blue: 0xEE/255, alpha: 1),
-                    dark:  UIColor(red: 0x0F/255, green: 0x2A/255, blue: 0x20/255, alpha: 1))
-// On-accent text for the filled service badge (light text on the mint fill).
-let wOnLive  = wDyn(light: UIColor(red: 0xF7/255, green: 0xFC/255, blue: 0xF9/255, alpha: 1),
-                    dark:  UIColor(red: 0x0C/255, green: 0x17/255, blue: 0x12/255, alpha: 1))
+let wBg      = wDyn(light: UIColor(red: 0xF2/255, green: 0xF2/255, blue: 0xF2/255, alpha: 1),
+                    dark:  UIColor(red: 0x0F/255, green: 0x0F/255, blue: 0x0F/255, alpha: 1))
+let wFg      = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1),
+                    dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1))
+let wDim     = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.60),
+                    dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.60))
+let wFaint   = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.45),
+                    dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.45))
+let wLine    = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.10),
+                    dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.10))
+let wLive    = wDyn(light: UIColor(red: 0x1A/255, green: 0xA2/255, blue: 0x51/255, alpha: 1),
+                    dark:  UIColor(red: 0x3D/255, green: 0xD6/255, blue: 0x8C/255, alpha: 1))
+let wLiveBg  = wDyn(light: UIColor(red: 0xE3/255, green: 0xF4/255, blue: 0xEA/255, alpha: 1),
+                    dark:  UIColor(red: 0x0E/255, green: 0x26/255, blue: 0x1B/255, alpha: 1))
+// On-accent text for the filled service badge (inverse ink, matches the
+// app's contrast-filled badges).
+let wOnLive  = wDyn(light: UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1),
+                    dark:  UIColor(red: 0x0F/255, green: 0x0F/255, blue: 0x0F/255, alpha: 1))
 
 // ─── Shared App Group (published by the app) ─────────────────────────
 enum WGroup {
@@ -165,18 +170,19 @@ func serviceURL(_ no: String, stop: String) -> URL? {
 
 // ─── Shared UI atoms ─────────────────────────────────────────────────
 
-/// Mint-filled service-number badge — the widget counterpart of in-app
-/// V2/ServiceBadge. Width adapts to fit "21A" etc.
+/// Contrast-filled service-number badge — the widget counterpart of in-app
+/// V2/ServiceBadge. Monochrome ink fill (the app reserves green for the
+/// arrival signal, not service identity). Width adapts to fit "21A" etc.
 struct WServiceBadge: View {
     let no: String
     var compact = false
     var body: some View {
         Text(no)
             .font(.system(size: compact ? 13 : 15, weight: .bold, design: .rounded))
-            .foregroundStyle(wOnLive)
+            .foregroundStyle(wBg)
             .padding(.horizontal, compact ? 5 : 7)
             .frame(minWidth: compact ? 26 : 32, minHeight: compact ? 20 : 24)
-            .background(wLive, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(wFg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .widgetAccentable()
     }
 }

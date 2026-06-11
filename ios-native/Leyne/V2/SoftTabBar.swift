@@ -1,8 +1,8 @@
-// SoftTab — tab identity for the native iOS 26 TabView mounted in
-// SoftRoot. The custom floating-pill tab bar that used to live here was
-// replaced by the system TabView, which renders the Liquid Glass bar and
-// the detached `.search` circle natively. This file now only carries the
-// tab enum plus the ad-banner gutter the tabbed screens share.
+// SoftTab — legacy destination identity. The bottom tab bar is GONE (the
+// app is a single Home screen with sheet cards — see SoftRoot); the enum
+// survives because Settings/Home still hand "go to X" requests around as
+// SoftTab values, which SoftRoot maps onto cards. Also carries the shared
+// top scroll-edge blur + ad-banner gutter modifiers.
 
 import SwiftUI
 

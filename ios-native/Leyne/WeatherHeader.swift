@@ -74,6 +74,9 @@ struct WeatherHeader: View {
                 Text(timeString(ctx.date))
                     .font(t.mono(13, weight: .semibold))
                     .foregroundStyle(t.fg)
+                    // Minute rolls over like the system clock instead of cutting.
+                    .contentTransition(.numericText())
+                    .animation(.smooth(duration: 0.4), value: timeString(ctx.date))
             }
         }
     }
@@ -150,39 +153,53 @@ struct WeatherHeader: View {
     }
 }
 
-// MARK: - WeatherBackdrop
+// MARK: - WeatherAmbientLayer
 
-/// A barely-there greyscale ambient wash pinned to the very top of the screen.
+/// A barely-there ambient wash pinned to the very top of the screen, fading
+/// to clear at ~40 % of the height — fully gone before the first card.
 ///
 /// Mounted at the SoftHomeView root (a sibling of the ScrollView) with
 /// `.ignoresSafeArea()`, so it fills full-bleed from above the status bar and
-/// stays put as content scrolls — ambient top lighting, not a band tied to the
-/// header. The single linear ramp reaches `.clear` at ~38 % of the screen
-/// height — a long, edge-free fade that's fully gone before the first card, so
-/// there's no visible boundary anywhere.
+/// stays put as content scrolls — ambient top lighting, not a band tied to
+/// the header.
 ///
-/// Condition → peak opacity (kept very low; the peak sits behind the status bar
-/// and is already fading by the time it reaches the readout, so the visible
-/// tint is a fraction of these numbers). Strict monochrome: white tint in dark,
-/// black tint in light, zero hue.
-struct WeatherBackdrop: View {
-    let bucket: WeatherBucket
+/// Two stacked ramps:
+///   1. the original greyscale lightness wash (opacity varies by bucket), and
+///   2. a *faint* condition hue — warm amber when clear by day, a cool slate
+///      shift in rain — at opacities below the threshold of conscious notice.
+/// The hue is deliberately NOT a saturated MRT-adjacent colour: amber sits at
+/// ≤6 % opacity and the rain tint is a desaturated grey-cool, so the palette
+/// stays effectively monochrome while the screen feels like *now*.
+struct WeatherAmbientLayer: View {
+    let bucket: WeatherBucket?
     let isDark: Bool
 
     var body: some View {
+        if let bucket {
+            ZStack(alignment: .top) {
+                ramp(greyColor(bucket))
+                if let hue = hueColor(bucket) {
+                    ramp(hue)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .animation(.easeInOut(duration: 0.8), value: isDark)
+        }
+    }
+
+    private func ramp(_ color: Color) -> some View {
         LinearGradient(
             stops: [
-                .init(color: topColor, location: 0.0),
-                .init(color: .clear,  location: 0.38)
+                .init(color: color, location: 0.0),
+                .init(color: .clear, location: 0.40)
             ],
             startPoint: .top,
             endPoint: .bottom
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private var topColor: Color {
-        // Greyscale opacity-only — zero hue.
+    /// Greyscale lightness wash — zero hue, the pre-existing backdrop ramp.
+    private func greyColor(_ bucket: WeatherBucket) -> Color {
         let opacity: Double
         switch bucket {
         case .clearDay:   opacity = isDark ? 0.07  : 0.045
@@ -190,8 +207,21 @@ struct WeatherBackdrop: View {
         case .cloudy:     opacity = isDark ? 0.09  : 0.055
         case .rain:       opacity = isDark ? 0.13  : 0.07
         }
-        // Dark mode: white tint; light mode: black tint — stays monochrome.
         return (isDark ? Color.white : Color.black).opacity(opacity)
+    }
+
+    /// The whisper of hue. Clear day = warm amber; rain = cool slate.
+    /// Cloudy and night stay pure monochrome (the near-black bg already
+    /// reads as night).
+    private func hueColor(_ bucket: WeatherBucket) -> Color? {
+        switch bucket {
+        case .clearDay:
+            return Color(hex: "FF9F0A").opacity(isDark ? 0.04 : 0.06)
+        case .rain:
+            return Color(hex: "5E6573").opacity(isDark ? 0.06 : 0.05)
+        case .clearNight, .cloudy:
+            return nil
+        }
     }
 }
 

@@ -55,7 +55,11 @@ struct NearbyProvider: TimelineProvider {
             for await (i, r) in group { tops[i] = r }
             return zip(stops, tops).map { NearbyRow(stop: $0, top: $1) }
         }
-        return NearbyEntry(date: .now, rows: rows)
+        // Soonest bus first, not closest stop — on the Home Screen the
+        // commuter's question is "which bus can I still catch?", and the
+        // walk time is printed on each row anyway.
+        return NearbyEntry(date: .now,
+                           rows: rows.sorted { ($0.top?.eta1 ?? .max) < ($1.top?.eta1 ?? .max) })
     }
 }
 

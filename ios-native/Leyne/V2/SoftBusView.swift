@@ -262,10 +262,9 @@ struct SoftBusView: View {
             } label: {
                 Image(systemName: boardingAlertOn ? "eye.fill" : "eye")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(boardingAlertOn ? t.soon : t.fg)
+                    .foregroundStyle(boardingAlertOn ? t.identity : t.fg)
                     .frame(width: 44, height: 44)
-                    .background(t.surface, in: Circle())
-                    .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                    .leyneGlass(in: Circle(), theme: t)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(boardingAlertOn
@@ -278,10 +277,9 @@ struct SoftBusView: View {
             } label: {
                 Image(systemName: serviceSaved ? "bus.fill" : "bus")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(serviceSaved ? t.soon : t.fg)
+                    .foregroundStyle(serviceSaved ? t.identity : t.fg)
                     .frame(width: 44, height: 44)
-                    .background(t.surface, in: Circle())
-                    .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                    .leyneGlass(in: Circle(), theme: t)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(serviceSaved ? "Bus \(svc) saved. Tap to remove."
@@ -316,14 +314,14 @@ struct SoftBusView: View {
         }
     }
 
-    /// Uniform circular button label.
+    /// Uniform circular button label — Liquid Glass on iOS 26, opaque
+    /// surface circle on iOS 18–25.
     private func circleButton(_ symbol: String, size: CGFloat) -> some View {
         Image(systemName: symbol)
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(t.fg)
             .frame(width: 44, height: 44)
-            .background(t.surface, in: Circle())
-            .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+            .leyneGlass(in: Circle(), theme: t)
     }
 
     // MARK: Title block
@@ -398,9 +396,9 @@ struct SoftBusView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(t.line, lineWidth: 1))
+        // The headline number floats on real Liquid Glass (iOS 26) — the one
+        // card on this screen that earns the premium material.
+        .leyneGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous), theme: t)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(approachA11y(s))
     }
@@ -419,6 +417,10 @@ struct SoftBusView: View {
                     Text(eta.big)
                         .font(t.mono(40, weight: .bold))
                         .foregroundStyle(t.fg)
+                        // Digits roll down with a soft spring instead of
+                        // snapping — the hero number reads as alive.
+                        .contentTransition(.numericText(countsDown: true))
+                        .animation(.spring(duration: 0.5, bounce: 0.2), value: eta.big)
                     Text(eta.small)
                         .font(t.sans(16, weight: .semibold))
                         .foregroundStyle(t.dim)

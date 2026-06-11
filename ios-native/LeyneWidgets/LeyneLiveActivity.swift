@@ -155,6 +155,11 @@ private struct JourneyTrack: View {
                     Image(systemName: "bus.fill")
                         .font(.system(size: busR * 0.9, weight: .bold))
                         .foregroundStyle(ink)
+                        // Final approach: the glyph pulses — the one moment a
+                        // commuter is staring at this, the pulse says "tracking,
+                        // not frozen". Degrades to static where unsupported.
+                        .symbolEffect(.pulse, options: .repeating,
+                                      isActive: !arrived && progress > 0.82)
                 }
                 .frame(width: h, height: h)
                 .position(x: x, y: h / 2)

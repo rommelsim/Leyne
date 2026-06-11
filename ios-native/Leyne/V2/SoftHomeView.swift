@@ -29,12 +29,23 @@ struct SoftHomeView: View {
     let onTab: (SoftTab) -> Void
     let onOpenStop: (String) -> Void
     let onOpenSearch: () -> Void
+    /// Direct bus-chip tap on a nearby card → straight to the Bus card.
+    let onOpenBus: (String, String) -> Void
+    let onOpenSaved: () -> Void
+    let onOpenSettings: () -> Void
 
     private var t: Theme { m.t }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             t.bg.ignoresSafeArea()
+
+            // Ambient weather tint — a sub-conscious wash from the top of the
+            // screen that makes the home feel like *now* (warm when clear,
+            // cool-grey when raining). Felt, not seen; never blocks content.
+            WeatherAmbientLayer(bucket: ws.snapshot?.bucket, isDark: t.isDark)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -107,24 +118,77 @@ struct SoftHomeView: View {
     // MARK: Header / live row
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             // Weather + greeting + clock — degrades invisibly when
             // WeatherKit is unavailable (WeatherHeader shows only the
             // greeting row in that case).
             WeatherHeader(t: t)
                 .padding(.horizontal, -16)  // bleed to scroll-view edge
 
-            HStack(alignment: .center, spacing: 12) {
-                Text("Stops near you")
-                    .font(t.sans(33, weight: .bold))
-                    .foregroundStyle(t.fg)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
+            // The app's single command row: search field + alerts + Saved +
+            // Settings, all on one line so the corner doesn't read as a
+            // stray stack of circles. The title row below stays clean.
+            HStack(spacing: 9) {
+                searchField
                 alertButton
+                headerIconButton("star.fill", label: "Saved",
+                                 action: onOpenSaved)
+                headerIconButton("gearshape.fill", label: "Settings",
+                                 action: onOpenSettings)
             }
+
+            Text("Stops near you")
+                .font(t.sans(33, weight: .bold))
+                .foregroundStyle(t.fg)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
+    }
+
+    /// The search field — visually a field, behaviourally a button that
+    /// raises the Search card (which owns the real keyboard focus).
+    private var searchField: some View {
+        Button {
+            fb.tap(); onOpenSearch()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                Text("Search")
+                    .font(t.sans(14))
+                    .foregroundStyle(t.dim)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 13)
+            .frame(maxWidth: .infinity)
+            .frame(height: 42)
+            .leyneGlass(in: Capsule(), theme: t)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Search buses, stops, or postal codes")
+        .accessibilityAddTraits(.isSearchField)
+    }
+
+    /// 42pt glass circle button for the header row (Saved / Settings).
+    private func headerIconButton(_ symbol: String, label: String,
+                                  action: @escaping () -> Void) -> some View {
+        Button {
+            fb.tap(); action()
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .frame(width: 42, height: 42)
+                .leyneGlass(in: Circle(), theme: t)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     /// Top-right bell → the central alerts list, with a count badge when the
@@ -135,11 +199,10 @@ struct SoftHomeView: View {
             showAlerts = true
         } label: {
             Image(systemName: "bell.fill")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(t.fg)
-                .frame(width: 44, height: 44)
-                .background(t.surface, in: Circle())
-                .overlay(Circle().stroke(t.line, lineWidth: 1))
+                .frame(width: 42, height: 42)
+                .leyneGlass(in: Circle(), theme: t)
                 .overlay(alignment: .topTrailing) {
                     if !m.alerts.isEmpty {
                         Text("\(m.alerts.count)")
@@ -147,9 +210,9 @@ struct SoftHomeView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 5)
                             .frame(minWidth: 18, minHeight: 18)
-                            .background(t.soon, in: Capsule())
+                            .background(t.identity, in: Capsule())
                             .overlay(Capsule().stroke(t.bg, lineWidth: 1.5))
-                            .offset(x: 5, y: -5)
+                            .offset(x: 4, y: -4)
                     }
                 }
         }
@@ -207,17 +270,18 @@ struct SoftHomeView: View {
             feed: feed(code),
             highlight: highlight,
             tick: m.tick,
-            onTap: { fb.select(); m.addRecent(name); onOpenStop(code) }
-        )
-        // Long-press menu (matches the mockup): the card lifts as the preview.
-        // Long-press → a peek of the stop (mini live-arrivals view) + actions.
-        .contextMenu(menuItems: {
-            Button {
-                fb.select(); m.addRecent(name); onOpenStop(code)
-            } label: {
-                Label("Open Stop", systemImage: "arrow.up.forward")
+            onTap: { fb.select(); m.addRecent(name); onOpenStop(code) },
+            // Bus rows deep-tap straight into the Bus card — no Stop hop.
+            onOpenBus: { svc in
+                fb.select(); m.addRecent(name); onOpenBus(code, svc)
             }
-            Divider()
+        )
+        // Long-press → a peek of the stop (mini live-arrivals view) + a SHORT
+        // action list: the two decisions a commuter actually makes here (save,
+        // alert), with the occasional utilities folded into one "More"
+        // submenu. Tapping the peek itself opens the stop, so no "Open Stop"
+        // row. Hide stays separate + destructive at the bottom.
+        .contextMenu(menuItems: {
             Button {
                 fb.select(); m.togglePin(code: code)
             } label: {
@@ -229,20 +293,24 @@ struct SoftHomeView: View {
             } label: {
                 Label("Arrival Alerts", systemImage: "bell")
             }
-            Button {
-                fb.select(); openOnMap(code: code, name: name)
+            Menu {
+                Button {
+                    fb.select(); openOnMap(code: code, name: name)
+                } label: {
+                    Label("Open on Map", systemImage: "map")
+                }
+                Button {
+                    fb.select(); shareStop(code: code, name: name)
+                } label: {
+                    Label("Share Stop", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    fb.success(); UIPasteboard.general.string = code
+                } label: {
+                    Label("Copy Stop Code", systemImage: "doc.on.doc")
+                }
             } label: {
-                Label("Open on Map", systemImage: "map")
-            }
-            Button {
-                fb.success(); UIPasteboard.general.string = code
-            } label: {
-                Label("Copy Stop Code", systemImage: "doc.on.doc")
-            }
-            Button {
-                fb.select(); shareStop(code: code, name: name)
-            } label: {
-                Label("Share Stop", systemImage: "square.and.arrow.up")
+                Label("More", systemImage: "ellipsis.circle")
             }
             Divider()
             Button(role: .destructive) {
@@ -370,65 +438,140 @@ struct SoftHomeView: View {
     /// `liveServices` already returns the stop's services sorted by ETA, so a
     /// stable partition into favourites + the rest preserves the soonest-first
     /// order inside each group.
-    /// A compact "peek" of a stop for the long-press preview — the stop name and
-    /// its live arrivals (service no · crowd · ETA), like a miniature Stop view.
+    /// The long-press "peek" of a stop — a miniature Stop view speaking the
+    /// app's full card language: identity header (map-pin tile, name, code ·
+    /// road, walk + LIVE signal), then surface-card arrival rows with
+    /// proximity-tinted service badges, destination, crowding, and a coloured
+    /// ETA — not a bare wireframe list.
     private func stopPreview(code: String, name: String) -> some View {
         let services = m.liveServices(code: code, tracked: [])
-            .sorted { $0.no.localizedStandardCompare($1.no) == .orderedAscending }
+            .sorted { $0.etaSec < $1.etaSec }
         let road = ds.roadName(code)
+        let fresh = feed(code)
+        let nearby = ds.nearby.first { $0.stopCode == code }
         return VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(t.sans(16, weight: .bold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(1)
-                Text(road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)")
-                    .font(t.mono(11))
-                    .foregroundStyle(t.dim)
-                    .lineLimit(1)
+            // ── Identity header — quotes SoftNearbyStopCard's identityRow ──
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(t.surfaceHi)
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                }
+                .frame(width: 42, height: 42)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(t.sans(16, weight: .bold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                    Text(road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)")
+                        .font(t.mono(11))
+                        .foregroundStyle(t.dim)
+                        .lineLimit(1)
+                    if let nearby {
+                        HStack(spacing: 4) {
+                            Image(systemName: "figure.walk")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("\(max(1, nearby.walkMin)) min walk")
+                            Text("·").foregroundStyle(t.faint)
+                            Text(fmtDistance(nearby.distanceM)).foregroundStyle(t.dim)
+                        }
+                        .font(t.mono(11, weight: .medium))
+                        .foregroundStyle(t.soon)
+                        .padding(.top, 1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if fresh == .live {
+                    HStack(spacing: 4) {
+                        Circle().fill(t.soon).frame(width: 6, height: 6)
+                        Text("LIVE")
+                            .font(t.mono(9, weight: .bold))
+                            .tracking(0.6)
+                            .foregroundStyle(t.soon)
+                    }
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
             .padding(.bottom, 12)
 
-            Rectangle().fill(t.line).frame(height: 1)
-
+            // ── Arrival rows — surface cards, same language as Stop view ──
             if services.isEmpty {
-                Text("No live arrivals right now")
-                    .font(t.sans(13))
-                    .foregroundStyle(t.dim)
-                    .padding(16)
+                HStack(spacing: 7) {
+                    ConfidenceDot(confidence: .stale, t: t, size: 6)
+                    Text("No live arrivals right now")
+                        .font(t.mono(12))
+                        .foregroundStyle(t.faint)
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+                .background(t.surface,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 14)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(services.prefix(7).enumerated()), id: \.element.id) { i, s in
-                        let eta = fmtETA(s.etaSec)
-                        if i > 0 {
-                            Rectangle().fill(t.line).frame(height: 1).padding(.leading, 16)
-                        }
-                        HStack(spacing: 10) {
-                            Text(s.no)
-                                .font(t.mono(15, weight: .bold))
-                                .foregroundStyle(t.fg)
-                                .frame(minWidth: 42, alignment: .leading)
-                            CrowdMeter(load: s.load, t: t, showLabel: false)
-                            Spacer(minLength: 8)
-                            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                                Text(eta.big)
-                                    .font(t.mono(15, weight: .bold))
-                                    .foregroundStyle(eta.big == "Arr" ? t.soon : t.fg)
-                                Text(eta.small)
-                                    .font(t.sans(11))
-                                    .foregroundStyle(t.dim)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                VStack(spacing: 6) {
+                    ForEach(Array(services.prefix(5).enumerated()), id: \.element.id) { _, s in
+                        previewArrivalRow(s, fresh: fresh)
+                    }
+                    if services.count > 5 {
+                        Text("+\(services.count - 5) more — tap to open")
+                            .font(t.mono(11))
+                            .foregroundStyle(t.faint)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 2)
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 14)
             }
         }
-        .frame(width: 300)
-        .background(t.surface)
+        .frame(width: 330)
+        .background(t.bg)
+    }
+
+    /// One arrival row inside the long-press peek: proximity-tinted service
+    /// badge · destination + crowding · coloured ETA.
+    private func previewArrivalRow(_ s: Service, fresh: Freshness) -> some View {
+        let conf = ArrivalConfidence.of(monitored: s.monitored, feed: fresh)
+        let badge = serviceBadgeColors(etaSec: s.etaSec, confidence: conf, t: t)
+        let eta = fmtETA(s.etaSec)
+        let arriving = eta.big == "Arr"
+        return HStack(spacing: 11) {
+            ServiceBadge(svc: s.no, t: t, size: .md,
+                         fillOverride: badge.fill, fgOverride: badge.fg)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(s.dest.isEmpty ? "Bus \(s.no)" : "To \(s.dest)")
+                    .font(t.sans(13, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                CrowdMeter(load: s.load, t: t, showLabel: false)
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                if conf == .unconfirmed {
+                    Text("~").font(t.mono(11))
+                        .foregroundStyle(t.faint)
+                }
+                Text(arriving ? "Arr" : eta.big)
+                    .font(t.mono(18, weight: .semibold))
+                    .foregroundStyle(etaColor(etaSec: s.etaSec, confidence: conf, t: t))
+                Text(arriving ? "now" : eta.small)
+                    .font(t.mono(10))
+                    .foregroundStyle(t.dim)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(t.surface,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func rankedArrivals(_ code: String) -> [RankedArrival] {
@@ -479,6 +622,9 @@ struct SoftNearbyStopCard: View {
     let highlight: Bool
     let tick: Int            // forces a per-second live ETA recompute
     let onTap: () -> Void
+    /// When set, each arrival row is its own tap target → opens that bus
+    /// directly (the rest of the card still opens the stop).
+    var onOpenBus: ((String) -> Void)? = nil
 
     var body: some View {
         let _ = tick
@@ -560,7 +706,25 @@ struct SoftNearbyStopCard: View {
     /// One ranked service: number badge (proximity-tinted), a gold star when
     /// favourited, the destination, then its soonest arrival on the trailing
     /// edge. Matches the "Top 3 arrivals" rows in the spec.
+    @ViewBuilder
     private func arrivalRow(_ a: RankedArrival) -> some View {
+        if let onOpenBus {
+            // Nested inside the card's outer Button — SwiftUI routes taps on
+            // the inner button to it alone, so the row opens the bus while
+            // the rest of the card still opens the stop.
+            Button {
+                onOpenBus(a.service.no)
+            } label: {
+                arrivalRowContent(a).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Bus \(a.service.no). Opens the bus directly.")
+        } else {
+            arrivalRowContent(a)
+        }
+    }
+
+    private func arrivalRowContent(_ a: RankedArrival) -> some View {
         let s = a.service
         let conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed)
         let badge = serviceBadgeColors(etaSec: s.etaSec, confidence: conf, t: t)

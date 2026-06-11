@@ -80,6 +80,12 @@ struct Theme: Equatable {
     let mrtNE: Color = Color(hex: "9B26B6")
     /// Live "ME" location dot on maps.
     let meBlue: Color = Color(hex: "3B82F6")
+    /// Identity accent — Leyne blue (system blue, adapts per mode). Used for
+    /// interactive chrome ONLY: tab tint, pin/save fills, alert-active states.
+    /// Never used to label transit content, so it can't be misread as an MRT
+    /// line colour (all six line hues are saturated content pills; system blue
+    /// reads as "tap me / my location" to iOS users).
+    let identity: Color = Color(uiColor: .systemBlue)
 
     // ── Fonts ────────────────────────────────────────────────────────
     // Leyne 2.0 typography target is Inter; for now we use the system
@@ -195,6 +201,37 @@ struct Theme: Equatable {
             }
         } else {
             surfaceHi
+        }
+    }
+
+    /// Edge-to-edge Liquid Glass bar backdrop for fixed headers that content
+    /// scrolls beneath (Stop view). Opaque `bg` on iOS 18–25 — same look as
+    /// the previous fixed header, so nothing regresses there.
+    @ViewBuilder
+    func glassBar() -> some View {
+        if #available(iOS 26.0, *) {
+            Rectangle().fill(.clear)
+                .glassEffect(.regular, in: .rect)
+        } else {
+            bg
+        }
+    }
+}
+
+// MARK: - Liquid Glass surface helper
+
+extension View {
+    /// Real iOS 26 Liquid Glass clipped to `shape`; on iOS 18–25 falls back to
+    /// the opaque surface card + hairline this app shipped with. Use for
+    /// floating chrome — circular buttons, hero cards — NOT for elements that
+    /// already sit on a glass bar (glass-on-glass is against the HIG).
+    @ViewBuilder
+    func leyneGlass<S: Shape>(in shape: S, theme t: Theme) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(t.surface, in: shape)
+                .overlay(shape.stroke(t.line, lineWidth: 1))
         }
     }
 }

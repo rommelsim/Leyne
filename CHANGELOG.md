@@ -8,6 +8,74 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Unreleased · iOS · 2026-06-11
+
+Design-identity pass on branch `design-new` — connects the pieces that were
+individually correct but visually inert. Not yet archived; add a `kChangelog`
+entry when this is versioned.
+
+- **Real Liquid Glass (iOS 26):** the Stop view header is now a floating glass
+  bar the arrival list visibly scrolls beneath (`safeAreaInset` + `.glassEffect`);
+  the Bus view's ETA hero and circular top-bar buttons use real glass too. The
+  tab bar collapses on scroll (`.tabBarMinimizeBehavior(.onScrollDown)`).
+  Opaque-surface fallbacks keep iOS 18–25 pixel-identical. (`Theme.swift`
+  `glassBar()`/`leyneGlass(in:theme:)`, `SoftStopView.swift`, `SoftBusView.swift`,
+  `SoftTabBar.swift`)
+- **Identity blue:** one interactive accent — system blue — for the tab tint,
+  pin/save/watch fills, and the alerts badge. Deliberately outside the MRT line
+  palette (the old `AccentColor` asset was a brown that nearly matched the TEL
+  line); arrival green stays semantic-only. (`Theme.swift` `identity`,
+  `AccentColor.colorset`, `SoftRoot.swift`, `SoftStopView.swift`,
+  `SoftBusView.swift`, `SoftHomeView.swift`)
+- **Zoom navigation:** tapping a Home stop card zoom-expands the card into the
+  Stop view (`.navigationTransition(.zoom)`, iOS 18+); the tab bar now hides on
+  Stop/Bus detail so the destination owns the screen, returning on pop.
+  (`SoftRoot.swift`, `SoftHomeView.swift`)
+- **Weather as atmosphere:** the (previously unmounted) ambient wash is live —
+  a sub-perceptual top tint that warms when clear and cools in rain, fading out
+  by 40% of the screen; the Home clock digits now roll over each minute.
+  (`WeatherHeader.swift` `WeatherAmbientLayer`, `SoftHomeView.swift`)
+- **Living numbers:** the Bus view's hero ETA counts down with a spring
+  `.numericText` roll instead of snapping. (`SoftBusView.swift`)
+- **Live Activity final approach:** the bus glyph on the journey track pulses
+  once the bus is on final approach — tracking, not frozen.
+  (`LeyneLiveActivity.swift`)
+- **Widgets are the app, miniaturized:** the warm-parchment widget palette is
+  replaced with the app's exact monochrome surfaces + the Live Activity's
+  arrival green; service badges go contrast-ink; the Nearby widget now sorts by
+  soonest bus, not closest stop. (`WidgetShared.swift`, `LeyneNearbyWidget.swift`)
+- **Alert discoverability:** swipe action renamed "Notify" → "Alert me", with a
+  one-line whisper under the Arrivals header until the first alert is set at
+  that stop. (`SoftStopView.swift`)
+- **Native large-title collapse on Stop:** the big stop title now scrolls with
+  the content and hands off to a compact inline title (name + code) in the
+  pinned glass bar — backdrop fades in the moment content slides beneath it,
+  exactly like a system navigation bar. Driven by `onScrollGeometryChange`,
+  state flips only at thresholds so the list isn't re-evaluated per frame.
+  (`SoftStopView.swift`)
+- **Tab-bar minimize is now ads-aware:** the collapse-on-scroll bar left the
+  anchored banner floating mid-air, so minimize only activates when no banner
+  is mounted (ads off / screenshot mode); with ads on, the bar stays put and
+  the banner sits flush. (`SoftTabBar.swift`)
+- **Single-screen app — the tab bar is gone:** Home (Nearby) is now the only
+  full-screen view, Apple-Maps style. Search is a glass field at the top of
+  Home (raises the Search card with the keyboard ready); Saved and Settings
+  are glass buttons beside it. Stop, Bus, Search, Saved and Settings all
+  present as sheet cards over the home canvas — Stop peeks at half-height
+  (home visible behind) and expands when a bus is opened; deeper drill-downs
+  (Search → Stop → Bus) push natively inside the card. Tapping a bus row on a
+  nearby stop card now opens that bus DIRECTLY, skipping the stop hop. Deep
+  links and the interstitial back-exit logic were rewired onto card
+  presentation/dismissal. This also dissolves the tab-bar/ad-banner conflict.
+  (`SoftRoot.swift` rewritten, `SoftHomeView.swift`, `SoftSearchView.swift`,
+  `SoftTabBar.swift`)
+- **Long-press peek redesigned:** the stop preview is now a miniature Stop view
+  in the app's full card language — identity header (pin tile, code · road,
+  walk + LIVE), surface-card rows with proximity-tinted badges, crowding and
+  coloured ETAs — replacing the wireframe-plain list. The menu itself was cut
+  from seven flat items to Save + Alerts, a "More" submenu (map / share /
+  copy), and the destructive Hide. (`SoftHomeView.swift`)
+
 ## Leyne 2.6.0 · iOS (23) · 2026-06-11
 
 **2026-06-11 — iOS Archive (2.6.0, build 23):** A design + features release. Leyne
