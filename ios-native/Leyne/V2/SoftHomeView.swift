@@ -186,7 +186,6 @@ struct SoftHomeView: View {
             code: code,
             road: ds.roadName(code),
             walkMin: stop.walkMin,
-            distanceM: stop.distanceM,
             arrivals: rankedArrivals(code),
             feed: feed(code),
             highlight: highlight,
@@ -406,54 +405,29 @@ struct RankedArrival: Identifiable {
     var id: String { service.no }
 }
 
-/// A nearby-stop card: identity (pin · name · "Stop {code} · road" · walk +
-/// distance) over a divider, then the stop's top-3 services — favourites first,
-/// then soonest — each on its own row with its next arrival. A "View all buses"
-/// footer opens the full stop. The closest stop gets a green border + badge.
+/// A nearby-stop card: identity (pin · name · "Stop {code} · road") plus a
+/// compact meta line (walk time + soonest arrival), with a trailing chevron.
+/// Tapping anywhere opens the full stop view. The closest stop gets a green
+/// border + badge.
 struct SoftNearbyStopCard: View {
     let t: Theme
     let name: String
     let code: String
     let road: String
     let walkMin: Int
-    let distanceM: Int
     let arrivals: [RankedArrival]
     let feed: Freshness
     let highlight: Bool
     let tick: Int            // forces a per-second live ETA recompute
+    /// Tapping the card opens the full stop view — there is no inline expand.
     let onTap: () -> Void
     let isSaved: Bool
-
-    /// Collapsed by default: the row shows only the stop's identity (no bus
-    /// numbers) to save vertical space. Tap the chevron to reveal the buses
-    /// inline; tap the identity to open the full stop view.
-    @State private var expanded = false
 
     var body: some View {
         let _ = tick
         return VStack(alignment: .leading, spacing: 0) {
             if highlight { closestBadge.padding(.bottom, 10) }
             headerRow
-            if expanded {
-                Rectangle().fill(t.line).frame(height: 1)
-                    .padding(.vertical, 14)
-                // Tapping any of the revealed buses opens the full stop view.
-                Button(action: onTap) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if arrivals.isEmpty {
-                            quietRow
-                        } else {
-                            VStack(spacing: 12) {
-                                ForEach(arrivals) { arrivalRow($0) }
-                            }
-                            viewAllRow
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PressScaleButtonStyle())
-            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -462,43 +436,23 @@ struct SoftNearbyStopCard: View {
             .stroke(highlight ? t.soon : t.line, lineWidth: highlight ? 1.5 : 1))
     }
 
-    /// Identity (tap → open stop) + a chevron toggle (tap → reveal buses).
+    /// The whole row is one tap target → opens the full stop view. A trailing
+    /// chevron signals the navigation; there is no inline expand.
     private var headerRow: some View {
-        HStack(spacing: 12) {
-            Button(action: onTap) {
-                HStack(spacing: 12) {
-                    pinTile
-                    identityText
-                    Spacer(minLength: 4)
-                }
-                .contentShape(Rectangle())
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                pinTile
+                identityText
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
             }
-            .buttonStyle(PressScaleButtonStyle())
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens \(name)")
-
-            expandToggle
+            .contentShape(Rectangle())
         }
-    }
-
-    /// Chevron that expands/collapses the inline bus list. A separate tap
-    /// target from the identity so the two actions never collide.
-    private var expandToggle: some View {
-        Button {
-            Feedback.shared.tap()
-            withAnimation(.easeInOut(duration: 0.22)) { expanded.toggle() }
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(t.dim)
-                .rotationEffect(.degrees(expanded ? 180 : 0))
-                .frame(width: 36, height: 36)
-                .background(t.surfaceHi, in: Circle())
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(expanded ? "Hide buses at \(name)"
-                                     : "Show buses at \(name)")
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens \(name)")
     }
 
     private var closestBadge: some View {
@@ -543,30 +497,14 @@ struct SoftNearbyStopCard: View {
                 .font(t.mono(12.5))
                 .foregroundStyle(t.dim)
                 .lineLimit(1)
-            // Collapsed: one tight meta line (walk + soonest arrival). Expanded:
-            // walk + distance, since the soonest bus is in the list just below.
-            if expanded { walkRow } else { compactMeta }
+            // One tight meta line: walk time + the soonest arrival.
+            compactMeta
         }
     }
 
-    /// Walk time + distance — shown while the card is expanded.
-    private var walkRow: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "figure.walk")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(t.soon)
-            Text("\(max(1, walkMin)) min walk")
-                .foregroundStyle(t.soon)
-            Text("·").foregroundStyle(t.faint)
-            Text(fmtDistance(distanceM)).foregroundStyle(t.dim)
-        }
-        .font(t.mono(12.5, weight: .medium))
-        .padding(.top, 1)
-    }
-
-    /// Collapsed-only single meta line: walk time + the soonest arrival, merged
-    /// to save a whole row. The whisper "~" precedes an unconfirmed estimate,
-    /// matching the app-wide honesty cue.
+    /// Single meta line: walk time + the soonest arrival, merged to save a
+    /// whole row. The whisper "~" precedes an unconfirmed estimate, matching
+    /// the app-wide honesty cue.
     @ViewBuilder
     private var compactMeta: some View {
         let soonest = arrivals.min(by: { $0.service.etaSec < $1.service.etaSec })
@@ -598,106 +536,6 @@ struct SoftNearbyStopCard: View {
 
     private var subtitle: String {
         road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)"
-    }
-
-    /// One ranked service: number badge (proximity-tinted), a gold star when
-    /// favourited, the destination, then its soonest arrival on the trailing
-    /// edge. Matches the "Top 3 arrivals" rows in the spec.
-    private func arrivalRow(_ a: RankedArrival) -> some View {
-        let s = a.service
-        let conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed)
-        return HStack(spacing: 10) {
-            // Badge keeps its standard look — proximity is not colour-coded.
-            Text(s.no)
-                .font(t.sans(16, weight: .bold))
-                .foregroundStyle(t.onAccent)
-                .lineLimit(1)
-                .frame(minWidth: 46, minHeight: 36)
-                .padding(.horizontal, 6)
-                .background(t.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            if a.fav {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(t.accent)
-                    .accessibilityLabel("Favourite")
-            }
-            Text(destLabel(s.dest))
-                .font(t.sans(14, weight: .medium))
-                .foregroundStyle(t.fg)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 8)
-            etaTrailing(s.etaSec, confidence: conf)
-                .fixedSize(horizontal: true, vertical: false)
-                .layoutPriority(1)
-        }
-    }
-
-    /// The single soonest arrival, trailing-aligned: proximity-tinted "Arr"
-    /// (with a live signal) or "{n} min". A faint "~" precedes an unconfirmed
-    /// estimate — the whisper-quiet honesty cue used app-wide.
-    private func etaTrailing(_ sec: Int, confidence: ArrivalConfidence) -> some View {
-        let eta = fmtETA(sec)
-        let arriving = eta.big == "Arr"
-        return HStack(alignment: .firstTextBaseline, spacing: 2) {
-            if confidence == .unconfirmed {
-                Text("~").font(t.mono(13, weight: .regular))
-                    .foregroundStyle(t.faint).accessibilityHidden(true)
-            }
-            Text(arriving ? "Arr" : eta.big)
-                .font(t.mono(19, weight: .semibold))
-                .foregroundStyle(confidence == .unconfirmed ? t.dim : t.fg)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            if arriving {
-                if confidence == .live {
-                    Image(systemName: "dot.radiowaves.up.forward")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(t.soon)
-                        .offset(y: -6)
-                        .accessibilityHidden(true)
-                }
-            } else {
-                Text(eta.small)
-                    .font(t.mono(11))
-                    .foregroundStyle(t.dim)
-            }
-        }
-    }
-
-    /// "View all buses" footer with a leading hairline — the tappable cue that
-    /// opens the full stop (the whole card shares the same action).
-    private var viewAllRow: some View {
-        HStack(spacing: 6) {
-            Text("View all buses")
-                .font(t.sans(13, weight: .semibold))
-                .foregroundStyle(t.dim)
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(t.faint)
-        }
-        .padding(.top, 14)
-        .overlay(alignment: .top) {
-            Rectangle().fill(t.line).frame(height: 1)
-        }
-        // Gap between the last bus pill and this divider (was 2 → pill bottom
-        // touched the line above "View all buses").
-        .padding(.top, 14)
-    }
-
-    private var quietRow: some View {
-        HStack(spacing: 7) {
-            ConfidenceDot(confidence: .stale, t: t, size: 6)
-            Text("No live arrivals right now")
-                .font(t.mono(12))
-                .foregroundStyle(t.faint)
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func destLabel(_ dest: String) -> String {
-        dest.isEmpty ? "Next bus" : (dest.hasPrefix("To ") ? dest : "To \(dest)")
     }
 }
 
