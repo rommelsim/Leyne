@@ -1,9 +1,9 @@
-// WeatherHeader — monochrome weather + time hero for SoftHomeView.
+// WeatherHeader — monochrome weather + time context line for SoftHomeView.
 //
 // Layout (top → bottom):
-//   [greeting + clock]  e.g. "Good morning · 08:41"
-//   [temp · condition · rain hint]  e.g. "29° · Partly Cloudy · rain ~5pm"
-//   [WeatherKit attribution link]   tiny legal line below the readout
+//   [greeting · clock · weather]  one compact line, e.g.
+//     "Good morning · 08:41 · ☀ 29° Partly Cloudy · rain ~5pm"
+//   [WeatherKit attribution link]  tiny legal line below the readout
 //
 // The whole block sits behind a subtle greyscale vertical gradient whose
 // opacity shifts by condition bucket (clear / cloudy / rain / night).
@@ -31,19 +31,16 @@ struct WeatherHeader: View {
         // cleanly and stay put as content scrolls — see `WeatherBackdrop`.
         // Anchoring it here, inside the scrolling header, is what made it read
         // as a discrete bar.
-        VStack(alignment: .leading, spacing: 6) {
-            greetingRow
-            if let snap = ws.snapshot {
-                weatherRow(snap)
-                if let attrURL = ws.attributionURL {
-                    attributionLine(url: attrURL)
-                }
+        VStack(alignment: .leading, spacing: 3) {
+            contextRow
+            if ws.snapshot != nil, let attrURL = ws.attributionURL {
+                attributionLine(url: attrURL)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
         .onAppear {
             if let loc = loc.location {
                 ws.fetchIfNeeded(location: loc)
@@ -59,52 +56,55 @@ struct WeatherHeader: View {
 
     // MARK: Sub-views
 
-    /// "Good morning · 08:41" — clock via TimelineView for minute-accurate
-    /// updates without a manual Timer or @State date.
-    private var greetingRow: some View {
+    /// A single compact context line:
+    ///   "Good evening · 17:24 · ☁ 28° Cloudy [· rain ~5pm]"
+    /// Clock via TimelineView for minute-accurate updates without a manual
+    /// Timer or @State date. The weather segment is omitted entirely until
+    /// WeatherKit resolves, so the line gracefully shortens to greeting + clock.
+    private var contextRow: some View {
         TimelineView(.everyMinute) { ctx in
             HStack(spacing: 6) {
                 Text(greeting(for: ctx.date))
                     .font(t.sans(13, weight: .medium))
                     .foregroundStyle(t.dim)
-                Text("·")
-                    .font(t.sans(13))
-                    .foregroundStyle(t.faint)
-                    .accessibilityHidden(true)
+                dot
                 Text(timeString(ctx.date))
                     .font(t.mono(13, weight: .semibold))
                     .foregroundStyle(t.fg)
+                if let snap = ws.snapshot {
+                    dot
+                    Image(systemName: snap.symbolName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(t.fg.opacity(0.85))
+                        .accessibilityHidden(true)
+                    Text("\(snap.tempC)°")
+                        .font(t.mono(13, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                    Text(snap.conditionLabel)
+                        .font(t.sans(13))
+                        .foregroundStyle(t.dim)
+                    if let hint = snap.rainHint {
+                        dot
+                        Text(hint)
+                            .font(t.sans(13))
+                            .foregroundStyle(t.fg)
+                    }
+                }
+                Spacer(minLength: 0)
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(a11yLabel(ctx.date))
         }
     }
 
-    /// "{temp}° · {condition} [· {rain hint}]" + SF Symbol glyph.
-    @ViewBuilder
-    private func weatherRow(_ snap: WeatherSnapshot) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: snap.symbolName)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(t.fg.opacity(0.85))
-                .accessibilityHidden(true)
-
-            HStack(spacing: 0) {
-                Text("\(snap.tempC)°")
-                    .font(t.mono(18, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                Text("  ·  \(snap.conditionLabel)")
-                    .font(t.sans(15))
-                    .foregroundStyle(t.dim)
-                if let hint = snap.rainHint {
-                    Text("  ·  \(hint)")
-                        .font(t.sans(15))
-                        .foregroundStyle(t.fg)
-                }
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(weatherA11yLabel(snap))
+    /// Faint middle-dot separator reused between context segments.
+    private var dot: some View {
+        Text("·")
+            .font(t.sans(13))
+            .foregroundStyle(t.faint)
+            .accessibilityHidden(true)
     }
 
     /// Tiny WeatherKit attribution link — required by Apple's ToS.
@@ -143,9 +143,13 @@ struct WeatherHeader: View {
         return f.string(from: date)
     }
 
-    private func weatherA11yLabel(_ snap: WeatherSnapshot) -> String {
-        var parts = ["\(snap.tempC) degrees Celsius", snap.conditionLabel]
-        if let hint = snap.rainHint { parts.append(hint) }
+    private func a11yLabel(_ date: Date) -> String {
+        var parts = [greeting(for: date), timeString(date)]
+        if let snap = ws.snapshot {
+            parts.append("\(snap.tempC) degrees Celsius")
+            parts.append(snap.conditionLabel)
+            if let hint = snap.rainHint { parts.append(hint) }
+        }
         return parts.joined(separator: ", ")
     }
 }

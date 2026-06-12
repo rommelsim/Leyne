@@ -90,7 +90,7 @@ final class InterstitialAdManager: NSObject {
 
     /// Load a single ad ahead of time if we don't already have one.
     func preload() {
-        guard AdConfig.adsEnabled, !AdConfig.screenshotMode else { return }
+        guard !AdConfig.adsSuppressed else { return }
         guard AdConfig.started else { return }       // consent + SDK ready
         guard configured else { return }
         guard !isLoading, ad == nil else { return }
@@ -117,7 +117,7 @@ final class InterstitialAdManager: NSObject {
     /// sure one is loading for next time. The navigation has already happened,
     /// so this never blocks the user.
     func maybeShowOnExit(model: AppModel) {
-        guard AdConfig.adsEnabled, !AdConfig.screenshotMode, configured else { return }
+        guard !AdConfig.adsSuppressed, configured else { return }
         // A deep link / notification drove this stack change — not a user exit.
         guard Date() >= suppressUntil else { return }
         guard AdConfig.started else { preload(); return }

@@ -30,6 +30,7 @@ struct SoftFavouritesView: View {
     let onOpenSearch: () -> Void
 
     @State private var segment: FavSegment = .all
+    @State private var editMode: EditMode = .inactive
 
     private var t: Theme { m.t }
 
@@ -49,10 +50,14 @@ struct SoftFavouritesView: View {
                     // empty — content is in the header
                 } header: {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Saved")
-                            .font(t.sans(31, weight: .bold))
-                            .foregroundStyle(t.fg)
-                            .padding(.top, 8)
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Saved")
+                                .font(t.sans(31, weight: .bold))
+                                .foregroundStyle(t.fg)
+                            Spacer()
+                            if !isEmpty { editButton }
+                        }
+                        .padding(.top, 8)
                         segmentedControl
                     }
                     .textCase(nil)
@@ -90,6 +95,15 @@ struct SoftFavouritesView: View {
                                         }
                                     }
                             }
+                            // Drag-to-reorder (in Edit mode) → persists via the
+                            // pins didSet, and re-mirrors to the widgets.
+                            .onMove { from, to in
+                                m.pins.move(fromOffsets: from, toOffset: to)
+                                fb.tap()
+                            }
+                            .onDelete { offsets in
+                                m.pins.remove(atOffsets: offsets)
+                            }
                         } else if segment == .stops {
                             hint("Pin a stop to see all its arrivals here.")
                                 .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -119,6 +133,15 @@ struct SoftFavouritesView: View {
                                         }
                                     }
                             }
+                            // Drag-to-reorder (in Edit mode) → persists via the
+                            // favServices didSet, and re-mirrors to the widgets.
+                            .onMove { from, to in
+                                m.favServices.move(fromOffsets: from, toOffset: to)
+                                fb.tap()
+                            }
+                            .onDelete { offsets in
+                                m.favServices.remove(atOffsets: offsets)
+                            }
                         } else if segment == .buses {
                             hint("Save a bus service to track it here.")
                                 .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -142,6 +165,7 @@ struct SoftFavouritesView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(t.bg)
+            .environment(\.editMode, $editMode)
             .refreshable { await refreshAll() }
         }
         .onAppear { warmArrivals() }
@@ -159,6 +183,23 @@ struct SoftFavouritesView: View {
         }
         .padding(3)
         .background(t.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Toggles List edit mode so saved stops / services can be dragged into the
+    /// user's preferred order (and deleted via the red minus). Hidden when the
+    /// list is empty since there's nothing to arrange.
+    private var editButton: some View {
+        Button {
+            fb.tap()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                editMode = editMode.isEditing ? .inactive : .active
+            }
+        } label: {
+            Text(editMode.isEditing ? "Done" : "Edit")
+                .font(t.sans(15, weight: editMode.isEditing ? .semibold : .medium))
+                .foregroundStyle(t.meBlue)
+        }
+        .buttonStyle(.plain)
     }
 
     private func segmentPill(_ label: String, for value: FavSegment) -> some View {
@@ -263,6 +304,11 @@ struct SoftFavouritesView: View {
                 }
                 Spacer(minLength: 8)
                 serviceETAs(svc, conf: conf)
+                    // Hold the ETA cluster at its intrinsic width so "now"
+                    // never wraps when Edit mode narrows the row; the
+                    // destination truncates instead.
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(t.faint)
@@ -303,6 +349,8 @@ struct SoftFavouritesView: View {
             Text(arriving ? eta.small : eta.big)
                 .font(t.mono(big ? 18 : 13, weight: big ? .bold : .semibold))
                 .foregroundStyle(color)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             if !arriving {
                 Text(eta.small)
                     .font(t.mono(big ? 12 : 10, weight: .semibold))
@@ -465,9 +513,10 @@ private func distanceMFromLocation(code: String) -> Int {
 
 // MARK: - FavStopCard
 
-/// Stop card used on the Favourites tab.
-/// Matches SoftNearbyStopCard layout (identity block + divider + chip row)
-/// with a gold star badge on the pin tile (all stops in Saved are pinned).
+/// Stop card used on the Favourites tab — a flat, tappable summary row
+/// (pin · name · "Stop code · road" · walk + soonest arrival, trailing chevron)
+/// that opens the full stop view. No inline expand: the Saved list is a `List`
+/// (for reorder + swipe-delete), which can't animate in-row height smoothly.
 private struct FavStopCard: View {
     let t: Theme
     let code: String
@@ -480,28 +529,26 @@ private struct FavStopCard: View {
     let tick: Int             // drives per-second ETA recompute
     let onTap: () -> Void
 
-    private static let maxChips = 4
-
     private var sorted: [Service] {
         services.sorted { $0.etaSec < $1.etaSec }
     }
 
     var body: some View {
         let _ = tick
+        // The whole card opens the full stop view. There's no inline expand: a
+        // List can't animate an in-row height change smoothly (it re-centres the
+        // row mid-animation), so Saved stays a flat, reorderable list and the
+        // full bus list is one tap away.
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 0) {
-                identityBlock
-                Rectangle()
-                    .fill(t.line)
-                    .frame(height: 1)
-                    .padding(.vertical, 12)
-                if sorted.isEmpty {
-                    quietRow
-                } else {
-                    chipRow
-                }
+            HStack(spacing: 12) {
+                pinTile
+                identityText
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
             }
-            .padding(16)
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(t.surface,
                         in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -509,108 +556,75 @@ private struct FavStopCard: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(t.line, lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens \(name)")
     }
 
-    private var identityBlock: some View {
-        HStack(spacing: 12) {
-            // Pin tile — the place glyph. Star badge removed: everything in
-            // this tab is already saved, so the badge added no signal.
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(t.surfaceHi)
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(t.fg)
-            }
-            .frame(width: 46, height: 46)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(name)
-                    .font(t.sans(17, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(subtitle)
-                    .font(t.mono(12.5))
-                    .foregroundStyle(t.dim)
-                    .lineLimit(1)
-                // Walk + distance row
-                if walkMin > 0 || distanceM > 0 {
-                    HStack(spacing: 5) {
-                        Image(systemName: "figure.walk")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(t.soon)
-                        Text("\(max(1, walkMin)) min walk")
-                            .foregroundStyle(t.soon)
-                        Text("·").foregroundStyle(t.faint)
-                        Text(fmtDistance(distanceM)).foregroundStyle(t.dim)
-                    }
-                    .font(t.mono(12.5, weight: .medium))
-                    .padding(.top, 1)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(t.faint)
+    private var pinTile: some View {
+        // Pin tile — the place glyph. Star badge removed: everything in
+        // this tab is already saved, so the badge added no signal.
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(t.surfaceHi)
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(t.fg)
         }
+        .frame(width: 42, height: 42)
+    }
+
+    private var identityText: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name)
+                .font(t.sans(17, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text(subtitle)
+                .font(t.mono(12.5))
+                .foregroundStyle(t.dim)
+                .lineLimit(1)
+            compactMeta
+        }
+    }
+
+    /// Single meta line: walk time (if known) + the soonest arrival. The
+    /// whisper "~" precedes an unconfirmed estimate.
+    @ViewBuilder
+    private var compactMeta: some View {
+        let soonest = sorted.first
+        let summary = soonest.flatMap {
+            stopTeaser(count: sorted.count, soonestEtaSec: $0.etaSec)
+        }
+        HStack(spacing: 5) {
+            if walkMin > 0 || distanceM > 0 {
+                Image(systemName: "figure.walk")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(t.soon)
+                Text("\(max(1, walkMin)) min")
+                    .foregroundStyle(t.soon)
+                if soonest != nil { Text("·").foregroundStyle(t.faint) }
+            }
+            if let soonest, let summary {
+                let conf = ArrivalConfidence.of(monitored: soonest.monitored, feed: feed)
+                Image(systemName: "bus.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                if conf == .unconfirmed {
+                    Text("~").foregroundStyle(t.faint).accessibilityHidden(true)
+                }
+                Text(summary.whenText)
+                    .foregroundStyle(t.fg)
+            }
+        }
+        .font(t.mono(12, weight: .medium))
+        .padding(.top, 1)
     }
 
     private var subtitle: String {
         road.isEmpty ? "Stop \(code)" : "Stop \(code) · \(road)"
-    }
-
-    // Chip row — reuses MiniBusChip from SoftStopCard.swift
-    private var chipRow: some View {
-        let shown = Array(sorted.prefix(Self.maxChips))
-        return HStack(alignment: .top, spacing: 7) {
-            ForEach(Array(shown.enumerated()), id: \.element.no) { i, s in
-                let conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed)
-                MiniBusChip(
-                    t: t,
-                    svc: s.no,
-                    etaSec: s.etaSec,
-                    confidence: conf,
-                    highlight: i == 0 && conf == .live
-                               && ETATier.of(etaSec: s.etaSec).isImminent
-                )
-            }
-            if sorted.count > Self.maxChips {
-                moreChip(count: sorted.count - Self.maxChips)
-            }
-        }
-    }
-
-    private func moreChip(count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("+\(count)")
-                .font(t.sans(15, weight: .bold))
-                .foregroundStyle(t.dim)
-            Text("more")
-                .font(t.mono(11, weight: .medium))
-                .foregroundStyle(t.faint)
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
-        .background(t.surfaceHi,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel("\(count) more buses")
-    }
-
-    private var quietRow: some View {
-        HStack(spacing: 7) {
-            ConfidenceDot(confidence: .stale, t: t, size: 6)
-            Text("No live arrivals right now")
-                .font(t.mono(12))
-                .foregroundStyle(t.faint)
-            Spacer(minLength: 0)
-        }
     }
 }

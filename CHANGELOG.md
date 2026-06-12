@@ -8,6 +8,39 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.7.0 · iOS (24) · 2026-06-12
+
+**2026-06-12 — Free live MRT board + Saved/Nearby polish (iOS, build 24):** The
+planned "Leyne+" paywall was dropped — the app stays ads-only and **every feature
+is free**. The new MRT tab is public and grew into a live board (line status +
+real-time station crowd + lift maintenance). Plus discoverable save/reorder
+gestures and a round of layout cleanup. _Android parity deferred until requested._
+
+- **Leyne+ paywall removed:** deleted `PremiumManager`, `PaywallView`, and the
+  StoreKit config; `AdConfig.premiumActive` is now a `false` stub. Revenue
+  modelling showed a paywall at S$2.98 added <1% over ad ARPU, not worth the UX
+  cost. (`AdBanner.swift`, `LeyneApp.swift`, `SoftSettingsView.swift`, `SoftRoot.swift`)
+- **Live MRT board (free for all):** the MRT tab shows each line's status; tap a
+  line to expand **live per-station crowd levels** (PCDRealTime), plus a
+  network-wide **lift maintenance** card (FacilitiesMaintenance v2). The "all
+  clear" banner is gone — it only surfaces on a real disruption.
+  (`SoftMrtView.swift`, `DataStore.swift`, `LTAService.swift`, `LTAModels.swift`,
+  `MrtStations.swift`, `Theme.swift`)
+- **MRT disruption notifications:** now free for everyone (gated only on the
+  notification toggle). (`AppModel.swift`, `DataStore.swift`)
+- **Swipe to save (Nearby):** swipe any nearby stop for a native Save/Remove
+  action (and via the long-press menu); a saved-star marks saved stops.
+  (`SoftHomeView.swift`)
+- **Reorder Saved:** an Edit button enables drag-to-reorder of saved stops and
+  buses (persisted + mirrored to widgets); Saved cards are now flat tap-to-open
+  rows. (`SoftFavouritesView.swift`)
+- **Save animations:** the Stop/Bus save toggles bounce + magic-replace on toggle.
+  (`SoftStopView.swift`, `SoftBusView.swift`)
+- **Layout cleanup:** tighter one-line Nearby header (greeting · time · weather),
+  compacted stop rows, BusView first/last bus moved up under the title, and the
+  BusView top dead-space removed. (`SoftHomeView.swift`, `WeatherHeader.swift`,
+  `SoftBusView.swift`)
+
 ## Leyne 2.6.0 · iOS (23) · 2026-06-11
 
 **2026-06-11 — iOS Archive (2.6.0, build 23):** A design + features release. Leyne

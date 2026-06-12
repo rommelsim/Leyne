@@ -138,6 +138,8 @@ struct SoftStopView: View {
                 Image(systemName: isPinned ? "star.fill" : "star")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isPinned ? t.soon : t.fg)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: isPinned)
                     .frame(width: 44, height: 44)
                     .background(t.surface, in: Circle())
                     .overlay(Circle().stroke(t.line, lineWidth: 1))

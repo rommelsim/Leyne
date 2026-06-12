@@ -7,7 +7,7 @@
 import SwiftUI
 
 enum SoftTab: String, CaseIterable {
-    case home, favourites, nearby, settings, search
+    case home, favourites, mrt, settings, search, nearby
 }
 
 // MARK: - Top scroll-edge blur
@@ -38,7 +38,7 @@ extension View {
     /// when ads are disabled or screenshot mode is on.
     @ViewBuilder
     func adBannerGutter() -> some View {
-        if AdConfig.adsEnabled && !AdConfig.screenshotMode {
+        if !AdConfig.adsSuppressed {
             self.safeAreaInset(edge: .bottom) {
                 AdBanner()
                     .frame(height: AdConfig.adaptiveBannerHeight)

@@ -226,6 +226,18 @@ enum MRTLine: String, CaseIterable {
         }
     }
 
+    /// PCD (Station Crowd Density) line code for this line, e.g. "EWL".
+    var pcdLineCode: String {
+        switch self {
+        case .EW: return "EWL"
+        case .NS: return "NSL"
+        case .NE: return "NEL"
+        case .CC: return "CCL"
+        case .DT: return "DTL"
+        case .TE: return "TEL"
+        }
+    }
+
     /// Map LTA TrainServiceAlerts `Line` codes (e.g. "NEL", "EWL") to
     /// our local palette enum. Returns nil for lines we don't colour
     /// yet — callers fall back to a neutral marker so the alert still

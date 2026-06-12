@@ -9,6 +9,26 @@
 
 import SwiftUI
 
+/// Text pieces for a collapsed stop-card teaser — the at-a-glance summary
+/// shown in place of the bus list ("5 buses · next in 3 min"). Split into two
+/// segments so the view can tint the count and the timing differently; the
+/// "~" honesty whisper is applied by the view from the arrival's confidence.
+struct StopTeaser: Equatable {
+    let countText: String   // "5 buses" / "1 bus"
+    let whenText: String    // "next in 3 min" / "next now"
+}
+
+/// Build a collapsed-card teaser from the bus count + the soonest arrival's
+/// ETA. Pure (no view state) so it can be unit-tested. Returns nil when there
+/// is nothing to summarise (no arrivals).
+func stopTeaser(count: Int, soonestEtaSec: Int) -> StopTeaser? {
+    guard count > 0 else { return nil }
+    let noun = count == 1 ? "bus" : "buses"
+    let eta = fmtETA(soonestEtaSec)
+    let when = eta.big == "Arr" ? "next now" : "next in \(eta.big) \(eta.small)"
+    return StopTeaser(countText: "\(count) \(noun)", whenText: when)
+}
+
 /// Compact next-bus chip: service number over its ETA (uniform ink).
 struct MiniBusChip: View {
     let t: Theme

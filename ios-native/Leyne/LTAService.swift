@@ -158,6 +158,23 @@ final class LTAService: @unchecked Sendable {
         let url = LTAConfig.baseURL.appendingPathComponent("TrainServiceAlerts")
         return try await get(url, as: LTATrainAlertResponse.self).value
     }
+
+    // ─── Live: Station Crowd Density (real-time) ──────────
+    /// Real-time station crowdedness for one train line. `trainLine` is the
+    /// PCD line code (EWL, NSL, NEL, CCL, DTL, TEL, …).
+    func stationCrowd(trainLine: String) async throws -> [LTAStationCrowd] {
+        var c = URLComponents(url: LTAConfig.baseURL.appendingPathComponent("PCDRealTime"),
+                              resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "TrainLine", value: trainLine)]
+        return try await get(c.url!, as: LTAList<LTAStationCrowd>.self).value
+    }
+
+    // ─── Live: Facilities Maintenance v2 (lift maintenance)
+    /// Network-wide list of MRT-station lifts currently under maintenance.
+    func facilitiesMaintenance() async throws -> [LTAFacilityMaintenance] {
+        let url = LTAConfig.baseURL.appendingPathComponent("v2/FacilitiesMaintenance")
+        return try await get(url, as: LTAList<LTAFacilityMaintenance>.self).value
+    }
 }
 
 // MARK: - GeocodeService (OneMap postal-code lookup)

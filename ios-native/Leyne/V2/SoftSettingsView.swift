@@ -34,7 +34,7 @@ struct SoftSettingsView: View {
 
     var body: some View {
         List {
-            // ── Section 1: title + primary rows ──────────────────────────
+            // ── Section 1: primary rows ──────────────────────────────────
             Section {
                 // Manage alerts → ManageAlertsView (the central alert list).
                 // Notification permission itself is requested once at first
@@ -107,8 +107,8 @@ struct SoftSettingsView: View {
                 .listRowBackground(rowBG)
 
             } header: {
-                // Large in-content title — SoftRoot hides the nav bar at each
-                // tab root, so the page title rides the first section header.
+                // Large in-content title rides the first section header
+                // (the nav bar is hidden at each tab root).
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Settings")
                         .font(t.sans(32, weight: .bold))

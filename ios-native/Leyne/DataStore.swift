@@ -98,6 +98,36 @@ struct TrainAlert: Identifiable, Equatable {
     let detail: String
 }
 
+/// Station crowdedness bucket from the PCDRealTime feed.
+enum CrowdLevel: String {
+    case low, moderate, high, unknown
+    static func from(_ raw: String) -> CrowdLevel {
+        switch raw.lowercased() {
+        case "l": return .low
+        case "m": return .moderate
+        case "h": return .high
+        default:  return .unknown
+        }
+    }
+}
+
+/// One station's live crowdedness on a line (PCDRealTime), with its display
+/// name resolved from the station code.
+struct StationCrowd: Identifiable, Equatable {
+    let code: String
+    let name: String
+    let level: CrowdLevel
+    var id: String { code }
+}
+
+/// A lift currently under maintenance at an MRT station (FacilitiesMaintenance v2).
+struct LiftMaintenance: Identifiable, Equatable {
+    let line: String
+    let stationName: String
+    let detail: String
+    var id: String { "\(line)·\(stationName)·\(detail)" }
+}
+
 /// The relevant slice of the route to draw on the map: from the bus's current
 /// position (or an approach window if it's passed/unknown) to just past your
 /// stop. Drawing the *whole* route connects 40–60 stops incl. loops with
@@ -125,6 +155,16 @@ final class DataStore: ObservableObject {
     /// Empty means no disruptions; the Home page renders one card per item.
     @Published var trainAlerts: [TrainAlert] = []
     private var lastTrainAlertFetch: Date?
+
+    /// Network-wide list of lifts currently under maintenance (FacilitiesMaintenance v2).
+    @Published var liftMaintenance: [LiftMaintenance] = []
+    private var lastLiftFetch: Date?
+
+    /// Live per-line station crowdedness (PCDRealTime), fetched lazily when a
+    /// line is expanded on the MRT board.
+    @Published var crowdByLine: [MRTLine: [StationCrowd]] = [:]
+    private var crowdInflight: Set<MRTLine> = []
+    private var lastCrowdFetch: [MRTLine: Date] = [:]
 
     private(set) var stopByCode: [String: LTABusStop] = [:]
     private var services: [LTABusServiceDTO] = []
@@ -199,6 +239,17 @@ final class DataStore: ObservableObject {
                             seg: seg, messages: r.Message))
                 }
                 : []
+            // Notify about lines that just became disrupted — i.e. present
+            // now but absent from the previous snapshot. Keyed by line code so
+            // a persisting disruption isn't re-announced every 60 s refresh.
+            // The manager gates on the user's notification toggle.
+            let previousIds = Set(trainAlerts.map(\.id))
+            for alert in alerts where !previousIds.contains(alert.id) {
+                NotificationsManager.shared.notifyTrainDisruption(
+                    lineCode: alert.lineCode,
+                    title: alert.title,
+                    detail: alert.detail)
+            }
             // Don't bounce equal arrays through @Published — keeps the
             // Home re-render quiet when nothing changed.
             if alerts != trainAlerts { trainAlerts = alerts }
@@ -206,6 +257,50 @@ final class DataStore: ObservableObject {
             // Network failures here are routine; we keep the previous
             // snapshot rather than blanking the cards out.
         }
+    }
+
+    // ─── Lift maintenance (Facilities Maintenance v2) ─────
+    /// Network-wide adhoc lift maintenance. Ad-hoc data; refresh at most every
+    /// 30 min while the MRT board is open.
+    func refreshLiftMaintenanceIfStale(force: Bool = false) {
+        if !force, let last = lastLiftFetch,
+           Date().timeIntervalSince(last) < 1800 { return }
+        lastLiftFetch = Date()
+        Task { await self.fetchLiftMaintenance() }
+    }
+
+    private func fetchLiftMaintenance() async {
+        guard let items = try? await api.facilitiesMaintenance() else { return }
+        let mapped = items.map {
+            LiftMaintenance(line: $0.Line,
+                            stationName: $0.StationName,
+                            detail: $0.LiftDesc?.trimmingCharacters(in: .whitespaces)
+                                ?? "Lift under maintenance")
+        }
+        if mapped != liftMaintenance { liftMaintenance = mapped }
+    }
+
+    // ─── Station crowd density (PCDRealTime) ──────────────
+    /// Fetch live crowdedness for one line (lazy — called when a line is
+    /// expanded). Real-time feed updates ~every 10 min; gate to 5 min here.
+    func refreshCrowd(line: MRTLine, force: Bool = false) {
+        if !force, let last = lastCrowdFetch[line],
+           Date().timeIntervalSince(last) < 300 { return }
+        if crowdInflight.contains(line) { return }
+        crowdInflight.insert(line)
+        lastCrowdFetch[line] = Date()
+        Task { await self.fetchCrowd(line: line) }
+    }
+
+    private func fetchCrowd(line: MRTLine) async {
+        defer { crowdInflight.remove(line) }
+        guard let rows = try? await api.stationCrowd(trainLine: line.pcdLineCode) else { return }
+        let mapped = rows.map { row in
+            StationCrowd(code: row.Station,
+                         name: mrtStationName(forCode: row.Station) ?? row.Station,
+                         level: CrowdLevel.from(row.CrowdLevel))
+        }
+        crowdByLine[line] = mapped
     }
 
     /// Pluck the first matching `Message.Content` for the segment, trim

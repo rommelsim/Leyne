@@ -113,6 +113,25 @@ struct LTATrainMessage: Codable, Equatable {
     let CreatedDate: String?
 }
 
+// ─── Station crowd density (PCDRealTime) ──────────────────
+// Real-time MRT/LRT station crowdedness for one train line.
+// CrowdLevel: "l" low · "m" moderate · "h" high · "NA" unknown.
+struct LTAStationCrowd: Codable, Equatable {
+    let Station: String          // station code, e.g. "EW13"
+    let StartTime: String?
+    let EndTime: String?
+    let CrowdLevel: String
+}
+
+// ─── Facilities maintenance v2 (adhoc lift maintenance) ───
+struct LTAFacilityMaintenance: Codable, Equatable {
+    let Line: String             // e.g. "NEL"
+    let StationCode: String      // e.g. "NE12"
+    let StationName: String      // e.g. "Serangoon"
+    let LiftID: String?
+    let LiftDesc: String?        // e.g. "Exit B Street level - Concourse"
+}
+
 // ─── ISO-8601 (+08:00) date parsing ───────────────────────
 enum LTADate {
     private static let fmt: ISO8601DateFormatter = {

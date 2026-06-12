@@ -127,12 +127,12 @@ struct SoftBusView: View {
                 heroCard
                 liveModule
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                firstLastFooter
             }
             .padding(.horizontal, 16)
-            // Leave room below the sheet's drag grabber so the title doesn't
-            // crowd it and the card stays easy to grab and drag down.
-            .padding(.top, 52)
+            // Pushed full-screen (not a sheet) — the safe-area inset already
+            // clears the status bar, so only a small breathing gap is needed
+            // above the top bar. Matches SoftStopView's top inset.
+            .padding(.top, 8)
             .padding(.bottom, 10)
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
@@ -281,6 +281,8 @@ struct SoftBusView: View {
                 Image(systemName: serviceSaved ? "bus.fill" : "bus")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(serviceSaved ? t.soon : t.fg)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: serviceSaved)
                     .frame(width: 44, height: 44)
                     .background(t.surface, in: Circle())
                     .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
@@ -368,6 +370,10 @@ struct SoftBusView: View {
                     .accessibilityLabel("Live tracking")
                 }
             }
+            // First/last bus rides directly under the route line — top of the
+            // screen for at-a-glance "have I missed the last bus?" visibility.
+            firstLastFooter
+                .padding(.top, 1)
         }
     }
 
@@ -720,7 +726,7 @@ struct SoftBusView: View {
 
     // MARK: First / last bus footer
 
-    /// "Did I miss the last bus?" — a thin line at the foot of the dashboard.
+    /// "Did I miss the last bus?" — a thin line under the title/route line.
     /// Hidden when unknown (older cache, or the non-anchor direction).
     @ViewBuilder
     private var firstLastFooter: some View {
@@ -737,7 +743,6 @@ struct SoftBusView: View {
                     .minimumScaleFactor(0.8)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 4)
             .accessibilityElement(children: .combine)
         }
     }

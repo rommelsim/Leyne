@@ -99,6 +99,19 @@ enum AdConfig {
     static let screenshotMode =
         ProcessInfo.processInfo.arguments.contains("-screenshots")
 
+    /// Reserved ad-free entitlement hook. The Leyne+ paywall was removed —
+    /// every feature is currently free and ad-supported — so this is always
+    /// false. Kept so ad call sites read a single gate; flip it back to a real
+    /// entitlement source if a paid ad-free tier returns.
+    static let premiumActive = false
+
+    /// Single source of truth for "should we suppress every ad right now":
+    /// the master switch is off or we're capturing screenshots. All ad
+    /// placements consult this.
+    static var adsSuppressed: Bool {
+        !adsEnabled || screenshotMode || premiumActive
+    }
+
     /// SDK-started signal. Toggling this notifies anyone waiting (BannerAdView)
     /// so the first ad request goes out *after* `MobileAds.shared.start()` —
     /// previously a returning-user launch raced the load against consent.
@@ -180,7 +193,7 @@ enum AdConsent {
         // Hard-stop when ads are disabled. Don't request consent, don't
         // start the Mobile Ads SDK, don't generate any traffic that could
         // hit a suspended AdMob account.
-        guard AdConfig.adsEnabled else { return }
+        guard AdConfig.adsEnabled, !AdConfig.premiumActive else { return }
         guard !ran else { return }
         ran = true
 
@@ -551,7 +564,7 @@ struct AdBanner: View {
 struct MediumRectAd: View {
     @EnvironmentObject private var m: AppModel
     var body: some View {
-        if !AdConfig.adsEnabled || AdConfig.screenshotMode {
+        if AdConfig.adsSuppressed {
             EmptyView()
         } else {
             ZStack {
@@ -594,7 +607,7 @@ extension View {
     @ViewBuilder
     func bottomAdBanner(_ t: Theme) -> some View {
         let _ = BottomAdBannerProbe.logOnce()
-        if !AdConfig.adsEnabled || AdConfig.screenshotMode {
+        if AdConfig.adsSuppressed {
             self
         } else if #available(iOS 26.0, *) {
             tabViewBottomAccessory {
@@ -611,7 +624,7 @@ extension View {
     /// `tabViewBottomAccessory` slot.
     @ViewBuilder
     func overlayAdBanner(_ t: Theme) -> some View {
-        if !AdConfig.adsEnabled || AdConfig.screenshotMode {
+        if AdConfig.adsSuppressed {
             self
         } else {
             safeAreaInset(edge: .bottom, spacing: 0) {

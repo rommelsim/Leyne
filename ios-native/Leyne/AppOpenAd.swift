@@ -84,7 +84,7 @@ final class AppOpenAdManager: NSObject {
     /// disable cold-launch ads without touching warm-resume behaviour.
     func showOnColdLaunch(model: AppModel) async {
         guard AppOpenAdConfig.coldLaunchEnabled else { return }
-        guard AdConfig.adsEnabled, !AdConfig.screenshotMode else { return }
+        guard !AdConfig.adsSuppressed else { return }
         let d = UserDefaults.standard
         guard d.bool(forKey: coldLaunchedKey) else {
             d.set(true, forKey: coldLaunchedKey)   // first launch — no ad
@@ -133,7 +133,7 @@ final class AppOpenAdManager: NSObject {
 
     /// Load a single ad ahead of time if we don't already have a fresh one.
     func preload() {
-        guard AdConfig.adsEnabled, !AdConfig.screenshotMode else { return }
+        guard !AdConfig.adsSuppressed else { return }
         guard AdConfig.started else { return }       // consent + SDK ready
         guard !isLoading, ad == nil || isExpired else { return }
         isLoading = true
@@ -158,7 +158,7 @@ final class AppOpenAdManager: NSObject {
     /// Present the App Open ad on foreground IF every guard passes; otherwise
     /// make sure one is loading for next time. Safe to call on every foreground.
     func showIfReady(model: AppModel) {
-        guard AdConfig.adsEnabled, !AdConfig.screenshotMode else { return }
+        guard !AdConfig.adsSuppressed else { return }
         guard AdConfig.started else { preload(); return }
 
         // Never during/before onboarding, or over the launch splash.

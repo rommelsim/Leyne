@@ -106,6 +106,11 @@ struct SoftRoot: View {
                         )
                     }
                 }
+                Tab("MRT", systemImage: "tram.fill", value: SoftTab.mrt) {
+                    SoftMrtView()
+                        .adBannerGutter()
+                        .softTopEdgeBlur()
+                }
                 Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
                     navStack($settingsStack) {
                         SoftSettingsView(onTab: { tab = $0 })

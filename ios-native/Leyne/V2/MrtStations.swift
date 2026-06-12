@@ -234,6 +234,23 @@ private let mrtIndex: [String: String] = {
     return idx
 }()
 
+/// Reverse index: station code (e.g. "EW13") → display name. Built once from
+/// `mrtStationCodes`. Covers the trunk MRT lines (NS/EW/NE/CC/DT/TE); LRT and
+/// any uncatalogued code simply isn't present.
+private let mrtNameByCode: [String: String] = {
+    var idx: [String: String] = [:]
+    for (name, codes) in mrtStationCodes {
+        for c in codes { idx[c.uppercased()] = name }
+    }
+    return idx
+}()
+
+/// Display name for a station code like "EW13" / "NS1", or nil if unknown.
+/// Used to label PCD (crowd density) rows, which carry only station codes.
+func mrtStationName(forCode code: String) -> String? {
+    mrtNameByCode[code.uppercased()]
+}
+
 /// Resolve a bus-stop description to its rail station, or nil when it isn't a
 /// (recognised) station stop. e.g. "Farrer Rd Stn Exit A" → Farrer Road [CC20].
 func resolveMrtStation(_ stopName: String) -> MrtStation? {

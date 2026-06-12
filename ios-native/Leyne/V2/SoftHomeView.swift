@@ -1,8 +1,8 @@
-// SoftHomeView — Leyne Home ("Stops near you"): weather + greeting + title
-// with a filter/map action pair, a NEAR YOU · LIVE status line, then the
-// single closest stop highlighted in its own "Closest to you" section, the
-// rest under "Other nearby stops", and a live-updates footer. Each card shows
-// the stop's identity and its soonest service's next three arrivals.
+// SoftHomeView — Leyne Home ("Stops near you"): a one-line greeting · clock ·
+// weather context strip, the "Stops near you" title with an alerts bell, a
+// compact LIVE status line, then the single closest stop (marked by its own
+// "Closest stop" badge) followed by the rest under "More stops". Each card
+// shows the stop's identity and its soonest service's next three arrivals.
 
 import SwiftUI
 import MapKit
@@ -32,35 +32,56 @@ struct SoftHomeView: View {
         ZStack(alignment: .bottom) {
             t.bg.ignoresSafeArea()
 
-            ScrollView {
+            // A List (not a ScrollView) so each stop gets a native trailing
+            // swipe action to Save/Remove — the same swipe affordance as the
+            // Saved tab. Header + live row + MRT alerts ride as plain rows so
+            // they scroll normally (no sticky section headers).
+            List {
                 VStack(alignment: .leading, spacing: 16) {
                     header
                     liveRow
-                    mrtAlertCards
-
-                    let stops = nearbyStops
-                    if let closest = stops.first {
-                        section(label: "Closest to you") {
-                            stopCard(closest, highlight: true)
-                        }
-                        let others = Array(stops.dropFirst().prefix(11))
-                        if !others.isEmpty {
-                            section(label: "Other nearby stops") {
-                                ForEach(others, id: \.id) { stopCard($0, highlight: false) }
-                            }
-                        }
-                    } else {
-                        SoftEmptyState(t: t,
-                                       onNearby: { loc.requestAndStart() },
-                                       onSearch: { onOpenSearch() })
-                            .padding(.top, 4)
-                    }
-
-                    Color.clear.frame(height: 24)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+                mrtAlertCards
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                let stops = nearbyStops
+                if let closest = stops.first {
+                    // The closest stop stands alone — its own "Closest stop"
+                    // badge labels it, so no section header is needed.
+                    stopCard(closest, highlight: true)
+                    let others = Array(stops.dropFirst().prefix(11))
+                    if !others.isEmpty {
+                        Text("More stops")
+                            .font(t.sans(15, weight: .semibold))
+                            .foregroundStyle(t.dim)
+                            .listRowInsets(EdgeInsets(top: 10, leading: 18, bottom: 2, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        ForEach(others, id: \.id) { stopCard($0, highlight: false) }
+                    }
+                } else {
+                    SoftEmptyState(t: t,
+                                   onNearby: { loc.requestAndStart() },
+                                   onSearch: { onOpenSearch() })
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 5, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+
+                Color.clear.frame(height: 24)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(t.bg)
             .refreshable { await refreshAll() }
         }
         .onAppear {
@@ -135,13 +156,9 @@ struct SoftHomeView: View {
 
     private var liveRow: some View {
         let located = loc.location != nil
-        return HStack(spacing: 7) {
-            Image(systemName: "location.fill")
+        return HStack(spacing: 6) {
+            Image(systemName: located ? "location.fill" : "location.slash.fill")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(located ? t.meBlue : t.dim)
-            Text(located ? "NEAR YOU" : "LOCATION OFF")
-                .font(t.mono(10, weight: .bold))
-                .tracking(0.8)
                 .foregroundStyle(located ? t.meBlue : t.dim)
             if located {
                 Circle().fill(t.soon).frame(width: 6, height: 6)
@@ -149,24 +166,15 @@ struct SoftHomeView: View {
                     .font(t.mono(10, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(t.dim)
+            } else {
+                Text("LOCATION OFF")
+                    .font(t.mono(10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(t.dim)
             }
             Spacer(minLength: 0)
         }
         .padding(.leading, 2)
-    }
-
-    // MARK: Sections
-
-    @ViewBuilder
-    private func section<Content: View>(label: String,
-                                        @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(label)
-                .font(t.sans(15, weight: .semibold))
-                .foregroundStyle(t.dim)
-                .padding(.leading, 2)
-            content()
-        }
     }
 
     private func stopCard(_ stop: NearbyStop, highlight: Bool) -> some View {
@@ -183,11 +191,18 @@ struct SoftHomeView: View {
             feed: feed(code),
             highlight: highlight,
             tick: m.tick,
-            onTap: { fb.select(); m.addRecent(name); onOpenStop(code) }
+            onTap: { fb.select(); m.addRecent(name); onOpenStop(code) },
+            isSaved: m.isPinned(code)
         )
         // Long-press menu (matches the mockup): the card lifts as the preview.
         // Long-press → a peek of the stop (mini live-arrivals view) + actions.
         .contextMenu(menuItems: {
+            Button {
+                fb.success(); m.togglePin(code: code)
+            } label: {
+                Label(m.isPinned(code) ? "Remove from Saved" : "Save stop",
+                      systemImage: m.isPinned(code) ? "star.slash" : "star")
+            }
             Button {
                 fb.select(); openOnMap(code: code, name: name)
             } label: {
@@ -201,6 +216,21 @@ struct SoftHomeView: View {
         }, preview: {
             stopPreview(code: code, name: name)
         })
+        // Native trailing swipe → Save/Remove, identical to the Saved tab.
+        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                fb.success(); m.togglePin(code: code)
+            } label: {
+                Label(m.isPinned(code) ? "Remove" : "Save",
+                      systemImage: m.isPinned(code) ? "star.slash.fill" : "star.fill")
+            }
+            // Swipe-action labels render white; tint with a real colour (not
+            // t.soon, which is white in dark mode → invisible glyph).
+            .tint(.green)
+        }
     }
 
     // MARK: Context-menu actions
@@ -392,33 +422,83 @@ struct SoftNearbyStopCard: View {
     let highlight: Bool
     let tick: Int            // forces a per-second live ETA recompute
     let onTap: () -> Void
+    let isSaved: Bool
+
+    /// Collapsed by default: the row shows only the stop's identity (no bus
+    /// numbers) to save vertical space. Tap the chevron to reveal the buses
+    /// inline; tap the identity to open the full stop view.
+    @State private var expanded = false
 
     var body: some View {
         let _ = tick
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 0) {
-                if highlight { closestBadge.padding(.bottom, 12) }
-                identityRow
+        return VStack(alignment: .leading, spacing: 0) {
+            if highlight { closestBadge.padding(.bottom, 10) }
+            headerRow
+            if expanded {
                 Rectangle().fill(t.line).frame(height: 1)
                     .padding(.vertical, 14)
-                if arrivals.isEmpty {
-                    quietRow
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(arrivals) { arrivalRow($0) }
+                // Tapping any of the revealed buses opens the full stop view.
+                Button(action: onTap) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if arrivals.isEmpty {
+                            quietRow
+                        } else {
+                            VStack(spacing: 12) {
+                                ForEach(arrivals) { arrivalRow($0) }
+                            }
+                            viewAllRow
+                        }
                     }
-                    viewAllRow
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(PressScaleButtonStyle())
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(highlight ? t.soon : t.line, lineWidth: highlight ? 1.5 : 1))
         }
-        .buttonStyle(PressScaleButtonStyle())
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens \(name)")
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(highlight ? t.soon : t.line, lineWidth: highlight ? 1.5 : 1))
+    }
+
+    /// Identity (tap → open stop) + a chevron toggle (tap → reveal buses).
+    private var headerRow: some View {
+        HStack(spacing: 12) {
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    pinTile
+                    identityText
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScaleButtonStyle())
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens \(name)")
+
+            expandToggle
+        }
+    }
+
+    /// Chevron that expands/collapses the inline bus list. A separate tap
+    /// target from the identity so the two actions never collide.
+    private var expandToggle: some View {
+        Button {
+            Feedback.shared.tap()
+            withAnimation(.easeInOut(duration: 0.22)) { expanded.toggle() }
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(t.dim)
+                .rotationEffect(.degrees(expanded ? 180 : 0))
+                .frame(width: 36, height: 36)
+                .background(t.surfaceHi, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(expanded ? "Hide buses at \(name)"
+                                     : "Show buses at \(name)")
     }
 
     private var closestBadge: some View {
@@ -430,40 +510,90 @@ struct SoftNearbyStopCard: View {
             .background(t.soon, in: Capsule())
     }
 
-    private var identityRow: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(t.surfaceHi)
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(t.fg)
-            }
-            .frame(width: 46, height: 46)
+    private var pinTile: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(t.surfaceHi)
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(t.fg)
+        }
+        .frame(width: 42, height: 42)
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
+    private var identityText: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
                 Text(name)
                     .font(t.sans(17, weight: .semibold))
                     .foregroundStyle(t.fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(subtitle)
-                    .font(t.mono(12.5))
-                    .foregroundStyle(t.dim)
-                    .lineLimit(1)
-                HStack(spacing: 5) {
-                    Image(systemName: "figure.walk")
+                // Saved marker — pops in when the stop is saved (swipe / menu),
+                // giving the save a visible, on-brand result.
+                if isSaved {
+                    Image(systemName: "star.fill")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(t.soon)
-                    Text("\(max(1, walkMin)) min walk")
-                        .foregroundStyle(t.soon)
-                    Text("·").foregroundStyle(t.faint)
-                    Text(fmtDistance(distanceM)).foregroundStyle(t.dim)
+                        .transition(.scale.combined(with: .opacity))
+                        .accessibilityLabel("Saved")
                 }
-                .font(t.mono(12.5, weight: .medium))
-                .padding(.top, 1)
             }
-            Spacer(minLength: 4)
+            .animation(.spring(response: 0.32, dampingFraction: 0.6), value: isSaved)
+            Text(subtitle)
+                .font(t.mono(12.5))
+                .foregroundStyle(t.dim)
+                .lineLimit(1)
+            // Collapsed: one tight meta line (walk + soonest arrival). Expanded:
+            // walk + distance, since the soonest bus is in the list just below.
+            if expanded { walkRow } else { compactMeta }
         }
+    }
+
+    /// Walk time + distance — shown while the card is expanded.
+    private var walkRow: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "figure.walk")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(t.soon)
+            Text("\(max(1, walkMin)) min walk")
+                .foregroundStyle(t.soon)
+            Text("·").foregroundStyle(t.faint)
+            Text(fmtDistance(distanceM)).foregroundStyle(t.dim)
+        }
+        .font(t.mono(12.5, weight: .medium))
+        .padding(.top, 1)
+    }
+
+    /// Collapsed-only single meta line: walk time + the soonest arrival, merged
+    /// to save a whole row. The whisper "~" precedes an unconfirmed estimate,
+    /// matching the app-wide honesty cue.
+    @ViewBuilder
+    private var compactMeta: some View {
+        let soonest = arrivals.min(by: { $0.service.etaSec < $1.service.etaSec })
+        let summary = soonest.flatMap {
+            stopTeaser(count: arrivals.count, soonestEtaSec: $0.service.etaSec)
+        }
+        HStack(spacing: 5) {
+            Image(systemName: "figure.walk")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(t.soon)
+            Text("\(max(1, walkMin)) min")
+                .foregroundStyle(t.soon)
+            if let soonest, let summary {
+                let conf = ArrivalConfidence.of(monitored: soonest.service.monitored, feed: feed)
+                Text("·").foregroundStyle(t.faint)
+                Image(systemName: "bus.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                if conf == .unconfirmed {
+                    Text("~").foregroundStyle(t.faint).accessibilityHidden(true)
+                }
+                Text(summary.whenText)
+                    .foregroundStyle(t.fg)
+            }
+        }
+        .font(t.mono(12, weight: .medium))
+        .padding(.top, 1)
     }
 
     private var subtitle: String {

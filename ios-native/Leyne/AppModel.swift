@@ -84,6 +84,30 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.7.0": WhatsNewEntry(
+        headline: "A live MRT board — free for everyone.",
+        items: [
+            WhatsNewItem(
+                icon: "tram.fill",
+                title: "Live MRT board",
+                body: "See every line's status at a glance, tap a line for live "
+                    + "station crowd levels, and check which lifts are under "
+                    + "maintenance — all free."
+            ),
+            WhatsNewItem(
+                icon: "star.fill",
+                title: "Save faster",
+                body: "Swipe any nearby stop to save it, and drag your saved "
+                    + "stops and buses into the order you want."
+            ),
+            WhatsNewItem(
+                icon: "bell.badge.fill",
+                title: "Disruption alerts",
+                body: "Get notified the moment a line goes down, so you can "
+                    + "reroute before you reach the platform."
+            ),
+        ]
+    ),
     "2.6.0": WhatsNewEntry(
         headline: "A calmer look — plus weather and one-swipe alerts.",
         items: [
@@ -1628,6 +1652,39 @@ final class NotificationsManager {
                 prefixes.contains { id.hasPrefix($0) }
             }
             self.center.removePendingNotificationRequests(withIdentifiers: ids)
+        }
+    }
+
+    // ─── MRT disruption alerts ─────────────────────────────
+    //
+    // Fired when a NEW train-line disruption appears in the LTA feed. Free for
+    // everyone; gated only on the user's notification toggle, so opted-out
+    // users are never buzzed. One notification per line, keyed by line code so
+    // a persisting disruption isn't re-announced every refresh.
+
+    private let mrtPrefix = "mrt."
+
+    /// Announce a freshly-detected MRT line disruption. No-op unless the user
+    /// has notifications enabled. Called by DataStore when a line transitions
+    /// into a disrupted state.
+    func notifyTrainDisruption(lineCode: String, title: String, detail: String) {
+        guard UserDefaults.standard.object(forKey: "leyne.notifications") == nil
+                || UserDefaults.standard.bool(forKey: "leyne.notifications") else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = detail
+        content.threadIdentifier = "mrt"
+        content.sound = .default
+        content.userInfo = ["kind": "mrt", "line": lineCode]
+        if #available(iOS 15.0, *) { content.interruptionLevel = .timeSensitive }
+        let req = UNNotificationRequest(
+            identifier: "\(mrtPrefix)\(lineCode)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
+        center.add(req) { err in
+            if let err {
+                notifLog.error("mrt notify failed: \(err.localizedDescription)")
+            }
         }
     }
 
