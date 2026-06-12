@@ -1,27 +1,25 @@
-// Proximity & occupancy — the 2.4.0 overhaul's semantic-colour layer.
+// Proximity & occupancy.
 //
-// Two orthogonal signals get colour here, and ONLY these two:
-//   • ETA proximity — how soon a bus arrives (green → amber → neutral)
-//   • Occupancy     — how full it is (seats green · standing amber · limited grey)
+// ETA / soon-ness is deliberately NOT colour-coded: arrival times read as
+// uniform ink, and only confidence dims them (scheduled / ghost arrivals show
+// faint — the honesty whisper, see Confidence.swift). The one remaining colour
+// signal here is occupancy — how full a bus is (seats green · standing amber ·
+// limited grey).
 //
-// Confidence (live / stale / scheduled) is deliberately NOT colour — it stays
-// shape + opacity + the whisper "~" (see Confidence.swift), so the honesty
-// thesis and colour-blind legibility survive. A scheduled/ghost arrival is
-// therefore shown neutral regardless of how soon it is: we don't paint an
-// unverified time green.
+// `ETATier` survives only to drive the "Arriving soon" text cue for an
+// imminent *live* arrival; it no longer maps to a colour.
 
 import SwiftUI
 
 // MARK: - ETA proximity
 
-/// How soon an arrival is, bucketed for colour + "Arriving soon" copy.
-/// Thresholds mirror the mockups: ≤~2.5 min reads as imminent, green holds
-/// to ~9 min, amber to ~16 min, then neutral.
+/// How soon an arrival is, bucketed for the "Arriving soon" copy on the lead
+/// chip. Thresholds mirror the mockups: ≤~2.5 min reads as imminent.
 enum ETATier {
-    case imminent   // arriving / very soon → green + "Arriving soon"
-    case soon       // green
-    case medium     // amber
-    case far        // neutral (grey)
+    case imminent   // arriving / very soon → "Arriving soon"
+    case soon
+    case medium
+    case far
 
     static func of(etaSec: Int) -> ETATier {
         switch etaSec {
@@ -33,45 +31,6 @@ enum ETATier {
     }
 
     var isImminent: Bool { self == .imminent }
-}
-
-/// Resolves the colour for an arrival's ETA, gating on confidence: a bus we
-/// can't verify live (scheduled / ghost) is always neutral — we never paint
-/// an unconfirmed time green or amber. Stale (was-live, now aging) keeps its
-/// proximity hue; the "~" whisper already signals the aging.
-func etaColor(tier: ETATier, confidence: ArrivalConfidence, t: Theme) -> Color {
-    switch confidence {
-    case .unconfirmed, .none:
-        return t.dim
-    case .live, .stale:
-        switch tier {
-        case .imminent, .soon: return t.soon
-        case .medium:          return t.mid
-        case .far:             return t.dim
-        }
-    }
-}
-
-/// Convenience: colour straight from seconds + confidence.
-func etaColor(etaSec: Int, confidence: ArrivalConfidence, t: Theme) -> Color {
-    etaColor(tier: .of(etaSec: etaSec), confidence: confidence, t: t)
-}
-
-/// Fill + number colour for a proximity-coloured service badge: soon → green,
-/// medium → amber (both with contrasting text that works in either mode),
-/// far / scheduled / ghost → neutral surface with ink text (we never paint an
-/// unverified service badge a confident green/amber).
-func serviceBadgeColors(etaSec: Int, confidence: ArrivalConfidence, t: Theme) -> (fill: Color, fg: Color) {
-    switch confidence {
-    case .unconfirmed, .none:
-        return (t.surfaceHi, t.fg)
-    case .live, .stale:
-        switch ETATier.of(etaSec: etaSec) {
-        case .imminent, .soon: return (t.soon, t.contrastFg)
-        case .medium:          return (t.mid, t.contrastFg)
-        case .far:             return (t.surfaceHi, t.fg)
-        }
-    }
 }
 
 // MARK: - Clock

@@ -1,15 +1,14 @@
-// Proximity & occupancy — 2.4.0 semantic-colour layer.
+// Proximity & occupancy.
 // Dart port of ios-native/Leyne/V2/Proximity.swift.
 //
-// Two orthogonal signals get colour here, and ONLY these two:
-//   • ETA proximity — how soon a bus arrives (green → amber → neutral)
-//   • Occupancy     — how full it is (seats green · standing amber · grey)
+// ETA / soon-ness is deliberately NOT colour-coded: arrival times read as
+// uniform ink, and only confidence dims them (scheduled/ghost arrivals show
+// faint — the honesty whisper, see confidence.dart). The one remaining colour
+// signal here is occupancy — how full a bus is (seats green · standing amber ·
+// limited grey).
 //
-// Confidence (live / stale / scheduled) is deliberately NOT colour — it stays
-// shape + opacity + the whisper "~" (see confidence.dart), so the honesty
-// thesis and colour-blind legibility survive. A scheduled/ghost arrival is
-// shown neutral regardless of how soon it is: we never paint an unverified
-// time green.
+// (iOS keeps an `ETATier` enum to drive an "Arriving soon" text cue on its
+// Home mini-chips; the Flutter UI has no such cue, so it isn't ported here.)
 
 import 'package:flutter/material.dart';
 
@@ -19,79 +18,15 @@ import 'confidence.dart';
 
 // ─── ETA proximity ─────────────────────────────────────────────────────────
 
-/// How soon an arrival is, bucketed for colour + "Arriving soon" copy.
-/// Thresholds mirror the iOS Proximity.swift spec:
-///   imminent  < 150s  (< ~2.5 min) → green + "Arriving soon"
-///   soon      < 540s  (< ~9 min)   → green
-///   medium    < 960s  (< ~16 min)  → amber
-///   far       ≥ 960s               → neutral grey
-enum EtaTier {
-  imminent,
-  soon,
-  medium,
-  far;
-
-  static EtaTier of(int etaSec) {
-    if (etaSec < 150) return EtaTier.imminent;
-    if (etaSec < 540) return EtaTier.soon;
-    if (etaSec < 960) return EtaTier.medium;
-    return EtaTier.far;
-  }
-
-  bool get isImminent => this == EtaTier.imminent;
-}
-
-/// Resolves the colour for an arrival's ETA, gating on confidence: a bus we
-/// can't verify live (scheduled/ghost) is always neutral — we never paint an
-/// unconfirmed time green or amber. Stale (was-live, now aging) keeps its
-/// proximity hue; the "~" whisper already signals the aging.
+/// Ink for an arrival's ETA. Soon-ness is not colour-coded — times read as
+/// uniform foreground ink; only a scheduled/ghost (unconfirmed) arrival dims
+/// to faint, the whisper-quiet honesty cue used app-wide.
 Color etaColor({
   required int etaSec,
   required ArrivalConfidence confidence,
   required LyneTheme t,
-}) {
-  switch (confidence) {
-    case ArrivalConfidence.unconfirmed:
-    case ArrivalConfidence.none:
-      return t.dim;
-    case ArrivalConfidence.live:
-    case ArrivalConfidence.stale:
-      switch (EtaTier.of(etaSec)) {
-        case EtaTier.imminent:
-        case EtaTier.soon:
-          return t.soon;
-        case EtaTier.medium:
-          return t.mid;
-        case EtaTier.far:
-          return t.dim;
-      }
-  }
-}
-
-/// Fill + foreground colour for a proximity-coloured service badge.
-/// soon → green fill, amber for medium, neutral surface for far / scheduled.
-({Color fill, Color fg}) serviceBadgeColors({
-  required int etaSec,
-  required ArrivalConfidence confidence,
-  required LyneTheme t,
-}) {
-  switch (confidence) {
-    case ArrivalConfidence.unconfirmed:
-    case ArrivalConfidence.none:
-      return (fill: t.surfaceHi, fg: t.fg);
-    case ArrivalConfidence.live:
-    case ArrivalConfidence.stale:
-      switch (EtaTier.of(etaSec)) {
-        case EtaTier.imminent:
-        case EtaTier.soon:
-          return (fill: t.soon, fg: t.contrastFg);
-        case EtaTier.medium:
-          return (fill: t.mid, fg: t.contrastFg);
-        case EtaTier.far:
-          return (fill: t.surfaceHi, fg: t.fg);
-      }
-  }
-}
+}) =>
+    confidence == ArrivalConfidence.unconfirmed ? t.dim : t.fg;
 
 // ─── Occupancy ─────────────────────────────────────────────────────────────
 

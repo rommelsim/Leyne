@@ -148,126 +148,10 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           ),
         ),
         const Spacer(),
-        // ETA colour legend info button.
-        _infoButton(context),
-        const SizedBox(width: 8),
         // Star menu — pin/unpin this stop or save a specific bus here,
         // without leaving the page (replaces the old save-sheet-only flow).
         _starMenu(context, isPinned),
         // Sort moved out of the top bar into a visible pill above the list.
-      ],
-    );
-  }
-
-  /// Small info button — tapping opens the ETA colour legend sheet.
-  Widget _infoButton(BuildContext context) {
-    final t = context.t;
-    return Semantics(
-      label: 'ETA colour guide',
-      button: true,
-      child: Material(
-        color: t.surface,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () => _showEtaLegend(context),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: t.line, width: 1),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.info_outline_rounded, size: 20, color: t.fg),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// ETA colour legend — compact bottom sheet explaining the three tiers.
-  void _showEtaLegend(BuildContext context) {
-    final t = context.t;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: t.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: t.line,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'ETA colours',
-              style: t.sans(17, weight: FontWeight.w700, color: t.fg),
-            ),
-            const SizedBox(height: 16),
-            _legendRow(
-              t,
-              color: t.soon,
-              label: 'Arriving soon',
-              detail: 'Under 9 minutes',
-            ),
-            const SizedBox(height: 14),
-            _legendRow(
-              t,
-              color: t.mid,
-              label: 'On its way',
-              detail: '9 – 16 minutes',
-            ),
-            const SizedBox(height: 14),
-            _legendRow(
-              t,
-              color: t.dim,
-              label: 'Further out',
-              detail: '16+ min or schedule only',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _legendRow(
-    LyneTheme t, {
-    required Color color,
-    required String label,
-    required String detail,
-  }) {
-    return Row(
-      children: [
-        Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(label,
-                style: t.sans(14, weight: FontWeight.w600, color: t.fg)),
-            Text(detail, style: t.mono(12, color: t.dim)),
-          ],
-        ),
       ],
     );
   }
@@ -734,8 +618,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     final feed =
         Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
     final conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed);
-    final sec = _liveSec(bus, now);
-    final badge = serviceBadgeColors(etaSec: sec, confidence: conf, t: t);
     final etas = _arrivalTimes(bus, now);
 
     return Semantics(
@@ -748,7 +630,8 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              _coloredBadge(bus.no, badge.fill, badge.fg, t),
+              // Badge keeps its standard look — proximity is not colour-coded.
+              _coloredBadge(bus.no, t),
               const SizedBox(width: 12),
               // Destination is the flexible element: it wraps to two lines
               // before truncating so "To Kampong Bahru Ter" reads in full.
@@ -849,8 +732,9 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  /// Up to three arrival columns ("Arr · 13 · 24 min") split by hairlines. The
-  /// lead column carries proximity colour + a live signal; the rest are ink.
+  /// Up to three arrival columns ("Arr · 13 · 24 min") split by hairlines. ETA
+  /// ink is uniform — soon-ness is not colour-coded; scheduled/ghost times read
+  /// faint (the honesty whisper), everything else standard ink.
   Widget _etaColumns(LyneTheme t, List<int> etas, ArrivalConfidence conf) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -871,8 +755,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
       {required bool lead, required ArrivalConfidence conf}) {
     final eta = fmtEta(sec);
     final arriving = eta.big == 'Arr';
-    final color =
-        lead ? etaColor(etaSec: sec, confidence: conf, t: t) : t.fg;
+    final color = etaColor(etaSec: sec, confidence: conf, t: t);
     final isGhost = conf == ArrivalConfidence.unconfirmed;
 
     return ConstrainedBox(
@@ -976,17 +859,17 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
 
   // ── Shared badge ──────────────────────────────────────────────────────────
 
-  Widget _coloredBadge(String svc, Color fill, Color fg, LyneTheme t) {
+  Widget _coloredBadge(String svc, LyneTheme t) {
     return Container(
       constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: fill,
+        color: t.accent,
         borderRadius: BorderRadius.circular(14), // ServiceBadgeSize.md.radius
       ),
       child: Text(svc,
-          style: t.sans(18, weight: FontWeight.w600, color: fg)),
+          style: t.sans(18, weight: FontWeight.w600, color: t.onAccent)),
     );
   }
 

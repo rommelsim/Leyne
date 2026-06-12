@@ -1,27 +1,28 @@
 // SoftStopCard — Leyne 2.4.0 Home card: a stop's identity (pin tile · name ·
 // "Stop {code} · road" · distance row) and a row of card-style next-bus chips.
 //
-// Chips preview the soonest buses (sorted by ETA). The lead chip is filled
-// green with an "Arriving soon" tag when it's an imminent *live* arrival; the
-// rest are bordered tiles with a proximity-coloured ETA. Colour carries only
-// proximity — confidence still reads from the whisper "~" (see fmtETA /
+// Chips preview the soonest buses (sorted by ETA). The lead chip carries an
+// "Arriving soon" text cue when it's an imminent *live* arrival; the rest are
+// bordered tiles. ETA is uniform ink — soon-ness is not colour-coded — and
+// confidence reads from the whisper "~" plus a faint ghost (see fmtETA /
 // Confidence.swift). Caps at 4 chips + a "+N more" tile, all equal-width.
 
 import SwiftUI
 
-/// Compact next-bus chip: service number over a proximity-coloured ETA.
+/// Compact next-bus chip: service number over its ETA (uniform ink).
 struct MiniBusChip: View {
     let t: Theme
     let svc: String
     let etaSec: Int
     let confidence: ArrivalConfidence
-    /// The lead/imminent chip — filled green with an "Arriving soon" tag.
+    /// The lead/imminent chip — carries the "Arriving soon" text cue.
     var highlight: Bool = false
 
     var body: some View {
         let eta = fmtETA(etaSec)
         let arriving = eta.big == "Arr"
-        let color = etaColor(etaSec: etaSec, confidence: confidence, t: t)
+        // Uniform ink — soon-ness isn't colour-coded; ghosts read faint.
+        let color = confidence == .unconfirmed ? t.dim : t.fg
         let whisper = confidence == .stale || confidence == .unconfirmed
 
         VStack(alignment: .leading, spacing: 3) {
@@ -45,9 +46,11 @@ struct MiniBusChip: View {
                 }
             }
             if highlight {
+                // Timely text cue only — no colour highlight (kept consistent
+                // with the rest; soon-ness is not colour-coded).
                 Text("Arriving soon")
                     .font(t.sans(9.5, weight: .semibold))
-                    .foregroundStyle(t.soon)
+                    .foregroundStyle(t.dim)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -55,10 +58,10 @@ struct MiniBusChip: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
-        .background(highlight ? t.soonBg : t.surface,
+        .background(t.surface,
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(highlight ? t.soon.opacity(0.55) : t.line, lineWidth: 1))
+            .stroke(t.line, lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(a11yLabel(eta: eta, arriving: arriving))
     }

@@ -38,15 +38,10 @@ struct ServiceBadge: View {
     /// When true, badge is filled inverted (surface bg, accent text).
     /// Used inside route timeline "BUS {svc}" chips that sit on accent.
     var inverted: Bool = false
-    /// Proximity colour override (2.4.0): when set, fills with this colour
-    /// and uses `fgOverride` for the number. Lets a badge read green/amber/
-    /// neutral by how soon the bus arrives. See `serviceBadgeColors`.
-    var fillOverride: Color? = nil
-    var fgOverride: Color? = nil
 
     var body: some View {
-        let fill = fillOverride ?? (inverted ? t.surface : t.accent)
-        let fg = fgOverride ?? (inverted ? t.accent : t.onAccent)
+        let fill = inverted ? t.surface : t.accent
+        let fg = inverted ? t.accent : t.onAccent
         Text(svc)
             .font(t.sans(size.font, weight: .semibold))
             .foregroundStyle(fg)

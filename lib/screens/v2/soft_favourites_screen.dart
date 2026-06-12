@@ -435,12 +435,6 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
           )
         : ArrivalConfidence.none;
 
-    final badge = serviceBadgeColors(
-      etaSec: svc?.etaSec ?? (1 << 30),
-      confidence: conf,
-      t: t,
-    );
-
     final whereName = resolved?.stopName ??
         (fav.isAnywhere
             ? 'No nearby arrivals'
@@ -458,7 +452,8 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              _ColoredBadge(no: fav.no, fill: badge.fill, fg: badge.fg),
+              // Badge keeps its standard look — proximity is not colour-coded.
+              _ColoredBadge(no: fav.no, fill: t.accent, fg: t.onAccent),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -748,9 +743,10 @@ class _Resolved {
   final String stopCode;
 }
 
-// ─── Proximity-coloured service badge ────────────────────────────────────────
+// ─── Service badge ───────────────────────────────────────────────────────────
 
-/// 48dp service-number badge with a proximity-driven fill.
+/// 48dp service-number badge — standard accent fill (proximity is not
+/// colour-coded; soon-ness reads from the ETA ink, not the badge).
 class _ColoredBadge extends StatelessWidget {
   const _ColoredBadge({
     required this.no,

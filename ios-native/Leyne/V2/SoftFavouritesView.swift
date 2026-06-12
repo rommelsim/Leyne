@@ -236,15 +236,14 @@ struct SoftFavouritesView: View {
             ArrivalConfidence.of(monitored: $0.monitored,
                                  feed: feed(resolved?.stopCode ?? fav.stop ?? ""))
         } ?? ArrivalConfidence.none
-        let badge = serviceBadgeColors(etaSec: svc?.etaSec ?? .max, confidence: conf, t: t)
 
         return Button {
             fb.select()
             if let code = resolved?.stopCode ?? fav.stop { onOpenBus(code, fav.no) }
         } label: {
             HStack(spacing: 12) {
-                ServiceBadge(svc: fav.no, t: t, size: .md,
-                             fillOverride: badge.fill, fgOverride: badge.fg)
+                // Badge keeps its standard look — proximity is not colour-coded.
+                ServiceBadge(svc: fav.no, t: t, size: .md)
                 VStack(alignment: .leading, spacing: 3) {
                     (Text(fav.no)
                         .font(t.sans(15, weight: .bold))
@@ -282,7 +281,8 @@ struct SoftFavouritesView: View {
     private func serviceETAs(_ svc: Service?, conf: ArrivalConfidence) -> some View {
         if let svc {
             let e1 = fmtETA(svc.etaSec)
-            let color = etaColor(etaSec: svc.etaSec, confidence: conf, t: t)
+            // Uniform ink — soon-ness isn't colour-coded; ghosts read faint.
+            let color = conf == .unconfirmed ? t.dim : t.fg
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 etaText(e1, color: color, big: true)
                 if let nextLabel = followingLabel(svc) {

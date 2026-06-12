@@ -22,10 +22,6 @@ struct SoftHomeView: View {
     /// Drives the push to the central alerts list from the header bell.
     @State private var showAlerts = false
 
-    /// Active arrival-alert toast (one-tap "Arrival Alerts" from the long-press
-    /// menu), nil when none is showing.
-    @State private var alertToast: ArrivalAlertToastState?
-
     let onTab: (SoftTab) -> Void
     let onOpenStop: (String) -> Void
     let onOpenSearch: () -> Void
@@ -53,7 +49,6 @@ struct SoftHomeView: View {
                                 ForEach(others, id: \.id) { stopCard($0, highlight: false) }
                             }
                         }
-                        liveUpdatesBanner
                     } else {
                         SoftEmptyState(t: t,
                                        onNearby: { loc.requestAndStart() },
@@ -82,25 +77,6 @@ struct SoftHomeView: View {
         // keeps its own nav bar (title + Edit) and the swipe-back gesture.
         .navigationDestination(isPresented: $showAlerts) {
             ManageAlertsView().toolbar(.hidden, for: .tabBar)
-        }
-        // Long-press "Arrival Alerts" arms the soonest bus in ONE tap (no sheet);
-        // a toast with Undo confirms it.
-        .arrivalAlertToastOverlay(state: $alertToast, t: t)
-    }
-
-    /// One-tap "Arrival Alerts" (long-press menu): arm the stop's soonest live
-    /// bus and confirm with an Undo toast. Falls back to opening the stop when
-    /// nothing is live yet so the user can still pick a bus (Android parity).
-    private func quickArrivalAlert(code: String) {
-        ds.ensureArrivals(stop: code)
-        guard let soonest = m.liveServices(code: code, tracked: []).first else {
-            onOpenStop(code)
-            return
-        }
-        withAnimation(.easeInOut(duration: 0.25)) {
-            alertToast = m.toggleArrivalAlertWithToast(
-                busNo: soonest.no, stopCode: code,
-                stopName: ds.stopName(code), dest: soonest.dest)
         }
     }
 
@@ -213,23 +189,6 @@ struct SoftHomeView: View {
         // Long-press → a peek of the stop (mini live-arrivals view) + actions.
         .contextMenu(menuItems: {
             Button {
-                fb.select(); m.addRecent(name); onOpenStop(code)
-            } label: {
-                Label("Open Stop", systemImage: "arrow.up.forward")
-            }
-            Divider()
-            Button {
-                fb.select(); m.togglePin(code: code)
-            } label: {
-                Label(m.isPinned(code) ? "Remove from Saved" : "Add to Saved",
-                      systemImage: m.isPinned(code) ? "star.slash" : "star")
-            }
-            Button {
-                fb.select(); quickArrivalAlert(code: code)
-            } label: {
-                Label("Arrival Alerts", systemImage: "bell")
-            }
-            Button {
                 fb.select(); openOnMap(code: code, name: name)
             } label: {
                 Label("Open on Map", systemImage: "map")
@@ -239,17 +198,6 @@ struct SoftHomeView: View {
             } label: {
                 Label("Copy Stop Code", systemImage: "doc.on.doc")
             }
-            Button {
-                fb.select(); shareStop(code: code, name: name)
-            } label: {
-                Label("Share Stop", systemImage: "square.and.arrow.up")
-            }
-            Divider()
-            Button(role: .destructive) {
-                fb.select(); m.hideFromNearby(code: code)
-            } label: {
-                Label("Hide From Nearby", systemImage: "eye.slash")
-            }
         }, preview: {
             stopPreview(code: code, name: name)
         })
@@ -257,54 +205,19 @@ struct SoftHomeView: View {
 
     // MARK: Context-menu actions
 
-    /// Opens the stop's location in Apple Maps (external handoff).
+    /// Opens walking directions to the stop in Apple Maps (external handoff):
+    /// Apple Maps draws a route from the user's current location to the stop.
     private func openOnMap(code: String, name: String) {
         guard let stop = ds.stopByCode[code] else { return }
         let coord = CLLocationCoordinate2D(latitude: stop.Latitude,
                                            longitude: stop.Longitude)
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: coord))
-        item.name = name.isEmpty ? "Stop \(code)" : name
-        item.openInMaps()
-    }
-
-    /// Shares the stop as text + a universal link (lyne.sg/stop/<code>) so the
-    /// recipient can deep-link straight into it. Presents from the top-most VC.
-    private func shareStop(code: String, name: String) {
-        let label = name.isEmpty ? "Stop \(code)" : "\(name) (Stop \(code))"
-        let text = "\(label) — track arrivals on Leyne https://lyne.sg/stop/\(code)"
-        let av = UIActivityViewController(activityItems: [text],
-                                          applicationActivities: nil)
-        guard let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene }).first,
-              let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController
-        else { return }
-        var top = root
-        while let presented = top.presentedViewController { top = presented }
-        av.popoverPresentationController?.sourceView = top.view
-        top.present(av, animated: true)
-    }
-
-    private var liveUpdatesBanner: some View {
-        Button { fb.tap(); Task { await refreshAll() } } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(t.soon)
-                (Text("Live updates  ").font(t.sans(13, weight: .semibold)).foregroundColor(t.fg)
-                 + Text("Arrival times update every few seconds.")
-                    .font(t.sans(13)).foregroundColor(t.dim))
-                    .lineLimit(2)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("Live updates. Arrival times update every few seconds. Tap to refresh.")
+        let destination = MKMapItem(placemark: MKPlacemark(coordinate: coord))
+        destination.name = name.isEmpty ? "Stop \(code)" : name
+        MKMapItem.openMaps(
+            with: [.forCurrentLocation(), destination],
+            launchOptions: [
+                MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking
+            ])
     }
 
     /// Nearby stops (closest first). Saved stops are kept — "nearby" means
@@ -563,15 +476,15 @@ struct SoftNearbyStopCard: View {
     private func arrivalRow(_ a: RankedArrival) -> some View {
         let s = a.service
         let conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed)
-        let badge = serviceBadgeColors(etaSec: s.etaSec, confidence: conf, t: t)
         return HStack(spacing: 10) {
+            // Badge keeps its standard look — proximity is not colour-coded.
             Text(s.no)
                 .font(t.sans(16, weight: .bold))
-                .foregroundStyle(badge.fg)
+                .foregroundStyle(t.onAccent)
                 .lineLimit(1)
                 .frame(minWidth: 46, minHeight: 36)
                 .padding(.horizontal, 6)
-                .background(badge.fill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .background(t.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             if a.fav {
                 Image(systemName: "star.fill")
                     .font(.system(size: 11, weight: .semibold))
@@ -603,7 +516,7 @@ struct SoftNearbyStopCard: View {
             }
             Text(arriving ? "Arr" : eta.big)
                 .font(t.mono(19, weight: .semibold))
-                .foregroundStyle(etaColor(etaSec: sec, confidence: confidence, t: t))
+                .foregroundStyle(confidence == .unconfirmed ? t.dim : t.fg)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             if arriving {

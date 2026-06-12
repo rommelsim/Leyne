@@ -836,13 +836,13 @@ class _NearbyCard extends StatelessWidget {
         .toList();
   }
 
-  /// One ranked service row: number badge (proximity-tinted), a gold star when
-  /// favourited, the destination, then its single soonest arrival.
+  /// One ranked service row: number badge (standard accent — proximity is not
+  /// colour-coded), a gold star when favourited, the destination, then its
+  /// single soonest arrival.
   Widget _arrivalRow(
       LyneTheme t, Service s, bool fav, DateTime now, Freshness feed) {
     final sec = _liveSec(s, now);
     final conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed);
-    final badge = serviceBadgeColors(etaSec: sec, confidence: conf, t: t);
     return Row(
       children: [
         Container(
@@ -850,12 +850,12 @@ class _NearbyCard extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 6),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: badge.fill,
+            color: t.accent,
             borderRadius: BorderRadius.circular(11),
           ),
           child: Text(
             s.no,
-            style: t.sans(16, weight: FontWeight.w700, color: badge.fg),
+            style: t.sans(16, weight: FontWeight.w700, color: t.onAccent),
           ),
         ),
         const SizedBox(width: 10),
@@ -1202,7 +1202,6 @@ class _StopPeekSheet extends StatelessWidget {
   Widget _row(LyneTheme t, Service s, DateTime now, Freshness feed) {
     final sec = _liveSec(s, now);
     final conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed);
-    final badge = serviceBadgeColors(etaSec: sec, confidence: conf, t: t);
     final eta = fmtEta(sec);
     final arriving = eta.big == 'Arr';
 
@@ -1210,16 +1209,17 @@ class _StopPeekSheet extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 9),
       child: Row(
         children: [
+          // Badge keeps its standard look — proximity is not colour-coded.
           Container(
             constraints: const BoxConstraints(minWidth: 44, minHeight: 32),
             padding: const EdgeInsets.symmetric(horizontal: 6),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: badge.fill,
+              color: t.accent,
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(s.no,
-                style: t.sans(15, weight: FontWeight.w700, color: badge.fg)),
+                style: t.sans(15, weight: FontWeight.w700, color: t.onAccent)),
           ),
           const SizedBox(width: 10),
           Expanded(

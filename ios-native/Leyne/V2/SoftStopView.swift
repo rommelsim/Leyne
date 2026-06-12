@@ -40,7 +40,6 @@ struct SoftStopView: View {
     // header chevron, but no longer presented from the per-bus button.
     @State private var alertToast: ArrivalAlertToastState?
     @State private var showManage = false
-    @State private var showETALegend = false
 
     /// How many services to show before the "Show more" expander kicks in.
     private let collapsedCount = 6
@@ -114,12 +113,6 @@ struct SoftStopView: View {
         }
         // One-tap arrival-alert Undo toast.
         .arrivalAlertToastOverlay(state: $alertToast, t: t)
-        // ETA colour legend sheet.
-        .sheet(isPresented: $showETALegend) {
-            ETALegendSheet(t: t)
-                .presentationDetents([.height(280)])
-                .presentationDragIndicator(.visible)
-        }
     }
 
     // MARK: - Top bar
@@ -152,13 +145,6 @@ struct SoftStopView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isPinned ? "\(stopName) saved. Tap to remove."
                                          : "Save stop \(stopName)")
-
-            // ETA colour legend — explains green/amber/grey thresholds.
-            Button { fb.tap(); showETALegend = true } label: {
-                circleButton(icon: "info.circle")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("ETA colour guide")
 
         }
         .padding(.top, 4)
@@ -505,7 +491,6 @@ struct SoftStopView: View {
     /// swipe (right) to toggle arrival alert instead.
     private func busRow(_ bus: Service) -> some View {
         let conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed)
-        let badge = serviceBadgeColors(etaSec: bus.etaSec, confidence: conf, t: t)
         let isLive = conf == .live || conf == .stale
 
         return Button {
@@ -513,8 +498,8 @@ struct SoftStopView: View {
             onOpenBus(bus.no)
         } label: {
             HStack(spacing: 12) {
-                ServiceBadge(svc: bus.no, t: t, size: .md,
-                             fillOverride: badge.fill, fgOverride: badge.fg)
+                // Badge keeps its standard look — proximity is not colour-coded.
+                ServiceBadge(svc: bus.no, t: t, size: .md)
 
                 // Destination + accessibility/vehicle glyphs
                 VStack(alignment: .leading, spacing: 3) {
@@ -581,7 +566,9 @@ struct SoftStopView: View {
     private func etaColumn(_ sec: Int, lead: Bool, confidence: ArrivalConfidence) -> some View {
         let eta = fmtETA(sec)
         let arriving = eta.big == "Arr"
-        let color = lead ? etaColor(etaSec: sec, confidence: confidence, t: t) : t.fg
+        // ETA ink is uniform — soon-ness is not colour-coded. Scheduled/ghost
+        // times read faint (the honesty whisper), everything else standard ink.
+        let color = confidence == .unconfirmed ? t.dim : t.fg
         let ghost = confidence == .unconfirmed
         return VStack(spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 1) {
@@ -740,74 +727,5 @@ struct SoftStopView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
-// MARK: - ETA Legend Sheet
-
-/// Compact sheet explaining ETA colour thresholds. Presented from the
-/// info button in the stop screen top bar.
-private struct ETALegendSheet: View {
-    let t: Theme
-
-    private struct Row {
-        let color: (Theme) -> Color
-        let label: String
-        let detail: String
-    }
-
-    private let rows: [Row] = [
-        Row(color: { $0.soon },
-            label: "Green",
-            detail: "Arriving within 9 min"),
-        Row(color: { $0.mid },
-            label: "Amber",
-            detail: "9 – 16 min away"),
-        Row(color: { $0.dim },
-            label: "Grey",
-            detail: "16+ min or schedule only"),
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("ETA Colours")
-                .font(t.sans(20, weight: .bold))
-                .foregroundStyle(t.fg)
-
-            VStack(spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                    if i > 0 {
-                        Rectangle().fill(t.line).frame(height: 1)
-                            .padding(.leading, 44)
-                    }
-                    HStack(spacing: 14) {
-                        Circle()
-                            .fill(row.color(t))
-                            .frame(width: 12, height: 12)
-                            .frame(width: 30)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.label)
-                                .font(t.sans(15, weight: .semibold))
-                                .foregroundStyle(t.fg)
-                            Text(row.detail)
-                                .font(t.sans(13))
-                                .foregroundStyle(t.dim)
-                        }
-                    }
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 16)
-                }
-            }
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-            Text("Colour applies to live and recently-live arrivals only. Scheduled-only times always show grey.")
-                .font(t.sans(12))
-                .foregroundStyle(t.faint)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.bg.ignoresSafeArea())
     }
 }
