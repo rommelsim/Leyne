@@ -6,10 +6,10 @@
 //   1. Top bar — back · bell (boarding alert) · save · ⋯ (manage alerts/share)
 //   2. Title   — "Bus {svc}" + "Towards {dest}" + LIVE
 //   3. Hero    — ETA + stops-away + crowd meter, then deck/wheelchair + next two
-//   4. Live    — a HORIZONTAL route-progress bar (origin → bus → your stop →
-//                terminus, green up to the bus) spanning the width, with the
-//                bus's "between X and Y" location and the upcoming stops below.
-//                Tap to open the full-route card.
+//   4. Live    — compact vertical mini-timeline (origin → bus → upcoming stops
+//                → your stop → terminus) inside the card. Connector line is
+//                t.soon up to the bus, t.line after. Tap to open the full-
+//                route card (RouteTimeline sheet).
 //   5. Footer  — first / last bus today
 //
 // "Stops away" / the bus position come from the estimated bus index (live GPS
@@ -82,12 +82,36 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DataStore.shared.ensureArrivals(widget.stopCode);
-      _loadRoute();
+      // Defer the heavy route-data fetch until the push-transition animation
+      // completes so the enter slide runs at full frame-rate. Fall back to an
+      // immediate call if ModalRoute or its animation is unavailable (e.g.
+      // deep-link on the very first frame before navigation is set up).
+      final route = ModalRoute.of(context);
+      final animation = route?.animation;
+      if (animation != null) {
+        animation.addStatusListener(_onRouteAnimationStatus);
+      } else {
+        _loadRoute();
+      }
     });
     _ticker = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (!mounted) return;
+      // Skip the network refresh when this screen is covered or transitioning.
+      // ModalRoute.isCurrent is false during push/pop of a screen on top of us.
+      if (ModalRoute.of(context)?.isCurrent != true) return;
       DataStore.shared.ensureArrivals(widget.stopCode);
     });
+  }
+
+  void _onRouteAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed) {
+      // One-shot: remove immediately so we don't accumulate listeners on
+      // repeat navigations to this screen within the same state lifecycle.
+      ModalRoute.of(
+        context,
+      )?.animation?.removeStatusListener(_onRouteAnimationStatus);
+      _loadRoute();
+    }
   }
 
   @override
@@ -231,8 +255,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
               onSelect: widget.onTab!,
             )
           : null,
+      // OUTER listener: DataStore only — rebuilds only when arrivals data
+      // changes from a network fetch. The heavy route-progress/timeline
+      // subtree lives here and is therefore NOT rebuilt every second.
       body: ListenableBuilder(
-        listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
+        listenable: DataStore.shared,
         builder: (context, _) {
           final t = context.t;
           return Stack(
@@ -243,26 +270,74 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildTopBar(t),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
-                      child: _buildTitleBlock(context, t, _liveService()),
-                    ),
-                    const SizedBox(height: 12),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: _buildHeroCard(t),
-                    ),
-                    const SizedBox(height: 12),
+                    // Fill-or-scroll: content hugs its natural height and the
+                    // first/last footer pins to the bottom when there's room;
+                    // when the mini-timeline is taller than the viewport the
+                    // whole area scrolls instead of overflowing.
                     Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: _buildLiveModule(t),
+                      child: LayoutBuilder(
+                        builder: (ctx, c) => SingleChildScrollView(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minHeight: c.maxHeight),
+                            child: IntrinsicHeight(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      2,
+                                      16,
+                                      0,
+                                    ),
+                                    child: _buildTitleBlock(
+                                      context,
+                                      t,
+                                      _liveService(),
+                                    ),
+                                  ),
+                                  // First/last bus rides directly under the
+                                  // title — "have I missed the last bus?" at a
+                                  // glance, matching iOS SoftBusView.
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      8,
+                                      16,
+                                      0,
+                                    ),
+                                    child: _buildFirstLastFooter(t),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  // INNER listener: AppModel only — rebuilds
+                                  // every second so the ETA countdown ticks.
+                                  // Only _buildHeroCard (which reads
+                                  // DateTime.now()) is inside it; everything
+                                  // else stays in the outer DataStore scope.
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: ListenableBuilder(
+                                      listenable: AppModel.shared,
+                                      builder: (context, _) =>
+                                          _buildHeroCard(t),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: _buildLiveModule(t),
+                                  ),
+                                  const Spacer(),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                      child: _buildFirstLastFooter(t),
                     ),
                   ],
                 ),
@@ -709,16 +784,20 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     return 'On the way to your stop';
   }
 
-  // ── 4. Live module — horizontal route progress (no map on Android) ─────
+  // ── 4. Live module — compact vertical mini-timeline (no map on Android) ─
   Widget _buildLiveModule(LyneTheme t) {
     final dir = _currentDir;
-    final nodes = dir == null ? const <_ProgNode>[] : _routeProgressNodes(dir);
-    final hasProgress = nodes.length >= 2;
-    final between = (dir != null && hasProgress) ? _betweenCaption(dir) : null;
-    final upcoming = (dir != null && hasProgress)
-        ? _upcomingStops(dir)
-        : const <String>[];
     final remaining = _stopsRemaining();
+
+    // Resolve timeline content only when live bus position is available.
+    final resolvedDir =
+        (dir != null && _estimatedBusIndex() != null && dir.stops.isNotEmpty)
+        ? dir
+        : null;
+    final upcoming = resolvedDir != null
+        ? _upcomingStops(resolvedDir)
+        : const <String>[];
+    final between = resolvedDir != null ? _betweenCaption(resolvedDir) : null;
 
     return Material(
       color: t.surface,
@@ -734,61 +813,12 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           ),
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              if (hasProgress) ...[
-                Row(
-                  children: [
-                    Text(
-                      'ROUTE PROGRESS',
-                      style: t
-                          .mono(10, weight: FontWeight.w600, color: t.dim)
-                          .copyWith(letterSpacing: 1),
-                    ),
-                    const Spacer(),
-                    if (remaining != null)
-                      Text(
-                        remaining == 0
-                            ? 'Arriving'
-                            : '$remaining stop${remaining == 1 ? '' : 's'} away',
-                        style: t.sans(
-                          12,
-                          weight: FontWeight.w600,
-                          color: t.soon,
-                        ),
-                      ),
-                  ],
-                ),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (ctx, c) => SingleChildScrollView(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minHeight: c.maxHeight),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _buildRouteProgress(t, nodes),
-                            if (between != null) ...[
-                              const SizedBox(height: 16),
-                              Text(
-                                between,
-                                style: t.sans(12, color: t.dim),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                            if (upcoming.isNotEmpty) ...[
-                              const SizedBox(height: 18),
-                              _comingUp(t, upcoming),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ] else
-                Expanded(child: Center(child: _routePlaceholder(t))),
+              if (resolvedDir != null)
+                _buildMiniTimeline(t, resolvedDir, upcoming, between, remaining)
+              else
+                _routePlaceholder(t),
               const SizedBox(height: 10),
               _viewFullRouteHint(t),
             ],
@@ -797,6 +827,291 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       ),
     );
   }
+
+  // Maximum upcoming stops shown inline before collapsing to "+N more".
+  static const int _maxInlineStops = 4;
+
+  /// Compact vertical mini-timeline: origin → bus → [upcoming stops] →
+  /// your stop → terminus, all inline in a single Column.
+  Widget _buildMiniTimeline(
+    LyneTheme t,
+    RouteDirection dir,
+    List<String> upcoming,
+    String? between,
+    int? remaining,
+  ) {
+    final stops = dir.stops;
+    final busIdx0 = _estimatedBusIndex()!;
+    final youIdx = dir.youIndex.clamp(0, stops.length - 1);
+    final busIdx = busIdx0.clamp(0, youIdx);
+
+    final showOrigin = busIdx > 0;
+    final showDest = youIdx < stops.length - 1;
+
+    // Bus subtitle: prefer "between A–B" when available, else "now here".
+    final busSub = between != null
+        ? between.replaceFirst('Between ', '').replaceFirst(' and ', ' – ')
+        : 'now here';
+
+    // Upcoming stops: cap at _maxInlineStops, show overflow as "+N more".
+    final shownUpcoming = upcoming.take(_maxInlineStops).toList();
+    final extraUpcoming = upcoming.length - shownUpcoming.length;
+
+    // Remaining label for your-stop node.
+    final youSub = remaining == null
+        ? null
+        : remaining == 0
+        ? 'Arriving'
+        : '$remaining stop${remaining == 1 ? '' : 's'} away';
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Origin ──────────────────────────────────────────────────────
+        if (showOrigin) ...[
+          _timelineRow(
+            t,
+            dot: _dotOrigin(t),
+            lineAbove: false,
+            lineBelow: true,
+            lineAboveColor: t.soon,
+            lineBelowColor: t.soon,
+            child: Text(
+              stops.first.name,
+              style: t.sans(12, color: t.dim),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+
+        // ── Bus node ─────────────────────────────────────────────────────
+        _timelineRow(
+          t,
+          dot: _dotBus(t),
+          lineAbove: showOrigin,
+          lineBelow: true,
+          lineAboveColor: t.soon,
+          lineBelowColor: t.line,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Bus ${widget.svc}',
+                style: t.sans(13, weight: FontWeight.w600, color: t.soon),
+              ),
+              Text(busSub, style: t.sans(11, color: t.dim)),
+            ],
+          ),
+        ),
+
+        // ── Upcoming stops (inline) ───────────────────────────────────────
+        for (final s in shownUpcoming)
+          _timelineRow(
+            t,
+            dot: _dotIntermediate(t),
+            lineAbove: true,
+            lineBelow: true,
+            lineAboveColor: t.line,
+            lineBelowColor: t.line,
+            child: Text(
+              s,
+              style: t.sans(12, color: t.dim),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+
+        // "+N more stops" overflow row
+        if (extraUpcoming > 0)
+          _timelineRow(
+            t,
+            dot: _dotIntermediate(t),
+            lineAbove: true,
+            lineBelow: true,
+            lineAboveColor: t.line,
+            lineBelowColor: t.line,
+            child: Text(
+              '+$extraUpcoming more stop${extraUpcoming == 1 ? '' : 's'}',
+              style: t.sans(12, color: t.faint),
+            ),
+          ),
+
+        // ── Your stop ────────────────────────────────────────────────────
+        _timelineRow(
+          t,
+          dot: _dotYou(t),
+          lineAbove: true,
+          lineBelow: showDest,
+          lineAboveColor: t.line,
+          lineBelowColor: t.line,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Your stop',
+                style: t.sans(13, weight: FontWeight.w600, color: t.fg),
+              ),
+              if (youSub != null)
+                Text(youSub, style: t.sans(11, color: t.soon)),
+            ],
+          ),
+        ),
+
+        // ── Terminus ─────────────────────────────────────────────────────
+        if (showDest)
+          _timelineRow(
+            t,
+            dot: _dotDest(t),
+            lineAbove: true,
+            lineBelow: false,
+            lineAboveColor: t.line,
+            lineBelowColor: t.line,
+            child: Text(
+              stops.last.name,
+              style: t.sans(12, color: t.dim),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// A single row in the vertical mini-timeline. The connector lines are drawn
+  /// as thin containers that sit in the fixed-width dot column, above/below the
+  /// dot itself, so they form a continuous vertical bar across nodes.
+  Widget _timelineRow(
+    LyneTheme t, {
+    required Widget dot,
+    required bool lineAbove,
+    required bool lineBelow,
+    required Color lineAboveColor,
+    required Color lineBelowColor,
+    required Widget child,
+  }) {
+    const dotColW = 32.0; // fixed width for the dot + connector column
+    const connW = 2.0; // connector bar width
+    const dotRowH = 28.0; // height of the dot zone
+    const connSegH = 8.0; // connector segment above/below dot zone
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: dotColW,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Connector above dot
+                SizedBox(
+                  height: connSegH,
+                  child: Center(
+                    child: Container(
+                      width: connW,
+                      color: lineAbove ? lineAboveColor : Colors.transparent,
+                    ),
+                  ),
+                ),
+                // Dot zone
+                SizedBox(
+                  height: dotRowH,
+                  child: Center(child: dot),
+                ),
+                // Connector below dot
+                SizedBox(
+                  height: connSegH,
+                  child: Center(
+                    child: Container(
+                      width: connW,
+                      color: lineBelow ? lineBelowColor : Colors.transparent,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+
+  // ── Node dot builders ─────────────────────────────────────────────────
+
+  /// Origin: filled `t.soon` circle with a check icon (bus has passed).
+  Widget _dotOrigin(LyneTheme t) => Container(
+    width: 16,
+    height: 16,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
+    child: Icon(Icons.check_rounded, size: 10, color: t.contrastFg),
+  );
+
+  /// Bus: filled `t.soon` circle with a halo ring and bus icon.
+  Widget _dotBus(LyneTheme t) => Stack(
+    alignment: Alignment.center,
+    children: [
+      Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          color: t.soon.withValues(alpha: 0.22),
+          shape: BoxShape.circle,
+        ),
+      ),
+      Container(
+        width: 22,
+        height: 22,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: t.soon,
+          shape: BoxShape.circle,
+          border: Border.all(color: t.surface, width: 2),
+        ),
+        child: Icon(
+          Icons.directions_bus_rounded,
+          size: 11,
+          color: t.contrastFg,
+        ),
+      ),
+    ],
+  );
+
+  /// Intermediate upcoming stop: small grey-filled dot.
+  Widget _dotIntermediate(LyneTheme t) => Container(
+    width: 7,
+    height: 7,
+    decoration: BoxDecoration(color: t.line, shape: BoxShape.circle),
+  );
+
+  /// Your stop: hollow ring with `t.soon` border.
+  Widget _dotYou(LyneTheme t) => Container(
+    width: 16,
+    height: 16,
+    decoration: BoxDecoration(
+      color: t.surface,
+      shape: BoxShape.circle,
+      border: Border.all(color: t.soon, width: 3),
+    ),
+  );
+
+  /// Terminus: small dim hollow ring.
+  Widget _dotDest(LyneTheme t) => Container(
+    width: 13,
+    height: 13,
+    decoration: BoxDecoration(
+      color: t.surface,
+      shape: BoxShape.circle,
+      border: Border.all(color: t.dim, width: 1.5),
+    ),
+  );
 
   Widget _viewFullRouteHint(LyneTheme t) {
     return Row(
@@ -825,24 +1140,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  // ── Horizontal route progress ─────────────────────────────────────────
-  // Origin → bus → your stop → terminus, laid out left-to-right across the
-  // full width; the line is green up to the bus, grey after.
-  List<_ProgNode> _routeProgressNodes(RouteDirection dir) {
-    final stops = dir.stops;
-    final busIdx0 = _estimatedBusIndex();
-    if (stops.isEmpty || busIdx0 == null) return const [];
-    final youIdx = dir.youIndex.clamp(0, stops.length - 1);
-    final busIdx = busIdx0.clamp(0, youIdx);
-    final nodes = <_ProgNode>[];
-    if (busIdx > 0) nodes.add(_ProgNode(_ProgKind.origin, stops.first.name));
-    nodes.add(_ProgNode(_ProgKind.bus, 'Bus ${widget.svc}'));
-    nodes.add(const _ProgNode(_ProgKind.you, 'Your stop'));
-    if (youIdx < stops.length - 1) {
-      nodes.add(_ProgNode(_ProgKind.dest, stops.last.name));
-    }
-    return nodes;
-  }
+  // ── Data helpers (used by mini-timeline) ─────────────────────────────
 
   /// Stops the bus still passes before reaching yours (in order).
   List<String> _upcomingStops(RouteDirection dir) {
@@ -864,184 +1162,6 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     final nextIdx = (busIdx + 1).clamp(0, dir.stops.length - 1);
     if (nextIdx == busIdx) return null;
     return 'Between ${dir.stops[busIdx].name} and ${dir.stops[nextIdx].name}';
-  }
-
-  // Green covers the line up to and including the bus; grey after.
-  bool _reached(_ProgKind k) => k == _ProgKind.origin || k == _ProgKind.bus;
-
-  Widget _buildRouteProgress(LyneTheme t, List<_ProgNode> nodes) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < nodes.length; i++)
-          Expanded(
-            child: Column(
-              children: [
-                SizedBox(
-                  height: 28,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              height: 3,
-                              color: i == 0
-                                  ? Colors.transparent
-                                  : (_reached(nodes[i].kind) ? t.soon : t.line),
-                            ),
-                          ),
-                          Expanded(
-                            child: Container(
-                              height: 3,
-                              color: i == nodes.length - 1
-                                  ? Colors.transparent
-                                  : (_reached(nodes[i + 1].kind)
-                                        ? t.soon
-                                        : t.line),
-                            ),
-                          ),
-                        ],
-                      ),
-                      _progDot(t, nodes[i].kind),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  nodes[i].label,
-                  style: t.sans(
-                    11,
-                    weight:
-                        nodes[i].kind == _ProgKind.bus ||
-                            nodes[i].kind == _ProgKind.you
-                        ? FontWeight.w600
-                        : FontWeight.w400,
-                    color: nodes[i].kind == _ProgKind.bus
-                        ? t.soon
-                        : (nodes[i].kind == _ProgKind.origin ||
-                              nodes[i].kind == _ProgKind.dest)
-                        ? t.dim
-                        : t.fg,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _progDot(LyneTheme t, _ProgKind kind) {
-    switch (kind) {
-      case _ProgKind.origin:
-        return Container(
-          width: 16,
-          height: 16,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
-          child: Icon(Icons.check_rounded, size: 10, color: t.contrastFg),
-        );
-      case _ProgKind.bus:
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 26,
-              height: 26,
-              decoration: BoxDecoration(
-                color: t.soon.withValues(alpha: 0.22),
-                shape: BoxShape.circle,
-              ),
-            ),
-            Container(
-              width: 22,
-              height: 22,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: t.soon,
-                shape: BoxShape.circle,
-                border: Border.all(color: t.surface, width: 2),
-              ),
-              child: Icon(
-                Icons.directions_bus_rounded,
-                size: 11,
-                color: t.contrastFg,
-              ),
-            ),
-          ],
-        );
-      case _ProgKind.you:
-        return Container(
-          width: 16,
-          height: 16,
-          decoration: BoxDecoration(
-            color: t.surface,
-            shape: BoxShape.circle,
-            border: Border.all(color: t.soon, width: 3),
-          ),
-        );
-      case _ProgKind.dest:
-        return Container(
-          width: 13,
-          height: 13,
-          decoration: BoxDecoration(
-            color: t.surface,
-            shape: BoxShape.circle,
-            border: Border.all(color: t.dim, width: 1.5),
-          ),
-        );
-    }
-  }
-
-  Widget _comingUp(LyneTheme t, List<String> stops) {
-    final shown = stops.take(4).toList();
-    final extra = stops.length - shown.length;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'COMING UP',
-          style: t
-              .mono(9, weight: FontWeight.w600, color: t.faint)
-              .copyWith(letterSpacing: 1),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          alignment: WrapAlignment.center,
-          children: [
-            for (final s in shown) _stopChip(t, s),
-            if (extra > 0) _stopChip(t, '+$extra more', muted: true),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _stopChip(LyneTheme t, String label, {bool muted = false}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(LyneRadius.full),
-      ),
-      child: Text(
-        label,
-        style: t.sans(
-          12,
-          weight: FontWeight.w500,
-          color: muted ? t.faint : t.dim,
-        ),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
   }
 
   // ── Route card (bottom sheet — full route) ─────────────────────────────
@@ -1201,15 +1321,6 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       ],
     );
   }
-}
-
-// ─── Route progress model ─────────────────────────────────────────────────────
-enum _ProgKind { origin, bus, you, dest }
-
-class _ProgNode {
-  const _ProgNode(this.kind, this.label);
-  final _ProgKind kind;
-  final String label;
 }
 
 // ─── Circle icon button (top bar) ─────────────────────────────────────────────

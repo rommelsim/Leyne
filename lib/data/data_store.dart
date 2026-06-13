@@ -146,6 +146,8 @@ class TrainAlert {
     required this.line,
     required this.title,
     required this.detail,
+    this.freeBus = false,
+    this.freeShuttle = false,
   });
 
   /// Stable per-line id so ListView builders and dismissal sets key off
@@ -156,15 +158,25 @@ class TrainAlert {
   final String title;
   final String detail;
 
+  /// True when the disruption notice includes free public bus rides
+  /// (LTA `FreePublicBus` field is non-empty).
+  final bool freeBus;
+
+  /// True when a free MRT shuttle is running during this disruption
+  /// (LTA `FreeMRTShuttle` field is non-empty).
+  final bool freeShuttle;
+
   @override
   bool operator ==(Object other) =>
       other is TrainAlert &&
       other.id == id &&
       other.title == title &&
-      other.detail == detail;
+      other.detail == detail &&
+      other.freeBus == freeBus &&
+      other.freeShuttle == freeShuttle;
 
   @override
-  int get hashCode => Object.hash(id, title, detail);
+  int get hashCode => Object.hash(id, title, detail, freeBus, freeShuttle);
 }
 
 class RouteInfo {
@@ -305,6 +317,13 @@ class DataStore extends ChangeNotifier {
   final Set<MRTLine> _crowdInflight = {};
   final Map<MRTLine, DateTime> _lastCrowdFetch = {};
 
+  /// Crowd forecast (PCDForecast), fetched lazily. null = not yet fetched /
+  /// in-flight; empty list = fetched but no data available.
+  final Map<MRTLine, List<StationCrowd>?> _forecastByLine = {};
+  Map<MRTLine, List<StationCrowd>?> get forecastByLine => _forecastByLine;
+  final Set<MRTLine> _forecastInflight = {};
+  final Map<MRTLine, DateTime> _lastForecastFetch = {};
+
   /// Tick from AppModel calls this once per second; the inner gate
   /// keeps us at one network hit per 60 s.
   void refreshTrainAlertsIfStale({bool force = false}) {
@@ -330,6 +349,8 @@ class DataStore extends ChangeNotifier {
                       title:
                           '${MRTLine.shortLabelForLta(seg.line)} · disrupted',
                       detail: _trainAlertSummary(seg, r.messages),
+                      freeBus: (seg.freePublicBus ?? '').trim().isNotEmpty,
+                      freeShuttle: (seg.freeMrtShuttle ?? '').trim().isNotEmpty,
                     ),
                   )
                   .toList(growable: false)
@@ -448,6 +469,60 @@ class DataStore extends ChangeNotifier {
         notifyListeners();
       } finally {
         _crowdInflight.remove(line);
+      }
+    }();
+  }
+
+  // ─── Station crowd forecast (PCDForecast) ─────────────────
+  /// Fetch 30-min crowd forecast for one line. Gate: 5–30 min (matches crowd
+  /// refresh cadence). Deduped via inflightSet. Called when the user switches
+  /// the crowd toggle to "Next 30 min".
+  void refreshForecast(MRTLine line, {bool force = false}) {
+    if (_forecastInflight.contains(line)) return;
+    if (!force &&
+        _lastForecastFetch[line] != null &&
+        DateTime.now().difference(_lastForecastFetch[line]!) <
+            const Duration(minutes: 5)) {
+      return;
+    }
+    _forecastInflight.add(line);
+    _lastForecastFetch[line] = DateTime.now();
+    () async {
+      try {
+        final rows = await _api.stationForecast(_pcdLineCode(line));
+        final now = DateTime.now();
+        final mapped = rows
+            .map((forecast) {
+              // Pick the interval whose Start is the next upcoming half-hour
+              // (first Start >= now). If all intervals are in the past, fall
+              // back to the latest one so we always show something.
+              final upcoming = forecast.intervals.where(
+                (iv) => !iv.start.isBefore(now),
+              );
+              final chosen = upcoming.isNotEmpty
+                  ? upcoming.reduce((a, b) => a.start.isBefore(b.start) ? a : b)
+                  : (forecast.intervals.isNotEmpty
+                        ? forecast.intervals.reduce(
+                            (a, b) => a.start.isAfter(b.start) ? a : b,
+                          )
+                        : null);
+              return StationCrowd(
+                code: forecast.station,
+                name: _mrtStationName(forecast.station) ?? forecast.station,
+                level: chosen == null
+                    ? CrowdLevel.unknown
+                    : StationCrowd.levelFrom(chosen.crowdLevel),
+              );
+            })
+            .toList(growable: false);
+        _forecastByLine[line] = mapped;
+        notifyListeners();
+      } catch (_) {
+        // On error: leave existing data intact; if nothing yet, mark empty.
+        _forecastByLine.putIfAbsent(line, () => const []);
+        notifyListeners();
+      } finally {
+        _forecastInflight.remove(line);
       }
     }();
   }

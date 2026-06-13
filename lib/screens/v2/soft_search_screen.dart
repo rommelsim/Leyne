@@ -13,6 +13,8 @@ import 'package:flutter/material.dart';
 import '../../data/data_store.dart';
 import '../../data/lta_models.dart';
 import '../../data/models.dart';
+import '../../data/mrt_geo.dart';
+import '../../data/mrt_stations.dart';
 import '../../data/search_logic.dart';
 import '../../services/geocode_service.dart';
 import '../../state/app_model.dart';
@@ -31,6 +33,7 @@ class SoftSearchScreen extends StatefulWidget {
     required this.onClose,
     required this.onOpenStop,
     required this.onOpenBus,
+    required this.onOpenStation,
     required this.onTab,
   });
   final VoidCallback onClose;
@@ -40,6 +43,10 @@ class SoftSearchScreen extends StatefulWidget {
   /// (the service origin) since the route view is built per (stop, service);
   /// the second is the service number.
   final void Function(String stopCode, String svc) onOpenBus;
+
+  /// Push the MRT station detail screen for a tapped search result.
+  /// Walk/distance are null when opened from Search (no location context).
+  final void Function(MrtGeoStation station) onOpenStation;
 
   /// Switch to another tab from the bottom bar (pops the search route).
   final ValueChanged<SoftTab> onTab;
@@ -161,9 +168,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
                   ],
                 ),
               ),
-              Expanded(
-                child: _results(context),
-              ),
+              Expanded(child: _results(context)),
             ],
           ),
         ),
@@ -188,7 +193,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
         // dismiss the keyboard and, if they choose, exit via onClose.
         // Uses AnimatedSwitcher so it slides+fades in and out smoothly.
         AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
+          duration: LyneMotion.short,
           transitionBuilder: (child, anim) => FadeTransition(
             opacity: anim,
             child: SlideTransition(
@@ -287,9 +292,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(LyneRadius.md),
-            borderSide: BorderSide(
-              color: t.accent.withValues(alpha: 0.6),
-            ),
+            borderSide: BorderSide(color: t.accent.withValues(alpha: 0.6)),
           ),
           contentPadding: const EdgeInsets.symmetric(
             vertical: 14,
@@ -412,10 +415,10 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   Widget _recentRow(BuildContext context, LyneTheme t, String recent) {
     final kind = detectQueryKind(recent).kind;
     final IconData icon = switch (kind) {
-      'bus'     => Icons.directions_bus,
+      'bus' => Icons.directions_bus,
       'stopcode' => Icons.location_on,
       'postal' || 'block' || 'text' => Icons.place,
-      _         => Icons.history,
+      _ => Icons.history,
     };
 
     return Material(
@@ -467,17 +470,19 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  // ─── Combined Services + Bus stops ───────────────────────────
-  // Mirrors SoftSearchView.swift:124-141 (resultsContent else branch).
+  // ─── Combined Services + Bus stops + MRT stations ────────────
+  // Mirrors SoftSearchView.swift:124-141 (resultsContent else branch),
+  // extended with an "MRT stations" section from MrtGeo.matching().
   Widget _combinedResults(BuildContext context, String q) {
     final services = DataStore.shared.searchServices(q);
     final stops = DataStore.shared.searchStops(q);
+    final stations = MrtGeo.matching(q);
 
-    if (services.isEmpty && stops.isEmpty) {
+    if (services.isEmpty && stops.isEmpty && stations.isEmpty) {
       return _emptyHint(
         context,
         'Nothing matches "$q"',
-        'Try a stop name, a 5-digit stop code, a 6-digit postal code, or a bus number.',
+        'Try a stop name, a 5-digit stop code, a 6-digit postal code, a bus number, or an MRT station.',
       );
     }
 
@@ -499,6 +504,15 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
           for (int i = 0; i < stops.length; i++) ...[
             _stopCard(context, stops[i]),
             if (i < stops.length - 1) const SizedBox(height: 8),
+          ],
+        ],
+        if (stations.isNotEmpty) ...[
+          SizedBox(height: (services.isEmpty && stops.isEmpty) ? 0 : 16),
+          _sectionLabel(context, 'MRT stations'),
+          const SizedBox(height: 8),
+          for (int i = 0; i < stations.length; i++) ...[
+            _stationCard(context, stations[i]),
+            if (i < stations.length - 1) const SizedBox(height: 8),
           ],
         ],
       ],
@@ -591,6 +605,70 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
                   style: t.mono(11, color: t.dim),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, color: t.dim),
+        ],
+      ),
+    );
+  }
+
+  Widget _stationCard(BuildContext context, MrtGeoStation station) {
+    final t = context.t;
+    return _card(
+      context,
+      onTap: () => _pickStation(station),
+      child: Row(
+        children: [
+          // Leading tram-icon tile — mirrors stopTile style.
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: t.surfaceHi,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.tram_rounded, size: 18, color: t.fg),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  station.name,
+                  style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                // Coloured line-code pills.
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: station.codes.map((code) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: lineColorFor(code),
+                        borderRadius: BorderRadius.circular(LyneRadius.full),
+                      ),
+                      child: Text(
+                        code,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 ),
               ],
             ),
@@ -810,6 +888,12 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     final q = _ctrl.text.trim();
     AppModel.shared.addRecent(q.isEmpty ? DataStore.shared.stopName(code) : q);
     widget.onOpenStop(code);
+  }
+
+  void _pickStation(MrtGeoStation station) {
+    final q = _ctrl.text.trim();
+    AppModel.shared.addRecent(q.isEmpty ? station.name : q);
+    widget.onOpenStation(station);
   }
 
   Future<void> _pickBus(String serviceNo) async {

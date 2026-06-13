@@ -16,7 +16,7 @@ import SwiftUI
 
 // MARK: - Filter enum
 
-enum FavSegment: Hashable { case all, stops, buses }
+enum FavSegment: Hashable { case all, stops, buses, mrt }
 
 // MARK: - Main view
 
@@ -28,6 +28,7 @@ struct SoftFavouritesView: View {
     let onOpenStop: (String) -> Void
     let onOpenBus: (String, String) -> Void
     let onOpenSearch: () -> Void
+    let onOpenMrtStation: (MrtGeoStation) -> Void
 
     @State private var segment: FavSegment = .all
     @State private var editMode: EditMode = .inactive
@@ -35,7 +36,12 @@ struct SoftFavouritesView: View {
     private var t: Theme { m.t }
 
     private var isEmpty: Bool {
-        m.pins.isEmpty && m.favServices.isEmpty
+        switch segment {
+        case .all:   return m.pins.isEmpty && m.favServices.isEmpty && m.savedMrtStations.isEmpty
+        case .stops: return m.pins.isEmpty
+        case .buses: return m.favServices.isEmpty
+        case .mrt:   return m.savedMrtStations.isEmpty
+        }
     }
 
     // MARK: Body
@@ -150,6 +156,44 @@ struct SoftFavouritesView: View {
                         }
                     }
 
+                    // ── Saved MRT stations ─────────────────────────────────
+                    if segment == .all || segment == .mrt {
+                        if !m.savedMrtStations.isEmpty {
+                            mrtStationsHeader
+                                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 2, trailing: 16))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+
+                            ForEach(m.savedMrtStations, id: \.id) { station in
+                                mrtStationRow(station)
+                                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button(role: .destructive) {
+                                            m.removeMrtSaved(station)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                            }
+                            // Drag-to-reorder (in Edit mode) → persists via
+                            // savedMrtStations didSet → persistSavedMrt().
+                            .onMove { from, to in
+                                m.savedMrtStations.move(fromOffsets: from, toOffset: to)
+                                fb.tap()
+                            }
+                            .onDelete { offsets in
+                                m.savedMrtStations.remove(atOffsets: offsets)
+                            }
+                        } else if segment == .mrt {
+                            hint("Save an MRT station to track it here.")
+                                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                        }
+                    }
+
                     // ── Add stop row ───────────────────────────────────────
                     addStopRow
                         .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -180,9 +224,13 @@ struct SoftFavouritesView: View {
             segmentPill("All",   for: .all)
             segmentPill("Stops", for: .stops)
             segmentPill("Buses", for: .buses)
+            segmentPill("MRT",   for: .mrt)
         }
         .padding(3)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            t.glassSurface()
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        )
     }
 
     /// Toggles List edit mode so saved stops / services can be dragged into the
@@ -265,6 +313,66 @@ struct SoftFavouritesView: View {
             Spacer()
         }
         .padding(.leading, 2)
+    }
+
+    private var mrtStationsHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "tram.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(t.soon)
+            Text("Saved stations")
+                .font(t.sans(15, weight: .semibold))
+                .foregroundStyle(t.dim)
+            Spacer()
+        }
+        .padding(.leading, 2)
+    }
+
+    private func mrtStationRow(_ station: MrtGeoStation) -> some View {
+        Button {
+            fb.select()
+            onOpenMrtStation(station)
+        } label: {
+            HStack(spacing: 0) {
+                MrtLineColorBar(codes: station.codes, width: 4, height: 40)
+                VStack(alignment: .center, spacing: 3) {
+                    ForEach(station.codes, id: \.self) { code in
+                        Text(code)
+                            .font(t.mono(10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(mrtLineColorFor(code), in: Capsule())
+                    }
+                }
+                .frame(width: 52, alignment: .center)
+                .padding(.leading, 10)
+
+                Text(station.name)
+                    .font(t.sans(15, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .truncationMode(.tail)
+                    .padding(.leading, 8)
+
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(t.line, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("\(station.name) MRT station")
     }
 
     // MARK: Service row
@@ -409,21 +517,33 @@ struct SoftFavouritesView: View {
     // MARK: Empty state
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Image(systemName: "star")
+        let isBuses = segment == .buses
+        let isMrt   = segment == .mrt
+        let icon    = isBuses ? "bus.fill" : isMrt ? "tram.fill" : "star"
+        let title   = isBuses ? "No saved buses yet"
+                    : isMrt   ? "No saved stations yet"
+                    : "No favourites yet"
+        let body    = isBuses
+            ? "Save the bus services you travel most — tap the star on any bus — and they'll appear here."
+            : isMrt
+            ? "Save MRT stations you use often — tap the star on any station — and they'll appear here."
+            : "Pin the stops and buses you use most — tap the pin on any stop or bus — and they'll show up here."
+        let cta     = isBuses ? "Find a bus" : isMrt ? "Find a station" : "Find a stop"
+        return VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: icon)
                 .font(.system(size: 28, weight: .regular))
                 .foregroundStyle(t.meBlue)
                 .frame(width: 64, height: 64)
                 .background(t.surfaceHi,
                             in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            Text("No favourites yet")
+            Text(title)
                 .font(t.sans(20, weight: .semibold))
                 .foregroundStyle(t.fg)
-            Text("Pin the stops and buses you use most — tap the pin on any stop or bus — and they'll show up here.")
+            Text(body)
                 .font(t.sans(13))
                 .foregroundStyle(t.dim)
             Button(action: { fb.select(); onOpenSearch() }) {
-                Text("Find a stop")
+                Text(cta)
                     .font(t.sans(14, weight: .semibold))
                     .foregroundStyle(t.onAccent)
                     .padding(.horizontal, 16)

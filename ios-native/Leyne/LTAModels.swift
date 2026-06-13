@@ -123,6 +123,91 @@ struct LTAStationCrowd: Codable, Equatable {
     let CrowdLevel: String
 }
 
+// ─── Station crowd forecast (PCDForecast) ─────────────────
+// The PCDForecast endpoint returns one of two JSON shapes depending on the
+// date context. We handle both defensively; any parse failure yields [].
+//
+// Nested shape (typical):
+//   { "value": [ { "Date": "...", "Stations": [ { "Station": "EW1",
+//       "Interval": [ { "Start": "2025-01-01T06:00:00+08:00",
+//                       "CrowdLevel": "l" } ] } ] } ] }
+//
+// Flat shape (historical / some endpoints):
+//   { "value": [ { "Station": "EW1", "Start": "...", "CrowdLevel": "l" } ] }
+
+/// A single (station, interval-start, crowd-level) tuple from PCDForecast.
+struct LTAForecastInterval: Equatable {
+    let station: String     // e.g. "EW13"
+    let start: Date
+    let crowdLevel: String  // "l" | "m" | "h" | "NA"
+}
+
+/// Decoder that tolerates both the nested and flat PCDForecast shapes.
+/// On any failure it returns an empty array instead of throwing.
+enum LTAForecastParser {
+    /// Attempt the nested shape first, then the flat shape.
+    /// Never throws — always returns (possibly empty) results.
+    static func parse(data: Data) -> [LTAForecastInterval] {
+        if let nested = tryNested(data: data), !nested.isEmpty { return nested }
+        if let flat   = tryFlat(data: data),   !flat.isEmpty   { return flat }
+        return []
+    }
+
+    // Nested shape intermediates
+    private struct NestedRoot: Decodable {
+        let value: [NestedDay]
+        struct NestedDay: Decodable {
+            let Date: String?
+            let Stations: [NestedStation]
+        }
+        struct NestedStation: Decodable {
+            let Station: String
+            let Interval: [NestedInterval]
+        }
+        struct NestedInterval: Decodable {
+            let Start: String
+            let CrowdLevel: String
+        }
+    }
+
+    private static func tryNested(data: Data) -> [LTAForecastInterval]? {
+        guard let root = try? JSONDecoder().decode(NestedRoot.self, from: data) else { return nil }
+        var out: [LTAForecastInterval] = []
+        for day in root.value {
+            for station in day.Stations {
+                for interval in station.Interval {
+                    guard let date = LTADate.parse(interval.Start) else { continue }
+                    out.append(LTAForecastInterval(station: station.Station,
+                                                  start: date,
+                                                  crowdLevel: interval.CrowdLevel))
+                }
+            }
+        }
+        return out.isEmpty ? nil : out
+    }
+
+    // Flat shape intermediates
+    private struct FlatRoot: Decodable {
+        let value: [FlatRow]
+        struct FlatRow: Decodable {
+            let Station: String
+            let Start: String
+            let CrowdLevel: String
+        }
+    }
+
+    private static func tryFlat(data: Data) -> [LTAForecastInterval]? {
+        guard let root = try? JSONDecoder().decode(FlatRoot.self, from: data) else { return nil }
+        let out = root.value.compactMap { row -> LTAForecastInterval? in
+            guard let date = LTADate.parse(row.Start) else { return nil }
+            return LTAForecastInterval(station: row.Station,
+                                      start: date,
+                                      crowdLevel: row.CrowdLevel)
+        }
+        return out.isEmpty ? nil : out
+    }
+}
+
 // ─── Facilities maintenance v2 (adhoc lift maintenance) ───
 struct LTAFacilityMaintenance: Codable, Equatable {
     let Line: String             // e.g. "NEL"

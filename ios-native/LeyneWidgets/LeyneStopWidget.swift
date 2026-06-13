@@ -1,6 +1,6 @@
 // Home Screen widgets: live next-bus arrivals for one (Small/Medium) or two
 // (Large) pinned stops. The widget reads as a snippet of the app — same
-// cream/parchment surface, mono digits, mint left-edge pill for arriving
+// monochrome ink surface, monospacedDigit ETAs, ink badge for arriving
 // rows — so muscle memory transfers from in-app PinnedCardView.
 //
 // Self-contained: the widget extension can't import the app module. It
@@ -153,16 +153,17 @@ private struct SmallStopView: View {
                 Spacer(minLength: 4)
 
                 Text(next.id)
-                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(wFg)
 
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(schedPrefix(next.mon1, next.eta1) + etaLabel(next.eta1))
                         .font(.system(size: etaLabel(next.eta1) == "Arr" ? 30 : 40,
-                                      weight: .medium, design: .monospaced))
-                        .foregroundStyle(arriving ? wLive : wFg)
-                        // Arriving is the primary signal — keep it tinted (not
-                        // desaturated) under StandBy / Lock Screen accenting.
+                                      weight: arriving ? .bold : .medium)
+                              .monospacedDigit())
+                        .foregroundStyle(wFg)
+                        // Arriving: ink weight (bold) is the signal — no hue.
+                        // Keep widgetAccentable so StandBy/Lock Screen can tint.
                         .widgetAccentable(arriving)
                     if etaLabel(next.eta1) != "Arr" {
                         Text("min")
@@ -176,13 +177,13 @@ private struct SmallStopView: View {
                 HStack {
                     if let eta2 = next.eta2 {
                         Text("then \(etaLabel(eta2))\(eta2 <= 0 ? "" : "m")")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 10).monospacedDigit())
                             .foregroundStyle(wDim)
                     }
                     Spacer()
                     if block.rows.count > 1 {
                         Text("+\(block.rows.count - 1)")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(.system(size: 10, weight: .medium).monospacedDigit())
                             .foregroundStyle(wFaint)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .overlay(Capsule().stroke(wLine, lineWidth: 1))
@@ -200,12 +201,12 @@ private struct SmallStopView: View {
 private struct WServiceRow: View {
     let row: WLTA.Row
     // Arriving = imminent AND live. A scheduled (non-GPS) guess never gets
-    // the confident mint-arriving treatment, even at <=1 min.
+    // the confident ink-arriving treatment, even at <=1 min.
     private var arriving: Bool { row.mon1 && (row.eta1 ?? 99) <= 1 }
 
     var body: some View {
         HStack(spacing: 9) {
-            // Mint-filled service badge — quotes the in-app V2/ServiceBadge so
+            // Ink-filled service badge — quotes the in-app ServiceBadge so
             // a glance at the widget reads as a glance at the app.
             WServiceBadge(no: row.id, compact: true)
 
@@ -234,7 +235,7 @@ private struct MediumStopView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "mappin.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(wLive)
+                        .foregroundStyle(wDim)
                         .widgetAccentable()
                     Text(block.name)
                         .font(.system(size: 14, weight: .semibold))
@@ -301,7 +302,7 @@ private struct LargeCommuteView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
                     Image(systemName: "bookmark.fill")
-                        .font(.system(size: 10)).foregroundStyle(wLive)
+                        .font(.system(size: 10)).foregroundStyle(wDim)
                         .widgetAccentable()
                     Text(block.name)
                         .font(.system(size: 13, weight: .semibold))

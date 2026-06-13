@@ -112,6 +112,20 @@ class LtaService {
         .toList(growable: false);
   }
 
+  // ─── Live: Station Crowd Forecast (PCDForecast) ──────────
+  /// Crowd forecast for the next ~2 hours on a line. `trainLine` is the PCD
+  /// code, e.g. "EWL". Returns the raw parsed forecast list; shape-handling
+  /// lives in [LtaStationForecast.parseValueList].
+  Future<List<LtaStationForecast>> stationForecast(String trainLine) async {
+    final uri = LtaConfig.baseUrl.replace(
+      pathSegments: [...LtaConfig.baseUrl.pathSegments, 'PCDForecast'],
+      queryParameters: {'TrainLine': trainLine},
+    );
+    final json = await _get(uri);
+    final value = (json['value'] as List?) ?? const [];
+    return LtaStationForecast.parseValueList(value);
+  }
+
   // ─── Live: Facilities Maintenance v2 (lift maintenance) ──
   /// Network-wide list of lifts currently under maintenance.
   Future<List<LtaFacilityMaintenance>> facilitiesMaintenance() async {

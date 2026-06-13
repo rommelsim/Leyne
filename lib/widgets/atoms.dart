@@ -9,7 +9,12 @@ enum ChipSize { sm, md, lg }
 /// Coloured rounded-rect with a service number in mono. The defining visual
 /// element of the redesigned UI — used on every screen.
 class BusChip extends StatelessWidget {
-  const BusChip({super.key, required this.no, this.color, this.size = ChipSize.md});
+  const BusChip({
+    super.key,
+    required this.no,
+    this.color,
+    this.size = ChipSize.md,
+  });
 
   final String no;
   final Color? color;
@@ -62,7 +67,9 @@ class Pill extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: t.mono(10, weight: FontWeight.w600, color: fg).copyWith(letterSpacing: 0.6),
+        style: t
+            .mono(10, weight: FontWeight.w600, color: fg)
+            .copyWith(letterSpacing: 0.6),
       ),
     );
   }
@@ -98,21 +105,20 @@ class LyneToggle extends StatelessWidget {
     return GestureDetector(
       onTap: () => onChanged(!on),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
+        duration: LyneMotion.fast,
         width: 40,
         height: 24,
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           color: on
               ? t.accent
-              : (t.isDark
-                  ? const Color.fromRGBO(255, 255, 255, 0.12)
-                  : t.line),
+              : (t.isDark ? const Color.fromRGBO(255, 255, 255, 0.12) : t.line),
           borderRadius: BorderRadius.circular(99),
         ),
         child: Row(
-          mainAxisAlignment:
-              on ? MainAxisAlignment.end : MainAxisAlignment.start,
+          mainAxisAlignment: on
+              ? MainAxisAlignment.end
+              : MainAxisAlignment.start,
           children: [
             Container(
               width: 20,

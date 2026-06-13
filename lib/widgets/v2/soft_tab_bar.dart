@@ -1,6 +1,6 @@
 // SoftTabBar (Material 3) — bottom NavigationBar with pill-indicator
 // behind the active icon. Mirrors the iOS tab set exactly:
-// Nearby (Home) · Saved · Search · MRT · Settings — matching SoftRoot.swift
+// Bus (Home) · MRT · Saved · Search · Settings — matching SoftRoot.swift
 // Tab declaration order.
 //
 // SoftBottomBar stacks the AdMob banner above SoftTabBar for the
@@ -12,8 +12,9 @@ import '../../theme.dart';
 import '../ad_banner.dart';
 
 // 2.4.0: Added `favourites` tab — mirrors iOS SoftRoot 4-tab layout.
-// 2.7.0: Added `mrt` tab — mirrors iOS SoftRoot Nearby·Saved·Search·MRT·Settings.
-// Android visible order: Home · Saved · Search · MRT · Settings.
+// 2.7.0: Added `mrt` tab — mirrors iOS SoftRoot.
+// Phase 1: Reordered to Bus · MRT · Saved · Search · Settings.
+// Android visible order: Bus(Home) · MRT · Saved · Search · Settings.
 enum SoftTab { home, favourites, mrt, settings, search }
 
 class SoftTabBar extends StatelessWidget {
@@ -36,9 +37,14 @@ class SoftTabBar extends StatelessWidget {
       surfaceTintColor: Colors.transparent,
       destinations: const [
         NavigationDestination(
-          icon: Icon(Icons.near_me_outlined),
-          selectedIcon: Icon(Icons.near_me_rounded),
-          label: 'Nearby',
+          icon: Icon(Icons.directions_bus_outlined),
+          selectedIcon: Icon(Icons.directions_bus_rounded),
+          label: 'Bus',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.train_outlined),
+          selectedIcon: Icon(Icons.train_rounded),
+          label: 'MRT',
         ),
         NavigationDestination(
           icon: Icon(Icons.star_outline_rounded),
@@ -51,11 +57,6 @@ class SoftTabBar extends StatelessWidget {
           label: 'Search',
         ),
         NavigationDestination(
-          icon: Icon(Icons.train_outlined),
-          selectedIcon: Icon(Icons.train_rounded),
-          label: 'MRT',
-        ),
-        NavigationDestination(
           icon: Icon(Icons.settings_outlined),
           selectedIcon: Icon(Icons.settings_rounded),
           label: 'Settings',
@@ -64,12 +65,12 @@ class SoftTabBar extends StatelessWidget {
     );
   }
 
-  // Order mirrors iOS SoftRoot: Nearby · Saved · Search · MRT · Settings.
+  // Order mirrors iOS SoftRoot: Bus · MRT · Saved · Search · Settings.
   static const _visibleTabs = [
     SoftTab.home,
+    SoftTab.mrt,
     SoftTab.favourites,
     SoftTab.search,
-    SoftTab.mrt,
     SoftTab.settings,
   ];
 

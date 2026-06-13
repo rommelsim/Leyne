@@ -101,12 +101,138 @@ struct LegendDot: View {
     }
 }
 
-/// Vertical MRT-line bar — coloured 4×28 rectangle leading an alert card.
+/// Multi-colour MRT line bar — vertical (for list rows) or horizontal (for hero rules).
+///
+/// Renders a thin rounded bar whose colours reflect all line codes for a station:
+///   - 1 colour  → solid bar.
+///   - N colours → bar split into N equal segments, one per distinct line colour
+///                 (deduped while preserving code order). Vertical axis: segments
+///                 run top-to-bottom. Horizontal axis: segments run left-to-right.
+///
+/// Interchange examples:
+///   Jurong East (EW24, NS1)         → 2-segment green/red bar
+///   Dhoby Ghaut (NS24, NE6, CC1)   → 3-segment red/purple/orange bar
+///
+/// Fixed width (4 pt) for the vertical variant so it doubles as an alignment
+/// anchor in list rows. Height defaults to 44 pt to match a standard card row.
+/// For the hero horizontal rule, callers flip the axis and swap width/height.
+struct MrtLineColorBar: View {
+    enum Axis { case vertical, horizontal }
+
+    let colors: [Color]
+    var width: CGFloat = 4
+    var height: CGFloat = 44
+    var axis: Axis = .vertical
+
+    /// Single-colour convenience init (e.g. re-using from alert cards).
+    init(color: Color, width: CGFloat = 4, height: CGFloat = 44, axis: Axis = .vertical) {
+        self.colors = [color]
+        self.width = width
+        self.height = height
+        self.axis = axis
+    }
+
+    /// Multi-colour init from station codes — dedups by 2-letter line prefix.
+    init(codes: [String], width: CGFloat = 4, height: CGFloat = 44, axis: Axis = .vertical) {
+        var seen: Set<String> = []
+        self.colors = codes.compactMap { code -> Color? in
+            let prefix = String(code.prefix(2)).uppercased()
+            guard seen.insert(prefix).inserted else { return nil }
+            return mrtLineColorFor(code)
+        }
+        self.width = width
+        self.height = height
+        self.axis = axis
+    }
+
+    var body: some View {
+        let distinct = colors.isEmpty ? [Color.gray] : colors
+        let r = axis == .vertical ? width / 2 : height / 2
+
+        if distinct.count == 1 {
+            RoundedRectangle(cornerRadius: r, style: .continuous)
+                .fill(distinct[0])
+                .frame(width: width, height: height)
+        } else {
+            segmentedBar(distinct, cornerRadius: r)
+        }
+    }
+
+    @ViewBuilder
+    private func segmentedBar(_ distinct: [Color], cornerRadius r: CGFloat) -> some View {
+        let count = CGFloat(distinct.count)
+        if axis == .vertical {
+            VStack(spacing: 0) {
+                ForEach(Array(distinct.enumerated()), id: \.offset) { index, color in
+                    segment(
+                        color: color,
+                        size: CGSize(width: width, height: height / count),
+                        isFirst: index == 0,
+                        isLast: index == distinct.count - 1,
+                        cornerRadius: r,
+                        axis: .vertical
+                    )
+                }
+            }
+            .frame(width: width, height: height)
+        } else {
+            HStack(spacing: 0) {
+                ForEach(Array(distinct.enumerated()), id: \.offset) { index, color in
+                    segment(
+                        color: color,
+                        size: CGSize(width: width / count, height: height),
+                        isFirst: index == 0,
+                        isLast: index == distinct.count - 1,
+                        cornerRadius: r,
+                        axis: .horizontal
+                    )
+                }
+            }
+            .frame(width: width, height: height)
+        }
+    }
+
+    private func segment(
+        color: Color,
+        size: CGSize,
+        isFirst: Bool,
+        isLast: Bool,
+        cornerRadius r: CGFloat,
+        axis: Axis
+    ) -> some View {
+        // Round only the ends the segment "owns" so adjacent segments butt flush.
+        let shape: UnevenRoundedRectangle = {
+            if axis == .vertical {
+                return UnevenRoundedRectangle(
+                    topLeadingRadius: isFirst ? r : 0,
+                    bottomLeadingRadius: isLast ? r : 0,
+                    bottomTrailingRadius: isLast ? r : 0,
+                    topTrailingRadius: isFirst ? r : 0,
+                    style: .continuous
+                )
+            } else {
+                return UnevenRoundedRectangle(
+                    topLeadingRadius: isFirst ? r : 0,
+                    bottomLeadingRadius: isFirst ? r : 0,
+                    bottomTrailingRadius: isLast ? r : 0,
+                    topTrailingRadius: isLast ? r : 0,
+                    style: .continuous
+                )
+            }
+        }()
+        return Rectangle()
+            .fill(color)
+            .frame(width: size.width, height: size.height)
+            .clipShape(shape)
+    }
+}
+
+/// Legacy single-colour vertical MRT-line bar — thin 4×28 rectangle.
+/// Kept for existing callers (alert cards in SoftHomeView / SoftMrtStationView).
+/// New code should prefer `MrtLineColorBar`.
 struct MRTLineBar: View {
     let color: Color
     var body: some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(color)
-            .frame(width: 4, height: 28)
+        MrtLineColorBar(color: color, width: 4, height: 28)
     }
 }

@@ -84,6 +84,40 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.8.0": WhatsNewEntry(
+        headline: "MRT, reimagined — plus a smarter Live Activity.",
+        items: [
+            WhatsNewItem(
+                icon: "tram.fill",
+                title: "MRT, side by side with Bus",
+                body: "MRT is now a full tab next to Bus — the stations nearest "
+                    + "you, live station crowd with a 30-minute forecast, free "
+                    + "bus & shuttle info during disruptions, and the full "
+                    + "system map. You can save MRT stations too."
+            ),
+            WhatsNewItem(
+                icon: "magnifyingglass",
+                title: "Search finds everything",
+                body: "Search now covers MRT stations alongside buses and "
+                    + "stops, with a quick filter to narrow to just what you "
+                    + "want."
+            ),
+            WhatsNewItem(
+                icon: "bus.fill",
+                title: "Live Activity + arrival times",
+                body: "The Dynamic Island shows your bus number with a live "
+                    + "countdown, and the bus view now shows the exact arrival "
+                    + "time — e.g. \"Arrives 7:39 PM\"."
+            ),
+            WhatsNewItem(
+                icon: "hand.tap.fill",
+                title: "Clearer bus controls",
+                body: "The bus screen's actions are now labelled — Track "
+                    + "arrival, Save service, and More — and the Saved tab gained "
+                    + "an MRT section you can reorder."
+            ),
+        ]
+    ),
     "2.7.0": WhatsNewEntry(
         headline: "A live MRT board — free for everyone.",
         items: [
@@ -526,6 +560,11 @@ final class AppModel: ObservableObject {
         didSet { persistHiddenNearby() }
     }
 
+    // Saved MRT stations — mirrors favServices/pins; persisted to UserDefaults.
+    @Published var savedMrtStations: [MrtGeoStation] = [] {
+        didSet { persistSavedMrt() }
+    }
+
     // ─── Notification alerts (the redesign's single source of truth) ───
     // Both alert kinds — "notify me when my bus reaches MY STOP" (arrival)
     // and "…MY DESTINATION" (destination) — live here, persisted as JSON.
@@ -542,6 +581,7 @@ final class AppModel: ObservableObject {
     init() {
         loadPins()
         loadFavServices()
+        loadSavedMrt()
         loadRecents()
         loadAlerts()
         loadHiddenNearby()
@@ -608,6 +648,35 @@ final class AppModel: ObservableObject {
             UserDefaults.standard.set(d, forKey: "leyne.hiddenNearby")
         }
     }
+    private func loadSavedMrt() {
+        if let d = UserDefaults.standard.data(forKey: "leyne.savedMrt"),
+           let s = try? JSONDecoder().decode([MrtGeoStation].self, from: d) {
+            savedMrtStations = s
+        }
+    }
+    private func persistSavedMrt() {
+        if let d = try? JSONEncoder().encode(savedMrtStations) {
+            UserDefaults.standard.set(d, forKey: "leyne.savedMrt")
+        }
+    }
+
+    // MARK: - Saved MRT station helpers
+
+    func isMrtSaved(_ station: MrtGeoStation) -> Bool {
+        savedMrtStations.contains { $0.id == station.id }
+    }
+
+    func toggleMrtSaved(_ station: MrtGeoStation) {
+        if isMrtSaved(station) {
+            savedMrtStations.removeAll { $0.id == station.id }
+        } else {
+            savedMrtStations.append(station)
+        }
+    }
+
+    func removeMrtSaved(_ station: MrtGeoStation) {
+        savedMrtStations.removeAll { $0.id == station.id }
+    }
 
     /// Hide a stop from the Nearby list ("Hide From Nearby" long-press action).
     func hideFromNearby(code: String) { hiddenNearby.insert(code) }
@@ -645,13 +714,41 @@ final class AppModel: ObservableObject {
     /// Toggle a favourite service on/off.
     func toggleFavService(no: String, stop: String?) {
         if let i = favServices.firstIndex(where: { $0.no == no && $0.stop == stop }) {
+            let fav = favServices[i]
             favServices.remove(at: i)
+            cancelAlertsForRemovedFav(fav)
         } else {
             favServices.append(FavService(no: no, stop: stop))
         }
     }
     func removeFavService(_ fav: FavService) {
         favServices.removeAll { $0.id == fav.id }
+        cancelAlertsForRemovedFav(fav)
+    }
+
+    /// Cancels any arrival alert (and its pending notification) that belongs to a
+    /// favourite service being removed. Also stops the Live Activity if it is
+    /// currently tracking that bus/stop combination.
+    ///
+    /// Matching rules:
+    ///   • Pinned-stop fav (`stop != nil`): cancel the alert whose (busNo, stopCode)
+    ///     matches exactly.
+    ///   • Anywhere fav (`stop == nil`): cancel every arrival alert for that bus
+    ///     number, regardless of stop, since the fav was bus-wide.
+    private func cancelAlertsForRemovedFav(_ fav: FavService) {
+        let matching: [BusAlert]
+        if let stop = fav.stop {
+            // Exact-stop fav — cancel only the alert at that stop.
+            matching = alerts.filter { $0.kind == .arrival
+                && $0.busNo == fav.no
+                && $0.stopCode == stop }
+        } else {
+            // Anywhere fav — cancel all arrival alerts for this bus number.
+            matching = alerts.filter { $0.kind == .arrival && $0.busNo == fav.no }
+        }
+        for alert in matching {
+            removeAlert(id: alert.id)
+        }
     }
     private func persistPins() {
         if let d = try? JSONEncoder().encode(pins) {
@@ -829,7 +926,9 @@ final class AppModel: ObservableObject {
     ///
     /// This is the single shared path used by the Stop view per-bus control,
     /// the Bus view top-bar bell, and any future one-tap entry points.
-    /// The Live Activity follows automatically via `autoTrackSoonestAlert`.
+    /// On arm, the Live Activity is started eagerly (not deferred to the next tick)
+    /// if live arrival data is already present; `autoTrackSoonestAlert` handles the
+    /// no-ETA fallback on subsequent ticks.
     @discardableResult
     func toggleArrivalAlert(busNo: String, stopCode: String,
                             stopName: String, dest: String) -> ArrivalAlertToggleResult {
@@ -843,6 +942,10 @@ final class AppModel: ObservableObject {
                 boardStopCode: stopCode,
                 leadMinutes: AlertTiming.defaultLead(.arrival))
             upsertAlert(a)
+            // Eagerly attempt to start the Live Activity so it appears at once
+            // rather than waiting up to 5 s for the next autoTrackSoonestAlert tick.
+            // autoTrackSoonestAlert guards against double-start via liveActivityKey.
+            autoTrackSoonestAlert()
             return .armed(a)
         }
     }
@@ -1374,7 +1477,13 @@ final class AppModel: ObservableObject {
         if liveActivity != nil { stopLiveActivity() }
         let attrs = LeyneActivityAttributes(busNo: s.no, dest: s.dest,
                                            stopName: stopName, stopCode: stopCode)
-        let state = liveState(etaSec: s.etaSec, stopsAway: -1, monitored: s.monitored)
+        // Prefer the service's real arrivalDate (GPS-derived) for the
+        // self-ticking countdown; fall back to offset from now if absent.
+        let arrivalDate: Date? = s.arrivalDate ?? (
+            s.etaSec > 0 ? Date().addingTimeInterval(TimeInterval(s.etaSec)) : nil
+        )
+        let state = liveState(etaSec: s.etaSec, stopsAway: -1,
+                              monitored: s.monitored, eta: arrivalDate)
         do {
             let act = try Activity.request(
                 attributes: attrs,
@@ -1445,7 +1554,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func liveState(etaSec: Int, stopsAway: Int, monitored: Bool = true)
+    private func liveState(etaSec: Int, stopsAway: Int, monitored: Bool = true,
+                           eta: Date? = nil)
         -> LeyneActivityAttributes.ContentState {
         let arrived = etaSec <= 0
         // Floor to whole minutes so the Dynamic Island / Lock Screen numeral
@@ -1460,8 +1570,17 @@ final class AppModel: ObservableObject {
         else if etaSec <= 30 { status = "Now" }
         else if etaSec <= 90 { status = "Arrives in 1 min" }
         else { status = "Arrives in \(mins) min" }
+        // Compute the target arrival Date for the self-ticking countdown.
+        // Only meaningful for live (monitored) buses — schedule-only buses use
+        // the static etaMinutes numeral with a leading "~" instead.
+        // If the caller supplies an explicit Date (from s.arrivalDate), prefer
+        // it; otherwise derive it from the ETA seconds offset.
+        let arrivalDate: Date = arrived
+            ? .now
+            : (eta ?? Date().addingTimeInterval(TimeInterval(etaSec)))
         return .init(etaMinutes: arrived ? 0 : mins, status: status,
-                     stopsAway: stopsAway, arrived: arrived, monitored: monitored)
+                     stopsAway: stopsAway, arrived: arrived, monitored: monitored,
+                     eta: arrivalDate)
     }
 
     // ─── Live Activity polling cadence + safety bounds ────
@@ -1503,6 +1622,13 @@ final class AppModel: ObservableObject {
             var sawClose = false    // bus has been inside the close window
             var misses = 0          // consecutive empty snapshots
             var polls = 0
+            // Push-gating: track the last values pushed to avoid a push every
+            // poll when nothing meaningful changed. The on-device timer ticks
+            // the countdown so we only need to push when the arrival Date drifts
+            // by more than ~10 s, or a categorical field changes.
+            var lastPushedEta: Date = .distantFuture
+            var lastPushedStopsAway: Int = Int.min
+            var lastPushedMonitored: Bool = true
 
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: Self.kLivePollInterval)
@@ -1543,10 +1669,27 @@ final class AppModel: ObservableObject {
                     let fromEta = Int((Double(max(0, eta)) / 90.0).rounded())
                     stopsAway = max(0, min(you, fromEta))
                 }
+                // Use the GPS-derived arrival Date carried in the snapshot
+                // directly — it's the raw LTA timestamp the polling loop
+                // already fetched, so no second-order computation needed.
+                let snapArrivalDate: Date = snap.arrivalDate
+                // Push-gating: skip the update if nothing meaningful changed.
+                // The on-device Text(timerInterval:) keeps ticking, so a push
+                // is only needed when the arrival Date shifts by >10 s, or a
+                // categorical value (monitored, stopsAway) changes.
+                let etaDrift = abs(snapArrivalDate.timeIntervalSince(lastPushedEta))
+                let categoricalChange = snap.monitored != lastPushedMonitored
+                    || stopsAway != lastPushedStopsAway
+                guard etaDrift > 10 || categoricalChange else { continue }
+                lastPushedEta = snapArrivalDate
+                lastPushedStopsAway = stopsAway
+                lastPushedMonitored = snap.monitored
                 let state = self.liveState(etaSec: eta, stopsAway: stopsAway,
-                                           monitored: snap.monitored)
+                                           monitored: snap.monitored,
+                                           eta: snapArrivalDate)
                 await self.liveActivity?.update(
-                    ActivityContent(state: state, staleDate: Date().addingTimeInterval(120)))
+                    ActivityContent(state: state,
+                                    staleDate: Date().addingTimeInterval(120)))
 
                 if polls >= Self.kLiveMaxPolls {
                     await self.finishLiveActivityAsArrived(monitored: snap.monitored)

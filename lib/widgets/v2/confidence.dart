@@ -136,8 +136,9 @@ class ConfidenceDot extends StatelessWidget {
     final t = context.t;
     switch (confidence) {
       case ArrivalConfidence.live:
-        // Green dot for live confidence — mirrors iOS Confidence.swift
-        // ConfidenceDot which fills with t.soon.
+        // Solid ink dot for live confidence. t.soon is now monochrome
+        // (white in dark / #111111 in light) per the 2.6.0 theme change —
+        // the dot reads as a filled shape, not a colour signal.
         return Container(
           width: size,
           height: size,
@@ -307,7 +308,8 @@ class ConfidenceStatusPill extends StatelessWidget {
   Widget _dot(LyneTheme t) {
     switch (confidence) {
       case ArrivalConfidence.live:
-        // Green dot in the LIVE status pill — mirrors iOS ConfidenceStatusPill.
+        // Solid ink dot in the LIVE status pill. t.soon is monochrome
+        // post-2.6.0 — the dot reads from shape against the inverse pill.
         return Container(
           width: 6,
           height: 6,
@@ -446,15 +448,20 @@ class CrowdMeter extends StatelessWidget {
     return i < _fill ? _occupancyColor(load, t) : t.line;
   }
 
-  /// Inline version of occupancyColor to avoid a circular import with
-  /// proximity.dart (which imports confidence.dart). The logic is
-  /// identical to occupancyColor() in proximity.dart.
+  /// Crowd/occupancy colour — hardcoded green/amber/grey so these meters
+  /// stay coloured even after the 2.6.0 monochrome theme change (which
+  /// set t.soon/t.mid to white/black ink). Mirrors iOS CrowdMeter which
+  /// keeps colour via a dedicated occupancyColor helper independent of
+  /// the theme's soon/mid tokens.
+  ///   sea → green  (seats available)
+  ///   sda → amber  (standing available)
+  ///   lsd/null → t.dim (limited/unknown — neutral grey)
   static Color _occupancyColor(Load? load, LyneTheme t) {
     switch (load) {
       case Load.sea:
-        return t.soon;
+        return const Color(0xFF34C759); // system green
       case Load.sda:
-        return t.mid;
+        return const Color(0xFFFF9500); // system orange/amber
       case Load.lsd:
       case null:
         return t.dim;

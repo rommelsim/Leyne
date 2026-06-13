@@ -1,2 +1,3 @@
 - [iOS Native Rewrite State](project_ios_rewrite_state.md) — V2 (Soft* views) is default; parity gaps vs V1/Android and key file locations
 - [WeatherKit integration](project_weatherkit.md) — WeatherService + WeatherHeader added 2026-06-10; entitlement + pbxproj edits; needs provisioning to return data at runtime
+- [MRT tab restructure](project_mrt_restructure.md) — 2026-06-13: ••• menu, saved stations (AppModel+FavSegment), compact lines list → SoftMrtLineView, SoftMrtNewsView; no version bump

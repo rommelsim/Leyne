@@ -114,9 +114,15 @@ struct SoftBusView: View {
     }
 
     /// Whether to show the "~" whisper cue.
+    ///
+    /// Reflects ARRIVAL-time confidence only — a quiet "~" when the ETA is a
+    /// schedule guess rather than a live (GPS-monitored) estimate. It must NOT
+    /// depend on `plot.tier`: a bus can have a confident live ETA yet no GPS
+    /// coordinate to plot on the map this poll, and tying the title "~" to the
+    /// map position made it appear "random" on live buses (e.g. Bus 165).
+    /// Map-position confidence is already conveyed by the bus marker's tier.
     private var showWhisper: Bool {
-        guard confidence != .none else { return false }
-        return confidence != .live || plot?.tier != .live
+        confidence != .none && confidence != .live
     }
 
     var body: some View {
@@ -124,6 +130,7 @@ struct SoftBusView: View {
             VStack(alignment: .leading, spacing: 12) {
                 topBar
                 titleBlock
+                actionBar
                 heroCard
                 liveModule
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -255,43 +262,49 @@ struct SoftBusView: View {
             .accessibilityLabel("Back to \(ds.stopName(stopCode))")
 
             Spacer(minLength: 0)
+        }
+    }
 
-            // Boarding alert toggle — buzz me before this bus reaches this stop.
-            // Eye ("watch this bus") fills when armed; bell is reserved for the
-            // app's notification settings/inbox, not a single watched bus.
+    // MARK: Action bar — labeled segments below the title
+
+    /// Three equal-width labeled action segments placed between the title block
+    /// and the hero ETA card. Replaces the cryptic icon-only top-bar toggles
+    /// with self-describing affordances that have larger tap targets.
+    private var actionBar: some View {
+        HStack(spacing: 8) {
+            // Track arrival
             Button {
                 toggleBoardingAlert()
             } label: {
-                Image(systemName: boardingAlertOn ? "eye.fill" : "eye")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(boardingAlertOn ? t.soon : t.fg)
-                    .frame(width: 44, height: 44)
-                    .background(t.surface, in: Circle())
-                    .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                actionSegment(
+                    icon: boardingAlertOn ? "bell.fill" : "bell",
+                    label: boardingAlertOn ? "Tracking" : "Track arrival",
+                    active: boardingAlertOn
+                )
             }
             .buttonStyle(.plain)
             .accessibilityLabel(boardingAlertOn
                 ? "Boarding alert on for bus \(svc). Tap to cancel."
                 : "Notify me before bus \(svc) reaches this stop")
 
-            // Save toggle — saves/removes this bus. A bus glyph fills when saved.
+            // Save service
             Button {
                 fb.select(); toggleServiceSaved()
             } label: {
-                Image(systemName: serviceSaved ? "bus.fill" : "bus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(serviceSaved ? t.soon : t.fg)
-                    .contentTransition(.symbolEffect(.replace))
-                    .symbolEffect(.bounce, value: serviceSaved)
-                    .frame(width: 44, height: 44)
-                    .background(t.surface, in: Circle())
-                    .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+                actionSegment(
+                    icon: serviceSaved ? "star.fill" : "star",
+                    label: serviceSaved ? "Saved" : "Save service",
+                    active: serviceSaved
+                )
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.bounce, value: serviceSaved)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(serviceSaved ? "Bus \(svc) saved. Tap to remove."
-                                             : "Save Bus \(svc)")
+            .accessibilityLabel(serviceSaved
+                ? "Bus \(svc) saved. Tap to remove."
+                : "Save Bus \(svc)")
 
-            // Overflow — alight reminder, manage alerts, share.
+            // More (overflow menu)
             Menu {
                 Button {
                     fb.select(); showManage = true
@@ -304,10 +317,37 @@ struct SoftBusView: View {
                     Label("Share Bus \(svc)", systemImage: "square.and.arrow.up")
                 }
             } label: {
-                circleButton("ellipsis", size: 16)
+                actionSegment(icon: "ellipsis", label: "More", active: false)
             }
             .accessibilityLabel("More options")
         }
+    }
+
+    /// A single labeled segment in the action bar.
+    /// Active = accent fill + onAccent text. Inactive = surface fill + fg text + line stroke.
+    @ViewBuilder
+    private func actionSegment(icon: String, label: String, active: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+            Text(label)
+                .font(t.sans(14, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(active ? t.onAccent : t.fg)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 11)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(active ? t.accent : t.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(active ? Color.clear : t.line, lineWidth: 1)
+        )
+        .animation(.easeInOut(duration: 0.18), value: active)
     }
 
     /// Share the bus service as a deep link / plain text.
@@ -388,7 +428,7 @@ struct SoftBusView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     heroETARow(s)
-                    Text(approachContext(hasService: s != nil))
+                    Text(approachContext(s))
                         .font(t.sans(13))
                         .foregroundStyle(t.dim)
                         .lineLimit(1)
@@ -488,13 +528,31 @@ struct SoftBusView: View {
         return parts.joined(separator: " · ") + " min"
     }
 
-    /// Supporting context beneath the hero number.
-    private func approachContext(hasService: Bool) -> String {
-        guard hasService else { return "Waiting for the next \(svc)" }
+    /// Supporting context beneath the hero number — leads with the absolute
+    /// arrival clock time ("Arrives 7:39 PM") when known, then the stops-away.
+    private func approachContext(_ s: Service?) -> String {
+        guard let s else { return "Waiting for the next \(svc)" }
+        let stopsPart: String
         if let n = stopsRemaining {
-            return n == 0 ? "At your stop now" : "\(n) stop\(n == 1 ? "" : "s") away"
+            stopsPart = n == 0 ? "At your stop now" : "\(n) stop\(n == 1 ? "" : "s") away"
+        } else {
+            stopsPart = "On the way to your stop"
         }
-        return "On the way to your stop"
+        if let clock = arrivalClock(s) {
+            return "Arrives \(clock) · \(stopsPart)"
+        }
+        return stopsPart
+    }
+
+    /// Absolute arrival time ("7:39 PM" / "19:39") from the live arrival date,
+    /// honouring the 24-hour setting. Nil when there's no future arrival (e.g.
+    /// arriving now) so the context falls back to just the stops-away text.
+    private func arrivalClock(_ s: Service) -> String? {
+        guard let d = s.arrivalDate, d.timeIntervalSinceNow >= 30 else { return nil }
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateFormat = m.use24h ? "HH:mm" : "h:mm a"
+        return f.string(from: d)
     }
 
     private func approachA11y(_ s: Service?) -> String {

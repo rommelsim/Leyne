@@ -24,7 +24,6 @@ import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
-import '../notifications_screen.dart';
 
 class SoftStopScreen extends StatefulWidget {
   const SoftStopScreen({
@@ -110,10 +109,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   const SizedBox(height: 20),
                   // ── Title block ─────────────────────────────────────────
                   _titleBlock(context),
-                  if (isPinned && !m.notificationsEnabled) ...[
-                    const SizedBox(height: 12),
-                    _notifOffBanner(context),
-                  ],
                   const SizedBox(height: 20),
                   // ── Arrivals section ────────────────────────────────────
                   _arrivalSection(context, state, sorted, isPinned),
@@ -911,40 +906,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  // ── Notification off banner ───────────────────────────────────────────────
-
-  Widget _notifOffBanner(BuildContext context) {
-    final t = context.t;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-      decoration: BoxDecoration(
-        color: t.warnBg,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.notifications_off_outlined, size: 18, color: t.warn),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              "Notifications are off — arrival alerts won't fire.",
-              style: t.sans(13, color: t.fg),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-            ),
-            child: Text(
-              'Enable',
-              style: t.sans(13, weight: FontWeight.w600, color: t.accent),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

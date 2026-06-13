@@ -411,18 +411,143 @@ class LtaTrainAlerts {
 }
 
 class LtaAffectedSegment {
-  const LtaAffectedSegment({required this.line, this.direction, this.stations});
+  const LtaAffectedSegment({
+    required this.line,
+    this.direction,
+    this.stations,
+    this.freePublicBus,
+    this.freeMrtShuttle,
+    this.mrtShuttleDirection,
+  });
 
   final String line;
   final String? direction;
   final String? stations;
+
+  /// Non-null / non-empty when free bus rides are offered during this
+  /// disruption (e.g. "Yes" or a route description).
+  final String? freePublicBus;
+
+  /// Non-null / non-empty when a free MRT shuttle is running.
+  final String? freeMrtShuttle;
+
+  /// Direction description for the free MRT shuttle, when present.
+  final String? mrtShuttleDirection;
 
   factory LtaAffectedSegment.fromJson(Map<String, dynamic> j) =>
       LtaAffectedSegment(
         line: (j['Line'] as String?) ?? '',
         direction: j['Direction'] as String?,
         stations: j['Stations'] as String?,
+        freePublicBus: j['FreePublicBus'] as String?,
+        freeMrtShuttle: j['FreeMRTShuttle'] as String?,
+        mrtShuttleDirection: j['MRTShuttleDirection'] as String?,
       );
+}
+
+// ─── Station crowd forecast (PCDForecast) ───────────────────────
+// Defensive parser for the PCDForecast endpoint.
+//
+// LTA documents two possible shapes:
+//   Nested: value:[{ Date, Stations:[{ Station, Interval:[{ Start, CrowdLevel }] }] }]
+//   Flat:   value:[{ Station, Start, CrowdLevel }]
+//
+// We try nested first; fall back to flat; on any unexpected shape we
+// yield an empty list without throwing. Callers can treat an empty result
+// as "forecast unavailable".
+
+class LtaStationForecastInterval {
+  const LtaStationForecastInterval({
+    required this.start,
+    required this.crowdLevel,
+  });
+
+  /// The half-hour slot start time (local Singapore time, as returned by LTA).
+  final DateTime start;
+
+  /// Raw level string: "l" | "m" | "h" | "NA".
+  final String crowdLevel;
+}
+
+class LtaStationForecast {
+  const LtaStationForecast({required this.station, required this.intervals});
+
+  /// Station code, e.g. "EW13".
+  final String station;
+
+  /// Ordered list of half-hour forecast intervals.
+  final List<LtaStationForecastInterval> intervals;
+
+  /// Parse the raw `value` list from PCDForecast response.
+  /// Returns an empty list on any unexpected shape — never throws.
+  static List<LtaStationForecast> parseValueList(List<dynamic> value) {
+    try {
+      return _tryParseNested(value) ?? _tryParseFlat(value) ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  // Nested shape: [{ Date, Stations:[{ Station, Interval:[{ Start, CrowdLevel }] }] }]
+  static List<LtaStationForecast>? _tryParseNested(List<dynamic> value) {
+    if (value.isEmpty) return const [];
+    final first = value.first;
+    if (first is! Map<String, dynamic>) return null;
+    // Nested form must have a "Stations" key.
+    if (!first.containsKey('Stations')) return null;
+
+    final out = <LtaStationForecast>[];
+    for (final dayItem in value) {
+      if (dayItem is! Map<String, dynamic>) continue;
+      final stations = dayItem['Stations'];
+      if (stations is! List) continue;
+      for (final stItem in stations) {
+        if (stItem is! Map<String, dynamic>) continue;
+        final stationCode = (stItem['Station'] as String?) ?? '';
+        final intervals = stItem['Interval'];
+        if (intervals is! List) continue;
+        final parsed = <LtaStationForecastInterval>[];
+        for (final iv in intervals) {
+          if (iv is! Map<String, dynamic>) continue;
+          final startRaw = iv['Start'] as String?;
+          final level = (iv['CrowdLevel'] as String?) ?? 'NA';
+          if (startRaw == null) continue;
+          final dt = LtaDate.parse(startRaw);
+          if (dt == null) continue;
+          parsed.add(LtaStationForecastInterval(start: dt, crowdLevel: level));
+        }
+        out.add(LtaStationForecast(station: stationCode, intervals: parsed));
+      }
+    }
+    return out;
+  }
+
+  // Flat shape: [{ Station, Start, CrowdLevel }]
+  static List<LtaStationForecast>? _tryParseFlat(List<dynamic> value) {
+    if (value.isEmpty) return const [];
+    final first = value.first;
+    if (first is! Map<String, dynamic>) return null;
+    // Flat form must have a "Station" key directly.
+    if (!first.containsKey('Station')) return null;
+
+    // Group intervals by station code.
+    final byStation = <String, List<LtaStationForecastInterval>>{};
+    for (final item in value) {
+      if (item is! Map<String, dynamic>) continue;
+      final stationCode = (item['Station'] as String?) ?? '';
+      final startRaw = item['Start'] as String?;
+      final level = (item['CrowdLevel'] as String?) ?? 'NA';
+      if (startRaw == null) continue;
+      final dt = LtaDate.parse(startRaw);
+      if (dt == null) continue;
+      byStation
+          .putIfAbsent(stationCode, () => [])
+          .add(LtaStationForecastInterval(start: dt, crowdLevel: level));
+    }
+    return byStation.entries
+        .map((e) => LtaStationForecast(station: e.key, intervals: e.value))
+        .toList(growable: false);
+  }
 }
 
 class LtaTrainMessage {

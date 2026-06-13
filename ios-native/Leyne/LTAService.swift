@@ -169,6 +169,22 @@ final class LTAService: @unchecked Sendable {
         return try await get(c.url!, as: LTAList<LTAStationCrowd>.self).value
     }
 
+    // ─── Live: Station Crowd Forecast (PCDForecast) ───────
+    /// Predicted station crowd for the next 30-min interval for one train
+    /// line. `trainLine` is the PCD line code (EWL, NSL, …).
+    /// Returns parsed intervals using `LTAForecastParser` — never throws;
+    /// network/parse failures surface as an empty array.
+    func stationForecast(trainLine: String) async throws -> [LTAForecastInterval] {
+        var c = URLComponents(url: LTAConfig.baseURL.appendingPathComponent("PCDForecast"),
+                              resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "TrainLine", value: trainLine)]
+        let (data, resp) = try await session.data(for: request(c.url!))
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw LTAError.badResponse(http.statusCode)
+        }
+        return LTAForecastParser.parse(data: data)
+    }
+
     // ─── Live: Facilities Maintenance v2 (lift maintenance)
     /// Network-wide list of MRT-station lifts currently under maintenance.
     func facilitiesMaintenance() async throws -> [LTAFacilityMaintenance] {

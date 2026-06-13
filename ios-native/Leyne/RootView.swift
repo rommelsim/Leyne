@@ -126,15 +126,21 @@ struct RootView: View {
             AppOpenAdManager.shared.suppressNextPresentation()
             guard url.scheme == "lyne", let host = url.host else { return }
             let parts = url.pathComponents.filter { $0 != "/" }
+            let ds = DataStore.shared
+            // Ignore deep links to a stop code that isn't a real stop (e.g. a
+            // sample/placeholder code from a widget). Stay optimistic while the
+            // stop DB is still loading (empty) so genuine cold-launch links work.
+            let code = parts.first ?? ""
+            let knownStop = ds.stopByCode.isEmpty || ds.stopByCode[code] != nil
             switch host {
-            case "bus" where parts.count >= 2:
+            case "bus" where parts.count >= 2 && knownStop:
                 m.open(stopCode: parts[0],
-                       label: DataStore.shared.stopName(parts[0]),
+                       label: ds.stopName(parts[0]),
                        busNo: parts[1],
                        feedback: false)
-            case "stop" where !parts.isEmpty:
+            case "stop" where !parts.isEmpty && knownStop:
                 m.open(stopCode: parts[0],
-                       label: DataStore.shared.stopName(parts[0]),
+                       label: ds.stopName(parts[0]),
                        busNo: nil,
                        feedback: false)
             default:

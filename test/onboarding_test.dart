@@ -3,9 +3,13 @@
 // Covers:
 //   • finishOnboarding flips the lyne.onboardingDone key.
 //   • resetOnboarding clears it.
-//   • OnboardingScreen advances on Continue, retreats on Back, and triggers
-//     the notification/location/tracking callbacks at the right step. There
-//     is no Skip — every user passes through the priming steps.
+//   • OnboardingScreen renders step 0 on the first frame.
+//   • There is no Skip — every user passes through all priming steps.
+//   • Continue/Back navigate correctly and fire callbacks at the right steps.
+//   • Rapid multi-tap on the location step cannot skip the notifications step.
+//
+// New flow (5 steps, no ATT):
+//   0 welcome → 1 live → 2 location primer → 3 notif primer → 4 done
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,10 +20,10 @@ import 'package:lyne/state/app_model.dart';
 import 'package:lyne/theme.dart';
 
 Widget _host(Widget child) => MaterialApp(
-      theme: LyneTheme.light.materialTheme(),
-      darkTheme: LyneTheme.dark.materialTheme(),
-      home: child,
-    );
+  theme: LyneTheme.light.materialTheme(),
+  darkTheme: LyneTheme.dark.materialTheme(),
+  home: child,
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -51,118 +55,197 @@ void main() {
   });
 
   group('OnboardingScreen', () {
-    testWidgets('renders the intro step on first frame', (tester) async {
-      await tester.pumpWidget(_host(OnboardingScreen(
-        onRequestNotifications: () {},
-        onRequestLocation: () {},
-        onRequestTracking: () {},
-      )));
+    testWidgets('renders the welcome step on first frame', (tester) async {
+      await tester.pumpWidget(
+        _host(
+          OnboardingScreen(
+            onRequestNotifications: () {},
+            onRequestLocation: () {},
+            onFinish: () {},
+          ),
+        ),
+      );
       await tester.pump();
-      expect(find.text('LEYNE'), findsOneWidget);
-      expect(find.text('Right on cue.'), findsOneWidget);
-      // Back button hidden on the first step (opacity 0).
-      final back = tester.widget<Opacity>(find
-          .ancestor(
-              of: find.text('Back'), matching: find.byType(Opacity))
-          .first);
+      // Step 0 welcome: wordmark text + tagline visible.
+      expect(find.text('leyne'), findsOneWidget);
+      expect(find.textContaining('Singapore'), findsOneWidget);
+      // Back button hidden on step 0 (opacity 0).
+      final back = tester.widget<Opacity>(
+        find
+            .ancestor(of: find.text('Back'), matching: find.byType(Opacity))
+            .first,
+      );
       expect(back.opacity, 0);
     });
 
     testWidgets('there is no Skip button', (tester) async {
-      await tester.pumpWidget(_host(OnboardingScreen(
-        onRequestNotifications: () {},
-        onRequestLocation: () {},
-        onRequestTracking: () {},
-      )));
+      await tester.pumpWidget(
+        _host(
+          OnboardingScreen(
+            onRequestNotifications: () {},
+            onRequestLocation: () {},
+            onFinish: () {},
+          ),
+        ),
+      );
       await tester.pump();
       expect(find.text('Skip'), findsNothing);
     });
 
-    testWidgets('Continue advances through steps and fires priming callbacks',
-        (tester) async {
-      var notificationCalls = 0;
-      var locationCalls = 0;
-      var trackingCalls = 0;
-      await tester.pumpWidget(_host(OnboardingScreen(
-        onRequestNotifications: () => notificationCalls++,
-        onRequestLocation: () => locationCalls++,
-        onRequestTracking: () => trackingCalls++,
-      )));
-      await tester.pump();
+    testWidgets(
+      'Continue advances through all steps and fires callbacks at the right step',
+      (tester) async {
+        var locationCalls = 0;
+        var notificationCalls = 0;
+        var finishCalls = 0;
 
-      // Step 0 → 1 → 2 → 3.
-      for (var i = 0; i < 3; i++) {
+        await tester.pumpWidget(
+          _host(
+            OnboardingScreen(
+              onRequestLocation: () => locationCalls++,
+              onRequestNotifications: () => notificationCalls++,
+              onFinish: () => finishCalls++,
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Step 0 → 1: welcome "Get started".
+        await tester.tap(find.text('Get started'));
+        await tester.pump(const Duration(milliseconds: 500));
+        // Step 1 shows the live-wedge kicker (rendered uppercase by _Kicker).
+        expect(find.textContaining('WHY LEYNE'), findsOneWidget);
+        expect(locationCalls, 0);
+        expect(notificationCalls, 0);
+
+        // Step 1 → 2: live "Continue".
         await tester.tap(find.text('Continue'));
         await tester.pump(const Duration(milliseconds: 500));
-      }
-      expect(find.text('STEP 3 · STAY PRESENT'), findsOneWidget);
-      expect(notificationCalls, 0);
-      expect(locationCalls, 0);
-      expect(trackingCalls, 0);
+        // Step 2: location primer.
+        expect(find.textContaining('Find stops around you'), findsOneWidget);
+        expect(locationCalls, 0);
+        expect(notificationCalls, 0);
 
-      // Step 3 → 4: triggers onRequestNotifications AND advances.
-      await tester.tap(find.text('Continue'));
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(notificationCalls, 1);
-      expect(find.text('STEP 4 · LOCATION'), findsOneWidget);
+        // Step 2 → 3: "Allow location" fires onRequestLocation + advances.
+        await tester.tap(find.text('Allow location'));
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(locationCalls, 1);
+        expect(notificationCalls, 0);
+        // Step 3: notifications primer.
+        expect(find.textContaining('Never miss your bus'), findsOneWidget);
 
-      // Step 4 → 5: triggers onRequestLocation AND advances.
-      await tester.tap(find.text('Continue'));
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(locationCalls, 1);
-      expect(find.text('STEP 5 · ADS'), findsOneWidget);
+        // Step 3 → 4: "Enable notifications" fires onRequestNotifications + advances.
+        await tester.tap(find.text('Enable notifications'));
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(notificationCalls, 1);
+        expect(finishCalls, 0);
+        // Step 4: done screen.
+        expect(find.textContaining('You\'re all set'), findsOneWidget);
 
-      // Step 5: triggers onRequestTracking. The host drives dismissal
-      // once consent resolves; there is no onDone callback.
-      await tester.tap(find.text('Continue'));
+        // Step 4: "Enter Leyne" fires onFinish.
+        await tester.tap(find.text('Enter Leyne'));
+        await tester.pump();
+        expect(finishCalls, 1);
+      },
+    );
+
+    testWidgets('secondary buttons advance without firing priming callbacks', (
+      tester,
+    ) async {
+      var locationCalls = 0;
+      var notificationCalls = 0;
+
+      await tester.pumpWidget(
+        _host(
+          OnboardingScreen(
+            onRequestLocation: () => locationCalls++,
+            onRequestNotifications: () => notificationCalls++,
+            onFinish: () {},
+          ),
+        ),
+      );
       await tester.pump();
-      expect(trackingCalls, 1);
+
+      // Advance to step 2 (location primer).
+      await tester.tap(find.text('Get started'));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('Continue'));
+      await tester.pump(const Duration(milliseconds: 500));
+
+      // Tap secondary "Not now" — advances but does NOT call onRequestLocation.
+      await tester.tap(find.text('Not now'));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(locationCalls, 0);
+      // Should now be on step 3 (notif primer).
+      expect(find.textContaining('Never miss your bus'), findsOneWidget);
+
+      // Tap secondary "Maybe later" — advances but does NOT call onRequestNotifications.
+      await tester.tap(find.text('Maybe later'));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(notificationCalls, 0);
+      // Should now be on step 4 (done).
+      expect(find.textContaining('You\'re all set'), findsOneWidget);
     });
 
     testWidgets('Back walks the user back one step', (tester) async {
-      await tester.pumpWidget(_host(OnboardingScreen(
-        onRequestNotifications: () {},
-        onRequestLocation: () {},
-        onRequestTracking: () {},
-      )));
+      await tester.pumpWidget(
+        _host(
+          OnboardingScreen(
+            onRequestNotifications: () {},
+            onRequestLocation: () {},
+            onFinish: () {},
+          ),
+        ),
+      );
       await tester.pump();
-      await tester.tap(find.text('Continue'));
+
+      // Advance to step 1.
+      await tester.tap(find.text('Get started'));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('STEP 1 · PIN'), findsOneWidget);
+      expect(find.textContaining('Always up to the minute'), findsOneWidget);
+
+      // Back returns to step 0.
       await tester.tap(find.text('Back'));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('LEYNE'), findsOneWidget);
+      expect(find.text('leyne'), findsOneWidget);
     });
 
-    testWidgets('rapid double-tap on the location step cannot skip the ATT '
-        'step', (tester) async {
-      var locationCalls = 0;
-      var trackingCalls = 0;
-      await tester.pumpWidget(_host(OnboardingScreen(
-        onRequestNotifications: () {},
-        onRequestLocation: () => locationCalls++,
-        onRequestTracking: () => trackingCalls++,
-      )));
-      await tester.pump();
+    testWidgets(
+      'rapid double-tap on the location step cannot skip the notifications step',
+      (tester) async {
+        var locationCalls = 0;
+        var notificationCalls = 0;
 
-      // Advance to the location step (step 4).
-      for (var i = 0; i < 4; i++) {
+        await tester.pumpWidget(
+          _host(
+            OnboardingScreen(
+              onRequestNotifications: () => notificationCalls++,
+              onRequestLocation: () => locationCalls++,
+              onFinish: () {},
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Advance to step 2 (location primer).
+        await tester.tap(find.text('Get started'));
+        await tester.pump(const Duration(milliseconds: 500));
         await tester.tap(find.text('Continue'));
         await tester.pump(const Duration(milliseconds: 500));
-      }
-      expect(find.text('STEP 4 · LOCATION'), findsOneWidget);
+        expect(find.textContaining('Find stops around you'), findsOneWidget);
 
-      // Two taps in quick succession — the second lands while the
-      // multi-tap lock is still engaged and must be ignored, so the ATT
-      // step's onRequestTracking never fires off the back of it.
-      await tester.tap(find.text('Continue'));
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.tap(find.text('Continue'), warnIfMissed: false);
-      await tester.pump(const Duration(milliseconds: 500));
+        // Two taps in quick succession — the second must be swallowed by the
+        // multi-tap lock so onRequestNotifications never fires off the back of it.
+        await tester.tap(find.text('Allow location'));
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(find.text('Allow location'), warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 500));
 
-      expect(locationCalls, 1);
-      expect(trackingCalls, 0);
-      expect(find.text('STEP 5 · ADS'), findsOneWidget);
-    });
+        expect(locationCalls, 1);
+        expect(notificationCalls, 0);
+        // Should be on step 3 (notifications primer), not step 4 (done).
+        expect(find.textContaining('Never miss your bus'), findsOneWidget);
+      },
+    );
   });
 }

@@ -50,8 +50,10 @@ import '../theme.dart';
 /// passes `--dart-define=LYNE_ADS_TEST=true`, so alpha/beta testers still see
 /// "Test Ad" creatives and can never trigger AdMob invalid-traffic detection
 /// on the live unit. (DEBUG builds force the test unit regardless, below.)
-const bool kLyneAdsTest =
-    bool.fromEnvironment('LYNE_ADS_TEST', defaultValue: false);
+const bool kLyneAdsTest = bool.fromEnvironment(
+  'LYNE_ADS_TEST',
+  defaultValue: false,
+);
 
 /// True when this build was compiled with
 /// `--dart-define=LYNE_SCREENSHOT_MODE=true`. Suppresses the ad banner
@@ -60,8 +62,10 @@ const bool kLyneAdsTest =
 /// "Nice job! …" test ad creative. Use this only when capturing
 /// screenshots — every other build path should leave the flag off so
 /// the slot is reserved correctly.
-const bool kLyneScreenshotMode =
-    bool.fromEnvironment('LYNE_SCREENSHOT_MODE', defaultValue: false);
+const bool kLyneScreenshotMode = bool.fromEnvironment(
+  'LYNE_SCREENSHOT_MODE',
+  defaultValue: false,
+);
 
 /// MASTER SWITCH for ads. Set to `false` to ship a no-ads build (e.g.
 /// during an AdMob account suspension) — the banner widget short-circuits
@@ -225,6 +229,137 @@ class _AdBannerState extends State<AdBanner> {
               )
             : null,
       ),
+    );
+  }
+}
+
+/// Resolve the native ad unit ID. Same gating as the banner.
+///   • DEBUG or LYNE_ADS_TEST=true: Google's Android native template test unit
+///   • RELEASE (public Play Store): production native unit (Leyne AdMob account,
+///     leyne0000@gmail.com, ca-app-pub-5864511655536507)
+String _nativeUnitId() {
+  if (kDebugMode || kLyneAdsTest) {
+    return 'ca-app-pub-3940256099942544/2247696110';
+  }
+  return 'ca-app-pub-5864511655536507/3213886079';
+}
+
+/// Inline native ad card using NativeTemplateStyle (TemplateType.small).
+///
+/// Uses the SDK's built-in native template — no NativeAdFactory registration
+/// required. The template is styled monochrome to match the app:
+///   • mainBackgroundColor → theme surface
+///   • CTA → accent background, onAccent text
+///   • primary/secondary/tertiary text → fg/dim/faint at the app's sizes
+///   • cornerRadius → LyneRadius.md (16)
+///
+/// Consent gate and lifecycle rules mirror AdBanner:
+///   • Load is deferred until AdConsent.started.
+///   • On failure the widget shrinks to zero — no gap, no placeholder.
+///   • NativeAd.dispose() is called in dispose() so the SDK cleans up the
+///     platform view and native memory.
+///   • Master switch (kLyneAdsEnabled) and screenshot mode are respected.
+class NativeAdCard extends StatefulWidget {
+  const NativeAdCard({super.key});
+
+  @override
+  State<NativeAdCard> createState() => _NativeAdCardState();
+}
+
+class _NativeAdCardState extends State<NativeAdCard> {
+  NativeAd? _ad;
+  bool _loaded = false;
+  Timer? _retry;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kLyneAdsEnabled || kLyneScreenshotMode) return;
+    _attemptLoad();
+  }
+
+  void _attemptLoad() {
+    if (!AdConsent.started) {
+      _retry?.cancel();
+      _retry = Timer(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
+        _attemptLoad();
+      });
+      return;
+    }
+    _load();
+  }
+
+  void _load() {
+    // Resolve theme colours at load time from the current context. If the
+    // widget is not yet in a tree (edge case) fall back to the dark palette so
+    // we still send a style object — the template renders something even if
+    // the colours are slightly off the first frame.
+    final t = context.mounted ? context.t : LyneTheme.dark;
+
+    final ad = NativeAd(
+      adUnitId: _nativeUnitId(),
+      request: const AdRequest(),
+      listener: NativeAdListener(
+        onAdLoaded: (_) {
+          if (!mounted) return;
+          setState(() => _loaded = true);
+        },
+        onAdFailedToLoad: (ad, error) {
+          ad.dispose();
+          _ad = null;
+          if (kDebugMode) {
+            // ignore: avoid_print
+            print('[ads] native failed: ${error.message}');
+          }
+        },
+      ),
+      nativeTemplateStyle: NativeTemplateStyle(
+        templateType: TemplateType.small,
+        // Surface background — card reads as part of the list, not a
+        // foreign white box. Matches other nearby-stop card surfaces.
+        mainBackgroundColor: t.surface,
+        // cornerRadius applies to the icon and CTA on Android.
+        cornerRadius: LyneRadius.md,
+        // CTA button: accent background (monochrome ink) + onAccent text.
+        callToActionTextStyle: NativeTemplateTextStyle(
+          textColor: t.onAccent,
+          backgroundColor: t.accent,
+          size: 13,
+        ),
+        // Headline — full-weight fg.
+        primaryTextStyle: NativeTemplateTextStyle(textColor: t.fg, size: 14),
+        // Body / rating line — dim (60 % opacity ink).
+        secondaryTextStyle: NativeTemplateTextStyle(textColor: t.dim, size: 12),
+        // Store / advertiser line — faint (35 % opacity ink).
+        tertiaryTextStyle: NativeTemplateTextStyle(
+          textColor: t.faint,
+          size: 11,
+        ),
+      ),
+    );
+    _ad = ad;
+    ad.load();
+  }
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    _ad?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Hard short-circuit — no reservation, no gap.
+    if (!kLyneAdsEnabled || kLyneScreenshotMode || !_loaded || _ad == null) {
+      return const SizedBox.shrink();
+    }
+    // Constrain the small template to a reasonable card height.
+    // TemplateType.small renders at ~90 pt tall on most phones.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 90, maxHeight: 120),
+      child: AdWidget(ad: _ad!),
     );
   }
 }

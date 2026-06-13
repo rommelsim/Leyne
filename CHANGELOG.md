@@ -8,6 +8,61 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.8.0 · iOS (25) · 2026-06-13
+
+**2026-06-13 — MRT overhaul + Live Activity + bus-view UX (iOS, build 25):** A
+big release: MRT becomes a first-class experience alongside Bus, plus a Live
+Activity overhaul, search/QOL upgrades. _Android stays on its own train this
+round (MRT overhaul not yet ported)._
+
+- **MRT, reimagined (the headline):** "Nearby" tab renamed **Bus**, and **MRT
+  moved beside it** (tab order Bus · MRT · Saved · Search · Settings). The MRT
+  tab now mirrors the Bus-nearby experience — **nearest stations** (within the
+  Settings search radius, capped at 3), a top disruption banner, a compact
+  **Lines** list, and a **•••** menu holding the **System map** (zoomable,
+  bundled official LTA map) and **News & advisories** (travel advisories + lift
+  maintenance). Tap a line → live station **crowd** with a **"Now / Next 30 min"
+  forecast** (PCDForecast) + free **bus/shuttle** info during disruptions. Tap a
+  station → a station detail (lines, crowd, lifts, disruption). Built on a
+  bundled 181-station coordinate dataset + `MrtGeo` nearest API.
+  (`MrtGeo.swift`, `MrtStationsGeo.json`, `SoftMrtView.swift`,
+  `SoftMrtStationView.swift`, `SoftMrtLineView.swift`, `SoftMrtNewsView.swift`,
+  `MrtMapView.swift`, `SoftRoot.swift`)
+- **Save MRT stations:** save toggle on the station detail, persisted; shown in
+  the MRT tab's Saved section and in the **Saved tab** under a new **MRT** filter
+  (with drag-to-reorder). (`AppModel.swift`, `SoftFavouritesView.swift`)
+- **Search upgrades:** results now include **MRT stations** (case-insensitive),
+  plus a category filter — **All · Stops · Buses · MRT**. (`SoftSearchView.swift`)
+- **Bus arrival time:** the bus hero now shows the absolute arrival clock — e.g.
+  "Arrives 7:39 PM" (honours the 24-hour setting) — alongside the countdown.
+  (`SoftBusView.swift`)
+- **Live Activity:** the Dynamic Island now leads with the **bus number** (was a
+  generic glyph), and the Lock Screen / expanded countdown **self-ticks** on
+  device (live m:ss for monitored buses; static minute + `~` for schedule-only;
+  "Now" on arrival). Minimal (multi-activity) shows the ETA; removed a stray `~`
+  from the phase label. Pushes only on real ETA changes; compact island stays
+  narrow so it never covers the status bar. _Known limit: background updates need
+  a push backend (none yet), so fresh estimates only land on app open; the
+  on-device countdown extrapolates meanwhile._
+  (`LeyneLiveActivity.swift`, `LeyneActivityAttributes.swift`, `AppModel.swift`)
+- **Bus view — labelled action bar:** the two cryptic top-right icons + overflow
+  are replaced by a labelled segmented bar under the title — **Track arrival /
+  Save service / More** (bigger tap targets, self-explanatory). (`SoftBusView.swift`)
+- **Fixed the stray `~`** on the bus title for live buses — it now reflects
+  arrival-time confidence only, not map-position. (`SoftBusView.swift`)
+- **Saved:** filter bar uses native Liquid Glass; the empty state is now
+  segment-aware ("Find a bus" on the Buses filter); removing a saved bus also
+  cancels its arrival alerts + stops its Live Activity. (`SoftFavouritesView.swift`,
+  `AppModel.swift`)
+- **Onboarding:** fixed a transition where elements rendered out of sync with the
+  view. (`OnboardingView.swift`)
+- **Widgets:** Home Screen widgets parked (monochrome redesign kept in-tree);
+  the extension ships the Live Activity only for now. (`LeyneWidgets/`)
+- Ignore deep links to unknown stop codes (no more dead "stop not found" view).
+  (`RootView.swift`)
+
+**Archive:** open `ios-native/Leyne.xcodeproj` → Product → Archive (signed).
+
 ## Leyne 2.7.0 · iOS (24) · 2026-06-12
 
 **2026-06-12 — Free live MRT board + Saved/Nearby polish (iOS, build 24):** The

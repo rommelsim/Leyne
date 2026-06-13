@@ -10,7 +10,6 @@
 
 import 'dart:ui' as ui;
 
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
 @immutable
@@ -93,16 +92,20 @@ class LyneTheme {
   final Color crit;
   final Color critBg;
 
-  // ── Proximity / status colour (2.4.0 overhaul) ──────────────────────
-  // Semantic green/amber used for ETA *proximity* and *occupancy* only.
-  // Confidence (live/stale/scheduled) stays shape + opacity + "~" whisper —
-  // never colour. Dark uses brighter shades tuned for near-black surfaces.
+  // ── Proximity / status colour (2.6.0+ monochrome overhaul) ─────────
+  // These tokens are now MONOCHROME ink (white in dark, #111111 in light)
+  // at varying opacities — matching iOS Theme.swift 2.6.0+. Green/amber
+  // are gone from ETA proximity badges and arrival rows.
+  //
+  // Crowd/occupancy meters remain coloured, but their colour is HARDCODED
+  // in confidence.dart / proximity.dart — NOT sourced from these tokens.
+  // Colour is reserved only for MRT line pills and crowd meters.
 
-  /// Imminent / good — green. "Arriving soon", seats available.
+  /// Imminent / active — monochrome ink (full opacity).
   final Color soon;
   final Color soonBg;
 
-  /// Medium / caution — amber. Mid-range ETA, standing-only.
+  /// Secondary / reduced — monochrome ink (~55% opacity).
   final Color mid;
   final Color midBg;
 
@@ -113,16 +116,22 @@ class LyneTheme {
   // countdowns don't jitter as digit widths change, while keeping the
   // same letterform as the rest of the UI. The old `fontFamily:'monospace'`
   // was replaced in 2.4.0; see `sans()` for the regular font factory.
-  TextStyle mono(double size, {FontWeight weight = FontWeight.w400, Color? color}) =>
-      TextStyle(
-        fontSize: size,
-        fontWeight: weight,
-        color: color ?? fg,
-        fontFeatures: const [ui.FontFeature.tabularFigures()],
-      );
+  TextStyle mono(
+    double size, {
+    FontWeight weight = FontWeight.w400,
+    Color? color,
+  }) => TextStyle(
+    fontSize: size,
+    fontWeight: weight,
+    color: color ?? fg,
+    fontFeatures: const [ui.FontFeature.tabularFigures()],
+  );
 
-  TextStyle sans(double size, {FontWeight weight = FontWeight.w400, Color? color}) =>
-      TextStyle(fontSize: size, fontWeight: weight, color: color ?? fg);
+  TextStyle sans(
+    double size, {
+    FontWeight weight = FontWeight.w400,
+    Color? color,
+  }) => TextStyle(fontSize: size, fontWeight: weight, color: color ?? fg);
 
   static Color _hex(String hex) {
     final s = hex.replaceFirst('#', '');
@@ -135,6 +144,11 @@ class LyneTheme {
   // black-ink accent). Warning amber + critical red are kept for disruption
   // severity. Cross-mode colours (MRT line hues, ME-dot blue) live on the
   // static `LyneSignal` helper / MRTLine enum below.
+  //
+  // Monochrome proximity tokens (2.6.0+, mirrors iOS Theme.swift dark):
+  //   soon/soonBg/mid/midBg/warn/warnBg/crit/critBg are all white-ink at
+  //   varying opacities. Colour is reserved ONLY for MRT line pills and
+  //   crowd/occupancy meters (hardcoded in confidence.dart / proximity.dart).
   static final LyneTheme dark = LyneTheme(
     isDark: true,
     bg: _hex('0F0F0F'),
@@ -151,22 +165,29 @@ class LyneTheme {
     accent: _hex('FFFFFF'),
     live: _hex('FFFFFF'),
     liveBg: _hex('242424'),
-    warn: _hex('F4B870'),
-    warnBg: const Color.fromRGBO(244, 184, 112, 0.16),
-    crit: _hex('F08F7C'),
-    critBg: const Color.fromRGBO(240, 143, 124, 0.16),
-    // 2.4.0 proximity tokens — brighter shades for near-black dark surfaces.
-    soon: _hex('3DD68C'),
-    soonBg: const Color.fromRGBO(61, 214, 140, 0.16),
-    mid: _hex('F4B870'),
-    midBg: const Color.fromRGBO(244, 184, 112, 0.16),
+    warn: const Color.fromRGBO(255, 255, 255, 0.72),
+    warnBg: const Color.fromRGBO(255, 255, 255, 0.10),
+    crit: _hex('FFFFFF'),
+    critBg: const Color.fromRGBO(255, 255, 255, 0.14),
+    // Monochrome proximity tokens — white ink at varying opacities.
+    // Mirrors ios-native/Leyne/Theme.swift dark variant (2.6.0+).
+    // Crowd/occupancy colour is hardcoded green/amber in confidence.dart
+    // and proximity.dart — it does NOT come from these tokens.
+    soon: _hex('FFFFFF'),
+    soonBg: const Color.fromRGBO(255, 255, 255, 0.12),
+    mid: const Color.fromRGBO(255, 255, 255, 0.55),
+    midBg: const Color.fromRGBO(255, 255, 255, 0.10),
   );
 
   // White & black light mode — mirrors iOS (ios-native/Leyne/Theme.swift).
   // Monochrome: the accent (LIVE / arriving / pin) is pure black ink rather
   // than the old mint green; confidence reads from opacity/shape, never hue.
-  // Warning amber + critical red are kept so disruptions still read at a
-  // glance. `bg` is a hair off-white so white `surface` cards lift off it.
+  // `bg` is a hair off-white so white `surface` cards lift off it.
+  //
+  // Monochrome proximity tokens (2.6.0+, mirrors iOS Theme.swift light):
+  //   soon/soonBg/mid/midBg/warn/warnBg/crit/critBg are all #111111 ink at
+  //   varying opacities. Colour is reserved ONLY for MRT line pills and
+  //   crowd/occupancy meters (hardcoded in confidence.dart / proximity.dart).
   static final LyneTheme light = LyneTheme(
     isDark: false,
     bg: _hex('F2F2F2'),
@@ -183,15 +204,18 @@ class LyneTheme {
     accent: _hex('111111'),
     live: _hex('111111'),
     liveBg: _hex('EDEDED'),
-    warn: _hex('A0631A'),
-    warnBg: const Color.fromRGBO(160, 99, 26, 0.14),
-    crit: _hex('A4422F'),
-    critBg: const Color.fromRGBO(164, 66, 47, 0.14),
-    // 2.4.0 proximity tokens — darker shades for legibility on white surfaces.
-    soon: _hex('1AA251'),
-    soonBg: const Color.fromRGBO(26, 162, 81, 0.12),
-    mid: _hex('C2740A'),
-    midBg: const Color.fromRGBO(194, 116, 10, 0.12),
+    warn: const Color.fromRGBO(17, 17, 17, 0.72),
+    warnBg: const Color.fromRGBO(17, 17, 17, 0.08),
+    crit: _hex('111111'),
+    critBg: const Color.fromRGBO(17, 17, 17, 0.10),
+    // Monochrome proximity tokens — #111111 ink at varying opacities.
+    // Mirrors ios-native/Leyne/Theme.swift light variant (2.6.0+).
+    // Crowd/occupancy colour is hardcoded green/amber in confidence.dart
+    // and proximity.dart — it does NOT come from these tokens.
+    soon: _hex('111111'),
+    soonBg: const Color.fromRGBO(17, 17, 17, 0.08),
+    mid: const Color.fromRGBO(17, 17, 17, 0.55),
+    midBg: const Color.fromRGBO(17, 17, 17, 0.08),
   );
 
   /// Foreground used on top of `accent` fills. White in light mode (black
@@ -203,15 +227,12 @@ class LyneTheme {
   /// NavigationBar, ListTile, etc.) inherit the look without per-widget
   /// styling.
   ///
-  /// When [dynamicScheme] is non-null (Material You is available on the
-  /// device — Android 12+), the user's wallpaper-derived palette is
-  /// harmonised against Leyne's brand colours: surfaces and tonal
-  /// containers take on the wallpaper tint, while `live` (mint), `warn`
-  /// (amber), and `crit` (red) keep their semantic identity. On older
-  /// Android, [dynamicScheme] is null and we use the static palette
-  /// verbatim.
-  ThemeData materialTheme({ColorScheme? dynamicScheme}) {
-    final base = ColorScheme(
+  /// The palette is the static MONOCHROME one (matching iOS 2.6.0+). We do
+  /// NOT consume Material You / wallpaper-derived dynamic colour — that would
+  /// tint surfaces with the user's wallpaper and break the monochrome look.
+  /// Colour is reserved for MRT line pills and crowd/occupancy elsewhere.
+  ThemeData materialTheme() {
+    final scheme = ColorScheme(
       brightness: isDark ? Brightness.dark : Brightness.light,
       primary: accent,
       onPrimary: contrastFg,
@@ -224,23 +245,8 @@ class LyneTheme {
       error: crit,
       onError: contrastFg,
     );
-    // Material You overlay: take the wallpaper-derived scheme as the
-    // base (so surfaces tint with the user's wallpaper) and re-paint
-    // Leyne's brand slots on top. `harmonized()` shifts the accent
-    // hue toward the dynamic primary so mint reads as part of the
-    // wallpaper family without losing its mint identity.
-    final scheme = dynamicScheme == null
-        ? base
-        : dynamicScheme.copyWith(
-            primary: accent.harmonizeWith(dynamicScheme.primary),
-            onPrimary: contrastFg,
-            secondary: live.harmonizeWith(dynamicScheme.primary),
-            onSecondary: contrastFg,
-            error: crit.harmonizeWith(dynamicScheme.primary),
-            onError: contrastFg,
-          );
-    final scaffoldBg = dynamicScheme == null ? bg : scheme.surface;
-    final surfaceTint = dynamicScheme == null ? Colors.transparent : scheme.surfaceTint;
+    final scaffoldBg = bg;
+    final surfaceTint = Colors.transparent;
     return ThemeData(
       useMaterial3: true,
       brightness: scheme.brightness,
@@ -253,7 +259,11 @@ class LyneTheme {
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
-            fontSize: 28, fontWeight: FontWeight.w600, color: fg, letterSpacing: -0.3),
+          fontSize: 28,
+          fontWeight: FontWeight.w600,
+          color: fg,
+          letterSpacing: -0.3,
+        ),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: scaffoldBg,
@@ -313,11 +323,32 @@ class LyneRadius {
 /// heights so rhythm is consistent across screens.
 const double kSectionGap = 16;
 
+/// Canonical motion timing constants. Always pick the closest semantic bucket
+/// rather than hard-coding millisecond literals.
+///
+///   fast         120 ms  tap feedback (toggles, ripples)
+///   short        180 ms  switchers, small state changes
+///   standard     220 ms  page/tab transitions
+///   emphasis     320 ms  expand/collapse panels
+///   pulse       1400 ms  shimmer / live pulse loops
+class LyneMotion {
+  const LyneMotion._();
+  static const fast = Duration(milliseconds: 120);
+  static const short = Duration(milliseconds: 180);
+  static const standard = Duration(milliseconds: 220);
+  static const emphasis = Duration(milliseconds: 320);
+  static const pulse = Duration(milliseconds: 1400);
+  static const enter = Curves.easeOutCubic;
+  static const exit = Curves.easeInCubic;
+  static const standardCurve = Curves.easeInOutCubic;
+}
+
 /// Cross-mode signal colours that don't change between dark and light.
 /// Use for transit-specific overlays (MRT line indicators, "ME" dots).
 class LyneSignal {
   /// MRT NE-line purple — alert cards and dots.
   static const Color mrtNE = Color(0xFF9B26B6);
+
   /// Live "ME" location dot on maps.
   static const Color meBlue = Color(0xFF3B82F6);
 }

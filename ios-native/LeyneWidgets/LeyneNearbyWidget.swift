@@ -1,144 +1,127 @@
-// Nearby Stops widget (Small / Medium). Shows the closest stops the app last
-// resolved from the user's location, each with its walking time and the
-// soonest service + ETA. The stop list + walk distance come from the App
-// Group (the extension has no stop DB to compute them); arrivals are fetched
-// live by the widget itself, same as the Stop widget.
+// Nearest Stop widget (Small only). Shows the single closest stop the app
+// last resolved from the user's location — its name and stop code — with a
+// tap that deep-links into that stop's arrivals view.
 //
-// No location is read in the extension — the app publishes the nearby
-// snapshot whenever it has a fresh fix, so the widget stays honest without
-// requesting its own location authorization.
+// No location is read in the extension and no arrivals are fetched here.
+// The app publishes the nearby snapshot to the App Group whenever it gets a
+// fresh location fix and calls WidgetCenter.reloadAllTimelines(), so this
+// widget stays current without ever doing its own network or GPS work.
 
 import WidgetKit
 import SwiftUI
 
-// ─── Timeline ────────────────────────────────────────────
-struct NearbyRow: Hashable {
-    let stop: WNearbyStop
-    let top: WLTA.Row?       // soonest service at this stop (nil = none live)
-}
-
-struct NearbyEntry: TimelineEntry {
+// ─── Entry ───────────────────────────────────────────────
+struct NearestEntry: TimelineEntry {
     let date: Date
-    let rows: [NearbyRow]
+    /// nil when the app has not yet published any nearby data.
+    let stop: WNearbyStop?
+    /// True for the gallery/placeholder preview only. A sample entry must NEVER
+    /// deep-link to its (fake) stop code — otherwise tapping the redacted
+    /// skeleton opens a non-existent stop in the app.
+    var isSample: Bool = false
 }
 
-struct NearbyProvider: TimelineProvider {
-    func placeholder(in context: Context) -> NearbyEntry {
-        NearbyEntry(date: .now, rows: [
-            NearbyRow(stop: .init(id: "1", name: "Opp Tempco Mfg", walkMin: 4),
-                      top: .init(id: "91", eta1: 2, eta2: 12, eta3: 24)),
-            NearbyRow(stop: .init(id: "2", name: "Tempco Mfg", walkMin: 4),
-                      top: .init(id: "91", eta1: 6, eta2: 16, eta3: 28)),
-        ])
+// A representative stop for the gallery preview + redacted placeholder. Only
+// ever shown with `isSample: true`, so its code is never used for navigation.
+private let sampleStop = WNearbyStop(id: "00000", name: "Opp Blk 123", walkMin: 2)
+
+// ─── Provider ────────────────────────────────────────────
+struct NearestProvider: TimelineProvider {
+    // Placeholder — the brief skeleton before data loads. Use the EMPTY state
+    // (not a fake sample) so a redacted/loading frame reads as "no data yet",
+    // never bars that look like a real stop.
+    func placeholder(in context: Context) -> NearestEntry {
+        NearestEntry(date: .now, stop: nil)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (NearbyEntry) -> Void) {
-        Task { completion(await entry(context.family)) }
-    }
-
-    func getTimeline(in context: Context, completion: @escaping (Timeline<NearbyEntry>) -> Void) {
-        Task {
-            let e = await entry(context.family)
-            completion(Timeline(entries: [e], policy: .after(Date().addingTimeInterval(60))))
+    // Snapshot — show the SAMPLE only in the gallery picker (`isPreview`); on
+    // the actual home screen show real data or the empty state (never a sample).
+    func getSnapshot(in context: Context, completion: @escaping (NearestEntry) -> Void) {
+        if let real = loadNearby().first {
+            completion(NearestEntry(date: .now, stop: real))
+        } else if context.isPreview {
+            completion(NearestEntry(date: .now, stop: sampleStop, isSample: true))
+        } else {
+            completion(NearestEntry(date: .now, stop: nil))
         }
     }
 
-    private func entry(_ family: WidgetFamily) async -> NearbyEntry {
-        let count = family == .systemMedium ? 3 : 2
-        let stops = Array(loadNearby().prefix(count))
-        // Fetch every stop's arrivals concurrently.
-        let rows = await withTaskGroup(of: (Int, WLTA.Row?).self) { group -> [NearbyRow] in
-            for (i, s) in stops.enumerated() {
-                group.addTask { (i, await WLTA.arrivals(stop: s.id).first) }
-            }
-            var tops = Array<WLTA.Row?>(repeating: nil, count: stops.count)
-            for await (i, r) in group { tops[i] = r }
-            return zip(stops, tops).map { NearbyRow(stop: $0, top: $1) }
-        }
-        return NearbyEntry(date: .now, rows: rows)
-    }
-}
-
-// ─── Row ─────────────────────────────────────────────────
-private struct NearbyStopRow: View {
-    let row: NearbyRow
-    private var arriving: Bool { (row.top?.mon1 ?? false) && (row.top?.eta1 ?? 99) <= 1 }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.stop.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(wFg).lineLimit(1)
-                HStack(spacing: 3) {
-                    Image(systemName: "figure.walk").font(.system(size: 9))
-                    Text("\(row.stop.walkMin) min walk").font(.system(size: 10))
-                }
-                .foregroundStyle(wDim)
-            }
-
-            Spacer(minLength: 4)
-
-            if let top = row.top {
-                WServiceBadge(no: top.id, compact: true)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(schedPrefix(top.mon1, top.eta1) + etaLabel(top.eta1))
-                        .font(.system(size: etaLabel(top.eta1) == "Arr" ? 18 : 24,
-                                      weight: .medium, design: .monospaced))
-                        .foregroundStyle(arriving ? wLive : wFg)
-                        .widgetAccentable(arriving)
-                        .contentTransition(.numericText(countsDown: true))
-                    if etaLabel(top.eta1) != "Arr" {
-                        Text("min").font(.system(size: 9)).foregroundStyle(wDim)
-                    }
-                }
-            } else {
-                Text("—").font(.system(size: 18, design: .monospaced)).foregroundStyle(wFaint)
-            }
-        }
-        .widgetURL(stopURL(row.stop.id))
+    // Timeline — the LIVE widget. Real nearest stop or nil (→ empty state).
+    // Never a sample. The app's reloadAllTimelines() on location change is the
+    // primary refresh; a 30-minute backstop avoids permanent staleness.
+    func getTimeline(in context: Context, completion: @escaping (Timeline<NearestEntry>) -> Void) {
+        let entry = NearestEntry(date: .now, stop: loadNearby().first)
+        let refresh = Date().addingTimeInterval(30 * 60)
+        completion(Timeline(entries: [entry], policy: .after(refresh)))
     }
 }
 
 // ─── View ────────────────────────────────────────────────
-private struct NearbyWidgetView: View {
-    let entry: NearbyEntry
+private struct NearestWidgetView: View {
+    let entry: NearestEntry
 
     var body: some View {
+        if let stop = entry.stop {
+            filledView(stop, isSample: entry.isSample)
+        } else {
+            emptyView
+        }
+    }
+
+    // Normal state: stop name + code.
+    private func filledView(_ stop: WNearbyStop, isSample: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Eyebrow: pin glyph + "NEAREST STOP" label
             HStack(spacing: 5) {
-                Image(systemName: "location.fill")
-                    .font(.system(size: 10)).foregroundStyle(wLive)
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(wDim)
                     .widgetAccentable()
-                Text("Nearby Stops")
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(wFg)
+                Text("NEAREST STOP")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(wDim)
+                    .kerning(0.5)
                 Spacer(minLength: 0)
             }
 
-            if entry.rows.isEmpty {
-                Spacer()
-                VStack(spacing: 4) {
-                    Image(systemName: "location.slash").font(.system(size: 16)).foregroundStyle(wDim)
-                    Text("Open Leyne nearby")
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(wFg)
-                    Text("to find stops around you")
-                        .font(.system(size: 9)).foregroundStyle(wDim)
-                }
-                .frame(maxWidth: .infinity)
-                Spacer()
-            } else {
-                Rectangle().fill(wLine).frame(height: 1).padding(.top, 6)
-                VStack(spacing: 0) {
-                    ForEach(Array(entry.rows.enumerated()), id: \.offset) { i, row in
-                        if i > 0 { Rectangle().fill(wLine).frame(height: 1) }
-                        NearbyStopRow(row: row).padding(.vertical, 7)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
+            Spacer(minLength: 8)
+
+            // Stop name — bold, scales down for long names.
+            Text(stop.name)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(wFg)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+                .fixedSize(horizontal: false, vertical: false)
+
+            Spacer(minLength: 6)
+
+            // Stop code — subtle, monospaced digits.
+            Text("Stop \(stop.id)")
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(wDim)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(wBg, for: .widget)
+        // A sample preview links to the app base, never its fake stop code.
+        .widgetURL(isSample ? URL(string: "lyne://") : stopURL(stop.id))
+    }
+
+    // Empty state: prompt the user to open the app.
+    private var emptyView: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "mappin.slash")
+                .font(.system(size: 20))
+                .foregroundStyle(wDim)
+            Text("Open Leyne to find stops near you")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(wFg)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerBackground(wBg, for: .widget)
+        .widgetURL(URL(string: "lyne://"))
     }
 }
 
@@ -146,11 +129,11 @@ private struct NearbyWidgetView: View {
 struct LeyneNearbyWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "com.leyne.Leyne.NearbyWidget",
-                            provider: NearbyProvider()) { entry in
-            NearbyWidgetView(entry: entry)
+                            provider: NearestProvider()) { entry in
+            NearestWidgetView(entry: entry)
         }
-        .configurationDisplayName("Nearby Stops")
-        .description("The closest stops around you with live arrivals. Updates as you move (open Leyne to refresh your location).")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .configurationDisplayName("Nearest Stop")
+        .description("The bus stop you're at — tap to see its arrivals.")
+        .supportedFamilies([.systemSmall])
     }
 }

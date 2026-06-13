@@ -17,8 +17,20 @@ struct SoftSearchView: View {
     /// Called when the user taps a service result. Receives (originStopCode, serviceNo)
     /// so the root can push SoftBusView directly with fullRoute: true.
     var onOpenBus: ((String, String) -> Void)?
+    /// Called when the user taps an MRT station result. Switches to the MRT tab
+    /// and pushes the station detail. Nil for callers that pre-date this param.
+    var onOpenMrtStation: ((MrtGeoStation) -> Void)?
 
     @FocusState private var focused: Bool
+
+    // Search category filter — only active during normal text-search results.
+    enum SearchFilter: String, CaseIterable {
+        case all   = "All"
+        case stops = "Stops"
+        case buses = "Buses"
+        case mrt   = "MRT"
+    }
+    @State private var searchFilter: SearchFilter = .all
 
     // Postal-code geocode state (stale-safe).
     @State private var postalGeo: GeoPlace?
@@ -70,7 +82,12 @@ struct SoftSearchView: View {
             // blocking on a cold fetch (originStop + serviceRoute both need it).
             ds.ensureRoutes()
         }
-        .onChange(of: query) { _, _ in maybeGeocode() }
+        .onChange(of: query) { _, newVal in
+            maybeGeocode()
+            // Reset filter to All when the query changes so a stale filter
+            // doesn't hide results from a completely different search term.
+            if searchFilter != .all { searchFilter = .all }
+        }
     }
 
     // MARK: Header
@@ -151,24 +168,87 @@ struct SoftSearchView: View {
         } else if isPostal {
             postalResults
         } else {
-            let services = ds.searchServices(query)
-            let stops = ds.searchStops(query)
-            if services.isEmpty && stops.isEmpty {
-                emptyHint("Nothing matches “\(trimmed)”",
-                          "Try a stop name, a 5-digit stop code, a 6-digit postal code, or a bus number.")
+            let services    = ds.searchServices(query)
+            let stops       = ds.searchStops(query)
+            let mrtStations = MrtGeo.stations(matching: trimmed)
+            if services.isEmpty && stops.isEmpty && mrtStations.isEmpty {
+                emptyHint("Nothing matches \"\(trimmed)\"",
+                          "Try a stop name, a 5-digit stop code, a 6-digit postal code, a bus number, or an MRT station name.")
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    if !services.isEmpty {
+                    searchFilterControl
+                        .padding(.bottom, 4)
+
+                    let showBuses = searchFilter == .all || searchFilter == .buses
+                    let showStops = searchFilter == .all || searchFilter == .stops
+                    let showMrt   = searchFilter == .all || searchFilter == .mrt
+
+                    // Per-filter empty hints when the chosen category has no hits
+                    // but another category does. Global empty state is handled above.
+                    if showBuses && services.isEmpty && searchFilter == .buses {
+                        emptyHint("No buses match",
+                                  "Try a different bus number or switch to All.")
+                    }
+                    if showStops && stops.isEmpty && searchFilter == .stops {
+                        emptyHint("No stops match",
+                                  "Try a stop name, a 5-digit stop code, or switch to All.")
+                    }
+                    if showMrt && mrtStations.isEmpty && searchFilter == .mrt {
+                        emptyHint("No MRT stations match",
+                                  "Try a station name or switch to All.")
+                    }
+
+                    if showBuses && !services.isEmpty {
                         sectionLabel("Services")
                         ForEach(services, id: \.ServiceNo) { svc in svcRow(svc) }
                     }
-                    if !stops.isEmpty {
-                        sectionLabel("Bus stops").padding(.top, services.isEmpty ? 0 : 6)
+                    if showStops && !stops.isEmpty {
+                        let topPad: CGFloat = (showBuses && !services.isEmpty) ? 6 : 0
+                        sectionLabel("Bus stops").padding(.top, topPad)
                         ForEach(stops, id: \.BusStopCode) { stop in stopRow(stop: stop) }
+                    }
+                    if showMrt && !mrtStations.isEmpty {
+                        let topPad: CGFloat = ((showBuses && !services.isEmpty) ||
+                                               (showStops && !stops.isEmpty)) ? 6 : 0
+                        sectionLabel("MRT stations").padding(.top, topPad)
+                        ForEach(mrtStations) { station in mrtStationRow(station) }
                     }
                 }
             }
         }
+    }
+
+    // MARK: Search filter segmented control
+
+    private var searchFilterControl: some View {
+        HStack(spacing: 0) {
+            ForEach(SearchFilter.allCases, id: \.self) { filter in
+                searchFilterPill(filter)
+            }
+        }
+        .padding(3)
+        .background(
+            t.glassSurface()
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        )
+    }
+
+    private func searchFilterPill(_ filter: SearchFilter) -> some View {
+        let active = searchFilter == filter
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { searchFilter = filter }
+        } label: {
+            Text(filter.rawValue)
+                .font(t.sans(13, weight: .semibold))
+                .foregroundStyle(active ? t.contrastFg : t.dim)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(
+                    active ? AnyShapeStyle(t.soon) : AnyShapeStyle(Color.clear),
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Empty state — recent searches (no Browse grid)
@@ -335,6 +415,52 @@ struct SoftSearchView: View {
                 .foregroundStyle(t.fg)
         }
         .frame(width: 34, height: 34)
+    }
+
+    // MARK: MRT station result row
+
+    private func mrtStationRow(_ station: MrtGeoStation) -> some View {
+        Button {
+            fb.select()
+            m.addRecent(station.name)
+            onOpenMrtStation?(station)
+        } label: {
+            HStack(spacing: 12) {
+                // Tram tile
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(t.surfaceHi)
+                    Image(systemName: "tram.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                }
+                .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(station.name)
+                        .font(t.sans(15, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                    // Line-code pills
+                    HStack(spacing: 4) {
+                        ForEach(station.codes, id: \.self) { code in
+                            Text(code)
+                                .font(t.mono(9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(mrtLineColorFor(code), in: Capsule())
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
+            }
+            .padding(12)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
     }
 
     // MARK: Service result row

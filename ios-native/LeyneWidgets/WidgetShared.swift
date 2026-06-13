@@ -10,30 +10,59 @@ import SwiftUI
 import UIKit
 
 // ─── Palette — dynamic, mirrors Theme.light / Theme.dark ─────────────
-// dim/faint alphas are nudged up vs the app (0.60 / 0.45) for legibility at
-// widget scale on unpredictable wallpapers; liveBg is the solid Soft fill.
+// Monochrome both ways: dark = near-black surfaces + white ink;
+// light = near-white surfaces + black ink. No mint/parchment — the widget
+// reads as a card lifted straight from the app (2.6.0+ monochrome identity).
+//
+// dim/faint alphas are nudged slightly vs the app (0.65 / 0.45) for
+// legibility at widget scale on unpredictable wallpapers; liveBg is a
+// solid ink-tinted fill rather than a transparent one.
 func wDyn(light: UIColor, dark: UIColor) -> Color {
     Color(uiColor: UIColor { trait in
         trait.userInterfaceStyle == .dark ? dark : light
     })
 }
-let wBg      = wDyn(light: UIColor(red: 0xF4/255, green: 0xEF/255, blue: 0xE7/255, alpha: 1),
-                    dark:  UIColor(red: 0x15/255, green: 0x20/255, blue: 0x1C/255, alpha: 1))
-let wFg      = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 1),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 1))
-let wDim     = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.60),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.60))
-let wFaint   = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.45),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.45))
-let wLine    = wDyn(light: UIColor(red: 0x1A/255, green: 0x20/255, blue: 0x1D/255, alpha: 0.10),
-                    dark:  UIColor(red: 0xF1/255, green: 0xED/255, blue: 0xE7/255, alpha: 0.08))
-let wLive    = wDyn(light: UIColor(red: 0x2D/255, green: 0x7A/255, blue: 0x5A/255, alpha: 1),
-                    dark:  UIColor(red: 0x8E/255, green: 0xE6/255, blue: 0xC0/255, alpha: 1))
-let wLiveBg  = wDyn(light: UIColor(red: 0xE8/255, green: 0xF5/255, blue: 0xEE/255, alpha: 1),
-                    dark:  UIColor(red: 0x0F/255, green: 0x2A/255, blue: 0x20/255, alpha: 1))
-// On-accent text for the filled service badge (light text on the mint fill).
-let wOnLive  = wDyn(light: UIColor(red: 0xF7/255, green: 0xFC/255, blue: 0xF9/255, alpha: 1),
-                    dark:  UIColor(red: 0x0C/255, green: 0x17/255, blue: 0x12/255, alpha: 1))
+
+// surface — the widget card background (Theme.surface)
+// dark: #1A1A1A  light: #FFFFFF
+let wBg     = wDyn(light: UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1),
+                   dark:  UIColor(red: 0x1A/255, green: 0x1A/255, blue: 0x1A/255, alpha: 1))
+
+// fg — primary text (Theme.fg)
+// dark: #FFFFFF  light: #111111
+let wFg     = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1),
+                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1))
+
+// dim — secondary text (Theme.dim), nudged slightly for widget legibility
+// dark: white@0.65  light: black@0.65
+let wDim    = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.65),
+                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.65))
+
+// faint — tertiary text (Theme.faint), nudged slightly for widget legibility
+// dark: white@0.45  light: black@0.45
+let wFaint  = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.45),
+                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.45))
+
+// line — hairline dividers (Theme.line)
+// dark: white@0.10  light: black@0.10
+let wLine   = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.10),
+                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.10))
+
+// accent / live — INK. The "live / arriving" signal is weight + shape,
+// not hue. Mirrors Theme.accent (white dark / black light). No mint.
+// dark: #FFFFFF  light: #111111
+let wLive   = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1),
+                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1))
+
+// liveBg — subtle ink-tinted row fill for "arriving" rows (Theme.liveBg)
+// dark: #242424  light: #EDEDED
+let wLiveBg = wDyn(light: UIColor(red: 0xED/255, green: 0xED/255, blue: 0xED/255, alpha: 1),
+                   dark:  UIColor(red: 0x24/255, green: 0x24/255, blue: 0x24/255, alpha: 1))
+
+// onAccent — text on an ink-filled badge (Theme.onAccent)
+// dark: #111111  light: #FFFFFF
+let wOnLive = wDyn(light: UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1),
+                   dark:  UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1))
 
 // ─── Shared App Group (published by the app) ─────────────────────────
 enum WGroup {
@@ -165,14 +194,16 @@ func serviceURL(_ no: String, stop: String) -> URL? {
 
 // ─── Shared UI atoms ─────────────────────────────────────────────────
 
-/// Mint-filled service-number badge — the widget counterpart of in-app
-/// V2/ServiceBadge. Width adapts to fit "21A" etc.
+/// Ink-filled service-number badge — the widget counterpart of in-app
+/// ServiceBadge. Monochrome: accent (ink) fill, onAccent text, SF Pro default
+/// design (NOT rounded — matches the app's sans() font). Width adapts to fit
+/// "21A" etc. Uses a continuous RoundedRectangle to match in-app style.
 struct WServiceBadge: View {
     let no: String
     var compact = false
     var body: some View {
         Text(no)
-            .font(.system(size: compact ? 13 : 15, weight: .bold, design: .rounded))
+            .font(.system(size: compact ? 13 : 15, weight: .semibold))
             .foregroundStyle(wOnLive)
             .padding(.horizontal, compact ? 5 : 7)
             .frame(minWidth: compact ? 26 : 32, minHeight: compact ? 20 : 24)
@@ -182,7 +213,9 @@ struct WServiceBadge: View {
 }
 
 /// The "2 / 18 / 35 min" arrival triple from the mockup: a hero ETA plus up
-/// to two thin follow-up columns. `arriving` tints the hero mint.
+/// to two thin follow-up columns. "Arriving" emphasis is ink weight + an
+/// ink-filled liveBg row — never a hue. monospacedDigit keeps digit-width
+/// stable as the countdown ticks (proportional letters, fixed-width digits).
 struct WEtaColumns: View {
     let row: WLTA.Row
     var heroSize: CGFloat = 22
@@ -193,8 +226,9 @@ struct WEtaColumns: View {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
                     .font(.system(size: etaLabel(row.eta1) == "Arr" ? heroSize * 0.78 : heroSize,
-                                  weight: .medium, design: .monospaced))
-                    .foregroundStyle(arriving ? wLive : wFg)
+                                  weight: arriving ? .bold : .medium)
+                          .monospacedDigit())
+                    .foregroundStyle(arriving ? wFg : wFg)
                     .widgetAccentable(arriving)
                 if etaLabel(row.eta1) != "Arr" {
                     Text("min").font(.system(size: 9)).foregroundStyle(wDim)
@@ -205,7 +239,7 @@ struct WEtaColumns: View {
             ForEach(Array([row.eta2, row.eta3].compactMap { $0 }.prefix(2).enumerated()),
                     id: \.offset) { _, m in
                 Text(m <= 0 ? "Arr" : "\(m)")
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 13).monospacedDigit())
                     .foregroundStyle(wFaint)
             }
         }

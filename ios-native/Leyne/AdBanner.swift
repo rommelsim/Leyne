@@ -87,6 +87,18 @@ enum AdConfig {
         : "ca-app-pub-5864511655536507/9782205994"  // leyne-acct prod (shared)
     #endif
 
+    // Native ad unit — used by the inline Home-screen placement (NativeAdCard).
+    // Google's official iOS native test unit fires on all simulators and any
+    // device that is registered as a test device. RELEASE serves the dedicated
+    // leyne-account native unit (ca-app-pub-5864511655536507/2734244623).
+    #if DEBUG
+    static let nativeUnitID = "ca-app-pub-3940256099942544/3986624511"
+    #else
+    static let nativeUnitID = forceTestUnitForRelease
+        ? "ca-app-pub-3940256099942544/3986624511"  // Google iOS native test unit
+        : "ca-app-pub-5864511655536507/2734244623"  // leyne-acct prod native
+    #endif
+
     /// Extra devices to force into TEST ads even in a RELEASE build (rarely
     /// needed — DEBUG already serves test ads everywhere). Leave empty.
     static let testDeviceIdentifiers: [String] = []

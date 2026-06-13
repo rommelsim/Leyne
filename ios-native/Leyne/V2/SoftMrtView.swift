@@ -1,26 +1,40 @@
-// SoftMrtView — the MRT line-status board (Leyne 2.7).
+// SoftMrtView — the MRT tab (Leyne 2.7 Phase 3 redesign).
 //
-// A calm, glanceable board built from three LTA DataMall feeds:
-//   • TrainServiceAlerts  → per-line operating status (running / disrupted)
-//   • FacilitiesMaintenance v2 → lifts currently under maintenance (network-wide)
-//   • PCDRealTime         → live per-station crowdedness, fetched lazily when a
-//                           line is expanded
+// Layout (top → bottom):
+//   1. Title "MRT" + ••• menu (system map / news & advisories).
+//   2. Disruption banner — compact, only when a line is affected.
+//   3. Saved stations section — user's saved MRT stations (omit when empty).
+//   4. Closest to you — nearest stations, capped at 3.
+//   5. Lines section — compact one-row-per-line list; tap → SoftMrtLineView.
 //
-// Free for everyone. Real-time disruption notifications are wired separately in
-// DataStore so users are buzzed even when the tab isn't open.
+// Lift maintenance has moved to SoftMrtNewsView.
+// Live station crowd has moved to SoftMrtLineView (expanded inline was too long).
 
 import SwiftUI
+import CoreLocation
 
 struct SoftMrtView: View {
     @EnvironmentObject var m: AppModel
     @ObservedObject private var ds = DataStore.shared
+    @StateObject private var loc = LocationManager.shared
 
-    /// The line whose live station crowd is currently expanded (one at a time).
-    @State private var expandedLine: MRTLine?
+    /// Controls the full-screen system-map sheet.
+    @State private var showMap = false
+
+    /// Nearest stations within the user's search radius, rebuilt on location or
+    /// radius changes. Capped at 3 per the redesign.
+    @State private var nearestStations: [(station: MrtGeoStation, distanceM: Int, walkMin: Int)] = []
+
+    /// The absolute nearest station, regardless of radius — used for the
+    /// empty-state "nearest outside radius" hint.
+    @State private var absoluteNearest: (station: MrtGeoStation, distanceM: Int, walkMin: Int)? = nil
+
+    let onOpenLine: (MRTLine) -> Void
+    let onOpenNews: () -> Void
 
     private var t: Theme { m.t }
 
-    /// Disrupted lines keyed by palette enum, derived from the LTA alerts.
+    /// Disrupted lines keyed by palette enum, derived from LTA alerts.
     private var disruptedLines: [MRTLine: TrainAlert] {
         var map: [MRTLine: TrainAlert] = [:]
         for alert in ds.trainAlerts {
@@ -32,271 +46,375 @@ struct SoftMrtView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                title
-                overallBanner
-                liftMaintenanceCard
-                linesList
+                titleBlock
+                topDisruptionBanner
+                if !m.savedMrtStations.isEmpty { savedSection }
+                nearestSection
+                linesSection
             }
             .padding(20)
         }
         .background(t.bg.ignoresSafeArea())
         .refreshable { refresh(force: true) }
-        .onAppear { refresh(force: false) }
+        .onAppear {
+            loc.startIfAuthorized()
+            if let l = loc.location { rebuildNearest(l) }
+            refresh(force: false)
+        }
+        .onChange(of: loc.location) { _, newLoc in
+            if let l = newLoc { rebuildNearest(l) }
+        }
+        .onChange(of: m.searchRadiusM) { _, _ in
+            if let l = loc.location { rebuildNearest(l) }
+        }
+        .sheet(isPresented: $showMap) {
+            MrtMapView()
+        }
     }
 
-    /// Refresh the always-on feeds (alerts + lift maintenance) plus the crowd
-    /// for the currently-open line.
+    // MARK: - Nearest list builder
+
+    private func rebuildNearest(_ loc: CLLocation) {
+        nearestStations = MrtGeo.nearestStations(
+            to: loc.coordinate,
+            limit: 3,
+            withinMeters: m.searchRadiusM
+        )
+        absoluteNearest = MrtGeo.nearestStation(to: loc.coordinate)
+    }
+
     private func refresh(force: Bool) {
         ds.refreshTrainAlertsIfStale(force: force)
         ds.refreshLiftMaintenanceIfStale(force: force)
-        if let line = expandedLine { ds.refreshCrowd(line: line, force: force) }
+        if let l = loc.location { rebuildNearest(l) }
     }
 
-    // ─── Title ────────────────────────────────────────────
-    private var title: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("MRT")
-                .font(t.sans(32, weight: .bold))
-                .foregroundStyle(t.fg)
-            Text("Live line status")
-                .font(t.sans(14, weight: .medium))
-                .foregroundStyle(t.dim)
+    // MARK: - Title block
+
+    private var titleBlock: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("MRT")
+                    .font(t.sans(32, weight: .bold))
+                    .foregroundStyle(t.fg)
+                Text("Stations near you")
+                    .font(t.sans(14, weight: .medium))
+                    .foregroundStyle(t.dim)
+            }
+            Spacer(minLength: 8)
+            moreMenu
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // ─── Disruption banner — only shown when a line is down ───
-    // No "all clear" banner: the per-line list already shows each line
-    // "Operating normally", so a green summary would just be noise.
+    /// Top-right ••• menu — system map and news/advisories.
+    private var moreMenu: some View {
+        Menu {
+            Button {
+                Feedback.shared.tap()
+                showMap = true
+            } label: {
+                Label("System map", systemImage: "map.fill")
+            }
+            Button {
+                Feedback.shared.tap()
+                onOpenNews()
+            } label: {
+                Label("News & advisories", systemImage: "newspaper.fill")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("More options")
+    }
+
+    // MARK: - Top disruption banner
+
     @ViewBuilder
-    private var overallBanner: some View {
+    private var topDisruptionBanner: some View {
         let count = disruptedLines.count
         if count > 0 {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Color.orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(count) line\(count == 1 ? "" : "s") disrupted")
-                        .font(t.sans(16, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                    Text("Tap a line below for details.")
-                        .font(t.sans(13))
-                        .foregroundStyle(t.dim)
+                Text("\(count) line\(count == 1 ? "" : "s") disrupted")
+                    .font(t.sans(14, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                HStack(spacing: 4) {
+                    ForEach(Array(disruptedLines.keys).sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { line in
+                        Text(line.rawValue)
+                            .font(t.mono(10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(line.color, in: Capsule())
+                    }
                 }
                 Spacer(minLength: 0)
             }
-            .padding(16)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.green.opacity(0.8))
+                Text("All lines running normally")
+                    .font(t.sans(13))
+                    .foregroundStyle(t.dim)
+            }
         }
     }
 
-    // ─── Lift maintenance (network-wide) ──────────────────
-    @ViewBuilder
-    private var liftMaintenanceCard: some View {
-        let items = ds.liftMaintenance
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "wrench.and.screwdriver.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.orange)
-                    Text("Lift maintenance")
-                        .font(t.sans(15, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                    Spacer(minLength: 0)
-                    Text("\(items.count)")
-                        .font(t.mono(12, weight: .bold))
-                        .foregroundStyle(t.dim)
+    // MARK: - Saved stations section
+
+    private var savedSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Saved")
+            ForEach(m.savedMrtStations, id: \.id) { station in
+                NavigationLink(value: SoftMrtRoute.station(station)) {
+                    compactStationRow(station)
                 }
-                VStack(spacing: 8) {
-                    ForEach(items) { item in
-                        HStack(alignment: .top, spacing: 8) {
-                            Circle().fill(t.faint).frame(width: 5, height: 5)
-                                .padding(.top, 6)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(item.stationName)
-                                    .font(t.sans(13, weight: .semibold))
-                                    .foregroundStyle(t.fg)
-                                Text(item.detail)
-                                    .font(t.sans(12))
-                                    .foregroundStyle(t.dim)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 0)
-                        }
+                .buttonStyle(PressScaleButtonStyle())
+                .accessibilityLabel("\(station.name) MRT station, saved")
+            }
+        }
+    }
+
+    // MARK: - Nearest stations section
+
+    @ViewBuilder
+    private var nearestSection: some View {
+        if nearestStations.isEmpty {
+            if !loc.authorized {
+                SoftEmptyState(
+                    t: t,
+                    onNearby: { loc.requestAndStart() },
+                    onSearch: {}
+                )
+            } else if loc.location != nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    sectionHeader("Closest to you")
+                    noStationWithinRadiusCard
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Closest to you")
+                ForEach(nearestStations, id: \.station.id) { entry in
+                    nearbyStationCard(entry.station,
+                                      distanceM: entry.distanceM,
+                                      walkMin: entry.walkMin)
+                }
+            }
+        }
+    }
+
+    private var noStationWithinRadiusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "tram")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(t.dim)
+                Text("No MRT stations within \(radiusLabel(m.searchRadiusM)).")
+                    .font(t.sans(15, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                Spacer(minLength: 0)
+            }
+            if let hint = absoluteNearest {
+                Text("Nearest: \(hint.station.name) · \(hint.distanceM) m away — widen your radius in Settings.")
+                    .font(t.sans(13))
+                    .foregroundStyle(t.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func radiusLabel(_ metres: Int) -> String {
+        if metres < 1000 { return "\(metres) m" }
+        let km = Double(metres) / 1000
+        if metres % 1000 == 0 { return "\(Int(km)) km" }
+        return String(format: "%.1f km", km)
+    }
+
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(t.mono(10, weight: .semibold))
+            .tracking(1.5)
+            .foregroundStyle(t.dim)
+            .padding(.leading, 2)
+    }
+
+    // MARK: - Nearby station card (with walk meta)
+
+    private func nearbyStationCard(
+        _ station: MrtGeoStation,
+        distanceM: Int,
+        walkMin: Int
+    ) -> some View {
+        NavigationLink(value: SoftMrtRoute.station(station, distanceM: distanceM, walkMin: walkMin)) {
+            HStack(spacing: 0) {
+                MrtLineColorBar(codes: station.codes, width: 4, height: 44)
+                VStack(alignment: .center, spacing: 3) {
+                    ForEach(station.codes, id: \.self) { code in
+                        lineCodePill(code)
                     }
                 }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-    }
+                .frame(width: 52, alignment: .center)
+                .padding(.leading, 10)
 
-    // ─── Per-line rows (expand → live station crowd) ──────
-    private var linesList: some View {
-        VStack(spacing: 10) {
-            ForEach(MRTLine.allCases, id: \.self) { line in
-                lineRow(line, alert: disruptedLines[line])
-            }
-        }
-    }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(station.name)
+                        .font(t.sans(16, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .truncationMode(.tail)
 
-    private func lineRow(_ line: MRTLine, alert: TrainAlert?) -> some View {
-        let disrupted = alert != nil
-        let isExpanded = expandedLine == line
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                Feedback.shared.tap()
-                let willExpand = !isExpanded
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {
-                    expandedLine = willExpand ? line : nil
+                    HStack(spacing: 5) {
+                        Image(systemName: "figure.walk")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(t.soon)
+                        Text("\(max(1, walkMin)) min")
+                            .foregroundStyle(t.soon)
+                        Text("·").foregroundStyle(t.faint)
+                        Text("\(distanceM) m")
+                            .foregroundStyle(t.dim)
+                    }
+                    .font(t.mono(12.5))
                 }
-                if willExpand { ds.refreshCrowd(line: line) }
-            } label: {
-                lineHeader(line, alert: alert, disrupted: disrupted, expanded: isExpanded)
-            }
-            .buttonStyle(.plain)
+                .padding(.leading, 8)
 
-            if isExpanded {
-                crowdSection(line)
-                    .transition(.opacity)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
             }
+            .contentShape(Rectangle())
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(t.line, lineWidth: 1)
+            )
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("\(station.name) MRT station, \(max(1, walkMin)) minute walk")
     }
 
-    private func lineHeader(_ line: MRTLine, alert: TrainAlert?,
-                            disrupted: Bool, expanded: Bool) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Line colour chip with the two-letter code.
-            Text(line.rawValue)
-                .font(t.mono(13))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(line.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    // MARK: - Compact station row (saved section — no walk meta)
 
-            VStack(alignment: .leading, spacing: 3) {
+    private func compactStationRow(_ station: MrtGeoStation) -> some View {
+        HStack(spacing: 0) {
+            MrtLineColorBar(codes: station.codes, width: 4, height: 40)
+            VStack(alignment: .center, spacing: 3) {
+                ForEach(station.codes, id: \.self) { code in
+                    lineCodePill(code)
+                }
+            }
+            .frame(width: 52, alignment: .center)
+            .padding(.leading, 10)
+
+            Text(station.name)
+                .font(t.sans(15, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .truncationMode(.tail)
+                .padding(.leading, 8)
+
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(t.faint)
+        }
+        .contentShape(Rectangle())
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(t.line, lineWidth: 1)
+        )
+    }
+
+    private func lineCodePill(_ code: String) -> some View {
+        Text(code)
+            .font(t.mono(11, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            // Uniform min width so stacked codes (e.g. EW24 + NS1 at an
+            // interchange) are the SAME width and line up as a tidy column,
+            // rather than each capsule hugging its text.
+            .frame(minWidth: 48)
+            .background(mrtLineColorFor(code), in: Capsule())
+    }
+
+    // MARK: - Lines section (compact one-row-per-line)
+
+    private var linesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Lines")
+            VStack(spacing: 8) {
+                ForEach(MRTLine.allCases, id: \.self) { line in
+                    compactLineRow(line, alert: disruptedLines[line])
+                }
+            }
+        }
+    }
+
+    private func compactLineRow(_ line: MRTLine, alert: TrainAlert?) -> some View {
+        let disrupted = alert != nil
+        return Button {
+            Feedback.shared.tap()
+            onOpenLine(line)
+        } label: {
+            HStack(spacing: 12) {
+                // Line pill
+                Text(line.rawValue)
+                    .font(t.mono(12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(line.color, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                // Name
                 Text(line.displayName + " Line")
                     .font(t.sans(15, weight: .semibold))
                     .foregroundStyle(t.fg)
-                if let alert {
-                    Text(alert.detail)
-                        .font(t.sans(13))
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("Operating normally")
-                        .font(t.sans(13))
-                        .foregroundStyle(t.dim)
-                }
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                // Status dot
+                Circle()
+                    .fill(disrupted ? Color.orange : Color.green.opacity(0.8))
+                    .frame(width: 8, height: 8)
+
+                // Chevron
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
             }
-            Spacer(minLength: 0)
-            Image(systemName: disrupted ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(disrupted ? Color.orange : Color.green.opacity(0.7))
-            Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(t.faint)
-                .rotationEffect(.degrees(expanded ? 180 : 0))
-                .padding(.top, 2)
+            .contentShape(Rectangle())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .contentShape(Rectangle())
-    }
-
-    // ─── Live station crowd (PCDRealTime) ─────────────────
-    @ViewBuilder
-    private func crowdSection(_ line: MRTLine) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Rectangle().fill(t.line).frame(height: 1).padding(.vertical, 12)
-
-            if let items = ds.crowdByLine[line] {
-                if items.isEmpty {
-                    Text("Crowd data unavailable right now.")
-                        .font(t.sans(13))
-                        .foregroundStyle(t.faint)
-                } else {
-                    crowdLegend
-                        .padding(.bottom, 10)
-                    VStack(spacing: 11) {
-                        ForEach(sortedCrowd(items)) { stop in
-                            crowdRow(stop)
-                        }
-                    }
-                }
-            } else {
-                HStack(spacing: 8) {
-                    ProgressView().tint(t.dim)
-                    Text("Loading live crowd…")
-                        .font(t.sans(13))
-                        .foregroundStyle(t.dim)
-                }
-                .padding(.vertical, 2)
-            }
-        }
-        // Smooth the loading → loaded height change (data arrives async, outside
-        // the expand's withAnimation).
-        .animation(.easeInOut(duration: 0.28), value: ds.crowdByLine[line]?.count)
-    }
-
-    private var crowdLegend: some View {
-        HStack(spacing: 12) {
-            ForEach([CrowdLevel.low, .moderate, .high], id: \.self) { level in
-                HStack(spacing: 5) {
-                    Circle().fill(crowdColor(level)).frame(width: 7, height: 7)
-                    Text(crowdLabel(level))
-                        .font(t.mono(11, weight: .medium))
-                        .foregroundStyle(t.dim)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func crowdRow(_ stop: StationCrowd) -> some View {
-        HStack(spacing: 10) {
-            Circle().fill(crowdColor(stop.level)).frame(width: 9, height: 9)
-            Text(stop.name)
-                .font(t.sans(15))
-                .foregroundStyle(stop.level == .unknown ? t.dim : t.fg)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Text(crowdLabel(stop.level))
-                .font(t.mono(12, weight: .medium))
-                .foregroundStyle(t.dim)
-        }
-    }
-
-    // ─── Helpers ──────────────────────────────────────────
-    /// Stations in line order — sort by the numeric suffix of the code
-    /// ("EW1" < "EW2" < … < "EW33").
-    private func sortedCrowd(_ items: [StationCrowd]) -> [StationCrowd] {
-        items.sorted { codeNum($0.code) < codeNum($1.code) }
-    }
-
-    private func codeNum(_ code: String) -> Int {
-        Int(code.drop(while: { !$0.isNumber })) ?? 0
-    }
-
-    private func crowdColor(_ l: CrowdLevel) -> Color {
-        switch l {
-        case .low:      return .green
-        case .moderate: return .orange
-        case .high:     return .red
-        case .unknown:  return t.faint
-        }
-    }
-
-    private func crowdLabel(_ l: CrowdLevel) -> String {
-        switch l {
-        case .low:      return "Low"
-        case .moderate: return "Moderate"
-        case .high:     return "High"
-        case .unknown:  return "—"
-        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("\(line.displayName) Line, \(disrupted ? "disrupted" : "operating normally")")
     }
 }
 

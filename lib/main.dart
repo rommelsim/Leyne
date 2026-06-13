@@ -9,13 +9,13 @@
 
 import 'dart:async';
 
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'data/changelog.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
+import 'data/mrt_geo.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/v2/soft_bus_screen.dart';
@@ -48,7 +48,9 @@ void main() async {
   try {
     final info = await PackageInfo.fromPlatform();
     AppModel.shared.setCurrentVersion(info.version);
-  } catch (_) {/* package_info unavailable — skip What's New */}
+  } catch (_) {
+    /* package_info unavailable — skip What's New */
+  }
   // Notification-tap handler: parses the payload that we set during
   // scheduling (`arrival.<stopCode>.<busNo>` or
   // `alight.<busNo>.<stopName>`) and drills into DetailScreen for that
@@ -82,29 +84,35 @@ void main() async {
     // Push the Soft stop screen on the root navigator. If the
     // payload identifies a specific bus, follow with a SoftBusScreen
     // push so the user lands directly on the tracking view.
-    navigator.push(MaterialPageRoute(
-      builder: (_) => SoftStopScreen(
-        stopCode: code,
-        onBack: () => navigator.pop(),
-        onOpenBus: (svc) => navigator.push(MaterialPageRoute(
-          builder: (_) => SoftBusScreen(
-            stopCode: code,
-            svc: svc,
-            onBack: () => navigator.pop(),
+    navigator.push(
+      MaterialPageRoute(
+        builder: (_) => SoftStopScreen(
+          stopCode: code,
+          onBack: () => navigator.pop(),
+          onOpenBus: (svc) => navigator.push(
+            MaterialPageRoute(
+              builder: (_) => SoftBusScreen(
+                stopCode: code,
+                svc: svc,
+                onBack: () => navigator.pop(),
+              ),
+            ),
           ),
-        )),
-        onSeeAll: () {},
+          onSeeAll: () {},
+        ),
       ),
-    ));
+    );
     if (no != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        navigator.push(MaterialPageRoute(
-          builder: (_) => SoftBusScreen(
-            stopCode: code,
-            svc: no,
-            onBack: () => navigator.pop(),
+        navigator.push(
+          MaterialPageRoute(
+            builder: (_) => SoftBusScreen(
+              stopCode: code,
+              svc: no,
+              onBack: () => navigator.pop(),
+            ),
           ),
-        ));
+        );
       });
     }
   };
@@ -119,8 +127,7 @@ void main() async {
   // has never asked for POST_NOTIFICATIONS and our intent (toggle) is
   // ON, fire the prompt now. Covers the upgrade path from versions
   // before onboarding step 3 became an actual permission ask.
-  if (AppModel.shared.onboardingDone &&
-      AppModel.shared.notificationsEnabled) {
+  if (AppModel.shared.onboardingDone && AppModel.shared.notificationsEnabled) {
     () async {
       final status = await NotificationsService.shared.currentStatus();
       if (status == NotifPermStatus.notDetermined) {
@@ -135,6 +142,9 @@ void main() async {
   // while this resolves. Tabs don't await this; data-bound screens read
   // DataStore.referenceState themselves.
   DataStore.shared.bootstrap();
+  // Fire-and-forget — the MRT tab is not the launch tab, so the dataset
+  // will be ready long before the user first taps it.
+  unawaited(MrtGeo.load());
   // UMP consent → ATT prompt → MobileAds.initialize. Also fire-and-forget;
   // the AdBanner widget polls AdConsent.started before requesting ads.
   // The test-device list is empty by default — the iOS Simulator and
@@ -148,9 +158,7 @@ void main() async {
   // would show before the user sees the explanation. Skippers fall through
   // to here on their next launch (AdConsent is idempotent).
   if (AppModel.shared.onboardingDone) {
-    AdConsent.gatherThenStart(
-      testDeviceIdentifiers: kTestDeviceIdentifiers,
-    );
+    AdConsent.gatherThenStart(testDeviceIdentifiers: kTestDeviceIdentifiers);
   }
   // Subscribe to Universal Links / App Links so an external
   // https://lyne.sg/stop/12345 tap routes into DetailScreen.
@@ -166,33 +174,26 @@ class LyneApp extends StatelessWidget {
     // Rebuild MaterialApp when the user changes Appearance / Language so the
     // themeMode + locale overrides take effect immediately.
     //
-    // DynamicColorBuilder pulls the system's Material You palette on
-    // Android 12+ (API 31+). On older Android the builder receives
-    // `null` for both schemes, and we fall back to LyneTheme's static
-    // warm-parchment / mint palette. The dynamic palette is overlaid
-    // onto the static one — Leyne brand colours (the live mint, warn
-    // amber, crit red) are preserved while the user's wallpaper tints
-    // surfaces and tonal containers.
-    return DynamicColorBuilder(
-      builder: (lightDynamic, darkDynamic) {
-        return ListenableBuilder(
-          listenable: AppModel.shared,
-          builder: (context, _) {
-            return MaterialApp(
-              title: 'Leyne',
-              debugShowCheckedModeBanner: false,
-              themeMode: AppModel.shared.themeMode,
-              theme: LyneTheme.light.materialTheme(dynamicScheme: lightDynamic),
-              darkTheme:
-                  LyneTheme.dark.materialTheme(dynamicScheme: darkDynamic),
-              locale: AppModel.shared.locale,
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
-              supportedLocales: AppLocalizations.supportedLocales,
-              navigatorKey: _navigatorKey,
-              scaffoldMessengerKey: lyneMessengerKey,
-              home: const _AppRoot(),
-            );
-          },
+    // The app is intentionally MONOCHROME (matching iOS 2.6.0+) — colour is
+    // reserved for MRT line pills and crowd/occupancy. So we do NOT apply
+    // Material You / wallpaper-derived dynamic colour, which would tint
+    // surfaces with the user's wallpaper and break the monochrome look.
+    // Always use LyneTheme's static palette.
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Leyne',
+          debugShowCheckedModeBanner: false,
+          themeMode: AppModel.shared.themeMode,
+          theme: LyneTheme.light.materialTheme(),
+          darkTheme: LyneTheme.dark.materialTheme(),
+          locale: AppModel.shared.locale,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          navigatorKey: _navigatorKey,
+          scaffoldMessengerKey: lyneMessengerKey,
+          home: const _AppRoot(),
         );
       },
     );
@@ -236,9 +237,10 @@ class _AppRoot extends StatelessWidget {
             // transition. AppModel handles permission + scheduling.
             AppModel.shared.setNotificationsEnabled(true);
           },
-          onRequestTracking: () async {
-            // UMP → ATT → MobileAds.initialize, then dismiss onboarding
-            // so the user lands on Home. AdConsent is idempotent.
+          onFinish: () async {
+            // UMP consent (Android only — no ATT), then MobileAds.initialize,
+            // then dismiss onboarding. AdConsent.gatherThenStart is a no-op
+            // for ATT on Android; the dedicated ATT primer view was removed.
             await AdConsent.gatherThenStart(
               testDeviceIdentifiers: kTestDeviceIdentifiers,
             );

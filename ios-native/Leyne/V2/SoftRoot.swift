@@ -45,6 +45,17 @@ enum SoftRoute: Hashable {
     case search
 }
 
+/// Navigation destinations within the MRT tab's NavigationStack.
+enum SoftMrtRoute: Hashable {
+    /// Push the station detail for a tapped nearby/search station.
+    /// `distanceM` and `walkMin` are optional (nil when navigating from Search).
+    case station(MrtGeoStation, distanceM: Int? = nil, walkMin: Int? = nil)
+    /// Push the per-line crowd + status detail view.
+    case line(MRTLine)
+    /// Push the News & advisories view.
+    case news
+}
+
 struct SoftRoot: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
@@ -54,6 +65,7 @@ struct SoftRoot: View {
     // the user over to Nearby or Search. The native TabView preserves each
     // path across tab switches, matching iOS's standard tab behaviour.
     @State private var homeStack: [SoftRoute] = []
+    @State private var mrtStack: [SoftMrtRoute] = []
     @State private var favouritesStack: [SoftRoute] = []
     @State private var settingsStack: [SoftRoute] = []
     @State private var searchStack: [SoftRoute] = []
@@ -73,7 +85,8 @@ struct SoftRoot: View {
             // keep the native slide + edge-swipe-back. Selection tint is the
             // location blue used across the redesign.
             TabView(selection: $tab) {
-                Tab("Nearby", systemImage: "location.fill", value: SoftTab.home) {
+                // 1. Bus — nearby bus stops home screen
+                Tab("Bus", systemImage: "bus.fill", value: SoftTab.home) {
                     navStack($homeStack) {
                         SoftHomeView(
                             onTab: { tab = $0 },
@@ -82,6 +95,11 @@ struct SoftRoot: View {
                         )
                     }
                 }
+                // 2. MRT — station map + live crowd / service alerts
+                Tab("MRT", systemImage: "tram.fill", value: SoftTab.mrt) {
+                    mrtNavStack($mrtStack)
+                }
+                // 3. Saved — pinned stops and favourite services
                 Tab("Saved", systemImage: "star.fill", value: SoftTab.favourites) {
                     navStack($favouritesStack) {
                         SoftFavouritesView(
@@ -89,10 +107,16 @@ struct SoftRoot: View {
                             onOpenBus: { code, svc in
                                 favouritesStack.append(.bus(stopCode: code, svc: svc))
                             },
-                            onOpenSearch: { tab = .search }
+                            onOpenSearch: { tab = .search },
+                            onOpenMrtStation: { station in
+                                // Switch to the MRT tab and push the station detail.
+                                tab = .mrt
+                                mrtStack = [.station(station)]
+                            }
                         )
                     }
                 }
+                // 4. Search
                 Tab("Search", systemImage: "magnifyingglass", value: SoftTab.search) {
                     navStack($searchStack) {
                         SoftSearchView(
@@ -102,15 +126,14 @@ struct SoftRoot: View {
                                 searchStack.append(.bus(stopCode: stopCode,
                                                         svc: svcNo,
                                                         fullRoute: true))
+                            },
+                            onOpenMrtStation: { station in
+                                navigateToStation(station)
                             }
                         )
                     }
                 }
-                Tab("MRT", systemImage: "tram.fill", value: SoftTab.mrt) {
-                    SoftMrtView()
-                        .adBannerGutter()
-                        .softTopEdgeBlur()
-                }
+                // 5. Settings
                 Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
                     navStack($settingsStack) {
                         SoftSettingsView(onTab: { tab = $0 })
@@ -242,8 +265,62 @@ struct SoftRoot: View {
                     path.wrappedValue.append(.bus(stopCode: stopCode,
                                                    svc: svcNo,
                                                    fullRoute: true))
+                },
+                onOpenMrtStation: { station in
+                    navigateToStation(station)
                 }
             )
         }
+    }
+
+    // MARK: - MRT navigation stack
+
+    /// Dedicated NavigationStack for the MRT tab. Pushes SoftMrtStationView for
+    /// station taps originating from the nearest list or from Search. The station
+    /// view needs its own `onBack` closure because the toolbar is hidden and the
+    /// system back button isn't visible — the SwipeBackEnabler reinstates the
+    /// edge-swipe gesture, but an in-view back button is also provided.
+    @ViewBuilder
+    private func mrtNavStack(_ path: Binding<[SoftMrtRoute]>) -> some View {
+        let pop = { if !path.wrappedValue.isEmpty { path.wrappedValue.removeLast() } }
+        NavigationStack(path: path) {
+            SoftMrtView(
+                onOpenLine: { line in path.wrappedValue.append(.line(line)) },
+                onOpenNews: { path.wrappedValue.append(.news) }
+            )
+            .adBannerGutter()
+            .softTopEdgeBlur()
+            .navigationDestination(for: SoftMrtRoute.self) { route in
+                switch route {
+                case .station(let station, let distM, let walkM):
+                    SoftMrtStationView(
+                        station: station,
+                        distanceM: distM,
+                        walkMin: walkM,
+                        onBack: pop
+                    )
+                    .adBannerGutter()
+                    .softTopEdgeBlur()
+                case .line(let line):
+                    SoftMrtLineView(line: line, onBack: pop)
+                        .adBannerGutter()
+                        .softTopEdgeBlur()
+                case .news:
+                    SoftMrtNewsView(onBack: pop)
+                        .adBannerGutter()
+                        .softTopEdgeBlur()
+                }
+            }
+        }
+    }
+
+    /// Navigates the Search tab's stack to an MRT station detail. The search
+    /// tab reuses the standard `SoftRoute` stack, so we push `.mrtStation`
+    /// using the shared `mrtStack` from the MRT tab — then switch to MRT.
+    /// This is the cleanest approach without adding mrtStation to SoftRoute
+    /// (which would require handling it in all other navStacks' routeView).
+    func navigateToStation(_ station: MrtGeoStation, distanceM: Int? = nil, walkMin: Int? = nil) {
+        tab = .mrt
+        mrtStack = [.station(station, distanceM: distanceM, walkMin: walkMin)]
     }
 }

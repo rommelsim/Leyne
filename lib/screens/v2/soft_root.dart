@@ -8,11 +8,14 @@ import 'soft_bus_screen.dart';
 import 'soft_favourites_screen.dart';
 import 'soft_home_screen.dart';
 import 'soft_mrt_screen.dart';
+import 'soft_mrt_station_screen.dart';
 import 'soft_search_screen.dart';
 import 'soft_settings_screen.dart';
 import 'soft_stop_screen.dart';
+import '../../data/mrt_geo.dart';
 import '../../services/app_open_ad.dart';
 import '../../services/interstitial_ad.dart';
+import '../../theme.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
 /// Route name tagged on Stop / Bus detail routes so the navigator observer can
@@ -80,17 +83,26 @@ class _SoftRootState extends State<SoftRoot> {
   void _handleTab(SoftTab next) {
     if (next == SoftTab.search) {
       _navKey.currentState?.push(
-        MaterialPageRoute(
-          builder: (_) => SoftSearchScreen(
+        // Fade-through instead of MaterialPageRoute's slide so that opening
+        // Search feels identical to switching any other tab. Back-stack
+        // semantics are preserved — this is still a pushed route, so Back from
+        // a stop/bus result returns to search results first, then to Home.
+        PageRouteBuilder<void>(
+          transitionDuration: LyneMotion.standard,
+          reverseTransitionDuration: LyneMotion.standard,
+          pageBuilder: (_, _, _) => SoftSearchScreen(
             onClose: () => _navKey.currentState?.pop(),
             // Push the result ON TOP of search (don't pop search first) so
-            // Back from the stop/bus returns to the search results, then Back
-            // again returns Home — instead of jumping straight to Home.
+            // Back from the stop/bus/station returns to the search results,
+            // then Back again returns Home — instead of jumping straight to Home.
             onOpenStop: (code) => _pushStop(code),
             onOpenBus: (stopCode, svc) =>
                 _pushBus(stopCode, svc, fullRoute: true),
+            onOpenStation: _pushMrtStationFromSearch,
             onTab: _handleTab,
           ),
+          transitionsBuilder: (_, anim, _, child) =>
+              FadeTransition(opacity: anim, child: child),
         ),
       );
       return;
@@ -110,6 +122,36 @@ class _SoftRootState extends State<SoftRoot> {
           stopCode: stopCode,
           svc: svc,
           fullRoute: fullRoute,
+          onBack: () => _navKey.currentState?.pop(),
+          onTab: _handleTab,
+          tabSelection: _tab,
+        ),
+      ),
+    );
+  }
+
+  /// Push station detail with walk/distance context (from nearest-stations tap).
+  void _pushMrtStation(MrtGeoStation station, int distanceM, int walkMin) {
+    _pushMrtStationDetail(station, distanceM: distanceM, walkMin: walkMin);
+  }
+
+  /// Push station detail without walk/distance context (from Search tap).
+  void _pushMrtStationFromSearch(MrtGeoStation station) {
+    _pushMrtStationDetail(station);
+  }
+
+  void _pushMrtStationDetail(
+    MrtGeoStation station, {
+    int? distanceM,
+    int? walkMin,
+  }) {
+    _navKey.currentState?.push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: _kDetailRouteName),
+        builder: (_) => SoftMrtStationScreen(
+          station: station,
+          distanceM: distanceM,
+          walkMin: walkMin,
           onBack: () => _navKey.currentState?.pop(),
           onTab: _handleTab,
           tabSelection: _tab,
@@ -161,9 +203,9 @@ class _SoftRootState extends State<SoftRoot> {
     // AnimatedSwitcher cross-fades; child keying by _tab ensures the
     // switcher sees a new widget identity on every tab change.
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
+      duration: LyneMotion.standard,
+      switchInCurve: LyneMotion.enter,
+      switchOutCurve: LyneMotion.exit,
       transitionBuilder: (child, anim) =>
           FadeTransition(opacity: anim, child: child),
       child: KeyedSubtree(key: ValueKey(_tab), child: _tabBody()),
@@ -186,7 +228,7 @@ class _SoftRootState extends State<SoftRoot> {
           onOpenSearch: () => _handleTab(SoftTab.search),
         );
       case SoftTab.mrt:
-        return SoftMrtScreen(onTab: _handleTab);
+        return SoftMrtScreen(onTab: _handleTab, onOpenStation: _pushMrtStation);
       case SoftTab.settings:
         return SoftSettingsScreen(onTab: _handleTab);
       case SoftTab.search:

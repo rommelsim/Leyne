@@ -18,6 +18,13 @@ struct LeyneActivityAttributes: ActivityAttributes {
         /// SCHEDULED marker so a timetable guess never reads as confident
         /// live tracking. Defaults true so existing call sites are unaffected.
         var monitored: Bool = true
+        /// Target arrival timestamp for live (monitored) buses. Used by
+        /// `Text(timerInterval:)` to produce an OS-ticked m:ss countdown
+        /// without a push every second. For schedule-only buses the static
+        /// `etaMinutes` value is used instead (we don't have second-level
+        /// precision for those). Defaults to `.distantFuture` so existing
+        /// call sites that don't set it won't accidentally show a countdown.
+        var eta: Date = .distantFuture
     }
 
     var busNo: String

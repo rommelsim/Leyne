@@ -37,10 +37,8 @@ class _PinnedCardState extends State<PinnedCard> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (sheetContext) => _RenameSheet(
-        initial: widget.card.label,
-        hint: widget.card.stopName,
-      ),
+      builder: (sheetContext) =>
+          _RenameSheet(initial: widget.card.label, hint: widget.card.stopName),
     );
     if (v != null && v.isNotEmpty && v != widget.card.label) {
       widget.onRename(v);
@@ -86,10 +84,7 @@ class _PinnedCardState extends State<PinnedCard> {
                 )
               else
                 for (var i = 0; i < visible.length; i++) ...[
-                  if (i == 0)
-                    const SizedBox(height: 12)
-                  else
-                    _rowDivider(t),
+                  if (i == 0) const SizedBox(height: 12) else _rowDivider(t),
                   _serviceRow(t, visible[i]),
                 ],
             ],
@@ -179,9 +174,11 @@ class _PinnedCardState extends State<PinnedCard> {
                   Row(
                     children: [
                       Container(
-                        width: 5, height: 5,
+                        width: 5,
+                        height: 5,
                         decoration: BoxDecoration(
-                          color: loadColor, shape: BoxShape.circle,
+                          color: loadColor,
+                          shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -193,7 +190,8 @@ class _PinnedCardState extends State<PinnedCard> {
                         const SizedBox(width: 8),
                         Text(
                           'WAB',
-                          style: t.mono(10, color: t.dim)
+                          style: t
+                              .mono(10, color: t.dim)
                               .copyWith(letterSpacing: 0.4),
                         ),
                       ],
@@ -213,21 +211,19 @@ class _PinnedCardState extends State<PinnedCard> {
                   children: [
                     Text(
                       big,
-                      style: t.mono(22, weight: FontWeight.w600, color: etaColor),
+                      style: t.mono(
+                        22,
+                        weight: FontWeight.w600,
+                        color: etaColor,
+                      ),
                     ),
                     const SizedBox(width: 3),
-                    Text(
-                      unit,
-                      style: t.mono(11, color: t.dim),
-                    ),
+                    Text(unit, style: t.mono(11, color: t.dim)),
                   ],
                 ),
                 if (followingMin > etaMin + 1) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    'then $followingMin',
-                    style: t.mono(10, color: t.faint),
-                  ),
+                  Text('then $followingMin', style: t.mono(10, color: t.faint)),
                 ],
               ],
             ),
@@ -248,8 +244,9 @@ class _RenameSheet extends StatefulWidget {
 }
 
 class _RenameSheetState extends State<_RenameSheet> {
-  late final TextEditingController _ctl =
-      TextEditingController(text: widget.initial);
+  late final TextEditingController _ctl = TextEditingController(
+    text: widget.initial,
+  );
 
   @override
   void dispose() {
@@ -261,16 +258,17 @@ class _RenameSheetState extends State<_RenameSheet> {
   Widget build(BuildContext context) {
     final t = context.t;
     return AnimatedPadding(
-      duration: const Duration(milliseconds: 120),
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      duration: LyneMotion.fast,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Rename stop',
-                style: t.sans(15, weight: FontWeight.w600)),
+            Text('Rename stop', style: t.sans(15, weight: FontWeight.w600)),
             const SizedBox(height: 12),
             TextField(
               controller: _ctl,
@@ -282,8 +280,10 @@ class _RenameSheetState extends State<_RenameSheet> {
                 isDense: true,
                 filled: true,
                 fillColor: t.bg,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(color: t.line),

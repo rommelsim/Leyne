@@ -89,6 +89,8 @@ flutter:
 
   assets:
     - assets/app_icon.png
+    - assets/mrt_stations_geo.json
+    - assets/mrt_system_map.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

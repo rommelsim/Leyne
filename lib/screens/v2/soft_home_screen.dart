@@ -24,6 +24,7 @@ import '../../data/weather_store.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
+import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/proximity.dart';
@@ -77,6 +78,8 @@ class _AlertItem extends _Item {
   _AlertItem(this.alert);
   final TrainAlert alert;
 }
+
+class _NativeAdItem extends _Item {}
 
 class _LiveBannerItem extends _Item {}
 
@@ -334,6 +337,12 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     items.add(_NearbyCardItem(nearby.first, highlight: true));
 
     // "Other nearby stops" — up to 11 more.
+    // The native ad card is injected after the 3rd stop (index 2) so it
+    // sits naturally mid-list rather than at the top or very bottom.
+    // NativeAdCard renders nothing (zero-size) until loaded + consent ready,
+    // so there is never a gap or placeholder when fill is pending.
+    const nativeAdAfterIndex =
+        2; // 0-based index of the stop after which the ad appears
     final others = nearby.skip(1).take(11).toList();
     if (others.isNotEmpty) {
       items.add(_GapItem(16));
@@ -342,6 +351,13 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       for (var i = 0; i < others.length; i++) {
         if (i > 0) items.add(_GapItem(10));
         items.add(_NearbyCardItem(others[i], highlight: false));
+        if (i == nativeAdAfterIndex &&
+            others.length > nativeAdAfterIndex + 1) {
+          // Only inject when there is at least one more stop below — keeps
+          // the ad from sitting as the final item in a short list.
+          items.add(_GapItem(10));
+          items.add(_NativeAdItem());
+        }
       }
     }
 
@@ -417,6 +433,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         ),
       ),
       _AlertItem(:final alert) => _mrtAlertCard(context, alert),
+      _NativeAdItem() => const NativeAdCard(),
       _LiveBannerItem() => _liveUpdatesBanner(context, pins: pins),
       _EmptyItem() => _EmptyState(
         onNearby: () async {

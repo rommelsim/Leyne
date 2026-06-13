@@ -119,7 +119,7 @@ private struct FavWidgetView: View {
                         .foregroundStyle(wFg).lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "star.fill").font(.system(size: 12)).foregroundStyle(wLive)
+                Image(systemName: "star.fill").font(.system(size: 12)).foregroundStyle(wDim)
                     .widgetAccentable()
             }
 
@@ -134,7 +134,7 @@ private struct FavWidgetView: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 HStack(spacing: 5) {
                     Image(systemName: "mappin.circle.fill")
-                        .font(.system(size: 13)).foregroundStyle(wLive)
+                        .font(.system(size: 13)).foregroundStyle(wDim)
                         .widgetAccentable()
                     Text(fav.stopName)
                         .font(.system(size: 14, weight: .medium))
@@ -145,8 +145,9 @@ private struct FavWidgetView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
                             .font(.system(size: etaLabel(row.eta1) == "Arr" ? 26 : 34,
-                                          weight: .medium, design: .monospaced))
-                            .foregroundStyle(arriving ? wLive : wFg)
+                                          weight: arriving ? .bold : .medium)
+                                  .monospacedDigit())
+                            .foregroundStyle(wFg)
                             .widgetAccentable(arriving)
                             .contentTransition(.numericText(countsDown: true))
                         if etaLabel(row.eta1) != "Arr" {
@@ -154,7 +155,7 @@ private struct FavWidgetView: View {
                         }
                     }
                 } else {
-                    Text("—").font(.system(size: 26, design: .monospaced)).foregroundStyle(wFaint)
+                    Text("—").font(.system(size: 26).monospacedDigit()).foregroundStyle(wFaint)
                 }
             }
             .padding(.top, 4)
@@ -166,7 +167,7 @@ private struct FavWidgetView: View {
                     ForEach(Array([row.eta2, row.eta3].compactMap { $0 }.prefix(2).enumerated()),
                             id: \.offset) { _, m in
                         Text("then \(m <= 0 ? "Arr" : "\(m) min")")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(wFaint)
                     }
                 }

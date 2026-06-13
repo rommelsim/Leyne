@@ -76,6 +76,7 @@ class SoftFavouritesScreen extends StatefulWidget {
 
 class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   _Segment _segment = _Segment.all;
+  bool _editing = false;
 
   @override
   void initState() {
@@ -170,9 +171,16 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
             LocationService.shared,
           ]),
           builder: (context, _) {
+            // Auto-exit edit mode when the list becomes empty.
+            if (_editing && _isEmpty) {
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => setState(() => _editing = false),
+              );
+            }
             return RefreshIndicator(
               color: t.accent,
-              onRefresh: _refreshAll,
+              // Disable pull-to-refresh while editing — drag gestures conflict.
+              onRefresh: _editing ? () async {} : _refreshAll,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
@@ -205,9 +213,38 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
   Widget _header(BuildContext context) {
     final t = context.t;
-    return Text(
-      'Saved',
-      style: t.sans(29, weight: FontWeight.w700, color: t.fg),
+    final canEdit = !_isEmpty;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Text(
+            'Saved',
+            style: t.sans(29, weight: FontWeight.w700, color: t.fg),
+          ),
+        ),
+        if (canEdit)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _editing = !_editing),
+            child: Padding(
+              // Expand tap target without shifting layout.
+              padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
+              child: AnimatedSwitcher(
+                duration: LyneMotion.short,
+                child: Text(
+                  _editing ? 'Done' : 'Edit',
+                  key: ValueKey(_editing),
+                  style: t.sans(
+                    16,
+                    weight: _editing ? FontWeight.w600 : FontWeight.w400,
+                    color: t.accent,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -242,8 +279,8 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       child: GestureDetector(
         onTap: () => setState(() => _segment = value),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeInOut,
+          duration: LyneMotion.short,
+          curve: LyneMotion.standardCurve,
           padding: const EdgeInsets.symmetric(vertical: 7),
           decoration: BoxDecoration(
             color: active ? t.soon : Colors.transparent,
@@ -284,22 +321,79 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       );
     }
 
+    final sectionHeader = _segment == _Segment.all
+        ? Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                Icon(Icons.star_rounded, size: 14, color: t.soon),
+                const SizedBox(width: 6),
+                Text(
+                  'Saved stops',
+                  style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+                ),
+              ],
+            ),
+          )
+        : null;
+
+    if (_editing) {
+      // ReorderableListView requires a fixed height when used inline inside a
+      // ListView. We use shrinkWrap + NeverScrollableScrollPhysics so it
+      // expands to its natural content height and delegates scrolling to the
+      // outer ListView.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ?sectionHeader,
+          ReorderableListView(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            // Remove the default drag elevation / Material shadow.
+            proxyDecorator: (child, index, animation) =>
+                Material(elevation: 0, color: Colors.transparent, child: child),
+            onReorderItem: (oldIndex, newIndex) {
+              final reordered = [...pins];
+              final item = reordered.removeAt(oldIndex);
+              reordered.insert(newIndex, item);
+              AppModel.shared.reorderPins(
+                reordered.map((p) => p.code).toList(),
+              );
+            },
+            children: [
+              for (final pin in pins)
+                Padding(
+                  key: ValueKey('reorder-pin-${pin.code}'),
+                  padding: EdgeInsets.only(bottom: pin == pins.last ? 0 : 10),
+                  child: Row(
+                    children: [
+                      Expanded(child: _pinCard(context, pin)),
+                      const SizedBox(width: 8),
+                      ReorderableDragStartListener(
+                        index: pins.indexOf(pin),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Icon(
+                            Icons.drag_handle_rounded,
+                            size: 22,
+                            color: context.t.dim,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Normal (non-edit) mode — Dismissible swipe-to-delete.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_segment == _Segment.all) ...[
-          Row(
-            children: [
-              Icon(Icons.star_rounded, size: 14, color: t.soon),
-              const SizedBox(width: 6),
-              Text(
-                'Saved stops',
-                style: t.sans(15, weight: FontWeight.w600, color: t.dim),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-        ],
+        ?sectionHeader,
         for (var i = 0; i < pins.length; i++) ...[
           if (i > 0) const SizedBox(height: 10),
           _pinRow(context, pins[i]),
@@ -375,19 +469,71 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   Widget _servicesSection(BuildContext context) {
     final t = context.t;
     final items = _visibleServices;
+
+    final sectionHeader = Row(
+      children: [
+        Icon(Icons.directions_bus_rounded, size: 14, color: t.soon),
+        const SizedBox(width: 6),
+        Text(
+          'Buses',
+          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+        ),
+      ],
+    );
+
+    if (_editing) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          sectionHeader,
+          const SizedBox(height: 10),
+          ReorderableListView(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            proxyDecorator: (child, index, animation) =>
+                Material(elevation: 0, color: Colors.transparent, child: child),
+            onReorderItem: (oldIndex, newIndex) {
+              final reordered = [...items];
+              final item = reordered.removeAt(oldIndex);
+              reordered.insert(newIndex, item);
+              AppModel.shared.reorderFavServices(
+                reordered.map((f) => f.id).toList(),
+              );
+            },
+            children: [
+              for (final fav in items)
+                Padding(
+                  key: ValueKey('reorder-svc-${fav.id}'),
+                  padding: EdgeInsets.only(bottom: fav == items.last ? 0 : 8),
+                  child: Row(
+                    children: [
+                      Expanded(child: _serviceCard(context, fav)),
+                      const SizedBox(width: 8),
+                      ReorderableDragStartListener(
+                        index: items.indexOf(fav),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Icon(
+                            Icons.drag_handle_rounded,
+                            size: 22,
+                            color: t.dim,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Normal (non-edit) mode — Dismissible swipe-to-delete.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(Icons.directions_bus_rounded, size: 14, color: t.soon),
-            const SizedBox(width: 6),
-            Text(
-              'Buses',
-              style: t.sans(15, weight: FontWeight.w600, color: t.dim),
-            ),
-          ],
-        ),
+        sectionHeader,
         const SizedBox(height: 10),
         for (var i = 0; i < items.length; i++) ...[
           if (i > 0) const SizedBox(height: 8),

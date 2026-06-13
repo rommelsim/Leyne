@@ -96,6 +96,10 @@ struct TrainAlert: Identifiable, Equatable {
     let title: String
     /// Body text — a trimmed single-sentence summary of the LTA message.
     let detail: String
+    /// LTA reported free public bus rides during this disruption.
+    let freeBus: Bool
+    /// LTA reported a free MRT shuttle service during this disruption.
+    let freeShuttle: Bool
 }
 
 /// Station crowdedness bucket from the PCDRealTime feed.
@@ -165,6 +169,12 @@ final class DataStore: ObservableObject {
     @Published var crowdByLine: [MRTLine: [StationCrowd]] = [:]
     private var crowdInflight: Set<MRTLine> = []
     private var lastCrowdFetch: [MRTLine: Date] = [:]
+
+    /// Forecasted station crowd for the next upcoming half-hour interval
+    /// (PCDForecast). Cached aggressively — forecast data is daily.
+    @Published var forecastByLine: [MRTLine: [StationCrowd]] = [:]
+    private var forecastInflight: Set<MRTLine> = []
+    private var lastForecastFetch: [MRTLine: Date] = [:]
 
     private(set) var stopByCode: [String: LTABusStop] = [:]
     private var services: [LTABusServiceDTO] = []
@@ -236,7 +246,9 @@ final class DataStore: ObservableObject {
                         line: MRTLine.from(ltaCode: seg.Line),
                         title: "\(MRTLine.shortLabel(forLta: seg.Line)) · disrupted",
                         detail: trainAlertSummary(
-                            seg: seg, messages: r.Message))
+                            seg: seg, messages: r.Message),
+                        freeBus: !(seg.FreePublicBus?.trimmingCharacters(in: .whitespaces).isEmpty ?? true),
+                        freeShuttle: !(seg.FreeMRTShuttle?.trimmingCharacters(in: .whitespaces).isEmpty ?? true))
                 }
                 : []
             // Notify about lines that just became disrupted — i.e. present
@@ -301,6 +313,52 @@ final class DataStore: ObservableObject {
                          level: CrowdLevel.from(row.CrowdLevel))
         }
         crowdByLine[line] = mapped
+    }
+
+    // ─── Station crowd forecast (PCDForecast) ─────────────
+    /// Fetch the next-upcoming-interval forecast for one line. Forecast data
+    /// is published daily; cache for 30 min — aggressive relative to real-time
+    /// but still picks up intraday re-publications.
+    func refreshForecast(line: MRTLine, force: Bool = false) {
+        if !force, let last = lastForecastFetch[line],
+           Date().timeIntervalSince(last) < 1800 { return }
+        if forecastInflight.contains(line) { return }
+        forecastInflight.insert(line)
+        lastForecastFetch[line] = Date()
+        Task { await self.fetchForecast(line: line) }
+    }
+
+    private func fetchForecast(line: MRTLine) async {
+        defer { forecastInflight.remove(line) }
+        guard let intervals = try? await api.stationForecast(trainLine: line.pcdLineCode) else {
+            // Keep the existing cached result on failure rather than
+            // blanking it — the "Now" crowd path is unaffected either way.
+            return
+        }
+        if intervals.isEmpty {
+            forecastByLine[line] = []
+            return
+        }
+        let now = Date()
+        // Group intervals by station, then pick the first one whose Start is
+        // >= now (the next upcoming half-hour). Fall back to the latest
+        // available interval when all are in the past (end of service day).
+        var byStation: [String: [LTAForecastInterval]] = [:]
+        for interval in intervals {
+            byStation[interval.station, default: []].append(interval)
+        }
+        var mapped: [StationCrowd] = []
+        for (station, stationIntervals) in byStation {
+            let sorted = stationIntervals.sorted { $0.start < $1.start }
+            let chosen = sorted.first(where: { $0.start >= now }) ?? sorted.last
+            guard let chosen else { continue }
+            mapped.append(StationCrowd(
+                code: station,
+                name: mrtStationName(forCode: station) ?? station,
+                level: CrowdLevel.from(chosen.crowdLevel)
+            ))
+        }
+        forecastByLine[line] = mapped
     }
 
     /// Pluck the first matching `Message.Content` for the segment, trim
@@ -609,8 +667,10 @@ final class DataStore: ObservableObject {
 
     /// Live snapshot for one service at a stop — used by the Live Activity to
     /// poll the real ETA + bus position (no mock/elapsed-time simulation).
+    /// `arrivalDate` is the raw LTA timestamp (used by the Live Activity's
+    /// self-ticking countdown); `etaSec` is derived from it relative to now.
     func liveServiceSnapshot(serviceNo: String, stopCode: String)
-        async -> (etaSec: Int, coord: CLLocationCoordinate2D?, monitored: Bool)? {
+        async -> (etaSec: Int, arrivalDate: Date, coord: CLLocationCoordinate2D?, monitored: Bool)? {
         guard let resp = try? await api.busArrival(stopCode: stopCode, serviceNo: serviceNo),
               let svc = resp.Services.first(where: { $0.ServiceNo == serviceNo }),
               let arr = svc.NextBus.arrivalDate
@@ -623,7 +683,7 @@ final class DataStore: ObservableObject {
         // Absent Monitored ⟶ live (LTA only emits 0 when it genuinely has no
         // GPS), matching the convention used in LTAModels.
         let monitored = (svc.NextBus.Monitored ?? 1) == 1
-        return (eta, coord, monitored)
+        return (eta, arr, coord, monitored)
     }
 }
 

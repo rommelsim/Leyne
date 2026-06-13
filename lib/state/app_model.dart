@@ -65,17 +65,17 @@ class ActiveAlight {
   final DateTime fireAt;
 
   Map<String, dynamic> toJson() => {
-        'busNo': busNo,
-        'stopCode': stopCode,
-        'stopName': stopName,
-        'fireAt': fireAt.millisecondsSinceEpoch,
-      };
+    'busNo': busNo,
+    'stopCode': stopCode,
+    'stopName': stopName,
+    'fireAt': fireAt.millisecondsSinceEpoch,
+  };
   factory ActiveAlight.fromJson(Map<String, dynamic> j) => ActiveAlight(
-        busNo: j['busNo'] as String,
-        stopCode: j['stopCode'] as String,
-        stopName: j['stopName'] as String,
-        fireAt: DateTime.fromMillisecondsSinceEpoch(j['fireAt'] as int),
-      );
+    busNo: j['busNo'] as String,
+    stopCode: j['stopCode'] as String,
+    stopName: j['stopName'] as String,
+    fireAt: DateTime.fromMillisecondsSinceEpoch(j['fireAt'] as int),
+  );
 }
 
 // ─── FavService (2.4.0) ────────────────────────────────────────────────────
@@ -98,19 +98,13 @@ class FavService {
   /// True when saved as "next arrival near me" (not stop-specific).
   bool get isAnywhere => stop == null;
 
-  factory FavService.fromJson(Map<String, dynamic> j) => FavService(
-        no: j['no'] as String,
-        stop: j['stop'] as String?,
-      );
+  factory FavService.fromJson(Map<String, dynamic> j) =>
+      FavService(no: j['no'] as String, stop: j['stop'] as String?);
 
-  Map<String, dynamic> toJson() => {
-        'no': no,
-        if (stop != null) 'stop': stop,
-      };
+  Map<String, dynamic> toJson() => {'no': no, if (stop != null) 'stop': stop};
 
   @override
-  bool operator ==(Object other) =>
-      other is FavService && other.id == id;
+  bool operator ==(Object other) => other is FavService && other.id == id;
 
   @override
   int get hashCode => id.hashCode;
@@ -129,16 +123,16 @@ class Pin {
   List<String>? tracked; // null = all
 
   factory Pin.fromJson(Map<String, dynamic> j) => Pin(
-        code: j['code'] as String,
-        nickname: (j['nickname'] as String?) ?? '',
-        tracked: (j['tracked'] as List?)?.cast<String>(),
-      );
+    code: j['code'] as String,
+    nickname: (j['nickname'] as String?) ?? '',
+    tracked: (j['tracked'] as List?)?.cast<String>(),
+  );
 
   Map<String, dynamic> toJson() => {
-        'code': code,
-        'nickname': nickname,
-        if (tracked != null) 'tracked': tracked,
-      };
+    'code': code,
+    'nickname': nickname,
+    if (tracked != null) 'tracked': tracked,
+  };
 }
 
 class AppModel extends ChangeNotifier {
@@ -306,8 +300,7 @@ class AppModel extends ChangeNotifier {
         await NotificationsService.shared.requestExactAlarmAuthorization();
         _notificationsEnabled = true;
         _prefs?.setBool(_kNotifKey, true);
-        await NotificationsService.shared
-            .scheduleAlerts(_alerts, _ds.arrivals);
+        await NotificationsService.shared.scheduleAlerts(_alerts, _ds.arrivals);
       } else {
         _notificationsEnabled = false;
         _prefs?.setBool(_kNotifKey, false);
@@ -382,11 +375,18 @@ class AppModel extends ChangeNotifier {
     required DateTime fireAt,
   }) async {
     _activeAlight = ActiveAlight(
-        busNo: busNo, stopCode: stopCode, stopName: stopName, fireAt: fireAt);
+      busNo: busNo,
+      stopCode: stopCode,
+      stopName: stopName,
+      fireAt: fireAt,
+    );
     _prefs?.setString(_kAlightKey, jsonEncode(_activeAlight!.toJson()));
     await NotificationsService.shared.scheduleAlightAlert(
-      busNo: busNo, alightStopCode: stopCode,
-      alightStopName: stopName, fireAt: fireAt);
+      busNo: busNo,
+      alightStopCode: stopCode,
+      alightStopName: stopName,
+      fireAt: fireAt,
+    );
     notifyListeners();
   }
 
@@ -524,8 +524,10 @@ class AppModel extends ChangeNotifier {
     if (a.kind == AlertKind.destination &&
         destinationFireAt != null &&
         _notificationsEnabled) {
-      await NotificationsService.shared
-          .scheduleDestinationAlert(a, destinationFireAt);
+      await NotificationsService.shared.scheduleDestinationAlert(
+        a,
+        destinationFireAt,
+      );
     }
     await rescheduleIfNeeded();
     notifyListeners();
@@ -555,8 +557,7 @@ class AppModel extends ChangeNotifier {
     required AlertKind kind,
     required String busNo,
     required String stopCode,
-  }) =>
-      removeAlert(BusAlert.makeId(kind, busNo, stopCode));
+  }) => removeAlert(BusAlert.makeId(kind, busNo, stopCode));
 
   // ─── Pins / recents (persisted) ───────────────────────────
   List<Pin> _pins = const [];
@@ -577,8 +578,10 @@ class AppModel extends ChangeNotifier {
     _onboardingDone = _prefs!.getBool(_kOnboardingDoneKey) ?? false;
     _use24h = _prefs!.getBool(_kUse24hKey) ?? true;
     final tm = _prefs!.getString(_kThemeModeKey);
-    _themeMode = ThemeMode.values
-        .firstWhere((m) => m.name == tm, orElse: () => ThemeMode.system);
+    _themeMode = ThemeMode.values.firstWhere(
+      (m) => m.name == tm,
+      orElse: () => ThemeMode.system,
+    );
     final lc = _prefs!.getString(_kLocaleKey);
     _locale = (lc == null || lc.isEmpty) ? null : Locale(lc);
     // Default OFF: the flag is the persisted result of the permission
@@ -595,7 +598,9 @@ class AppModel extends ChangeNotifier {
       try {
         final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
         _pins = list.map(Pin.fromJson).toList();
-      } catch (_) {/* corrupt — start empty */}
+      } catch (_) {
+        /* corrupt — start empty */
+      }
     }
     _recents = _prefs!.getStringList(_kRecentsKey) ?? const [];
     _hiddenNearby = (_prefs!.getStringList(_kHiddenNearbyKey) ?? const [])
@@ -606,7 +611,9 @@ class AppModel extends ChangeNotifier {
       try {
         final list = (jsonDecode(favRaw) as List).cast<Map<String, dynamic>>();
         _favServices = list.map(FavService.fromJson).toList();
-      } catch (_) {/* corrupt — start empty */}
+      } catch (_) {
+        /* corrupt — start empty */
+      }
     }
     // Restore any in-flight alight ride so the picker still shows the
     // armed stop on reopen. We don't re-schedule the notification — the
@@ -616,8 +623,11 @@ class AppModel extends ChangeNotifier {
     if (alightRaw != null) {
       try {
         _activeAlight = ActiveAlight.fromJson(
-            jsonDecode(alightRaw) as Map<String, dynamic>);
-      } catch (_) {/* corrupt — start empty */}
+          jsonDecode(alightRaw) as Map<String, dynamic>,
+        );
+      } catch (_) {
+        /* corrupt — start empty */
+      }
     }
     // Configurable alerts (notifications redesign). When the key is present we
     // load it verbatim; when it's absent we run a one-time, best-effort
@@ -628,9 +638,12 @@ class AppModel extends ChangeNotifier {
     final alertsRaw = _prefs!.getString(_kAlertsKey);
     if (alertsRaw != null) {
       try {
-        final list = (jsonDecode(alertsRaw) as List).cast<Map<String, dynamic>>();
+        final list = (jsonDecode(alertsRaw) as List)
+            .cast<Map<String, dynamic>>();
         _alerts = list.map(BusAlert.fromJson).toList();
-      } catch (_) {/* corrupt — start empty */}
+      } catch (_) {
+        /* corrupt — start empty */
+      }
     } else {
       _migrateLegacyAlerts();
     }
@@ -662,26 +675,30 @@ class AppModel extends ChangeNotifier {
       final tracked = p.tracked;
       if (tracked == null) continue;
       for (final no in tracked) {
-        seeded.add(BusAlert(
-          kind: AlertKind.arrival,
-          busNo: no,
-          stopCode: p.code,
-          stopName: _ds.stopName(p.code),
-          leadMinutes: 1,
-        ));
+        seeded.add(
+          BusAlert(
+            kind: AlertKind.arrival,
+            busNo: no,
+            stopCode: p.code,
+            stopName: _ds.stopName(p.code),
+            leadMinutes: 1,
+          ),
+        );
       }
     }
     // The active alight ride became a destination alert (lead 1).
     final a = _activeAlight;
     if (a != null) {
-      seeded.add(BusAlert(
-        kind: AlertKind.destination,
-        busNo: a.busNo,
-        stopCode: a.stopCode,
-        stopName: a.stopName,
-        leadMinutes: 1,
-        boardStopCode: a.stopCode,
-      ));
+      seeded.add(
+        BusAlert(
+          kind: AlertKind.destination,
+          busNo: a.busNo,
+          stopCode: a.stopCode,
+          stopName: a.stopName,
+          leadMinutes: 1,
+          boardStopCode: a.stopCode,
+        ),
+      );
     }
     _alerts = seeded;
     _persistAlerts();
@@ -690,14 +707,19 @@ class AppModel extends ChangeNotifier {
   void addRecent(String q) {
     final v = q.trim();
     if (v.isEmpty) return;
-    final next = [v, ..._recents.where((r) => r.toLowerCase() != v.toLowerCase())];
+    final next = [
+      v,
+      ..._recents.where((r) => r.toLowerCase() != v.toLowerCase()),
+    ];
     _recents = next.take(8).toList();
     _prefs?.setStringList(_kRecentsKey, _recents);
     notifyListeners();
   }
 
   void removeRecent(String q) {
-    _recents = _recents.where((r) => r.toLowerCase() != q.toLowerCase()).toList();
+    _recents = _recents
+        .where((r) => r.toLowerCase() != q.toLowerCase())
+        .toList();
     _prefs?.setStringList(_kRecentsKey, _recents);
     notifyListeners();
   }
@@ -797,10 +819,7 @@ class AppModel extends ChangeNotifier {
     // absent or the cache is fresh.
     if (tick % 60 == 0) {
       final loc = _loc.lastLocation;
-      WeatherStore.shared.refreshIfStale(
-        lat: loc?.lat,
-        lon: loc?.lon,
-      );
+      WeatherStore.shared.refreshIfStale(lat: loc?.lat, lon: loc?.lon);
     }
     // Live tracker (single, automatic): point it at the soonest-arriving
     // alerted bus and push its ETA. A 5 s cadence is plenty (ETA shows whole
@@ -830,10 +849,7 @@ class AppModel extends ChangeNotifier {
       }
       final f = s.followingDate;
       if (f != null) {
-        followingSec = f
-            .difference(now)
-            .inSeconds
-            .clamp(etaSec, 1 << 30);
+        followingSec = f.difference(now).inSeconds.clamp(etaSec, 1 << 30);
       }
       return Service(
         no: s.no,
@@ -848,8 +864,7 @@ class AppModel extends ChangeNotifier {
         followingDate: s.followingDate,
         thirdDate: s.thirdDate,
       );
-    }).toList()
-      ..sort((a, b) => a.etaSec.compareTo(b.etaSec));
+    }).toList()..sort((a, b) => a.etaSec.compareTo(b.etaSec));
     return out;
   }
 
@@ -892,10 +907,7 @@ class AppModel extends ChangeNotifier {
     if (idx >= 0) {
       _pins = [..._pins]..removeAt(idx);
     } else {
-      _pins = [
-        ..._pins,
-        Pin(code: code, nickname: _ds.stopName(code)),
-      ];
+      _pins = [..._pins, Pin(code: code, nickname: _ds.stopName(code))];
       _markRecentlyAdded(code);
     }
     _persistPins();
@@ -908,7 +920,8 @@ class AppModel extends ChangeNotifier {
     if (tracked.isEmpty) return; // empty subset means unpin — caller's bug
     final all = _ds.servicesFor(code).map((s) => s.no).toSet();
     final trackedSet = tracked.toSet();
-    final normalised = trackedSet.containsAll(all) && all.containsAll(trackedSet)
+    final normalised =
+        trackedSet.containsAll(all) && all.containsAll(trackedSet)
         ? null
         : tracked.toList();
 
@@ -946,7 +959,10 @@ class AppModel extends ChangeNotifier {
   }
 
   /// Service numbers hidden from the Home card for this stop.
-  Set<String> hiddenSet({required String code, List<String> allNos = const []}) {
+  Set<String> hiddenSet({
+    required String code,
+    List<String> allNos = const [],
+  }) {
     final p = pinForCode(code);
     if (p == null) return allNos.toSet();
     final tr = p.tracked;
@@ -1009,10 +1025,7 @@ class AppModel extends ChangeNotifier {
       if (idx >= 0) {
         _pins[idx].tracked = null; // all
       } else {
-        _pins = [
-          ..._pins,
-          Pin(code: code, nickname: _ds.stopName(code)),
-        ];
+        _pins = [..._pins, Pin(code: code, nickname: _ds.stopName(code))];
         _markRecentlyAdded(code);
       }
     } else if (idx >= 0) {
@@ -1117,8 +1130,7 @@ class AppModel extends ChangeNotifier {
     if (at < 0) return;
     final busNo = key.substring(0, at);
     final stopCode = key.substring(at + 1);
-    final matches =
-        liveServices(stopCode).where((s) => s.no == busNo).toList();
+    final matches = liveServices(stopCode).where((s) => s.no == busNo).toList();
     if (matches.isEmpty) {
       // Data momentarily empty — keep the last shown state, but don't do it
       // forever: if the service has truly dropped out, finalise the tracker
@@ -1166,6 +1178,22 @@ class AppModel extends ChangeNotifier {
     next.addAll(byCode.values); // any not in newCodes preserved
     _pins = next;
     _persistPins();
+    notifyListeners();
+  }
+
+  /// Reorder saved services to [newIds] (list of FavService.id). Any id not
+  /// present in [newIds] is appended at the end (preserves items added
+  /// concurrently). Persists immediately.
+  void reorderFavServices(List<String> newIds) {
+    final byId = {for (final f in _favServices) f.id: f};
+    final next = <FavService>[];
+    for (final id in newIds) {
+      final f = byId.remove(id);
+      if (f != null) next.add(f);
+    }
+    next.addAll(byId.values); // any not in newIds preserved
+    _favServices = next;
+    _persistFavServices();
     notifyListeners();
   }
 

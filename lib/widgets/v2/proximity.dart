@@ -25,19 +25,27 @@ Color etaColor({
   required int etaSec,
   required ArrivalConfidence confidence,
   required LyneTheme t,
-}) =>
-    confidence == ArrivalConfidence.unconfirmed ? t.dim : t.fg;
+}) => confidence == ArrivalConfidence.unconfirmed ? t.dim : t.fg;
 
 // ─── Occupancy ─────────────────────────────────────────────────────────────
 
 /// Shared crowding colour: seats → green, standing → amber, limited/unknown
-/// → neutral grey. Used by both OccupancyLabel and CrowdMeter.
+/// → neutral grey. Used by OccupancyLabel (CrowdMeter has its own copy to
+/// avoid a circular import).
+///
+/// Colours are HARDCODED (not sourced from t.soon/t.mid) so occupancy stays
+/// green/amber after the 2.6.0 monochrome theme change. Mirrors the intent
+/// of iOS Proximity.swift occupancyColor, where t.soon/t.mid are also the
+/// source but iOS keeps them coloured — Android makes this explicit instead.
+///   sea → system green   (seats available)
+///   sda → system orange  (standing available)
+///   lsd/null → t.dim     (limited/unknown — neutral grey)
 Color occupancyColor(Load? load, LyneTheme t) {
   switch (load) {
     case Load.sea:
-      return t.soon;
+      return const Color(0xFF34C759); // system green
     case Load.sda:
-      return t.mid;
+      return const Color(0xFFFF9500); // system orange/amber
     case Load.lsd:
     case null:
       return t.dim;
@@ -67,8 +75,10 @@ class OccupancyLabel extends StatelessWidget {
         children: [
           Icon(_icon, size: size, color: color),
           const SizedBox(width: 4),
-          Text(_text,
-              style: t.mono(size, weight: FontWeight.w500, color: color)),
+          Text(
+            _text,
+            style: t.mono(size, weight: FontWeight.w500, color: color),
+          ),
         ],
       ),
     );

@@ -63,7 +63,15 @@ struct SoftHomeView: View {
                             .listRowInsets(EdgeInsets(top: 10, leading: 18, bottom: 2, trailing: 16))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                        ForEach(others, id: \.id) { stopCard($0, highlight: false) }
+                        // Insert native ad after the 3rd card (index 2 in `others`).
+                        // NativeAdCard renders EmptyView when no ad is loaded or
+                        // ads are suppressed, so this is always safe to emit.
+                        ForEach(Array(others.enumerated()), id: \.element.id) { index, stop in
+                            stopCard(stop, highlight: false)
+                            if index == 2 {
+                                NativeAdCard()
+                            }
+                        }
                     }
                 } else {
                     SoftEmptyState(t: t,

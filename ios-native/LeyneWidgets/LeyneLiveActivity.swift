@@ -14,28 +14,33 @@ private func dyn(dark: UIColor, light: UIColor) -> Color {
         trait.userInterfaceStyle == .dark ? dark : light
     })
 }
-// Monochrome to match the app (Leyne/Theme.swift): a near-black / off-white
-// BASE (`ink` ≈ Theme.bg) with a pure white / near-black FOREGROUND
-// (`paper` ≈ Theme.accent). `green` (≈ Theme.soon) is a SEMANTIC accent ONLY —
-// reserved for the arrival moment ("Bus is here" / the arrived ETA / the bus
-// landing on your stop), never the resting palette. The Live Activity used to
-// read as green-dominant; the app is monochrome, so this brings it in line.
+// Fully monochrome, matching the app (Leyne/Theme.swift): a near-black /
+// off-white BASE (`ink` ≈ Theme.bg) with a pure white / near-black FOREGROUND
+// (`paper` ≈ Theme.accent). The app went monochrome in 2.6.0 — Theme.soon is
+// now ink, NOT green — so the arrival moment ("Bus is here") is emphasised with
+// ink weight + the "Now" label, never hue. `arrivalAccent` is therefore ink
+// (kept as a named token so the arrival call sites stay self-documenting).
 private let ink = dyn(
     dark:  UIColor(red: 0x0F/255, green: 0x0F/255, blue: 0x0F/255, alpha: 1),
     light: UIColor(red: 0xF2/255, green: 0xF2/255, blue: 0xF2/255, alpha: 1))
 private let paper = dyn(
     dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1),
     light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1))
-/// Arrival accent ONLY — mirrors Theme.soon. Absent from the resting palette.
-private let green = dyn(
-    dark:  UIColor(red: 0x3D/255, green: 0xD6/255, blue: 0x8C/255, alpha: 1),
-    light: UIColor(red: 0x1A/255, green: 0xA2/255, blue: 0x51/255, alpha: 1))
+/// Arrival emphasis — monochrome ink (mirrors Theme.soon, which is now ink).
+/// Named separately so the "Bus is here" call sites read intentionally.
+private let green = paper
 private let dim = dyn(
     dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.55),
     light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.55))
 
 private func etaText(_ s: LeyneActivityAttributes.ContentState) -> String {
     s.arrived ? "Now" : (s.etaMinutes <= 0 ? "Arr" : "\(s.etaMinutes)")
+}
+
+/// True when the state should render a live, OS-ticked m:ss countdown.
+/// Requires a real monitored bus whose target Date is still in the future.
+private func shouldShowTimer(_ s: LeyneActivityAttributes.ContentState) -> Bool {
+    !s.arrived && s.monitored && s.eta > .now
 }
 
 /// Whisper-quiet estimate tell: a single faint "~" before a scheduled-only
@@ -178,7 +183,7 @@ struct LeyneLiveActivity: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Text(context.attributes.busNo)
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(ink)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(paper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -187,15 +192,31 @@ struct LeyneLiveActivity: Widget {
                         .padding(.leading, 12)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(confPrefix(context.state) + etaText(context.state))
-                            .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(context.state.arrived ? green : paper)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                        if !context.state.arrived && context.state.etaMinutes > 0 {
-                            Text("min")
-                                .font(.system(size: 10)).foregroundStyle(dim)
+                    Group {
+                        if context.state.arrived {
+                            Text("Now")
+                                .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(green)
+                                .lineLimit(1)
+                        } else if shouldShowTimer(context.state) {
+                            Text(timerInterval: .now...context.state.eta, countsDown: true)
+                                .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(paper)
+                                .multilineTextAlignment(.trailing)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                        } else {
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text(confPrefix(context.state) + etaText(context.state))
+                                    .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                                    .foregroundStyle(paper)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.6)
+                                if context.state.etaMinutes > 0 {
+                                    Text("min")
+                                        .font(.system(size: 10)).foregroundStyle(dim)
+                                }
+                            }
                         }
                     }
                     .padding(.trailing, 10)
@@ -227,26 +248,38 @@ struct LeyneLiveActivity: Widget {
                     .widgetURL(busURL(context.attributes))
                 }
             } compactLeading: {
-                // Bus glyph (mockup) rather than the number — identity lives in
-                // the expanded badge; the compact rail is about "a bus is coming".
-                Image(systemName: "bus.fill")
-                    .font(.system(size: 13, weight: .bold))
+                // Bus NUMBER, not a generic glyph — the identity is the whole
+                // point. Paired with the ETA in compactTrailing, the collapsed
+                // island answers "which bus, how long" at a glance.
+                Text(context.attributes.busNo)
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(context.state.arrived ? green : paper)
+                    .lineLimit(1).minimumScaleFactor(0.7)
                     .widgetAccentable()
                     .widgetURL(busURL(context.attributes))
             } compactTrailing: {
-                Text(confPrefix(context.state) + etaText(context.state)
-                     + (context.state.arrived || context.state.etaMinutes <= 0 ? "" : "m"))
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                // STATIC minute value only — never a `Text(timerInterval:)` here.
+                // A self-sizing timer reserves width for its widest value, which
+                // balloons the compact island across the whole notch and covers
+                // the status-bar clock + battery. The live m:ss countdown lives
+                // on the lock screen + expanded views, where there's room.
+                Text(context.state.arrived
+                     ? "Now"
+                     : confPrefix(context.state) + etaText(context.state)
+                        + (context.state.etaMinutes <= 0 ? "" : "m"))
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
                     .foregroundStyle(context.state.arrived ? green : paper)
                     .widgetURL(busURL(context.attributes))
             } minimal: {
                 // The minimal view (multiple Live Activities) is the tiniest notch
-                // presentation — show the ETA, the one thing worth a glance, rather
-                // than the bus number (identity lives in the compact/expanded views).
-                Text(confPrefix(context.state) + etaText(context.state))
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                // presentation — show the ETA, the one actionable number. The app
+                // only ever runs ONE bus Live Activity at a time, so the bus
+                // number isn't needed to disambiguate here (it's in the
+                // compact/expanded views). Static minute, never a wide timer.
+                Text(context.state.arrived ? "Now" : etaText(context.state))
+                    .font(.system(size: 11, weight: .bold).monospacedDigit())
                     .foregroundStyle(context.state.arrived ? green : paper)
+                    .lineLimit(1).minimumScaleFactor(0.6)
                     .widgetAccentable()
                     .widgetURL(busURL(context.attributes))
             }
@@ -266,7 +299,7 @@ private struct LockScreenView: View {
             // number; the lock-screen card carried none before this).
             HStack(spacing: 9) {
                 Text(attributes.busNo)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(ink)
                     .padding(.horizontal, 7).frame(minWidth: 34, minHeight: 24)
                     .background(paper, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -274,14 +307,30 @@ private struct LockScreenView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(dim).lineLimit(1)
                 Spacer(minLength: 6)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(confPrefix(state) + etaText(state))
-                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(state.arrived ? green : paper)
-                        .lineLimit(1)
-                    if !state.arrived && state.etaMinutes > 0 {
-                        Text("min")
-                            .font(.system(size: 10)).foregroundStyle(dim)
+                Group {
+                    if state.arrived {
+                        Text("Now")
+                            .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(green)
+                    } else if shouldShowTimer(state) {
+                        // Live bus: OS-ticked countdown, no manual push needed.
+                        Text(timerInterval: .now...state.eta, countsDown: true)
+                            .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(paper)
+                            .multilineTextAlignment(.trailing)
+                            .lineLimit(1)
+                    } else {
+                        // Schedule-only: static minute with whisper-quiet "~".
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text(confPrefix(state) + etaText(state))
+                                .font(.system(size: 22, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(paper)
+                                .lineLimit(1)
+                            if state.etaMinutes > 0 {
+                                Text("min")
+                                    .font(.system(size: 10)).foregroundStyle(dim)
+                            }
+                        }
                     }
                 }
             }
@@ -295,10 +344,9 @@ private struct LockScreenView: View {
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(p.isGreen ? green : paper)
                     .widgetAccentable(p.isGreen)
-                if !state.monitored && !state.arrived {
-                    // Whisper-quiet scheduled tell — see feedback_timely_over_honest.
-                    Text("~").font(.system(size: 16, weight: .semibold)).foregroundStyle(dim)
-                }
+                // No "~" here — the scheduled-only whisper belongs on the ETA
+                // (which already shows it). Appending it to the phase word read
+                // as "Next stop ~", which looks like a glitch.
                 Spacer(minLength: 0)
             }
 
@@ -329,9 +377,12 @@ private struct LockScreenView: View {
 @main
 struct LeyneWidgetBundle: WidgetBundle {
     var body: some Widget {
-        LeyneStopWidget()          // Home Screen — pinned stop arrivals
-        LeyneNearbyWidget()        // Home Screen — closest stops
-        LeyneFavServiceWidget()    // Home Screen — favourited service
+        // Home Screen widgets are all PARKED — focus is the Live Activity.
+        // The source (nearest-stop / pinned-stop / fav-service) stays in the
+        // target; re-register here when we return to Home Screen widgets.
+        // LeyneNearbyWidget()     // Home Screen — nearest stop name + code (parked)
+        // LeyneStopWidget()       // Home Screen — pinned stop arrivals (parked)
+        // LeyneFavServiceWidget() // Home Screen — favourited service (parked)
         LeyneLiveActivity()        // Lock Screen / Dynamic Island
     }
 }
