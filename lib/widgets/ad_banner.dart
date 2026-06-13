@@ -244,14 +244,29 @@ String _nativeUnitId() {
   return 'ca-app-pub-5864511655536507/3213886079';
 }
 
-/// Inline native ad card using NativeTemplateStyle (TemplateType.small).
+/// Inline native ad card using NativeTemplateStyle (TemplateType.medium).
 ///
 /// Uses the SDK's built-in native template — no NativeAdFactory registration
-/// required. The template is styled monochrome to match the app:
-///   • mainBackgroundColor → theme surface
+/// required. TemplateType.medium is chosen over small because it renders at a
+/// height (≈120–160 pt) that naturally sits in the same visual rhythm as the
+/// nearby-stop cards (~80–90 pt padded). The small template's intrinsic height
+/// (~55–70 pt) is too short — even with a minHeight constraint the creative
+/// sits in an empty shell that reads as a thin band next to full-height stops.
+/// Medium fills to a richer, intentional size with both sparse and rich
+/// creatives; it is capped at 200 pt so it never dominates the list.
+///
+/// The outer card frame mirrors _NearbyCard exactly:
+///   • Material(color: t.surface, borderRadius: 18)
+///   • 1 pt t.line border (same as a non-highlighted stop card)
+///   • ClipAntiAlias so the SDK's platform view respects the rounded corners
+///   • Horizontal margins come from the ListView padding (16 each side) —
+///     no extra horizontal margin needed inside the widget.
+///
+/// NativeTemplateStyle tokens — monochrome, light/dark aware:
+///   • mainBackgroundColor → t.surface  (transparent to the Material layer)
 ///   • CTA → accent background, onAccent text
-///   • primary/secondary/tertiary text → fg/dim/faint at the app's sizes
-///   • cornerRadius → LyneRadius.md (16)
+///   • primary/secondary/tertiary text → fg/dim/faint at the app's type scale
+///   • cornerRadius → 18 (matches the stop-card corner, applied to icon + CTA)
 ///
 /// Consent gate and lifecycle rules mirror AdBanner:
 ///   • Load is deferred until AdConsent.started.
@@ -270,6 +285,9 @@ class _NativeAdCardState extends State<NativeAdCard> {
   NativeAd? _ad;
   bool _loaded = false;
   Timer? _retry;
+
+  // The stop-card corner radius — 18 pt, matching _NearbyCard exactly.
+  static const double _cardRadius = 18;
 
   @override
   void initState() {
@@ -315,12 +333,17 @@ class _NativeAdCardState extends State<NativeAdCard> {
         },
       ),
       nativeTemplateStyle: NativeTemplateStyle(
-        templateType: TemplateType.small,
-        // Surface background — card reads as part of the list, not a
-        // foreign white box. Matches other nearby-stop card surfaces.
+        // medium gives a richer, intentional height (≈120–160 pt) that sits
+        // in the same visual rhythm as the nearby-stop cards. It also
+        // exposes more creative surface (image slot), which improves eCPM.
+        templateType: TemplateType.medium,
+        // Surface background — matches the stop-card Material surface so the
+        // ad reads as part of the list, not a foreign white box.
         mainBackgroundColor: t.surface,
-        // cornerRadius applies to the icon and CTA on Android.
-        cornerRadius: LyneRadius.md,
+        // cornerRadius: applies to the app icon and CTA button inside the
+        // template. Use 18 to match the stop-card outer corner so internal
+        // and external radii feel consistent.
+        cornerRadius: _cardRadius,
         // CTA button: accent background (monochrome ink) + onAccent text.
         callToActionTextStyle: NativeTemplateTextStyle(
           textColor: t.onAccent,
@@ -355,11 +378,27 @@ class _NativeAdCardState extends State<NativeAdCard> {
     if (!kLyneAdsEnabled || kLyneScreenshotMode || !_loaded || _ad == null) {
       return const SizedBox.shrink();
     }
-    // Constrain the small template to a reasonable card height.
-    // TemplateType.small renders at ~90 pt tall on most phones.
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 90, maxHeight: 120),
-      child: AdWidget(ad: _ad!),
+
+    final t = context.t;
+
+    // Outer frame mirrors _NearbyCard: Material surface + 1 pt line border +
+    // 18 pt corner radius + antiAlias clip so the SDK platform view is
+    // contained inside the rounded rect.
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(_cardRadius),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(_cardRadius),
+          border: Border.all(color: t.line),
+        ),
+        // TemplateType.medium renders at ≈120–160 pt; floor at 120 so a
+        // sparse creative still fills a card-height slot, ceiling at 200 so
+        // it never dominates the list on large-text devices.
+        constraints: const BoxConstraints(minHeight: 120, maxHeight: 200),
+        child: AdWidget(ad: _ad!),
+      ),
     );
   }
 }

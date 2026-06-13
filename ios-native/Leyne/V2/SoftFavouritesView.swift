@@ -194,6 +194,12 @@ struct SoftFavouritesView: View {
                         }
                     }
 
+                    // ── Native ad ─────────────────────────────────────────
+                    // One ad per screen — placed after all saved content and
+                    // before the "Add stop" row. NativeAdCard renders nothing
+                    // when no ad is loaded or ads are suppressed; no gap.
+                    NativeAdCard()
+
                     // ── Add stop row ───────────────────────────────────────
                     addStopRow
                         .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -337,12 +343,7 @@ struct SoftFavouritesView: View {
                 MrtLineColorBar(codes: station.codes, width: 4, height: 40)
                 VStack(alignment: .center, spacing: 3) {
                     ForEach(station.codes, id: \.self) { code in
-                        Text(code)
-                            .font(t.mono(10, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(mrtLineColorFor(code), in: Capsule())
+                        MrtCodePill(t: t, code: code)
                     }
                 }
                 .frame(width: 52, alignment: .center)

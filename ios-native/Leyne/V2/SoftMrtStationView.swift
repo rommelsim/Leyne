@@ -151,7 +151,7 @@ struct SoftMrtStationView: View {
                 if !station.codes.isEmpty {
                     HStack(spacing: 6) {
                         ForEach(station.codes, id: \.self) { code in
-                            heroLineCodePill(code)
+                            MrtCodePill(t: t, code: code)
                         }
                     }
                 }
@@ -175,15 +175,6 @@ struct SoftMrtStationView: View {
                 }
             }
         }
-    }
-
-    private func heroLineCodePill(_ code: String) -> some View {
-        Text(code)
-            .font(t.mono(12, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(mrtLineColorFor(code), in: Capsule())
     }
 
     // MARK: - Live crowd section

@@ -50,6 +50,10 @@ struct SoftMrtView: View {
                 topDisruptionBanner
                 if !m.savedMrtStations.isEmpty { savedSection }
                 nearestSection
+                // One native ad per screen — placed after "Closest to you" to
+                // mirror the Home tab placement. NativeAdCard renders EmptyView
+                // when no ad is loaded or ads are suppressed; no gap otherwise.
+                NativeAdCard()
                 linesSection
             }
             .padding(20)
@@ -267,7 +271,7 @@ struct SoftMrtView: View {
                 MrtLineColorBar(codes: station.codes, width: 4, height: 44)
                 VStack(alignment: .center, spacing: 3) {
                     ForEach(station.codes, id: \.self) { code in
-                        lineCodePill(code)
+                        MrtCodePill(t: t, code: code)
                     }
                 }
                 .frame(width: 52, alignment: .center)
@@ -320,7 +324,7 @@ struct SoftMrtView: View {
             MrtLineColorBar(codes: station.codes, width: 4, height: 40)
             VStack(alignment: .center, spacing: 3) {
                 ForEach(station.codes, id: \.self) { code in
-                    lineCodePill(code)
+                    MrtCodePill(t: t, code: code)
                 }
             }
             .frame(width: 52, alignment: .center)
@@ -349,18 +353,6 @@ struct SoftMrtView: View {
         )
     }
 
-    private func lineCodePill(_ code: String) -> some View {
-        Text(code)
-            .font(t.mono(11, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            // Uniform min width so stacked codes (e.g. EW24 + NS1 at an
-            // interchange) are the SAME width and line up as a tidy column,
-            // rather than each capsule hugging its text.
-            .frame(minWidth: 48)
-            .background(mrtLineColorFor(code), in: Capsule())
-    }
 
     // MARK: - Lines section (compact one-row-per-line)
 

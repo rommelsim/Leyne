@@ -11,18 +11,33 @@
 //                     → Swift name "NativeAdView"); registers all asset
 //                     subviews so AdMob can track impressions/clicks.
 //
-//   NativeAdCard    — SwiftUI card: "Ad" badge + headline + body + icon +
-//                     CTA button. Styled monochrome with t.surface / t.fg /
+//   NativeAdCard    — SwiftUI card: sized to match SoftNearbyStopCard (fixed
+//                     height 86 pt). Styled monochrome with t.surface / t.fg /
 //                     t.dim tokens to sit as a sibling of SoftNearbyStopCard.
 //                     Only rendered when an ad is loaded and consent is ready;
 //                     callers see EmptyView otherwise (no empty gap).
 //
 // AdMob policy requirements satisfied:
-//   • "Ad" attribution label — always visible, per policy §3.
+//   • "Ad" attribution label — always visible, inline before headline.
 //   • headlineView outlet wired — required.
 //   • bodyView, iconView, callToActionView, advertiserView wired when present.
 //   • NativeAdView is the root interaction target — taps route correctly.
 //   • No custom click-handling; interaction delegate left to SDK defaults.
+//
+// Layout (stack-based, robust to any creative subset):
+//
+//   ┌─────────────────────────────────────────────────────────┐
+//   │ 14pt │ [iconTile 42×42] 10pt │ [text VStack] │ [CTA] 14pt│
+//   └─────────────────────────────────────────────────────────┘
+//
+//   Text VStack (leading-aligned):
+//     Row 0: [Ad pill] [headline (1–2 lines)]
+//     Row 1: optional secondary — body or advertiser (1 line, dim)
+//
+//   CTA pill: right-trailing, vertically centred; hidden when absent —
+//   the text column expands to fill via .setContentHuggingPriority(.low).
+//   "Ad" badge: inline pill at the start of the headline row — never
+//   floats top-right, so it never collides with the AdChoices overlay.
 
 import SwiftUI
 import GoogleMobileAds
@@ -33,6 +48,17 @@ private let nativeLog = Logger(subsystem: "com.leyne.Leyne", category: "NativeAd
 // MARK: - Retry constants (mirrors BannerHostView strategy)
 
 private let kNativeRetryDelays: [TimeInterval] = [5, 10, 30]
+
+// MARK: - Card height
+
+/// Fixed card height that matches a standard SoftNearbyStopCard row.
+///
+/// SoftNearbyStopCard layout: .padding(14) all sides + 42 pt tile.
+/// The non-highlighted card's text column (name + subtitle + compactMeta)
+/// measures ~58 pt at default Dynamic Type, so the card naturally rests at
+/// 14 + 58 + 14 ≈ 86 pt. We pin the ad card to this value so it is never
+/// shorter (a thin strip) or taller (breaking the list rhythm).
+private let kAdCardHeight: CGFloat = 86
 
 // MARK: - NativeAdLoader
 
@@ -154,9 +180,24 @@ final class NativeAdLoader: NSObject, ObservableObject,
 /// UIViewRepresentable wrapping NativeAdView and wiring all asset subviews
 /// so AdMob can attribute impressions and route clicks correctly.
 ///
-/// Asset wiring is required by AdMob policy: NativeAdView must hold
-/// UIView references for every rendered asset. The SDK attaches gesture
-/// recognisers to those outlets — do NOT add your own tap handlers.
+/// Layout uses UIStackView throughout — no hand-rolled anchor math that
+/// breaks when optional views are hidden. The card is pinned to a fixed
+/// height (kAdCardHeight) via the SwiftUI .frame modifier on the caller,
+/// so the UIKit layer never needs to compute its own height.
+///
+/// Stack structure:
+///   outerH (horizontal, 10pt spacing, 14pt insets):
+///     iconTile (42×42, fixed)
+///     textV (vertical, 3pt spacing, compressionResistance low):
+///       badgeRow (horizontal, 6pt spacing):
+///         adBadge pill (fixed, hugs tightly)
+///         headlineLabel (1–2 lines)
+///       secondaryLabel (1 line, hidden when nil — UIStackView collapses it)
+///     ctaButton (fixed, hugs tightly; hidden when nil — stack collapses it)
+///
+/// AdChoices overlay (rendered by the SDK) lands in its default top-right
+/// corner. The "Ad" badge is inline in the text column, so there is zero
+/// chance of collision.
 struct NativeAdUIView: UIViewRepresentable {
     let nativeAd: NativeAd
     let theme: Theme
@@ -165,83 +206,134 @@ struct NativeAdUIView: UIViewRepresentable {
         let adView = NativeAdView()
         adView.backgroundColor = .clear
 
-        // ── Headline (required) ───────────────────────────────────────────
+        // ── Create all subviews ───────────────────────────────────────────
+
+        // Icon tile (always shown — either the creative icon or a placeholder)
+        let iconTile = UIView()
+        iconTile.layer.cornerRadius = 12
+        iconTile.layer.cornerCurve = .continuous
+        iconTile.clipsToBounds = true
+
+        let iconImageView = UIImageView()
+        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        iconImageView.contentMode = .scaleAspectFit
+        iconImageView.clipsToBounds = true
+        adView.iconView = iconImageView
+
+        let placeholderImageView = UIImageView()
+        placeholderImageView.translatesAutoresizingMaskIntoConstraints = false
+        placeholderImageView.contentMode = .center
+
+        iconTile.addSubview(iconImageView)
+        iconTile.addSubview(placeholderImageView)
+        NSLayoutConstraint.activate([
+            iconImageView.topAnchor.constraint(equalTo: iconTile.topAnchor),
+            iconImageView.leadingAnchor.constraint(equalTo: iconTile.leadingAnchor),
+            iconImageView.trailingAnchor.constraint(equalTo: iconTile.trailingAnchor),
+            iconImageView.bottomAnchor.constraint(equalTo: iconTile.bottomAnchor),
+            placeholderImageView.centerXAnchor.constraint(equalTo: iconTile.centerXAnchor),
+            placeholderImageView.centerYAnchor.constraint(equalTo: iconTile.centerYAnchor),
+        ])
+
+        // "Ad" attribution badge — inline pill, always visible (AdMob policy §3)
+        let adBadge = PaddedLabel()
+        adBadge.text = "Ad"
+        adBadge.textAlignment = .center
+        adBadge.layer.cornerRadius = 5
+        adBadge.layer.cornerCurve = .continuous
+        adBadge.clipsToBounds = true
+        adBadge.adjustsFontForContentSizeCategory = true
+        adBadge.setContentHuggingPriority(.required, for: .horizontal)
+        adBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        // Headline (required outlet)
         let headlineLabel = UILabel()
-        headlineLabel.translatesAutoresizingMaskIntoConstraints = false
         headlineLabel.numberOfLines = 2
         headlineLabel.adjustsFontForContentSizeCategory = true
+        headlineLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         adView.headlineView = headlineLabel
 
-        // ── Body ──────────────────────────────────────────────────────────
-        let bodyLabel = UILabel()
-        bodyLabel.translatesAutoresizingMaskIntoConstraints = false
-        bodyLabel.numberOfLines = 3
-        bodyLabel.adjustsFontForContentSizeCategory = true
-        adView.bodyView = bodyLabel
+        // Badge + headline in a horizontal stack
+        let badgeRow = UIStackView(arrangedSubviews: [adBadge, headlineLabel])
+        badgeRow.axis = .horizontal
+        badgeRow.spacing = 6
+        badgeRow.alignment = .center
 
-        // ── Advertiser ────────────────────────────────────────────────────
-        let advertiserLabel = UILabel()
-        advertiserLabel.translatesAutoresizingMaskIntoConstraints = false
-        advertiserLabel.numberOfLines = 1
-        adView.advertiserView = advertiserLabel
+        // Secondary label: body if present, else advertiser, else hidden.
+        // UIStackView automatically collapses hidden arranged subviews —
+        // this is why we use a stack instead of hand-rolled constraints.
+        let secondaryLabel = UILabel()
+        secondaryLabel.numberOfLines = 1
+        secondaryLabel.adjustsFontForContentSizeCategory = true
+        secondaryLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // Wire to bodyView so AdMob attributes impression correctly.
+        // (advertiserView is set to nil; we display whichever string exists.)
+        adView.bodyView = secondaryLabel
+        adView.advertiserView = secondaryLabel   // same view — both wired
 
-        // ── Icon image ────────────────────────────────────────────────────
-        let iconView = UIImageView()
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.contentMode = .scaleAspectFit
-        iconView.clipsToBounds = true
-        iconView.layer.cornerRadius = 8
-        iconView.layer.cornerCurve = .continuous
-        adView.iconView = iconView
+        // Text column
+        let textV = UIStackView(arrangedSubviews: [badgeRow, secondaryLabel])
+        textV.axis = .vertical
+        textV.spacing = 3
+        textV.alignment = .leading
+        textV.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textV.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // ── Call-to-action button ─────────────────────────────────────────
-        // isUserInteractionEnabled = false — NativeAdView owns the tap event.
-        // We use UIButtonConfiguration (iOS 15+) to avoid the deprecated
-        // contentEdgeInsets property and get proper content padding.
+        // CTA button (hugs content; hidden when absent — stack collapses it)
         var ctaConfig = UIButton.Configuration.filled()
         ctaConfig.cornerStyle = .capsule
         ctaConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attr in
             var a = attr
-            a.font = scaledFont(size: 13, weight: .semibold)
+            a.font = UIFontMetrics.default.scaledFont(
+                for: UIFont.systemFont(ofSize: 13, weight: .semibold))
             return a
         }
+        ctaConfig.contentInsets = NSDirectionalEdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14)
         let ctaButton = UIButton(configuration: ctaConfig)
-        ctaButton.translatesAutoresizingMaskIntoConstraints = false
-        ctaButton.isUserInteractionEnabled = false
+        ctaButton.isUserInteractionEnabled = false   // NativeAdView owns the tap
+        ctaButton.setContentHuggingPriority(.required, for: .horizontal)
+        ctaButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         adView.callToActionView = ctaButton
 
-        // ── "Ad" attribution badge ────────────────────────────────────────
-        // Required by AdMob policy §3 — must be clearly visible at all times.
-        // Styled as a small surfaceHi pill with dim text, matching the
-        // "Closest stop" badge pattern on SoftNearbyStopCard.
-        let adBadge = PaddedLabel()
-        adBadge.translatesAutoresizingMaskIntoConstraints = false
-        adBadge.text = "Ad"
-        adBadge.adjustsFontForContentSizeCategory = true
-        adBadge.textAlignment = .center
+        // Outer horizontal stack — the whole card row
+        let outerH = UIStackView(arrangedSubviews: [iconTile, textV, ctaButton])
+        outerH.axis = .horizontal
+        outerH.spacing = 10
+        outerH.alignment = .center
+        outerH.translatesAutoresizingMaskIntoConstraints = false
 
-        // ── Assemble the card layout ──────────────────────────────────────
-        let container = buildContainer(
-            adView: adView,
-            headlineLabel: headlineLabel,
-            bodyLabel: bodyLabel,
-            advertiserLabel: advertiserLabel,
-            iconView: iconView,
-            ctaButton: ctaButton,
-            adBadge: adBadge,
-            theme: theme,
-            nativeAd: nativeAd
-        )
-        adView.addSubview(container)
-        container.translatesAutoresizingMaskIntoConstraints = false
+        // Fix the icon tile size (stack doesn't know about fixed-size tiles)
         NSLayoutConstraint.activate([
-            container.topAnchor.constraint(equalTo: adView.topAnchor),
-            container.leadingAnchor.constraint(equalTo: adView.leadingAnchor),
-            container.trailingAnchor.constraint(equalTo: adView.trailingAnchor),
-            container.bottomAnchor.constraint(equalTo: adView.bottomAnchor),
+            iconTile.widthAnchor.constraint(equalToConstant: 42),
+            iconTile.heightAnchor.constraint(equalToConstant: 42),
         ])
 
-        // Register assets — MUST happen after outlets are set.
+        // Add the "Ad" badge fixed height
+        adBadge.heightAnchor.constraint(equalToConstant: 18).isActive = true
+
+        adView.addSubview(outerH)
+
+        let pad: CGFloat = 14
+        NSLayoutConstraint.activate([
+            outerH.topAnchor.constraint(equalTo: adView.topAnchor, constant: pad),
+            outerH.leadingAnchor.constraint(equalTo: adView.leadingAnchor, constant: pad),
+            outerH.trailingAnchor.constraint(equalTo: adView.trailingAnchor, constant: -pad),
+            outerH.bottomAnchor.constraint(equalTo: adView.bottomAnchor, constant: -pad),
+        ])
+
+        // ── Populate asset values (must happen before .nativeAd is set) ──
+        applyAssets(
+            nativeAd: nativeAd,
+            iconTile: iconTile,
+            iconImageView: iconImageView,
+            placeholderImageView: placeholderImageView,
+            adBadge: adBadge,
+            headlineLabel: headlineLabel,
+            secondaryLabel: secondaryLabel,
+            ctaButton: ctaButton
+        )
+
+        // Register outlets — MUST happen after all outlet properties are set.
         adView.nativeAd = nativeAd
 
         return adView
@@ -251,118 +343,81 @@ struct NativeAdUIView: UIViewRepresentable {
         // Single-use; the loader never replaces an ad mid-session.
     }
 
-    // MARK: - Layout
+    // MARK: - Asset population
 
-    private func buildContainer(
-        adView: NativeAdView,
-        headlineLabel: UILabel,
-        bodyLabel: UILabel,
-        advertiserLabel: UILabel,
-        iconView: UIImageView,
-        ctaButton: UIButton,
+    /// Populate creative content and style every subview.
+    /// Called once in makeUIView, before nativeAd is assigned to the outlet.
+    private func applyAssets(
+        nativeAd: NativeAd,
+        iconTile: UIView,
+        iconImageView: UIImageView,
+        placeholderImageView: UIImageView,
         adBadge: PaddedLabel,
-        theme: Theme,
-        nativeAd: NativeAd
-    ) -> UIView {
+        headlineLabel: UILabel,
+        secondaryLabel: UILabel,
+        ctaButton: UIButton
+    ) {
         let fg        = UIColor(theme.fg)
         let dim       = UIColor(theme.dim)
         let surfaceHi = UIColor(theme.surfaceHi)
         let accent    = UIColor(theme.accent)
         let onAccent  = UIColor(theme.onAccent)
 
-        // "Ad" badge styling
-        adBadge.font = scaledFont(size: 10, weight: .semibold)
+        // Ad badge
+        adBadge.font = UIFontMetrics.default.scaledFont(
+            for: UIFont.systemFont(ofSize: 10, weight: .semibold))
         adBadge.textColor = dim
         adBadge.backgroundColor = surfaceHi
-        adBadge.layer.cornerRadius = 5
-        adBadge.layer.cornerCurve = .continuous
-        adBadge.clipsToBounds = true
+
+        // Icon tile — always present; fills with creative icon or placeholder
+        if let icon = nativeAd.icon?.image {
+            iconImageView.image = icon
+            iconTile.backgroundColor = .clear
+            placeholderImageView.isHidden = true
+        } else {
+            iconImageView.image = nil
+            iconTile.backgroundColor = surfaceHi
+            placeholderImageView.isHidden = false
+            placeholderImageView.tintColor = dim
+            let cfg = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+            placeholderImageView.image = UIImage(systemName: "tag.fill", withConfiguration: cfg)
+        }
 
         // Headline
         headlineLabel.text = nativeAd.headline
-        headlineLabel.font = scaledFont(size: 15, weight: .semibold)
+        headlineLabel.font = UIFontMetrics.default.scaledFont(
+            for: UIFont.systemFont(ofSize: 14, weight: .semibold))
         headlineLabel.textColor = fg
 
-        // Body
-        bodyLabel.text = nativeAd.body
-        bodyLabel.font = scaledFont(size: 12, weight: .regular)
-        bodyLabel.textColor = dim
-        bodyLabel.isHidden = nativeAd.body == nil
-
-        // Advertiser
-        advertiserLabel.text = nativeAd.advertiser
-        advertiserLabel.font = scaledFont(size: 11, weight: .regular)
-        advertiserLabel.textColor = dim
-        advertiserLabel.isHidden = nativeAd.advertiser == nil
-
-        // Icon
-        if let icon = nativeAd.icon {
-            iconView.image = icon.image
-            iconView.isHidden = false
+        // Secondary line — body wins; fall back to advertiser; hide when neither
+        if let body = nativeAd.body, !body.isEmpty {
+            secondaryLabel.text = body
+            secondaryLabel.isHidden = false
+        } else if let advertiser = nativeAd.advertiser, !advertiser.isEmpty {
+            secondaryLabel.text = advertiser
+            secondaryLabel.isHidden = false
         } else {
-            iconView.isHidden = true
+            secondaryLabel.text = nil
+            secondaryLabel.isHidden = true
         }
+        secondaryLabel.font = UIFontMetrics.default.scaledFont(
+            for: UIFont.systemFont(ofSize: 12, weight: .regular))
+        secondaryLabel.textColor = dim
 
-        // CTA button — update configuration colours
-        let ctaTitle = nativeAd.callToAction ?? "Learn More"
-        var config = ctaButton.configuration ?? UIButton.Configuration.filled()
-        config.title = ctaTitle
-        config.baseForegroundColor = onAccent
-        config.baseBackgroundColor = accent
-        config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
-        ctaButton.configuration = config
-
-        // Layout
-        let container = UIView()
-        container.backgroundColor = .clear
-        [headlineLabel, bodyLabel, advertiserLabel, iconView, ctaButton, adBadge]
-            .forEach { container.addSubview($0) }
-
-        let iconSize: CGFloat = 42
-
-        NSLayoutConstraint.activate([
-            // Icon: top-left
-            iconView.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
-            iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
-            iconView.widthAnchor.constraint(equalToConstant: iconSize),
-            iconView.heightAnchor.constraint(equalToConstant: iconSize),
-
-            // "Ad" badge: top-right
-            adBadge.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
-            adBadge.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
-            adBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 28),
-            adBadge.heightAnchor.constraint(equalToConstant: 18),
-
-            // Headline: right of icon, left of badge
-            headlineLabel.topAnchor.constraint(equalTo: iconView.topAnchor),
-            headlineLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
-            headlineLabel.trailingAnchor.constraint(equalTo: adBadge.leadingAnchor, constant: -8),
-
-            // Body: below headline, same span
-            bodyLabel.topAnchor.constraint(equalTo: headlineLabel.bottomAnchor, constant: 3),
-            bodyLabel.leadingAnchor.constraint(equalTo: headlineLabel.leadingAnchor),
-            bodyLabel.trailingAnchor.constraint(equalTo: headlineLabel.trailingAnchor),
-
-            // Second row: below icon
-            advertiserLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 10),
-            advertiserLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
-            advertiserLabel.trailingAnchor.constraint(equalTo: ctaButton.leadingAnchor, constant: -8),
-
-            // CTA: right-aligned to advertiser row
-            ctaButton.centerYAnchor.constraint(equalTo: advertiserLabel.centerYAnchor),
-            ctaButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
-
-            // Container bottom clears whichever is taller
-            container.bottomAnchor.constraint(
-                greaterThanOrEqualTo: advertiserLabel.bottomAnchor, constant: 14),
-            container.bottomAnchor.constraint(
-                greaterThanOrEqualTo: ctaButton.bottomAnchor, constant: 14),
-        ])
-
-        return container
+        // CTA button — hidden when absent; UIStackView collapses it automatically
+        if let cta = nativeAd.callToAction, !cta.isEmpty {
+            var config = ctaButton.configuration ?? UIButton.Configuration.filled()
+            config.title = cta
+            config.baseForegroundColor = onAccent
+            config.baseBackgroundColor = accent
+            ctaButton.configuration = config
+            ctaButton.isHidden = false
+        } else {
+            ctaButton.isHidden = true
+        }
     }
 
-    // MARK: - Font helper
+    // MARK: - Font helper (kept for internal clarity — identical to applyAssets calls)
 
     private func scaledFont(size: CGFloat, weight: UIFont.Weight) -> UIFont {
         UIFontMetrics.default.scaledFont(for: UIFont.systemFont(ofSize: size, weight: weight))
@@ -373,7 +428,7 @@ struct NativeAdUIView: UIViewRepresentable {
 
 /// UILabel with fixed horizontal padding — used for the "Ad" attribution badge.
 /// UILabel has no built-in content inset; we override drawText(in:) and
-/// sizeThatFits(_:) to add symmetric horizontal padding (6 pt each side).
+/// intrinsicContentSize to add symmetric horizontal padding (6 pt each side).
 private final class PaddedLabel: UILabel {
     private let hPad: CGFloat = 6
 
@@ -399,6 +454,9 @@ private final class PaddedLabel: UILabel {
 /// Only renders content when a native ad is loaded AND ads are not suppressed.
 /// Renders nothing otherwise — no reserved space, no empty gap.
 ///
+/// Fixed height (kAdCardHeight = 86 pt) matches SoftNearbyStopCard's
+/// typical row so the card sits flush in the list rhythm.
+///
 /// Placement: use inside a SwiftUI List after about the 3rd stop card.
 struct NativeAdCard: View {
     @EnvironmentObject private var m: AppModel
@@ -418,6 +476,7 @@ struct NativeAdCard: View {
     private func adCard(_ ad: NativeAd) -> some View {
         let t = m.t
         NativeAdUIView(nativeAd: ad, theme: t)
+            .frame(height: kAdCardHeight)   // fixed height — no collapse, no bloat
             .frame(maxWidth: .infinity)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(

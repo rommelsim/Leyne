@@ -236,3 +236,27 @@ struct MRTLineBar: View {
         MrtLineColorBar(color: color, width: 4, height: 28)
     }
 }
+
+/// Uniform MRT line-code pill — the single source of truth for all code badges.
+///
+/// Renders the station code (e.g. "EW24", "NS1") in a coloured capsule.
+/// The fixed `minWidth: 48` ensures that short codes (NS1) and long codes
+/// (EW24) occupy the same horizontal space, so stacked interchange pills
+/// align flush in every list context — MRT tab, station detail, Saved tab.
+///
+/// Pass the ambient `Theme` so the font scales correctly with Dynamic Type
+/// (the same pattern used by all other primitives in this file).
+struct MrtCodePill: View {
+    let t: Theme
+    let code: String
+
+    var body: some View {
+        Text(code)
+            .font(t.mono(11, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(minWidth: 48)
+            .background(mrtLineColorFor(code), in: Capsule())
+    }
+}
