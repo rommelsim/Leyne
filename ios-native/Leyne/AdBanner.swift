@@ -478,6 +478,11 @@ private struct BannerAdView: UIViewRepresentable {
         let banner = host.banner
         banner.adUnitID = unitID
         banner.delegate = context.coordinator
+        // ILRD — attribute each paid impression's value to the user in GA4
+        // (revenue-per-cohort). Mirrors the App Open / Interstitial wiring.
+        banner.paidEventHandler = { value in
+            AnalyticsService.recordAdImpression(value, format: "Banner", unitID: unitID)
+        }
         // Wire the onReady closure: called by dispatchLoad() each time a
         // fresh request should go out. rootViewController is set immediately
         // before load() inside dispatchLoad, so it's always current.

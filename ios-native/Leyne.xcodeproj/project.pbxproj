@@ -10,6 +10,8 @@
 		3C00000000000000000000C1 /* LeyneActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000C0 /* LeyneActivityAttributes.swift */; };
 		3C00000000000000000000D1 /* LeyneWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3C00000000000000000000A1 /* LeyneWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		AD0000000000000000000F01 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AD0000000000000000000F00 /* GoogleMobileAds */; };
+		B0D12A1E2FDDC7AA006B54FB /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = B0D12A1D2FDDC7AA006B54FB /* FirebaseAnalytics */; };
+		B0D12A202FDDC7AA006B54FB /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = B0D12A1F2FDDC7AA006B54FB /* FirebaseCrashlytics */; };
 		WK0000000000000000000001 /* WeatherKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = WK0000000000000000000000 /* WeatherKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 /* End PBXBuildFile section */
 
@@ -74,7 +76,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				AD0000000000000000000F01 /* GoogleMobileAds in Frameworks */,
+				B0D12A202FDDC7AA006B54FB /* FirebaseCrashlytics in Frameworks */,
 				WK0000000000000000000001 /* WeatherKit.framework in Frameworks */,
+				B0D12A1E2FDDC7AA006B54FB /* FirebaseAnalytics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -148,6 +152,8 @@
 			name = Leyne;
 			packageProductDependencies = (
 				AD0000000000000000000F00 /* GoogleMobileAds */,
+				B0D12A1D2FDDC7AA006B54FB /* FirebaseAnalytics */,
+				B0D12A1F2FDDC7AA006B54FB /* FirebaseCrashlytics */,
 			);
 			productName = Leyne;
 			productReference = 1A0000000000000000000006 /* Leyne.app */;
@@ -227,6 +233,7 @@
 			mainGroup = 1A0000000000000000000002;
 			packageReferences = (
 				B0BCB4272FBAF213001A943F /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+				B0D12A1C2FDDC7AA006B54FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			productRefGroup = 1A0000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -639,6 +646,14 @@
 				minimumVersion = 13.3.0;
 			};
 		};
+		B0D12A1C2FDDC7AA006B54FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.14.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -646,6 +661,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B0BCB4272FBAF213001A943F /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
 			productName = GoogleMobileAds;
+		};
+		B0D12A1D2FDDC7AA006B54FB /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0D12A1C2FDDC7AA006B54FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		B0D12A1F2FDDC7AA006B54FB /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0D12A1C2FDDC7AA006B54FB /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

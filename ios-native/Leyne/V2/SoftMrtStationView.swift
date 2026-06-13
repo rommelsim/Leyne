@@ -75,7 +75,11 @@ struct SoftMrtStationView: View {
         .toolbar(.hidden, for: .navigationBar)
         .enableSwipeBack()
         .refreshable { fetchCrowdForStation(force: true) }
-        .onAppear { fetchCrowdForStation(force: false) }
+        .onAppear {
+            fetchCrowdForStation(force: false)
+            AnalyticsService.log(.stopViewed(code: station.codes.first ?? station.name,
+                                             kind: .mrt))
+        }
     }
 
     // MARK: - Top bar (matches SoftStopView / SoftBusView exactly)

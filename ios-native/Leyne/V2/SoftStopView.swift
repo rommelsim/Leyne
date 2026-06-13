@@ -103,7 +103,10 @@ struct SoftStopView: View {
             // rows themselves never re-diff (WATCHING is pinned, not a row).
             .animation(.easeInOut(duration: 0.3), value: hasAlertsHere)
         }
-        .onAppear { ds.ensureArrivals(stop: stopCode) }
+        .onAppear {
+            ds.ensureArrivals(stop: stopCode)
+            AnalyticsService.log(.stopViewed(code: stopCode, kind: .bus))
+        }
         // Manage all alerts (reachable from the active-alerts card header).
         .sheet(isPresented: $showManage) {
             NavigationStack { ManageAlertsView() }

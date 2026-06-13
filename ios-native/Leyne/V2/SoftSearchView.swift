@@ -38,6 +38,10 @@ struct SoftSearchView: View {
     @State private var postalLoading = false
     @State private var postalFailed = false
 
+    // Guards `search_performed` analytics to once per search session (set when the
+    // query first becomes non-empty, re-armed when cleared) — see the onChange.
+    @State private var loggedSearchSession = false
+
     private var t: Theme { m.t }
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
@@ -87,6 +91,17 @@ struct SoftSearchView: View {
             // Reset filter to All when the query changes so a stale filter
             // doesn't hide results from a completely different search term.
             if searchFilter != .all { searchFilter = .all }
+            // Log one search_performed per search session: fire on the keystroke
+            // that first makes the query non-empty, then re-arm once it's cleared.
+            // Avoids one analytics event per character while still counting each
+            // distinct search.
+            let hasQuery = !newVal.trimmingCharacters(in: .whitespaces).isEmpty
+            if hasQuery, !loggedSearchSession {
+                loggedSearchSession = true
+                AnalyticsService.log(.searchPerformed)
+            } else if !hasQuery {
+                loggedSearchSession = false
+            }
         }
     }
 

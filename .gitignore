@@ -49,3 +49,11 @@ ios/build/
 /android/key.properties
 *.jks
 *.keystore
+
+# Firebase config — low-sensitivity but kept out of git for cleanliness.
+# Drop these where the setup doc says; the SDK wiring reads them by path.
+#   iOS:     ios-native/Leyne/GoogleService-Info.plist
+#   Android: android/app/google-services.json
+GoogleService-Info.plist
+google-services.json
+firebase_options.dart

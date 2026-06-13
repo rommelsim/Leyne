@@ -719,6 +719,7 @@ final class AppModel: ObservableObject {
             cancelAlertsForRemovedFav(fav)
         } else {
             favServices.append(FavService(no: no, stop: stop))
+            AnalyticsService.log(.favouriteAdded(kind: .service))
         }
     }
     func removeFavService(_ fav: FavService) {
@@ -865,6 +866,7 @@ final class AppModel: ObservableObject {
             alerts[i] = alert
         } else {
             alerts.append(alert)
+            AnalyticsService.log(.alertSet(kind: "\(alert.kind)", busNo: alert.busNo))
         }
         persistAlerts()
         if alert.kind == .destination, let fireAt {
@@ -975,6 +977,7 @@ final class AppModel: ObservableObject {
     func finishOnboarding() {
         onboarded = true
         showOnboarding = false
+        AnalyticsService.log(.onboardingCompleted)
         // Pin the running version so the What's New screen doesn't fire on
         // the user's very next launch for the version they just installed.
         if let v = currentVersion { lastSeenVersion = v }
@@ -1243,6 +1246,7 @@ final class AppModel: ObservableObject {
             Feedback.shared.success()
             pins.append(Pin(code: code, nickname: ds.stopName(code), tracked: nil)) // all
             markNew(code)
+            AnalyticsService.log(.favouriteAdded(kind: .stop))
         }
     }
     func togglePinForCard(_ card: CardModel) { togglePin(code: card.stopCode) }

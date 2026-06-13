@@ -51,3 +51,43 @@ App identifiers (you'll need these in the console):
 - Revenue-per-cohort (are commuters who pin worth 3× casual users?).
 - The data needed to decide the **backend** question — only build server push
   once D7 retention > 20% and DAU > ~500 (see growth review).
+
+---
+
+## Execution plan — confirmed 2026-06-14
+
+**Decision:** full Phase 0 scope (Analytics + 7 events + ILRD + Crashlytics),
+**iOS first**, Android in a follow-up.
+
+### iOS manual steps (you, in Xcode — blocks everything else)
+The Xcode project uses **file-system synchronized groups**, so:
+- Dropping `GoogleService-Info.plist` into `ios-native/Leyne/` auto-adds it to
+  the target — no "add to target" step.
+- BUT any `.swift` file is auto-compiled too, so the **Firebase SPM package must
+  be added before any wiring**, or the build breaks on `import FirebaseAnalytics`.
+
+Steps:
+1. Xcode → **File → Add Package Dependencies…** →
+   `https://github.com/firebase/firebase-ios-sdk` → add products
+   **FirebaseAnalytics** + **FirebaseCrashlytics** to the `Leyne` target.
+2. Drop `GoogleService-Info.plist` into `ios-native/Leyne/`.
+3. Tell Claude "package + plist are in" → wiring applied in one pass.
+
+### iOS wiring map (Claude applies once package + plist exist)
+- **New file** `Leyne/AnalyticsService.swift` — thin enum-based wrapper
+  (`AnalyticsService.log(.stopViewed(...))`) + `record(adValue:currency:precision:)`
+  for ILRD.
+- `Leyne/LeyneApp.swift` — `FirebaseApp.configure()` at launch; the notification
+  delegate (`didReceive response`) → `notification_tapped`.
+- `Leyne/AppModel.swift` — central hub for `favourite_added`, `alert_set`,
+  `onboarding_completed` at the model mutation points.
+- `Leyne/V2/SoftStopView.swift` + `Leyne/SoftMrtStationView.swift` — `stop_viewed`
+  on appear.
+- `Leyne/V2/SoftSearchView.swift` — `search_performed` on submit.
+- `Leyne/AdBanner.swift`, `AppOpenAd.swift`, `InterstitialAd.swift` —
+  `paidEventHandler` → ILRD `ad_impression` (value + currency).
+- `app_open` is auto-logged by Firebase; no code.
+
+### AdMob app IDs to link in console (per-app "Link to Firebase" + ILRD)
+- iOS  → `ca-app-pub-5864511655536507~6330743279`
+- Android → `ca-app-pub-5864511655536507~5685985257`

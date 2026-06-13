@@ -2,6 +2,7 @@ import SwiftUI
 import CoreSpotlight
 import UserNotifications
 import StoreKit
+import FirebaseCore
 
 @main
 struct LeyneApp: App {
@@ -93,6 +94,14 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions:
                      [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Firebase Analytics + Crashlytics. Guarded on the config file so a build
+        // without GoogleService-Info.plist (the file is git-ignored — forks / CI)
+        // degrades to no-op analytics instead of crashing at launch. Crashlytics
+        // starts automatically once the app is configured.
+        if Bundle.main.url(forResource: "GoogleService-Info",
+                           withExtension: "plist") != nil {
+            FirebaseApp.configure()
+        }
         UNUserNotificationCenter.current().delegate = self
         return true
     }
@@ -120,6 +129,10 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
         // signal — count it toward the App Store ratings prompt (fires once, on
         // the 2nd such moment).
         Task { @MainActor in ReviewPrompt.recordValueMomentAndMaybeAsk() }
+        // A notification tap is a strong value signal — record it for retention
+        // analysis. categoryIdentifier distinguishes arrival vs alight when set.
+        AnalyticsService.log(.notificationTapped(
+            kind: response.notification.request.content.categoryIdentifier))
         let userInfo = response.notification.request.content.userInfo
         NotificationCenter.default.post(
             name: .leyneOpenStopFromNotification,

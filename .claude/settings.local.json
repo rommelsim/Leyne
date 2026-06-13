@@ -152,7 +152,8 @@
       "Bash(grep -v \".png$\")",
       "Bash(xargs ls -1)",
       "Bash(grep -rn \"expandedStops\\\\|Set<String> _open\\\\|_openStops\\\\|Map<String, bool>\\\\|<String>{}\\\\|expanded\\\\[\" lib/)",
-      "Bash(xcodebuild -list -json)"
+      "Bash(xcodebuild -list -json)",
+      "Bash(grep -rniA1 \"GADApplicationIdentifier\" ios-native/)"
     ]
   }
 }
