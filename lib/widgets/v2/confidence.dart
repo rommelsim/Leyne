@@ -197,22 +197,40 @@ class ConfidenceEta extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.t;
     if (confidence == ArrivalConfidence.none) {
-      return Text('—', style: t.mono(size, weight: weight, color: t.faint));
+      return Text(
+        '—',
+        style: t.mono(size, weight: weight, color: t.faint),
+      );
     }
     final eta = fmtEta(etaSec);
     final color = _imminent ? t.accent : t.fg;
     final children = <Widget>[];
     if (eta.big == 'Arr') {
       // Arriving now — render the small word as the figure.
-      children.add(Text(eta.small, style: t.mono(size, weight: weight, color: color)));
+      children.add(
+        Text(
+          eta.small,
+          style: t.mono(size, weight: weight, color: color),
+        ),
+      );
     } else {
-      children.add(Text(eta.big, style: t.mono(size, weight: weight, color: color)));
+      children.add(
+        Text(
+          eta.big,
+          style: t.mono(size, weight: weight, color: color),
+        ),
+      );
       children.add(const SizedBox(width: 2));
-      children.add(Text(
-        eta.small,
-        style: t.mono(size * 0.72, weight: FontWeight.w500,
-            color: _imminent ? t.accent : t.dim),
-      ));
+      children.add(
+        Text(
+          eta.small,
+          style: t.mono(
+            size * 0.72,
+            weight: FontWeight.w500,
+            color: _imminent ? t.accent : t.dim,
+          ),
+        ),
+      );
     }
     if (_whisper) {
       children.add(const SizedBox(width: 2));
@@ -228,12 +246,14 @@ class ConfidenceEta extends StatelessWidget {
 
   /// Near-invisible estimate marker — small, faint, screen-reader-hidden.
   Widget _whisperTilde(LyneTheme t) => ExcludeSemantics(
-        child: Opacity(
-          opacity: 0.7,
-          child: Text('~',
-              style: t.mono(size * 0.6, weight: FontWeight.w400, color: t.faint)),
-        ),
-      );
+    child: Opacity(
+      opacity: 0.7,
+      child: Text(
+        '~',
+        style: t.mono(size * 0.6, weight: FontWeight.w400, color: t.faint),
+      ),
+    ),
+  );
 }
 
 // ─── Status pill (Bus view) ────────────────────────────────────────────
@@ -258,7 +278,10 @@ class ConfidenceStatusPill extends StatelessWidget {
         decoration: BoxDecoration(
           color: isLive ? t.contrast : t.surfaceHi,
           borderRadius: BorderRadius.circular(100),
-          border: Border.all(color: isLive ? Colors.transparent : t.line, width: 1),
+          border: Border.all(
+            color: isLive ? Colors.transparent : t.line,
+            width: 1,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -268,8 +291,11 @@ class ConfidenceStatusPill extends StatelessWidget {
             Text(
               _label,
               style: t
-                  .mono(10, weight: FontWeight.w600,
-                      color: isLive ? t.contrastFg : t.dim)
+                  .mono(
+                    10,
+                    weight: FontWeight.w600,
+                    color: isLive ? t.contrastFg : t.dim,
+                  )
                   .copyWith(letterSpacing: 0.8),
             ),
           ],
@@ -333,17 +359,18 @@ class ConfidenceStatusPill extends StatelessWidget {
 }
 
 // ─── Crowd meter glyph ─────────────────────────────────────────────────
-/// Three ascending bars filled by load (Seats=1, Standing=2, Crowded=3),
-/// with an unknown state rendered as dashed outlines. Bar colour follows
-/// the occupancy: green for seats, amber for standing, grey for limited/
-/// unknown — matching ios-native/Leyne/V2/Confidence.swift CrowdMeter.
+/// Occupancy shown as a row of three person glyphs filled by load
+/// (Seats=1, Standing=2, Crowded=3) and tinted green / amber / grey — the
+/// "how full is the bus" metaphor riders already know from the LTA app.
+/// (Deliberately NOT ascending bars: those read as a cellular-signal meter,
+/// which is the wrong sense — more crowding is worse, not "stronger".)
+/// Matches ios-native/Leyne/V2/Confidence.swift CrowdMeter exactly.
+/// Unknown shows three faint outline persons, honestly rather than hidden.
 class CrowdMeter extends StatelessWidget {
   const CrowdMeter({super.key, required this.load, this.showLabel = true});
 
   final Load? load; // null → unknown
   final bool showLabel;
-
-  static const List<double> _heights = [8, 11, 14];
 
   int get _fill {
     switch (load) {
@@ -375,38 +402,48 @@ class CrowdMeter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    // Bar colour follows occupancy: green/amber/grey (from proximity.dart).
-    final barColor = _occupancyColor(load, t);
     return Semantics(
       label: load == null ? 'Crowd unknown' : _label,
       excludeSemantics: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            height: 14,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var i = 0; i < _heights.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 2.5),
-                  _bar(t, filled: load != null && i < _fill,
-                      height: _heights[i], barColor: barColor),
-                ],
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) const SizedBox(width: 1.5),
+                Icon(
+                  (load != null && i < _fill)
+                      ? Icons.person_rounded
+                      : Icons.person_outline_rounded,
+                  size: 13,
+                  color: _personColor(i, t),
+                ),
               ],
-            ),
+            ],
           ),
           if (showLabel) ...[
             const SizedBox(width: 5),
-            Text(_label,
-                style: t.mono(10,
-                    weight: FontWeight.w500,
-                    color: load == null ? t.faint : barColor)),
+            Text(
+              _label,
+              style: t.mono(
+                10,
+                weight: FontWeight.w500,
+                color: load == null ? t.faint : _occupancyColor(load, t),
+              ),
+            ),
           ],
         ],
       ),
     );
+  }
+
+  /// Filled persons take the occupancy hue; empty persons are hairline;
+  /// unknown load greys the whole row.
+  Color _personColor(int i, LyneTheme t) {
+    if (load == null) return t.faint;
+    return i < _fill ? _occupancyColor(load, t) : t.line;
   }
 
   /// Inline version of occupancyColor to avoid a circular import with
@@ -422,27 +459,6 @@ class CrowdMeter extends StatelessWidget {
       case null:
         return t.dim;
     }
-  }
-
-  Widget _bar(LyneTheme t,
-      {required bool filled,
-      required double height,
-      required Color barColor}) {
-    if (load == null) {
-      return CustomPaint(
-        size: Size(4, height),
-        painter: _DashedBarPainter(color: t.faint, strokeWidth: 1, radius: 1.5),
-      );
-    }
-    return Container(
-      width: 4,
-      height: height,
-      decoration: BoxDecoration(
-        color: filled ? barColor : null,
-        borderRadius: BorderRadius.circular(1.5),
-        border: filled ? null : Border.all(color: t.line, width: 1),
-      ),
-    );
   }
 }
 
@@ -465,7 +481,11 @@ class _DashedCirclePainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     final inset = strokeWidth / 2;
     final rect = Rect.fromLTWH(
-        inset, inset, size.width - strokeWidth, size.height - strokeWidth);
+      inset,
+      inset,
+      size.width - strokeWidth,
+      size.height - strokeWidth,
+    );
     final path = Path()..addOval(rect);
     _drawDashed(canvas, path, paint, dash: 2, gap: 2);
   }
@@ -475,38 +495,14 @@ class _DashedCirclePainter extends CustomPainter {
       old.color != color || old.strokeWidth != strokeWidth;
 }
 
-class _DashedBarPainter extends CustomPainter {
-  _DashedBarPainter(
-      {required this.color, required this.strokeWidth, required this.radius});
-
-  final Color color;
-  final double strokeWidth;
-  final double radius;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke;
-    final inset = strokeWidth / 2;
-    final rrect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(
-          inset, inset, size.width - strokeWidth, size.height - strokeWidth),
-      Radius.circular(radius),
-    );
-    final path = Path()..addRRect(rrect);
-    _drawDashed(canvas, path, paint, dash: 2, gap: 2);
-  }
-
-  @override
-  bool shouldRepaint(_DashedBarPainter old) =>
-      old.color != color || old.strokeWidth != strokeWidth || old.radius != radius;
-}
-
 /// Stamp a [dash]/[gap] pattern along [source], drawing onto [canvas].
-void _drawDashed(Canvas canvas, Path source, Paint paint,
-    {required double dash, required double gap}) {
+void _drawDashed(
+  Canvas canvas,
+  Path source,
+  Paint paint, {
+  required double dash,
+  required double gap,
+}) {
   for (final metric in source.computeMetrics()) {
     var distance = 0.0;
     while (distance < metric.length) {

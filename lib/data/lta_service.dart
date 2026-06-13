@@ -31,11 +31,11 @@ import 'lta_models.dart';
 
 class LtaException implements Exception {
   LtaException.badResponse(this.statusCode)
-      : message = 'LTA returned HTTP $statusCode',
-        decodingDetail = null;
+    : message = 'LTA returned HTTP $statusCode',
+      decodingDetail = null;
   LtaException.decoding(this.decodingDetail)
-      : message = 'Couldn’t read LTA data ($decodingDetail)',
-        statusCode = null;
+    : message = 'Couldn’t read LTA data ($decodingDetail)',
+      statusCode = null;
 
   final String message;
   final int? statusCode;
@@ -76,10 +76,7 @@ class LtaService {
   }) async {
     final uri = LtaConfig.baseUrl.replace(
       pathSegments: [...LtaConfig.baseUrl.pathSegments, 'v3', 'BusArrival'],
-      queryParameters: {
-        'BusStopCode': stopCode,
-        'ServiceNo': ?serviceNo,
-      },
+      queryParameters: {'BusStopCode': stopCode, 'ServiceNo': ?serviceNo},
     );
     final json = await _get(uri);
     return LtaArrivalResponse.fromJson(json);
@@ -99,6 +96,40 @@ class LtaService {
   Future<List<LtaBusRoute>> busRoutes() =>
       _fetchAllPaged('BusRoutes', LtaBusRoute.fromJson);
 
+  // ─── Live: Station Crowd Density (PCDRealTime) ───────────
+  /// Per-station crowdedness on a line. `trainLine` is the PCD code,
+  /// e.g. "EWL" (not the 2-letter prefix). Returns `{ "value": [...] }`.
+  Future<List<LtaStationCrowd>> stationCrowd(String trainLine) async {
+    final uri = LtaConfig.baseUrl.replace(
+      pathSegments: [...LtaConfig.baseUrl.pathSegments, 'PCDRealTime'],
+      queryParameters: {'TrainLine': trainLine},
+    );
+    final json = await _get(uri);
+    final value = (json['value'] as List?) ?? const [];
+    return value
+        .cast<Map<String, dynamic>>()
+        .map(LtaStationCrowd.fromJson)
+        .toList(growable: false);
+  }
+
+  // ─── Live: Facilities Maintenance v2 (lift maintenance) ──
+  /// Network-wide list of lifts currently under maintenance.
+  Future<List<LtaFacilityMaintenance>> facilitiesMaintenance() async {
+    final uri = LtaConfig.baseUrl.replace(
+      pathSegments: [
+        ...LtaConfig.baseUrl.pathSegments,
+        'v2',
+        'FacilitiesMaintenance',
+      ],
+    );
+    final json = await _get(uri);
+    final value = (json['value'] as List?) ?? const [];
+    return value
+        .cast<Map<String, dynamic>>()
+        .map(LtaFacilityMaintenance.fromJson)
+        .toList(growable: false);
+  }
+
   // ─── Live: Train Service Alerts (MRT/LRT) ────────────────
   /// Always-on endpoint reporting MRT/LRT line disruptions. `Status` is
   /// 1 (normal) or 2 (disrupted); when normal the affected/messages
@@ -111,7 +142,10 @@ class LtaService {
     final value = json['value'];
     if (value is! Map<String, dynamic>) {
       return const LtaTrainAlerts(
-          status: 1, affectedSegments: [], messages: []);
+        status: 1,
+        affectedSegments: [],
+        messages: [],
+      );
     }
     return LtaTrainAlerts.fromJson(value);
   }
@@ -119,13 +153,15 @@ class LtaService {
   // ─── Internal helpers ──────────────────────────────────────
 
   Future<Map<String, dynamic>> _get(Uri uri) async {
-    final resp = await _client.get(
-      uri,
-      headers: {
-        'AccountKey': LtaConfig.accountKey,
-        'accept': 'application/json',
-      },
-    ).timeout(_timeout);
+    final resp = await _client
+        .get(
+          uri,
+          headers: {
+            'AccountKey': LtaConfig.accountKey,
+            'accept': 'application/json',
+          },
+        )
+        .timeout(_timeout);
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw LtaException.badResponse(resp.statusCode);
     }
@@ -151,7 +187,9 @@ class LtaService {
     var base = 0;
     while (true) {
       final skips = List.generate(
-          _pageWindow, (i) => base + i * LtaConfig.pageSize);
+        _pageWindow,
+        (i) => base + i * LtaConfig.pageSize,
+      );
       final pages = await Future.wait(
         skips.map((skip) async {
           final json = await _get(_pageUri(path, skip));
@@ -174,5 +212,4 @@ class LtaService {
     }
     return out;
   }
-
 }

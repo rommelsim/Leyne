@@ -29,13 +29,11 @@ enum LoadState { loading, ready, error }
 /// Bootstrap status — loading / ready / error(message).
 class ReferenceState {
   const ReferenceState.loading()
-      : state = LoadState.loading,
-        errorMessage = null;
-  const ReferenceState.ready()
-      : state = LoadState.ready,
-        errorMessage = null;
+    : state = LoadState.loading,
+      errorMessage = null;
+  const ReferenceState.ready() : state = LoadState.ready, errorMessage = null;
   const ReferenceState.error(String this.errorMessage)
-      : state = LoadState.error;
+    : state = LoadState.error;
 
   final LoadState state;
   final String? errorMessage;
@@ -83,6 +81,59 @@ class GeoPoint {
   const GeoPoint(this.lat, this.lon);
   final double lat;
   final double lon;
+}
+
+/// Crowdedness bucket from the PCDRealTime feed.
+/// Mirrors iOS DataStore.swift: enum CrowdLevel.
+enum CrowdLevel { low, moderate, high, unknown }
+
+/// One station's live crowdedness on a line.
+/// Mirrors iOS DataStore.swift: struct StationCrowd.
+class StationCrowd {
+  const StationCrowd({
+    required this.code,
+    required this.name,
+    required this.level,
+  });
+
+  /// LTA station code, e.g. "EW13".
+  final String code;
+
+  /// Display name resolved from station code, e.g. "City Hall".
+  final String name;
+
+  final CrowdLevel level;
+
+  String get id => code;
+
+  static CrowdLevel levelFrom(String raw) {
+    switch (raw.toLowerCase()) {
+      case 'l':
+        return CrowdLevel.low;
+      case 'm':
+        return CrowdLevel.moderate;
+      case 'h':
+        return CrowdLevel.high;
+      default:
+        return CrowdLevel.unknown;
+    }
+  }
+}
+
+/// A lift under maintenance at an MRT station (FacilitiesMaintenance v2).
+/// Mirrors iOS DataStore.swift: struct LiftMaintenance.
+class LiftMaintenance {
+  const LiftMaintenance({
+    required this.line,
+    required this.stationName,
+    required this.detail,
+  });
+
+  final String line;
+  final String stationName;
+  final String detail;
+
+  String get id => '$line·$stationName·$detail';
 }
 
 /// MRT/LRT line disruption surfaced on the Home screen. Built from LTA's
@@ -241,6 +292,19 @@ class DataStore extends ChangeNotifier {
   DateTime? _lastTrainAlertFetch;
   bool _trainAlertsInflight = false;
 
+  /// Network-wide lift maintenance items (FacilitiesMaintenance v2).
+  /// Empty = no current lift outages. Refreshed lazily when the MRT board opens.
+  List<LiftMaintenance> _liftMaintenance = const [];
+  List<LiftMaintenance> get liftMaintenance => _liftMaintenance;
+  DateTime? _lastLiftFetch;
+
+  /// Live per-line station crowdedness (PCDRealTime), fetched lazily when a
+  /// line is expanded on the MRT board. null = not yet fetched / in-flight.
+  final Map<MRTLine, List<StationCrowd>?> _crowdByLine = {};
+  Map<MRTLine, List<StationCrowd>?> get crowdByLine => _crowdByLine;
+  final Set<MRTLine> _crowdInflight = {};
+  final Map<MRTLine, DateTime> _lastCrowdFetch = {};
+
   /// Tick from AppModel calls this once per second; the inner gate
   /// keeps us at one network hit per 60 s.
   void refreshTrainAlertsIfStale({bool force = false}) {
@@ -258,20 +322,25 @@ class DataStore extends ChangeNotifier {
         final r = await _api.trainServiceAlerts();
         final next = (r.status == 2)
             ? r.affectedSegments
-                .map((seg) => TrainAlert(
+                  .map(
+                    (seg) => TrainAlert(
                       id: seg.line,
                       lineCode: seg.line,
                       line: MRTLine.fromLtaCode(seg.line),
                       title:
                           '${MRTLine.shortLabelForLta(seg.line)} · disrupted',
                       detail: _trainAlertSummary(seg, r.messages),
-                    ))
-                .toList(growable: false)
+                    ),
+                  )
+                  .toList(growable: false)
             : const <TrainAlert>[];
         // Skip a rebuild when nothing changed.
-        final unchanged = next.length == _trainAlerts.length &&
-            List.generate(next.length, (i) => next[i] == _trainAlerts[i])
-                .every((e) => e);
+        final unchanged =
+            next.length == _trainAlerts.length &&
+            List.generate(
+              next.length,
+              (i) => next[i] == _trainAlerts[i],
+            ).every((e) => e);
         if (!unchanged) {
           _trainAlerts = next;
           notifyListeners();
@@ -285,20 +354,285 @@ class DataStore extends ChangeNotifier {
   }
 
   String _trainAlertSummary(
-      LtaAffectedSegment seg, List<LtaTrainMessage> messages) {
+    LtaAffectedSegment seg,
+    List<LtaTrainMessage> messages,
+  ) {
     final raw = messages
-            .firstWhere((m) => m.content.contains(seg.line),
-                orElse: () => messages.isEmpty
-                    ? const LtaTrainMessage(content: '')
-                    : messages.first)
-            .content
-            .replaceAll('\n', ' ')
-            .trim();
+        .firstWhere(
+          (m) => m.content.contains(seg.line),
+          orElse: () => messages.isEmpty
+              ? const LtaTrainMessage(content: '')
+              : messages.first,
+        )
+        .content
+        .replaceAll('\n', ' ')
+        .trim();
     if (raw.isEmpty) return 'Service disruption · tap to dismiss';
     final dot = raw.indexOf('.');
     final head = dot > 0 ? raw.substring(0, dot) : raw;
     return '$head · tap to dismiss';
   }
+
+  // ─── Lift maintenance (FacilitiesMaintenance v2) ──────────
+  /// Refresh network-wide lift outage list. Gate: 30 min, matching iOS.
+  void refreshLiftMaintenanceIfStale({bool force = false}) {
+    if (!force &&
+        _lastLiftFetch != null &&
+        DateTime.now().difference(_lastLiftFetch!) <
+            const Duration(minutes: 30)) {
+      return;
+    }
+    _lastLiftFetch = DateTime.now();
+    () async {
+      try {
+        final items = await _api.facilitiesMaintenance();
+        final mapped = items
+            .map(
+              (i) => LiftMaintenance(
+                line: i.line,
+                stationName: i.stationName,
+                detail: (i.liftDesc?.trim().isNotEmpty ?? false)
+                    ? i.liftDesc!.trim()
+                    : 'Lift under maintenance',
+              ),
+            )
+            .toList(growable: false);
+        // Skip rebuild when list is identical.
+        final unchanged =
+            mapped.length == _liftMaintenance.length &&
+            List.generate(
+              mapped.length,
+              (i) => mapped[i].id == _liftMaintenance[i].id,
+            ).every((e) => e);
+        if (!unchanged) {
+          _liftMaintenance = mapped;
+          notifyListeners();
+        }
+      } catch (_) {
+        // Network blip — keep the previous snapshot.
+      }
+    }();
+  }
+
+  // ─── Station crowd density (PCDRealTime) ──────────────────
+  /// Fetch live crowdedness for one line (lazy — called when a line is
+  /// expanded). Gate: 5 min per line, matching iOS. Deduped via inflightSet.
+  void refreshCrowd(MRTLine line, {bool force = false}) {
+    if (_crowdInflight.contains(line)) return;
+    if (!force &&
+        _lastCrowdFetch[line] != null &&
+        DateTime.now().difference(_lastCrowdFetch[line]!) <
+            const Duration(minutes: 5)) {
+      return;
+    }
+    _crowdInflight.add(line);
+    _lastCrowdFetch[line] = DateTime.now();
+    () async {
+      try {
+        final rows = await _api.stationCrowd(_pcdLineCode(line));
+        final mapped = rows
+            .map(
+              (r) => StationCrowd(
+                code: r.station,
+                name: _mrtStationName(r.station) ?? r.station,
+                level: StationCrowd.levelFrom(r.crowdLevel),
+              ),
+            )
+            .toList(growable: false);
+        _crowdByLine[line] = mapped;
+        notifyListeners();
+      } catch (_) {
+        // On error: leave the existing entry unchanged (don't blank data).
+        // If nothing was there yet, set empty so the UI shows "unavailable".
+        _crowdByLine.putIfAbsent(line, () => const []);
+        notifyListeners();
+      } finally {
+        _crowdInflight.remove(line);
+      }
+    }();
+  }
+
+  /// PCDRealTime line code for a given MRT line enum.
+  /// Mirrors iOS Theme.swift: MRTLine.pcdLineCode.
+  static String _pcdLineCode(MRTLine line) {
+    switch (line) {
+      case MRTLine.ew:
+        return 'EWL';
+      case MRTLine.ns:
+        return 'NSL';
+      case MRTLine.ne:
+        return 'NEL';
+      case MRTLine.cc:
+        return 'CCL';
+      case MRTLine.dt:
+        return 'DTL';
+      case MRTLine.te:
+        return 'TEL';
+    }
+  }
+
+  /// Resolve a station code (e.g. "EW13") to its display name using the
+  /// existing `_stationCodes` dataset from mrt_stations.dart (inverse lookup).
+  /// Mirrors iOS DataStore.swift: mrtStationName(forCode:).
+  static final Map<String, String> _mrtNameByCode = () {
+    // Build a reverse index: code → station name.
+    // Replicates the logic in ios-native/Leyne/V2/MrtStations.swift.
+    const Map<String, List<String>> stationCodes = {
+      'Jurong East': ['EW24', 'NS1'],
+      'Bukit Batok': ['NS2'],
+      'Bukit Gombak': ['NS3'],
+      'Choa Chu Kang': ['NS4'],
+      'Yew Tee': ['NS5'],
+      'Kranji': ['NS7'],
+      'Marsiling': ['NS8'],
+      'Woodlands': ['NS9', 'TE2'],
+      'Admiralty': ['NS10'],
+      'Sembawang': ['NS11'],
+      'Canberra': ['NS12'],
+      'Yishun': ['NS13'],
+      'Khatib': ['NS14'],
+      'Yio Chu Kang': ['NS15'],
+      'Ang Mo Kio': ['NS16'],
+      'Bishan': ['NS17', 'CC15'],
+      'Braddell': ['NS18'],
+      'Toa Payoh': ['NS19'],
+      'Novena': ['NS20'],
+      'Newton': ['NS21', 'DT11'],
+      'Orchard': ['NS22', 'TE14'],
+      'Somerset': ['NS23'],
+      'Dhoby Ghaut': ['NS24', 'NE6', 'CC1'],
+      'City Hall': ['NS25', 'EW13'],
+      'Raffles Place': ['NS26', 'EW14'],
+      'Marina Bay': ['NS27', 'CE2', 'TE20'],
+      'Marina South Pier': ['NS28'],
+      'Pasir Ris': ['EW1'],
+      'Tampines': ['EW2', 'DT32'],
+      'Simei': ['EW3'],
+      'Tanah Merah': ['EW4'],
+      'Bedok': ['EW5'],
+      'Kembangan': ['EW6'],
+      'Eunos': ['EW7'],
+      'Paya Lebar': ['EW8', 'CC9'],
+      'Aljunied': ['EW9'],
+      'Kallang': ['EW10'],
+      'Lavender': ['EW11'],
+      'Bugis': ['EW12', 'DT14'],
+      'Tanjong Pagar': ['EW15'],
+      'Outram Park': ['EW16', 'NE3', 'TE17'],
+      'Tiong Bahru': ['EW17'],
+      'Redhill': ['EW18'],
+      'Queenstown': ['EW19'],
+      'Commonwealth': ['EW20'],
+      'Buona Vista': ['EW21', 'CC22'],
+      'Dover': ['EW22'],
+      'Clementi': ['EW23'],
+      'Chinese Garden': ['EW25'],
+      'Lakeside': ['EW26'],
+      'Boon Lay': ['EW27'],
+      'Pioneer': ['EW28'],
+      'Joo Koon': ['EW29'],
+      'Gul Circle': ['EW30'],
+      'Tuas Crescent': ['EW31'],
+      'Tuas West Road': ['EW32'],
+      'Tuas Link': ['EW33'],
+      'Expo': ['CG1', 'DT35'],
+      'Changi Airport': ['CG2'],
+      'HarbourFront': ['NE1', 'CC29'],
+      'Chinatown': ['NE4', 'DT19'],
+      'Clarke Quay': ['NE5'],
+      'Little India': ['NE7', 'DT12'],
+      'Farrer Park': ['NE8'],
+      'Boon Keng': ['NE9'],
+      'Potong Pasir': ['NE10'],
+      'Woodleigh': ['NE11'],
+      'Serangoon': ['NE12', 'CC13'],
+      'Kovan': ['NE13'],
+      'Hougang': ['NE14'],
+      'Buangkok': ['NE15'],
+      'Sengkang': ['NE16'],
+      'Punggol': ['NE17'],
+      'Punggol Coast': ['NE18'],
+      'Bras Basah': ['CC2'],
+      'Esplanade': ['CC3'],
+      'Promenade': ['CC4', 'DT15'],
+      'Nicoll Highway': ['CC5'],
+      'Stadium': ['CC6'],
+      'Mountbatten': ['CC7'],
+      'Dakota': ['CC8'],
+      'MacPherson': ['CC10', 'DT26'],
+      'Tai Seng': ['CC11'],
+      'Bartley': ['CC12'],
+      'Lorong Chuan': ['CC14'],
+      'Marymount': ['CC16'],
+      'Caldecott': ['CC17', 'TE9'],
+      'Botanic Gardens': ['CC19', 'DT9'],
+      'Farrer Road': ['CC20'],
+      'Holland Village': ['CC21'],
+      'one-north': ['CC23'],
+      'Kent Ridge': ['CC24'],
+      'Haw Par Villa': ['CC25'],
+      'Pasir Panjang': ['CC26'],
+      'Labrador Park': ['CC27'],
+      'Telok Blangah': ['CC28'],
+      'Bayfront': ['CE1', 'DT16'],
+      'Bukit Panjang': ['DT1'],
+      'Cashew': ['DT2'],
+      'Hillview': ['DT3'],
+      'Hume': ['DT4'],
+      'Beauty World': ['DT5'],
+      'King Albert Park': ['DT6'],
+      'Sixth Avenue': ['DT7'],
+      'Tan Kah Kee': ['DT8'],
+      'Stevens': ['DT10', 'TE11'],
+      'Rochor': ['DT13'],
+      'Downtown': ['DT17'],
+      'Telok Ayer': ['DT18'],
+      'Fort Canning': ['DT20'],
+      'Bencoolen': ['DT21'],
+      'Jalan Besar': ['DT22'],
+      'Bendemeer': ['DT23'],
+      'Geylang Bahru': ['DT24'],
+      'Mattar': ['DT25'],
+      'Ubi': ['DT27'],
+      'Kaki Bukit': ['DT28'],
+      'Bedok North': ['DT29'],
+      'Bedok Reservoir': ['DT30'],
+      'Tampines West': ['DT31'],
+      'Tampines East': ['DT33'],
+      'Upper Changi': ['DT34'],
+      'Woodlands North': ['TE1'],
+      'Woodlands South': ['TE3'],
+      'Springleaf': ['TE4'],
+      'Lentor': ['TE5'],
+      'Mayflower': ['TE6'],
+      'Bright Hill': ['TE7'],
+      'Upper Thomson': ['TE8'],
+      'Napier': ['TE12'],
+      'Orchard Boulevard': ['TE13'],
+      'Great World': ['TE15'],
+      'Havelock': ['TE16'],
+      'Maxwell': ['TE18'],
+      'Shenton Way': ['TE19'],
+      'Gardens by the Bay': ['TE22'],
+      'Tanjong Rhu': ['TE23'],
+      'Katong Park': ['TE24'],
+      'Tanjong Katong': ['TE25'],
+      'Marine Parade': ['TE26'],
+      'Marine Terrace': ['TE27'],
+      'Siglap': ['TE28'],
+      'Bayshore': ['TE29'],
+    };
+    final idx = <String, String>{};
+    for (final entry in stationCodes.entries) {
+      for (final code in entry.value) {
+        idx[code.toUpperCase()] = entry.key;
+      }
+    }
+    return idx;
+  }();
+
+  static String? _mrtStationName(String code) =>
+      _mrtNameByCode[code.toUpperCase()];
 
   // ─── Bootstrap reference data ──────────────────────────────
 
@@ -313,8 +647,10 @@ class DataStore extends ChangeNotifier {
     LtaException? lastErr;
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
-        final results =
-            await Future.wait([_api.busStops(), _api.busServices()]);
+        final results = await Future.wait([
+          _api.busStops(),
+          _api.busServices(),
+        ]);
         final stops = results[0] as List<LtaBusStop>;
         final svcs = results[1] as List<LtaBusService>;
         _stopByCode
@@ -347,13 +683,13 @@ class DataStore extends ChangeNotifier {
         return;
       }
     }
-    _referenceState =
-        ReferenceState.error(lastErr?.message ?? 'Couldn’t reach LTA');
+    _referenceState = ReferenceState.error(
+      lastErr?.message ?? 'Couldn’t reach LTA',
+    );
     notifyListeners();
   }
 
-  String stopName(String code) =>
-      _stopByCode[code]?.description ?? code;
+  String stopName(String code) => _stopByCode[code]?.description ?? code;
   String roadName(String code) => _stopByCode[code]?.roadName ?? '';
 
   // ─── Nearby ────────────────────────────────────────────────
@@ -373,24 +709,32 @@ class DataStore extends ChangeNotifier {
   void _recomputeNearby() {
     final loc = _lastLoc;
     if (loc == null) return;
-    final ranked = _stopByCode.values
-        .map((s) =>
-            (stop: s, d: haversine(loc.lat, loc.lon, s.latitude, s.longitude)))
-        .toList()
-      ..sort((a, b) => a.d.compareTo(b.d));
-    _nearby = ranked.take(12).map((r) {
-      final s = r.stop;
-      return NearbyStop(
-        id: s.busStopCode,
-        stopName: s.description,
-        stopCode: s.busStopCode,
-        lat: s.latitude,
-        lon: s.longitude,
-        distanceM: r.d.round(),
-        walkMin: walkMinutesFor(r.d),
-        services: servicesFor(s.busStopCode),
-      );
-    }).toList(growable: false);
+    final ranked =
+        _stopByCode.values
+            .map(
+              (s) => (
+                stop: s,
+                d: haversine(loc.lat, loc.lon, s.latitude, s.longitude),
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.d.compareTo(b.d));
+    _nearby = ranked
+        .take(12)
+        .map((r) {
+          final s = r.stop;
+          return NearbyStop(
+            id: s.busStopCode,
+            stopName: s.description,
+            stopCode: s.busStopCode,
+            lat: s.latitude,
+            lon: s.longitude,
+            distanceM: r.d.round(),
+            walkMin: walkMinutesFor(r.d),
+            services: servicesFor(s.busStopCode),
+          );
+        })
+        .toList(growable: false);
   }
 
   /// Refresh only the live-`services` snapshot on the already-ranked nearby
@@ -426,19 +770,22 @@ class DataStore extends ChangeNotifier {
       if (d <= radiusM) within.add((stop: s, d: d));
     }
     within.sort((a, b) => a.d.compareTo(b.d));
-    return within.take(50).map((r) {
-      final s = r.stop;
-      return NearbyStop(
-        id: s.busStopCode,
-        stopName: s.description,
-        stopCode: s.busStopCode,
-        lat: s.latitude,
-        lon: s.longitude,
-        distanceM: r.d.round(),
-        walkMin: walkMinutesFor(r.d),
-        services: const [],
-      );
-    }).toList(growable: false);
+    return within
+        .take(50)
+        .map((r) {
+          final s = r.stop;
+          return NearbyStop(
+            id: s.busStopCode,
+            stopName: s.description,
+            stopCode: s.busStopCode,
+            lat: s.latitude,
+            lon: s.longitude,
+            distanceM: r.d.round(),
+            walkMin: walkMinutesFor(r.d),
+            services: const [],
+          );
+        })
+        .toList(growable: false);
   }
 
   // ─── Live arrivals ─────────────────────────────────────────
@@ -457,17 +804,12 @@ class DataStore extends ChangeNotifier {
 
   /// `silent: true` warms data without publishing a `loading` state (used
   /// by prefetch so entering Nearby doesn't burst-republish the whole list).
-  void ensureArrivals(
-    String code, {
-    bool force = false,
-    bool silent = false,
-  }) {
+  void ensureArrivals(String code, {bool force = false, bool silent = false}) {
     final last = _lastFetched[code];
-    final fresh = last != null &&
+    final fresh =
+        last != null &&
         DateTime.now().difference(last) < LtaConfig.arrivalRefresh;
-    if (!force &&
-        fresh &&
-        _arrivals[code]?.kind == ArrivalStateKind.loaded) {
+    if (!force && fresh && _arrivals[code]?.kind == ArrivalStateKind.loaded) {
       return;
     }
     if (_inflight.contains(code)) return;
@@ -498,12 +840,16 @@ class DataStore extends ChangeNotifier {
     final prevState = _arrivals[code];
     try {
       final resp = await _api.busArrival(code);
-      final mapped = resp.services
-          .where((s) => s.nextBus.hasData)
-          .map((s) => s.toService(
-              destName: stopName(s.nextBus.destinationCode ?? '')))
-          .toList()
-        ..sort((a, b) => a.etaSec.compareTo(b.etaSec));
+      final mapped =
+          resp.services
+              .where((s) => s.nextBus.hasData)
+              .map(
+                (s) => s.toService(
+                  destName: stopName(s.nextBus.destinationCode ?? ''),
+                ),
+              )
+              .toList()
+            ..sort((a, b) => a.etaSec.compareTo(b.etaSec));
       _arrivals[code] = mapped.isEmpty
           ? ArrivalState.empty()
           : ArrivalState.loaded(mapped);
@@ -587,7 +933,9 @@ class DataStore extends ChangeNotifier {
     if (s.isEmpty) return const [];
     final seen = <String>{};
     return _services
-        .where((b) => b.serviceNo.toLowerCase().contains(s) && seen.add(b.serviceNo))
+        .where(
+          (b) => b.serviceNo.toLowerCase().contains(s) && seen.add(b.serviceNo),
+        )
         .toList();
   }
 
@@ -602,16 +950,20 @@ class DataStore extends ChangeNotifier {
       if (b.busStopCode.contains(s)) return true;
       final hay = _searchTokens('${b.description} ${b.roadName}');
       return queryTokens.every((qt) => hay.any((h) => h.contains(qt)));
-    }).toList()
-      ..sort((a, b) => a.description.compareTo(b.description));
+    }).toList()..sort((a, b) => a.description.compareTo(b.description));
   }
 
   /// Synonym-normalised search tokens. Maps the words LTA never uses in stop
   /// names (mrt / station / interchange / lrt) onto the ones it does (stn /
   /// int), and splits on any non-alphanumeric separator.
   static const _searchSynonyms = {
-    'mrt': 'stn', 'station': 'stn', 'stn': 'stn', 'lrt': 'stn',
-    'interchange': 'int', 'int': 'int', 'intg': 'int',
+    'mrt': 'stn',
+    'station': 'stn',
+    'stn': 'stn',
+    'lrt': 'stn',
+    'interchange': 'int',
+    'int': 'int',
+    'intg': 'int',
   };
   List<String> _searchTokens(String s) => s
       .toLowerCase()
@@ -719,19 +1071,18 @@ class DataStore extends ChangeNotifier {
     for (final r in chosen) {
       final s = _stopByCode[r.busStopCode];
       if (s == null) continue;
-      stops.add(RouteStopLive(
-        code: s.busStopCode,
-        name: s.description,
-        lat: s.latitude,
-        lon: s.longitude,
-        seq: r.stopSequence,
-      ));
+      stops.add(
+        RouteStopLive(
+          code: s.busStopCode,
+          name: s.description,
+          lat: s.latitude,
+          lon: s.longitude,
+          seq: r.stopSequence,
+        ),
+      );
     }
     final youIdx = stops.indexWhere((s) => s.code == stopCode);
-    return RouteInfo(
-      stops: stops,
-      youIndex: youIdx < 0 ? 0 : youIdx,
-    );
+    return RouteInfo(stops: stops, youIndex: youIdx < 0 ? 0 : youIdx);
   }
 
   /// All directions of `serviceNo` (typically two — there and back), each with
@@ -756,23 +1107,28 @@ class DataStore extends ChangeNotifier {
       for (final r in seq) {
         final s = _stopByCode[r.busStopCode];
         if (s == null) continue;
-        stops.add(RouteStopLive(
-          code: s.busStopCode,
-          name: s.description,
-          lat: s.latitude,
-          lon: s.longitude,
-          seq: r.stopSequence,
-        ));
+        stops.add(
+          RouteStopLive(
+            code: s.busStopCode,
+            name: s.description,
+            lat: s.latitude,
+            lon: s.longitude,
+            seq: r.stopSequence,
+          ),
+        );
       }
       if (stops.isEmpty) continue;
-      final youIdx =
-          stopCode == null ? -1 : stops.indexWhere((s) => s.code == stopCode);
-      directions.add(RouteDirection(
-        direction: d,
-        stops: stops,
-        youIndex: youIdx < 0 ? 0 : youIdx,
-        anchorPresent: youIdx >= 0,
-      ));
+      final youIdx = stopCode == null
+          ? -1
+          : stops.indexWhere((s) => s.code == stopCode);
+      directions.add(
+        RouteDirection(
+          direction: d,
+          stops: stops,
+          youIndex: youIdx < 0 ? 0 : youIdx,
+          anchorPresent: youIdx >= 0,
+        ),
+      );
     }
     if (directions.isEmpty) return null;
     var initial = directions.indexWhere((dir) => dir.anchorPresent);
@@ -818,7 +1174,9 @@ class DataStore extends ChangeNotifier {
   }
 
   static LtaArrivalService? _matchService(
-      LtaArrivalResponse resp, String serviceNo) {
+    LtaArrivalResponse resp,
+    String serviceNo,
+  ) {
     for (final s in resp.services) {
       if (s.serviceNo == serviceNo) return s;
     }

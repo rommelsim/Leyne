@@ -1,21 +1,20 @@
 // SoftTabBar (Material 3) — bottom NavigationBar with pill-indicator
 // behind the active icon. Mirrors the iOS tab set exactly:
-// Home / Settings / Search. There is NO standalone Nearby tab — iOS folds
-// Nearby into the Home page (the "Nearby" section), so a separate tab would
-// duplicate it.
+// Nearby (Home) · Saved · Search · MRT · Settings — matching SoftRoot.swift
+// Tab declaration order.
 //
 // SoftBottomBar stacks the AdMob banner above SoftTabBar for the
-// tabbed screens (Home / Settings) — this is what those Scaffolds mount
-// as bottomNavigationBar.
+// tabbed screens — this is what those Scaffolds mount as bottomNavigationBar.
 
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
 import '../ad_banner.dart';
 
-// 2.4.0: Added `favourites` tab — mirrors iOS SoftRoot 4-tab layout:
-// Home · Favourites · Settings · Search
-enum SoftTab { home, favourites, settings, search }
+// 2.4.0: Added `favourites` tab — mirrors iOS SoftRoot 4-tab layout.
+// 2.7.0: Added `mrt` tab — mirrors iOS SoftRoot Nearby·Saved·Search·MRT·Settings.
+// Android visible order: Home · Saved · Search · MRT · Settings.
+enum SoftTab { home, favourites, mrt, settings, search }
 
 class SoftTabBar extends StatelessWidget {
   const SoftTabBar({
@@ -31,7 +30,6 @@ class SoftTabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.t;
     return NavigationBar(
-      // Search is a pushed route — not a real tab index. Map visible tabs only.
       selectedIndex: _visibleIndex(selection),
       onDestinationSelected: (i) => onSelect(_visibleTabs[i]),
       backgroundColor: t.bg,
@@ -53,6 +51,11 @@ class SoftTabBar extends StatelessWidget {
           label: 'Search',
         ),
         NavigationDestination(
+          icon: Icon(Icons.train_outlined),
+          selectedIcon: Icon(Icons.train_rounded),
+          label: 'MRT',
+        ),
+        NavigationDestination(
           icon: Icon(Icons.settings_outlined),
           selectedIcon: Icon(Icons.settings_rounded),
           label: 'Settings',
@@ -61,12 +64,12 @@ class SoftTabBar extends StatelessWidget {
     );
   }
 
-  // Search is always pushed as a route, so all 4 tabs map 1:1.
-  // Order mirrors iOS: Home · Saved · Search · Settings.
+  // Order mirrors iOS SoftRoot: Nearby · Saved · Search · MRT · Settings.
   static const _visibleTabs = [
     SoftTab.home,
     SoftTab.favourites,
     SoftTab.search,
+    SoftTab.mrt,
     SoftTab.settings,
   ];
 

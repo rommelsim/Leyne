@@ -48,11 +48,14 @@ class LtaArrivalService {
         serviceNo: j['ServiceNo'] as String? ?? '',
         operator_: j['Operator'] as String?,
         nextBus: LtaNextBus.fromJson(
-            (j['NextBus'] as Map?)?.cast<String, dynamic>() ?? const {}),
+          (j['NextBus'] as Map?)?.cast<String, dynamic>() ?? const {},
+        ),
         nextBus2: LtaNextBus.fromJson(
-            (j['NextBus2'] as Map?)?.cast<String, dynamic>() ?? const {}),
+          (j['NextBus2'] as Map?)?.cast<String, dynamic>() ?? const {},
+        ),
         nextBus3: LtaNextBus.fromJson(
-            (j['NextBus3'] as Map?)?.cast<String, dynamic>() ?? const {}),
+          (j['NextBus3'] as Map?)?.cast<String, dynamic>() ?? const {},
+        ),
       );
 
   /// Build a domain Service. `destName` resolves DestinationCode → stop name.
@@ -115,16 +118,16 @@ class LtaNextBus {
   final String? vehicleType;
 
   factory LtaNextBus.fromJson(Map<String, dynamic> j) => LtaNextBus(
-        originCode: j['OriginCode'] as String?,
-        destinationCode: j['DestinationCode'] as String?,
-        estimatedArrival: j['EstimatedArrival'] as String?,
-        monitored: (j['Monitored'] as num?)?.toInt(),
-        latitude: j['Latitude'] as String?,
-        longitude: j['Longitude'] as String?,
-        load: j['Load'] as String?,
-        feature: j['Feature'] as String?,
-        vehicleType: j['Type'] as String?,
-      );
+    originCode: j['OriginCode'] as String?,
+    destinationCode: j['DestinationCode'] as String?,
+    estimatedArrival: j['EstimatedArrival'] as String?,
+    monitored: (j['Monitored'] as num?)?.toInt(),
+    latitude: j['Latitude'] as String?,
+    longitude: j['Longitude'] as String?,
+    load: j['Load'] as String?,
+    feature: j['Feature'] as String?,
+    vehicleType: j['Type'] as String?,
+  );
 
   DateTime? get arrivalDate {
     final s = estimatedArrival;
@@ -155,20 +158,20 @@ class LtaBusStop {
   final double longitude;
 
   factory LtaBusStop.fromJson(Map<String, dynamic> j) => LtaBusStop(
-        busStopCode: j['BusStopCode'] as String? ?? '',
-        roadName: j['RoadName'] as String? ?? '',
-        description: j['Description'] as String? ?? '',
-        latitude: (j['Latitude'] as num?)?.toDouble() ?? 0,
-        longitude: (j['Longitude'] as num?)?.toDouble() ?? 0,
-      );
+    busStopCode: j['BusStopCode'] as String? ?? '',
+    roadName: j['RoadName'] as String? ?? '',
+    description: j['Description'] as String? ?? '',
+    latitude: (j['Latitude'] as num?)?.toDouble() ?? 0,
+    longitude: (j['Longitude'] as num?)?.toDouble() ?? 0,
+  );
 
   Map<String, dynamic> toJson() => {
-        'BusStopCode': busStopCode,
-        'RoadName': roadName,
-        'Description': description,
-        'Latitude': latitude,
-        'Longitude': longitude,
-      };
+    'BusStopCode': busStopCode,
+    'RoadName': roadName,
+    'Description': description,
+    'Latitude': latitude,
+    'Longitude': longitude,
+  };
 
   @override
   bool operator ==(Object other) =>
@@ -197,24 +200,24 @@ class LtaBusService {
   final String? loopDesc;
 
   factory LtaBusService.fromJson(Map<String, dynamic> j) => LtaBusService(
-        serviceNo: j['ServiceNo'] as String? ?? '',
-        operator_: j['Operator'] as String?,
-        direction: (j['Direction'] as num?)?.toInt() ?? 0,
-        category: j['Category'] as String?,
-        originCode: j['OriginCode'] as String?,
-        destinationCode: j['DestinationCode'] as String?,
-        loopDesc: j['LoopDesc'] as String?,
-      );
+    serviceNo: j['ServiceNo'] as String? ?? '',
+    operator_: j['Operator'] as String?,
+    direction: (j['Direction'] as num?)?.toInt() ?? 0,
+    category: j['Category'] as String?,
+    originCode: j['OriginCode'] as String?,
+    destinationCode: j['DestinationCode'] as String?,
+    loopDesc: j['LoopDesc'] as String?,
+  );
 
   Map<String, dynamic> toJson() => {
-        'ServiceNo': serviceNo,
-        'Operator': operator_,
-        'Direction': direction,
-        'Category': category,
-        'OriginCode': originCode,
-        'DestinationCode': destinationCode,
-        'LoopDesc': loopDesc,
-      };
+    'ServiceNo': serviceNo,
+    'Operator': operator_,
+    'Direction': direction,
+    'Category': category,
+    'OriginCode': originCode,
+    'DestinationCode': destinationCode,
+    'LoopDesc': loopDesc,
+  };
 }
 
 class LtaBusRoute {
@@ -251,34 +254,34 @@ class LtaBusRoute {
   final String? sunLastBus;
 
   factory LtaBusRoute.fromJson(Map<String, dynamic> j) => LtaBusRoute(
-        serviceNo: j['ServiceNo'] as String? ?? '',
-        operator_: j['Operator'] as String?,
-        direction: (j['Direction'] as num?)?.toInt() ?? 0,
-        stopSequence: (j['StopSequence'] as num?)?.toInt() ?? 0,
-        busStopCode: j['BusStopCode'] as String? ?? '',
-        distance: (j['Distance'] as num?)?.toDouble(),
-        wdFirstBus: _busTime(j['WD_FirstBus']),
-        wdLastBus: _busTime(j['WD_LastBus']),
-        satFirstBus: _busTime(j['SAT_FirstBus']),
-        satLastBus: _busTime(j['SAT_LastBus']),
-        sunFirstBus: _busTime(j['SUN_FirstBus']),
-        sunLastBus: _busTime(j['SUN_LastBus']),
-      );
+    serviceNo: j['ServiceNo'] as String? ?? '',
+    operator_: j['Operator'] as String?,
+    direction: (j['Direction'] as num?)?.toInt() ?? 0,
+    stopSequence: (j['StopSequence'] as num?)?.toInt() ?? 0,
+    busStopCode: j['BusStopCode'] as String? ?? '',
+    distance: (j['Distance'] as num?)?.toDouble(),
+    wdFirstBus: _busTime(j['WD_FirstBus']),
+    wdLastBus: _busTime(j['WD_LastBus']),
+    satFirstBus: _busTime(j['SAT_FirstBus']),
+    satLastBus: _busTime(j['SAT_LastBus']),
+    sunFirstBus: _busTime(j['SUN_FirstBus']),
+    sunLastBus: _busTime(j['SUN_LastBus']),
+  );
 
   Map<String, dynamic> toJson() => {
-        'ServiceNo': serviceNo,
-        'Operator': operator_,
-        'Direction': direction,
-        'StopSequence': stopSequence,
-        'BusStopCode': busStopCode,
-        'Distance': distance,
-        'WD_FirstBus': wdFirstBus,
-        'WD_LastBus': wdLastBus,
-        'SAT_FirstBus': satFirstBus,
-        'SAT_LastBus': satLastBus,
-        'SUN_FirstBus': sunFirstBus,
-        'SUN_LastBus': sunLastBus,
-      };
+    'ServiceNo': serviceNo,
+    'Operator': operator_,
+    'Direction': direction,
+    'StopSequence': stopSequence,
+    'BusStopCode': busStopCode,
+    'Distance': distance,
+    'WD_FirstBus': wdFirstBus,
+    'WD_LastBus': wdLastBus,
+    'SAT_FirstBus': satFirstBus,
+    'SAT_LastBus': satLastBus,
+    'SUN_FirstBus': sunFirstBus,
+    'SUN_LastBus': sunLastBus,
+  };
 }
 
 /// Normalise an LTA bus-time cell: a 4-digit `HHMM` string, or null when the
@@ -331,6 +334,54 @@ Deck _deckFromLta(String? raw) {
   }
 }
 
+// ─── Station crowd density (PCDRealTime) ─────────────────────────
+// Mirrors LTAModels.swift: LTAStationCrowd. CrowdLevel "l"/"m"/"h"/"NA".
+
+class LtaStationCrowd {
+  const LtaStationCrowd({required this.station, required this.crowdLevel});
+
+  /// Station code, e.g. "EW13".
+  final String station;
+
+  /// Raw level string: "l" | "m" | "h" | "NA".
+  final String crowdLevel;
+
+  factory LtaStationCrowd.fromJson(Map<String, dynamic> j) => LtaStationCrowd(
+    station: (j['Station'] as String?) ?? '',
+    crowdLevel: (j['CrowdLevel'] as String?) ?? 'NA',
+  );
+}
+
+// ─── Facilities maintenance v2 ───────────────────────────────────
+// Mirrors LTAModels.swift: LTAFacilityMaintenance.
+
+class LtaFacilityMaintenance {
+  const LtaFacilityMaintenance({
+    required this.line,
+    required this.stationCode,
+    required this.stationName,
+    this.liftId,
+    this.liftDesc,
+  });
+
+  final String line;
+  final String stationCode;
+  final String stationName;
+  final String? liftId;
+
+  /// Human-readable location, e.g. "Exit B Street level - Concourse".
+  final String? liftDesc;
+
+  factory LtaFacilityMaintenance.fromJson(Map<String, dynamic> j) =>
+      LtaFacilityMaintenance(
+        line: (j['Line'] as String?) ?? '',
+        stationCode: (j['StationCode'] as String?) ?? '',
+        stationName: (j['StationName'] as String?) ?? '',
+        liftId: j['LiftID'] as String?,
+        liftDesc: j['LiftDesc'] as String?,
+      );
+}
+
 // ─── Train service alerts (MRT/LRT) ─────────────────────────────
 // Mirrors LTAModels.swift. `Status` is 1 (normal) or 2 (disrupted); when
 // normal `affectedSegments` and `messages` come back empty.
@@ -347,24 +398,20 @@ class LtaTrainAlerts {
   final List<LtaTrainMessage> messages;
 
   factory LtaTrainAlerts.fromJson(Map<String, dynamic> j) => LtaTrainAlerts(
-        status: (j['Status'] as num?)?.toInt() ?? 1,
-        affectedSegments: ((j['AffectedSegments'] as List?) ?? const [])
-            .cast<Map<String, dynamic>>()
-            .map(LtaAffectedSegment.fromJson)
-            .toList(growable: false),
-        messages: ((j['Message'] as List?) ?? const [])
-            .cast<Map<String, dynamic>>()
-            .map(LtaTrainMessage.fromJson)
-            .toList(growable: false),
-      );
+    status: (j['Status'] as num?)?.toInt() ?? 1,
+    affectedSegments: ((j['AffectedSegments'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map(LtaAffectedSegment.fromJson)
+        .toList(growable: false),
+    messages: ((j['Message'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>()
+        .map(LtaTrainMessage.fromJson)
+        .toList(growable: false),
+  );
 }
 
 class LtaAffectedSegment {
-  const LtaAffectedSegment({
-    required this.line,
-    this.direction,
-    this.stations,
-  });
+  const LtaAffectedSegment({required this.line, this.direction, this.stations});
 
   final String line;
   final String? direction;
@@ -385,7 +432,7 @@ class LtaTrainMessage {
   final String? createdDate;
 
   factory LtaTrainMessage.fromJson(Map<String, dynamic> j) => LtaTrainMessage(
-        content: (j['Content'] as String?) ?? '',
-        createdDate: j['CreatedDate'] as String?,
-      );
+    content: (j['Content'] as String?) ?? '',
+    createdDate: j['CreatedDate'] as String?,
+  );
 }

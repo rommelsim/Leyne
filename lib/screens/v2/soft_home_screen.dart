@@ -271,12 +271,16 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     final s = DataStore.shared.stopByCode[stop.stopCode];
     final name = stop.stopName.isEmpty ? stop.stopCode : stop.stopName;
     if (s != null) {
-      final geo = Uri.parse('geo:${s.latitude},${s.longitude}'
-          '?q=${s.latitude},${s.longitude}(${Uri.encodeComponent(name)})');
+      final geo = Uri.parse(
+        'geo:${s.latitude},${s.longitude}'
+        '?q=${s.latitude},${s.longitude}(${Uri.encodeComponent(name)})',
+      );
       if (await launchUrl(geo, mode: LaunchMode.externalApplication)) return;
     }
-    final web = Uri.parse('https://www.google.com/maps/search/?api=1'
-        '&query=${Uri.encodeComponent(name)}');
+    final web = Uri.parse(
+      'https://www.google.com/maps/search/?api=1'
+      '&query=${Uri.encodeComponent(name)}',
+    );
     await launchUrl(web, mode: LaunchMode.externalApplication);
   }
 
@@ -405,26 +409,26 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       _GapItem(:final height) => SizedBox(height: height),
       _EyebrowItem(:final label) => Eyebrow(label),
       _NearbyCardItem(:final stop, :final highlight) => RepaintBoundary(
-          child: _NearbyCard(
-            stop: stop,
-            highlight: highlight,
-            onTap: () => widget.onOpenStop(stop.stopCode),
-            onLongPress: () => _showStopPeek(context, stop),
-          ),
+        child: _NearbyCard(
+          stop: stop,
+          highlight: highlight,
+          onTap: () => widget.onOpenStop(stop.stopCode),
+          onLongPress: () => _showStopPeek(context, stop),
         ),
+      ),
       _AlertItem(:final alert) => _mrtAlertCard(context, alert),
       _LiveBannerItem() => _liveUpdatesBanner(context, pins: pins),
       _EmptyItem() => _EmptyState(
-          onNearby: () async {
-            await LocationService.shared.requestAndStart();
-            final loc = LocationService.shared.lastLocation;
-            if (loc != null) {
-              DataStore.shared.updateNearby(loc.lat, loc.lon);
-              DataStore.shared.prefetchNearbyArrivals();
-            }
-          },
-          onSearch: widget.onOpenSearch,
-        ),
+        onNearby: () async {
+          await LocationService.shared.requestAndStart();
+          final loc = LocationService.shared.lastLocation;
+          if (loc != null) {
+            DataStore.shared.updateNearby(loc.lat, loc.lon);
+            DataStore.shared.prefetchNearbyArrivals();
+          }
+        },
+        onSearch: widget.onOpenSearch,
+      ),
     };
   }
 
@@ -465,12 +469,12 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         borderRadius: BorderRadius.circular(99),
         onTap: () {
           Navigator.of(context)
-              .push(MaterialPageRoute(
-                builder: (_) => const ManageAlertsScreen(),
-              ))
+              .push(
+                MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
+              )
               .then((_) {
-            if (mounted) setState(() {});
-          });
+                if (mounted) setState(() {});
+              });
         },
         child: Container(
           width: 42,
@@ -492,8 +496,10 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
                   right: -6,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5),
-                    constraints:
-                        const BoxConstraints(minWidth: 18, minHeight: 18),
+                    constraints: const BoxConstraints(
+                      minWidth: 18,
+                      minHeight: 18,
+                    ),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: t.soon,
@@ -502,8 +508,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
                     ),
                     child: Text(
                       '$count',
-                      style: t.sans(11,
-                          weight: FontWeight.w700, color: Colors.white),
+                      style: t.sans(
+                        11,
+                        weight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
@@ -528,8 +537,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         Text(
           located ? 'NEAR YOU' : 'LOCATION OFF',
           style: t
-              .mono(10, weight: FontWeight.w700,
-                  color: located ? LyneSignal.meBlue : t.dim)
+              .mono(
+                10,
+                weight: FontWeight.w700,
+                color: located ? LyneSignal.meBlue : t.dim,
+              )
               .copyWith(letterSpacing: 0.8),
         ),
         if (located) ...[
@@ -618,8 +630,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
                       children: [
                         TextSpan(
                           text: 'Live updates  ',
-                          style:
-                              t.sans(13, weight: FontWeight.w600, color: t.fg),
+                          style: t.sans(
+                            13,
+                            weight: FontWeight.w600,
+                            color: t.fg,
+                          ),
                         ),
                         TextSpan(
                           text: 'Arrival times update every few seconds.',
@@ -650,10 +665,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
 
 // ─── Nearby stop card ────────────────────────────────────────────────────────
 
-/// A nearby-stop card matching iOS SoftNearbyStopCard:
-/// identity (pin tile · name · "Stop {code} · road" · walk + distance) over a
-/// 1px divider, then the stop's top-3 services — favourites first, then soonest
-/// — each on its own row with its next arrival and a "View all buses" footer.
+/// A compact nearby-stop card matching iOS SoftNearbyStopCard:
+/// "Closest stop" badge (closest only) + pin tile · name · "Stop {code} · road"
+/// + a single merged meta line (walk time + soonest arrival with "~" whisper)
+/// + trailing chevron. No inline arrivals list, no divider, no footer. Whole
+/// card taps to open the full stop view.
 /// The closest stop is highlighted with a green border + "Closest stop" badge.
 class _NearbyCard extends StatelessWidget {
   const _NearbyCard({
@@ -698,15 +714,11 @@ class _NearbyCard extends StatelessWidget {
                   _closestBadge(t),
                   const SizedBox(height: 12),
                 ],
-                _identityRow(context, t),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Divider(height: 1, thickness: 1, color: t.line),
-                ),
-                // Wrap arrivals in per-second tick + favourite changes.
+                // Wrap identity in per-second tick so the soonest-arrival
+                // meta line updates without rebuilding the whole list.
                 ListenableBuilder(
                   listenable: AppModel.shared,
-                  builder: (context, _) => _arrivalsSection(context, t),
+                  builder: (context, _) => _identityRow(context, t),
                 ),
               ],
             ),
@@ -730,18 +742,20 @@ class _NearbyCard extends StatelessWidget {
     );
   }
 
+  /// Identity row: pin tile · (name + subtitle + compact meta) · chevron.
+  /// Matches iOS SoftNearbyStopCard which shows only the header row — no
+  /// per-service arrivals list, no divider, no footer.
   Widget _identityRow(BuildContext context, LyneTheme t) {
     final code = stop.stopCode;
     final name = stop.stopName.isEmpty ? code : stop.stopName;
     final road = DataStore.shared.roadName(code);
     final subtitle = road.isEmpty ? 'Stop $code' : 'Stop $code · $road';
     final walkMin = stop.walkMin;
-    final dist = fmtDistance(stop.distanceM);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Leading 46×46 rounded tile.
+        // Leading 46×46 rounded pin tile.
         Container(
           width: 46,
           height: 46,
@@ -763,7 +777,7 @@ class _NearbyCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               Text(
                 subtitle,
                 style: t.mono(12.5, color: t.dim),
@@ -771,184 +785,70 @@ class _NearbyCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 3),
-              // Walk + distance line.
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.directions_walk, size: 13, color: t.soon),
-                  const SizedBox(width: 3),
-                  Text(
-                    '${walkMin < 1 ? 1 : walkMin} min walk',
-                    style: t.mono(12.5,
-                        weight: FontWeight.w500, color: t.soon),
-                  ),
-                  const SizedBox(width: 5),
-                  Text('·',
-                      style: t.mono(12.5, color: t.faint)),
-                  const SizedBox(width: 5),
-                  Text(dist, style: t.mono(12.5, color: t.dim)),
-                ],
-              ),
+              _compactMeta(t, code, walkMin),
             ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// The stop's top-3 services ranked favourite-first → soonest, each on its
-  /// own row, plus a "View all buses" footer. Mirrors iOS SoftNearbyStopCard.
-  Widget _arrivalsSection(BuildContext context, LyneTheme t) {
-    final code = stop.stopCode;
-    final now = DateTime.now();
-    final feed = Freshness.from(DataStore.shared.lastRefresh(code));
-    final ranked = _rankedArrivals(code, now);
-    if (ranked.isEmpty) return _quietRow(t);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < ranked.length; i++) ...[
-          if (i > 0) const SizedBox(height: 12),
-          _arrivalRow(t, ranked[i].service, ranked[i].fav, now, feed),
-        ],
-        _viewAllRow(t),
-      ],
-    );
-  }
-
-  /// Rank the stop's services: favourites first (saved here OR anywhere), then
-  /// earliest within each group, capped at three. The list is sorted by live
-  /// ETA before partitioning so each group stays soonest-first.
-  List<({Service service, bool fav})> _rankedArrivals(
-      String code, DateTime now) {
-    final raw = DataStore.shared.servicesFor(code);
-    bool isFav(Service s) =>
-        AppModel.shared.isFavService(no: s.no, stop: code) ||
-        AppModel.shared.isFavService(no: s.no);
-    final sorted = [...raw]
-      ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
-    final favs = sorted.where(isFav);
-    final rest = sorted.where((s) => !isFav(s));
-    return [...favs, ...rest]
-        .take(3)
-        .map((s) => (service: s, fav: isFav(s)))
-        .toList();
-  }
-
-  /// One ranked service row: number badge (standard accent — proximity is not
-  /// colour-coded), a gold star when favourited, the destination, then its
-  /// single soonest arrival.
-  Widget _arrivalRow(
-      LyneTheme t, Service s, bool fav, DateTime now, Freshness feed) {
-    final sec = _liveSec(s, now);
-    final conf = ArrivalConfidence.of(monitored: s.monitored, feed: feed);
-    return Row(
-      children: [
-        Container(
-          constraints: const BoxConstraints(minWidth: 46, minHeight: 36),
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: t.accent,
-            borderRadius: BorderRadius.circular(11),
-          ),
-          child: Text(
-            s.no,
-            style: t.sans(16, weight: FontWeight.w700, color: t.onAccent),
-          ),
-        ),
-        const SizedBox(width: 10),
-        if (fav) ...[
-          const Icon(Icons.star, size: 13, color: Color(0xFFF5B500)),
-          const SizedBox(width: 8),
-        ],
-        Expanded(
-          child: Text(
-            _destLabel(s.dest),
-            style: t.sans(14, weight: FontWeight.w500, color: t.fg),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ),
         const SizedBox(width: 8),
-        _etaTrailing(t, sec, conf),
+        Icon(Icons.chevron_right, size: 18, color: t.faint),
       ],
     );
   }
 
-  /// The single soonest arrival, trailing-aligned: proximity-tinted "Arr"
-  /// (with a live signal) or "{n} min". A faint "~" precedes an unconfirmed
-  /// estimate — the whisper-quiet honesty cue used app-wide.
-  Widget _etaTrailing(LyneTheme t, int sec, ArrivalConfidence conf) {
-    final eta = fmtEta(sec);
-    final arriving = eta.big == 'Arr';
-    final isGhost = conf == ArrivalConfidence.unconfirmed;
+  /// Single merged meta line: walk time + soonest arrival with "~" whisper.
+  /// Mirrors iOS SoftNearbyStopCard compactMeta — no per-service list.
+  Widget _compactMeta(LyneTheme t, String code, int walkMin) {
+    final now = DateTime.now();
+    final feed = Freshness.from(DataStore.shared.lastRefresh(code));
+    final services = DataStore.shared.servicesFor(code);
+    final sorted = [...services]
+      ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
+    final soonest = sorted.isEmpty ? null : sorted.first;
+    final hasMeta = walkMin > 0 || soonest != null;
+    if (!hasMeta) return const SizedBox.shrink();
+
+    ArrivalConfidence? conf;
+    String? whenText;
+    if (soonest != null) {
+      conf = ArrivalConfidence.of(monitored: soonest.monitored, feed: feed);
+      final sec = _liveSec(soonest, now);
+      final eta = fmtEta(sec);
+      whenText = eta.big == 'Arr'
+          ? 'next now'
+          : 'next in ${eta.big} ${eta.small}';
+    }
+
     return Row(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
       children: [
-        if (isGhost)
-          ExcludeSemantics(
-            child: Text('~',
-                style: t.mono(13, weight: FontWeight.w400, color: t.faint)),
+        if (walkMin > 0) ...[
+          Icon(Icons.directions_walk, size: 12, color: t.soon),
+          const SizedBox(width: 3),
+          Text(
+            '${walkMin < 1 ? 1 : walkMin} min',
+            style: t.mono(12, weight: FontWeight.w500, color: t.soon),
           ),
-        Text(
-          arriving ? 'Arr' : eta.big,
-          style: t.mono(19,
-              weight: FontWeight.w600,
-              color: etaColor(etaSec: sec, confidence: conf, t: t)),
-        ),
-        if (arriving) ...[
-          if (conf == ArrivalConfidence.live) ...[
-            const SizedBox(width: 1),
+          if (soonest != null) ...[
+            const SizedBox(width: 5),
+            Text('·', style: t.mono(12, color: t.faint)),
+            const SizedBox(width: 5),
+          ],
+        ],
+        if (soonest != null && whenText != null) ...[
+          Icon(Icons.directions_bus_outlined, size: 11, color: t.dim),
+          const SizedBox(width: 3),
+          if (conf == ArrivalConfidence.unconfirmed)
             ExcludeSemantics(
-              child: Transform.translate(
-                offset: const Offset(0, -6),
-                child: Icon(Icons.sensors, size: 9, color: t.soon),
+              child: Text(
+                '~',
+                style: t.mono(11, weight: FontWeight.w400, color: t.faint),
               ),
             ),
-          ],
-        ] else ...[
-          const SizedBox(width: 3),
-          Text(eta.small, style: t.mono(11, color: t.dim)),
-        ],
-      ],
-    );
-  }
-
-  /// "View all buses" footer with a leading hairline — the tappable cue that
-  /// opens the full stop (the whole card shares the same action).
-  Widget _viewAllRow(LyneTheme t) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: Column(
-        children: [
-          Divider(height: 1, thickness: 1, color: t.line),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Text('View all buses',
-                  style: t.sans(13, weight: FontWeight.w600, color: t.dim)),
-              const Spacer(),
-              Icon(Icons.chevron_right, size: 16, color: t.faint),
-            ],
+          Text(
+            whenText,
+            style: t.mono(12, weight: FontWeight.w500, color: t.fg),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _quietRow(LyneTheme t) {
-    return Row(
-      children: [
-        const ConfidenceDot(confidence: ArrivalConfidence.stale, size: 6),
-        const SizedBox(width: 7),
-        Text(
-          'No live arrivals right now',
-          style: t.mono(12, color: t.faint),
-        ),
       ],
     );
   }
@@ -959,12 +859,6 @@ class _NearbyCard extends StatelessWidget {
       return s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30);
     }
     return s.etaSec;
-  }
-
-  static String _destLabel(String dest) {
-    if (dest.isEmpty) return 'Next bus';
-    if (dest.startsWith('To ')) return dest;
-    return 'To $dest';
   }
 }
 
@@ -1019,10 +913,7 @@ class _EmptyState extends StatelessWidget {
                 child: const Text('Use location'),
               ),
               const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: onSearch,
-                child: const Text('Search'),
-              ),
+              OutlinedButton(onPressed: onSearch, child: const Text('Search')),
             ],
           ),
         ],
@@ -1095,7 +986,9 @@ class _StopPeekSheet extends StatelessWidget {
                   children: [
                     _actionRow(
                       t,
-                      icon: pinned ? Icons.star_rounded : Icons.star_outline_rounded,
+                      icon: pinned
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
                       label: pinned ? 'Remove from Saved' : 'Add to Saved',
                       onTap: () => AppModel.shared.togglePin(code),
                     ),
@@ -1166,7 +1059,10 @@ class _StopPeekSheet extends StatelessWidget {
           children: [
             Icon(icon, size: 20, color: color),
             const SizedBox(width: 14),
-            Text(label, style: t.sans(15, weight: FontWeight.w500, color: color)),
+            Text(
+              label,
+              style: t.sans(15, weight: FontWeight.w500, color: color),
+            ),
           ],
         ),
       ),
@@ -1184,8 +1080,7 @@ class _StopPeekSheet extends StatelessWidget {
         children: [
           const ConfidenceDot(confidence: ArrivalConfidence.stale, size: 6),
           const SizedBox(width: 7),
-          Text('No live arrivals right now',
-              style: t.mono(12, color: t.faint)),
+          Text('No live arrivals right now', style: t.mono(12, color: t.faint)),
         ],
       );
     }
@@ -1218,8 +1113,10 @@ class _StopPeekSheet extends StatelessWidget {
               color: t.accent,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(s.no,
-                style: t.sans(15, weight: FontWeight.w700, color: t.onAccent)),
+            child: Text(
+              s.no,
+              style: t.sans(15, weight: FontWeight.w700, color: t.onAccent),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1240,9 +1137,11 @@ class _StopPeekSheet extends StatelessWidget {
             children: [
               Text(
                 arriving ? 'Arr' : eta.big,
-                style: t.mono(17,
-                    weight: FontWeight.w600,
-                    color: etaColor(etaSec: sec, confidence: conf, t: t)),
+                style: t.mono(
+                  17,
+                  weight: FontWeight.w600,
+                  color: etaColor(etaSec: sec, confidence: conf, t: t),
+                ),
               ),
               if (!arriving) ...[
                 const SizedBox(width: 3),

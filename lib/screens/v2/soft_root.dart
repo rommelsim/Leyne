@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'soft_bus_screen.dart';
 import 'soft_favourites_screen.dart';
 import 'soft_home_screen.dart';
+import 'soft_mrt_screen.dart';
 import 'soft_search_screen.dart';
 import 'soft_settings_screen.dart';
 import 'soft_stop_screen.dart';
@@ -78,18 +79,20 @@ class _SoftRootState extends State<SoftRoot> {
 
   void _handleTab(SoftTab next) {
     if (next == SoftTab.search) {
-      _navKey.currentState?.push(MaterialPageRoute(
-        builder: (_) => SoftSearchScreen(
-          onClose: () => _navKey.currentState?.pop(),
-          // Push the result ON TOP of search (don't pop search first) so
-          // Back from the stop/bus returns to the search results, then Back
-          // again returns Home — instead of jumping straight to Home.
-          onOpenStop: (code) => _pushStop(code),
-          onOpenBus: (stopCode, svc) =>
-              _pushBus(stopCode, svc, fullRoute: true),
-          onTab: _handleTab,
+      _navKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => SoftSearchScreen(
+            onClose: () => _navKey.currentState?.pop(),
+            // Push the result ON TOP of search (don't pop search first) so
+            // Back from the stop/bus returns to the search results, then Back
+            // again returns Home — instead of jumping straight to Home.
+            onOpenStop: (code) => _pushStop(code),
+            onOpenBus: (stopCode, svc) =>
+                _pushBus(stopCode, svc, fullRoute: true),
+            onTab: _handleTab,
+          ),
         ),
-      ));
+      );
       return;
     }
     setState(() => _tab = next);
@@ -100,42 +103,48 @@ class _SoftRootState extends State<SoftRoot> {
   /// shows the entire route (used for bus search, which has no boarding stop);
   /// the per-stop arrival flow leaves it false for the narrow approach window.
   void _pushBus(String stopCode, String svc, {bool fullRoute = false}) {
-    _navKey.currentState?.push(MaterialPageRoute(
-      settings: const RouteSettings(name: _kDetailRouteName),
-      builder: (_) => SoftBusScreen(
-        stopCode: stopCode,
-        svc: svc,
-        fullRoute: fullRoute,
-        onBack: () => _navKey.currentState?.pop(),
-        onTab: _handleTab,
-        tabSelection: _tab,
+    _navKey.currentState?.push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: _kDetailRouteName),
+        builder: (_) => SoftBusScreen(
+          stopCode: stopCode,
+          svc: svc,
+          fullRoute: fullRoute,
+          onBack: () => _navKey.currentState?.pop(),
+          onTab: _handleTab,
+          tabSelection: _tab,
+        ),
       ),
-    ));
+    );
   }
 
   void _pushStop(String code) {
-    _navKey.currentState?.push(MaterialPageRoute(
-      settings: const RouteSettings(name: _kDetailRouteName),
-      builder: (_) => SoftStopScreen(
-        stopCode: code,
-        onBack: () => _navKey.currentState?.pop(),
-        onOpenBus: (svc) => _pushBus(code, svc),
-        onTab: _handleTab,
-        tabSelection: _tab,
-        onSeeAll: () => _navKey.currentState?.push(MaterialPageRoute(
-          settings: const RouteSettings(name: _kDetailRouteName),
-          builder: (_) => SoftStopScreen(
-            stopCode: code,
-            showAll: true,
-            onBack: () => _navKey.currentState?.pop(),
-            onOpenBus: (svc) => _pushBus(code, svc),
-            onTab: _handleTab,
-            tabSelection: _tab,
-            onSeeAll: () {},
+    _navKey.currentState?.push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: _kDetailRouteName),
+        builder: (_) => SoftStopScreen(
+          stopCode: code,
+          onBack: () => _navKey.currentState?.pop(),
+          onOpenBus: (svc) => _pushBus(code, svc),
+          onTab: _handleTab,
+          tabSelection: _tab,
+          onSeeAll: () => _navKey.currentState?.push(
+            MaterialPageRoute(
+              settings: const RouteSettings(name: _kDetailRouteName),
+              builder: (_) => SoftStopScreen(
+                stopCode: code,
+                showAll: true,
+                onBack: () => _navKey.currentState?.pop(),
+                onOpenBus: (svc) => _pushBus(code, svc),
+                onTab: _handleTab,
+                tabSelection: _tab,
+                onSeeAll: () {},
+              ),
+            ),
           ),
-        )),
+        ),
       ),
-    ));
+    );
   }
 
   @override
@@ -157,10 +166,7 @@ class _SoftRootState extends State<SoftRoot> {
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (child, anim) =>
           FadeTransition(opacity: anim, child: child),
-      child: KeyedSubtree(
-        key: ValueKey(_tab),
-        child: _tabBody(),
-      ),
+      child: KeyedSubtree(key: ValueKey(_tab), child: _tabBody()),
     );
   }
 
@@ -179,6 +185,8 @@ class _SoftRootState extends State<SoftRoot> {
           onOpenBus: (stopCode, svc) => _pushBus(stopCode, svc),
           onOpenSearch: () => _handleTab(SoftTab.search),
         );
+      case SoftTab.mrt:
+        return SoftMrtScreen(onTab: _handleTab);
       case SoftTab.settings:
         return SoftSettingsScreen(onTab: _handleTab);
       case SoftTab.search:

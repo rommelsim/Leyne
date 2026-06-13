@@ -227,7 +227,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       backgroundColor: context.t.bg,
       bottomNavigationBar: (widget.onTab != null && widget.tabSelection != null)
           ? SoftBottomBar(
-              selection: widget.tabSelection!, onSelect: widget.onTab!)
+              selection: widget.tabSelection!,
+              onSelect: widget.onTab!,
+            )
           : null,
       body: ListenableBuilder(
         listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
@@ -278,7 +280,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     final boardingOn = _boardingAlertOn;
     final saved =
         AppModel.shared.isFavService(no: widget.svc, stop: widget.stopCode) ||
-            AppModel.shared.isFavService(no: widget.svc, stop: null);
+        AppModel.shared.isFavService(no: widget.svc, stop: null);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -361,8 +363,10 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                 children: [
                   Icon(Icons.ios_share_rounded, size: 18, color: t.dim),
                   const SizedBox(width: 10),
-                  Text('Share bus ${widget.svc}',
-                      style: t.sans(14, color: t.fg)),
+                  Text(
+                    'Share bus ${widget.svc}',
+                    style: t.sans(14, color: t.fg),
+                  ),
                 ],
               ),
             ),
@@ -418,12 +422,16 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     if (savedHere || savedAnywhere) {
       if (savedHere) m.toggleFavService(no: widget.svc, stop: widget.stopCode);
       if (savedAnywhere) m.toggleFavService(no: widget.svc, stop: null);
-      _showToast(Icons.directions_bus_outlined,
-          'Bus ${widget.svc} removed from saved');
+      _showToast(
+        Icons.directions_bus_outlined,
+        'Bus ${widget.svc} removed from saved',
+      );
     } else {
       m.toggleFavService(no: widget.svc, stop: widget.stopCode);
-      _showToast(Icons.directions_bus_rounded,
-          'Bus ${widget.svc} saved — find it under Saved');
+      _showToast(
+        Icons.directions_bus_rounded,
+        'Bus ${widget.svc} saved — find it under Saved',
+      );
     }
   }
 
@@ -485,16 +493,38 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
         ? ArrivalConfidence.of(monitored: live.monitored, feed: feed)
         : ArrivalConfidence.none;
     final isLive = conf != ArrivalConfidence.none;
+    // Show a faint "~" whisper when we have a service but the position /
+    // arrival isn't a fresh live fix — mirrors iOS SoftBusView.showWhisper:
+    //   confidence != .none && (confidence != .live)
+    // Android has no `plot.tier` concept so the condition simplifies to
+    // "any confidence that isn't fully live".
+    final showWhisper =
+        conf != ArrivalConfidence.none && conf != ArrivalConfidence.live;
     final dest = live?.dest ?? '';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Bus ${widget.svc}',
-          style: t.sans(28, weight: FontWeight.w700, color: t.fg),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              'Bus ${widget.svc}',
+              style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (showWhisper) ...[
+              const SizedBox(width: 6),
+              ExcludeSemantics(
+                child: Opacity(
+                  opacity: 0.7,
+                  child: Text('~', style: t.mono(14, color: t.faint)),
+                ),
+              ),
+            ],
+          ],
         ),
         const SizedBox(height: 4),
         Row(
@@ -519,7 +549,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                          color: t.soon, shape: BoxShape.circle),
+                        color: t.soon,
+                        shape: BoxShape.circle,
+                      ),
                     ),
                     const SizedBox(width: 4),
                     Text(
@@ -590,23 +622,32 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
 
   Widget _heroEtaRow(LyneTheme t, Service? s, DateTime now) {
     if (s == null) {
-      return Text('No live arrival',
-          style: t.sans(20, weight: FontWeight.w700, color: t.dim));
+      return Text(
+        'No live arrival',
+        style: t.sans(20, weight: FontWeight.w700, color: t.dim),
+      );
     }
     final eta = fmtEta(_liveEtaSec(s, now));
     if (eta.big == 'Arr') {
-      return Text('Arriving',
-          style: t.sans(30, weight: FontWeight.w700, color: t.soon));
+      return Text(
+        'Arriving',
+        style: t.sans(30, weight: FontWeight.w700, color: t.soon),
+      );
     }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.baseline,
       textBaseline: TextBaseline.alphabetic,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(eta.big, style: t.mono(40, weight: FontWeight.w700, color: t.fg)),
+        Text(
+          eta.big,
+          style: t.mono(40, weight: FontWeight.w700, color: t.fg),
+        ),
         const SizedBox(width: 5),
-        Text(eta.small,
-            style: t.sans(16, weight: FontWeight.w600, color: t.dim)),
+        Text(
+          eta.small,
+          style: t.sans(16, weight: FontWeight.w600, color: t.dim),
+        ),
       ],
     );
   }
@@ -617,8 +658,10 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       children: [
         Icon(Icons.directions_bus_rounded, size: 13, color: t.dim),
         const SizedBox(width: 6),
-        Text(s.deck.word,
-            style: t.mono(11, weight: FontWeight.w500, color: t.dim)),
+        Text(
+          s.deck.word,
+          style: t.mono(11, weight: FontWeight.w500, color: t.dim),
+        ),
         if (s.wab) ...[
           const SizedBox(width: 6),
           Icon(Icons.accessible_rounded, size: 13, color: t.dim),
@@ -628,10 +671,14 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Then ',
-                  style: t.sans(11, weight: FontWeight.w600, color: t.faint)),
-              Text(next,
-                  style: t.mono(12, weight: FontWeight.w600, color: t.dim)),
+              Text(
+                'Then ',
+                style: t.sans(11, weight: FontWeight.w600, color: t.faint),
+              ),
+              Text(
+                next,
+                style: t.mono(12, weight: FontWeight.w600, color: t.dim),
+              ),
             ],
           ),
       ],
@@ -645,8 +692,10 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       return e.big == 'Arr' ? 'now' : e.big;
     }
 
-    final parts =
-        [mins(s.followingDate), mins(s.thirdDate)].whereType<String>().toList();
+    final parts = [
+      mins(s.followingDate),
+      mins(s.thirdDate),
+    ].whereType<String>().toList();
     if (parts.isEmpty) return '';
     return '${parts.join(" · ")} min';
   }
@@ -666,8 +715,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     final nodes = dir == null ? const <_ProgNode>[] : _routeProgressNodes(dir);
     final hasProgress = nodes.length >= 2;
     final between = (dir != null && hasProgress) ? _betweenCaption(dir) : null;
-    final upcoming =
-        (dir != null && hasProgress) ? _upcomingStops(dir) : const <String>[];
+    final upcoming = (dir != null && hasProgress)
+        ? _upcomingStops(dir)
+        : const <String>[];
     final remaining = _stopsRemaining();
 
     return Material(
@@ -700,8 +750,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                         remaining == 0
                             ? 'Arriving'
                             : '$remaining stop${remaining == 1 ? '' : 's'} away',
-                        style:
-                            t.sans(12, weight: FontWeight.w600, color: t.soon),
+                        style: t.sans(
+                          12,
+                          weight: FontWeight.w600,
+                          color: t.soon,
+                        ),
                       ),
                   ],
                 ),
@@ -845,8 +898,8 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                               color: i == nodes.length - 1
                                   ? Colors.transparent
                                   : (_reached(nodes[i + 1].kind)
-                                      ? t.soon
-                                      : t.line),
+                                        ? t.soon
+                                        : t.line),
                             ),
                           ),
                         ],
@@ -860,16 +913,17 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                   nodes[i].label,
                   style: t.sans(
                     11,
-                    weight: nodes[i].kind == _ProgKind.bus ||
+                    weight:
+                        nodes[i].kind == _ProgKind.bus ||
                             nodes[i].kind == _ProgKind.you
                         ? FontWeight.w600
                         : FontWeight.w400,
                     color: nodes[i].kind == _ProgKind.bus
                         ? t.soon
                         : (nodes[i].kind == _ProgKind.origin ||
-                                nodes[i].kind == _ProgKind.dest)
-                            ? t.dim
-                            : t.fg,
+                              nodes[i].kind == _ProgKind.dest)
+                        ? t.dim
+                        : t.fg,
                   ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -913,8 +967,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                 shape: BoxShape.circle,
                 border: Border.all(color: t.surface, width: 2),
               ),
-              child: Icon(Icons.directions_bus_rounded,
-                  size: 11, color: t.contrastFg),
+              child: Icon(
+                Icons.directions_bus_rounded,
+                size: 11,
+                color: t.contrastFg,
+              ),
             ),
           ],
         );
@@ -976,8 +1033,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
       ),
       child: Text(
         label,
-        style: t.sans(12,
-            weight: FontWeight.w500, color: muted ? t.faint : t.dim),
+        style: t.sans(
+          12,
+          weight: FontWeight.w500,
+          color: muted ? t.faint : t.dim,
+        ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
@@ -1004,8 +1064,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
               ),
               decoration: BoxDecoration(
                 color: t.bg,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1027,13 +1088,20 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Bus ${widget.svc}',
-                              style: t.sans(22,
-                                  weight: FontWeight.w700, color: t.fg)),
+                          Text(
+                            'Bus ${widget.svc}',
+                            style: t.sans(
+                              22,
+                              weight: FontWeight.w700,
+                              color: t.fg,
+                            ),
+                          ),
                           if (dest.isNotEmpty) ...[
                             const SizedBox(height: 3),
-                            Text('Towards $dest',
-                                style: t.sans(14, color: t.dim)),
+                            Text(
+                              'Towards $dest',
+                              style: t.sans(14, color: t.dim),
+                            ),
                           ],
                           if (dirs > 1) ...[
                             const SizedBox(height: 14),
@@ -1062,7 +1130,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   }
 
   Widget _routeCardDirectionToggle(
-      LyneTheme t, void Function(void Function()) setSheet) {
+    LyneTheme t,
+    void Function(void Function()) setSheet,
+  ) {
     final sr = _serviceRoute!;
     return SegmentedButton<int>(
       showSelectedIcon: false,

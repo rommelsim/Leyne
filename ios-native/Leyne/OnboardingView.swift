@@ -23,11 +23,23 @@ struct OnboardingView: View {
 
     // 0 welcome · 1 live · 2 location · 3 notifications · 4 ATT · 5 done
     @State private var step = 0
+    // Drives the push direction so a "Back" tap slides the opposite way to
+    // an "advance" — keeps the slide reading as a coherent stack, not a
+    // same-side cross-fade.
+    @State private var goingBack = false
     // Single-shot guard so rapid taps don't spawn multiple consent flows.
     @State private var trackingTapped = false
 
+    private var stepAnimation: Animation { .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4) }
+
     private func advance() {
-        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4)) { step += 1 }
+        goingBack = false
+        withAnimation(stepAnimation) { step += 1 }
+    }
+
+    private func goBack() {
+        goingBack = true
+        withAnimation(stepAnimation) { step -= 1 }
     }
 
     var body: some View {
@@ -35,26 +47,37 @@ struct OnboardingView: View {
             t.bg.ignoresSafeArea()
             VStack(spacing: 0) {
                 topBar
-                Group {
-                    switch step {
-                    case 0: welcome
-                    case 1: live
-                    case 2: locationPrimer
-                    case 3: notifPrimer
-                    case 4: attPrimer
-                    default: done
-                    }
-                }
-                .id(step)
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                // The step content carries `.id`/`.transition` directly (NOT a
+                // Group, whose modifiers distribute to children and break the
+                // transition). The whole subtree slides as one unit so text,
+                // cards and CTA move together.
+                stepContent
+                    .id(step)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: goingBack ? .leading : .trailing),
+                        removal: .move(edge: goingBack ? .trailing : .leading)
+                    ).combined(with: .opacity))
             }
             .padding(.vertical, 20)
         }
     }
 
+    @ViewBuilder
+    private var stepContent: some View {
+        switch step {
+        case 0: welcome
+        case 1: live
+        case 2: locationPrimer
+        case 3: notifPrimer
+        case 4: attPrimer
+        default: done
+        }
+    }
+
     private var topBar: some View {
         HStack {
-            Button { if step > 0 { withAnimation { step -= 1 } } } label: {
+            Button { if step > 0 { goBack() } } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left").font(.system(size: 13, weight: .bold))
                     Text("Back")

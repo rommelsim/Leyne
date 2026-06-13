@@ -435,7 +435,8 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
           )
         : ArrivalConfidence.none;
 
-    final whereName = resolved?.stopName ??
+    final whereName =
+        resolved?.stopName ??
         (fav.isAnywhere
             ? 'No nearby arrivals'
             : DataStore.shared.stopName(fav.stop ?? ''));
@@ -466,8 +467,11 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                         children: [
                           TextSpan(
                             text: fav.no,
-                            style: t.sans(15,
-                                weight: FontWeight.w700, color: t.fg),
+                            style: t.sans(
+                              15,
+                              weight: FontWeight.w700,
+                              color: t.fg,
+                            ),
                           ),
                           if (svc != null)
                             TextSpan(
@@ -554,9 +558,11 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
               const SizedBox(width: 2),
               Text(
                 eta.small,
-                style: t.mono(12,
-                    weight: FontWeight.w600,
-                    color: color.withValues(alpha: 0.85)),
+                style: t.mono(
+                  12,
+                  weight: FontWeight.w600,
+                  color: color.withValues(alpha: 0.85),
+                ),
               ),
             ],
           ],
@@ -578,8 +584,10 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     final now = DateTime.now();
     final parts = <String>[followEta.big];
     if (svc.thirdDate != null) {
-      final thirdSec =
-          svc.thirdDate!.difference(now).inSeconds.clamp(0, 1 << 30);
+      final thirdSec = svc.thirdDate!
+          .difference(now)
+          .inSeconds
+          .clamp(0, 1 << 30);
       final third = fmtEta(thirdSec);
       if (third.big.isNotEmpty && third.big != 'Arr') {
         parts.add(third.big);
@@ -609,8 +617,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         child: InkWell(
           onTap: widget.onOpenSearch,
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
                 Container(
@@ -626,8 +633,11 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                 const SizedBox(width: 12),
                 Text(
                   isBuses ? 'Add bus' : 'Add stop',
-                  style: t.sans(15,
-                      weight: FontWeight.w600, color: LyneSignal.meBlue),
+                  style: t.sans(
+                    15,
+                    weight: FontWeight.w600,
+                    color: LyneSignal.meBlue,
+                  ),
                 ),
               ],
             ),
@@ -693,8 +703,11 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
               color: t.surfaceHi,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Icon(Icons.star_outline_rounded, size: 28,
-                color: LyneSignal.meBlue),
+            child: Icon(
+              Icons.star_outline_rounded,
+              size: 28,
+              color: LyneSignal.meBlue,
+            ),
           ),
           const SizedBox(height: 16),
           Text(
@@ -711,16 +724,14 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
           GestureDetector(
             onTap: widget.onOpenSearch,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
                 color: t.accent,
                 borderRadius: BorderRadius.circular(LyneRadius.full),
               ),
               child: Text(
                 'Find a stop',
-                style:
-                    t.sans(14, weight: FontWeight.w600, color: t.onAccent),
+                style: t.sans(14, weight: FontWeight.w600, color: t.onAccent),
               ),
             ),
           ),
@@ -748,11 +759,7 @@ class _Resolved {
 /// 48dp service-number badge — standard accent fill (proximity is not
 /// colour-coded; soon-ness reads from the ETA ink, not the badge).
 class _ColoredBadge extends StatelessWidget {
-  const _ColoredBadge({
-    required this.no,
-    required this.fill,
-    required this.fg,
-  });
+  const _ColoredBadge({required this.no, required this.fill, required this.fg});
 
   final String no;
   final Color fill;
@@ -779,15 +786,15 @@ class _ColoredBadge extends StatelessWidget {
 
 // ─── Favourite stop card ─────────────────────────────────────────────────────
 
-/// Mirrors FavStopCard in SoftFavouritesView.swift:
-///   46×46 pin tile (gold star always shown — every stop here is pinned)
-///   → name (sans 17 w600) + "Stop {code} · road" (mono 12.5 dim)
-///   → walk/distance row (when location is available)
-///   → 1px divider
-///   → mini-chip bus row (up to 4 chips + "+N" overflow)
+/// Compact card matching iOS FavStopCard in SoftFavouritesView.swift:
+///   46×46 pin tile · name (sans 17 w600) · "Stop {code} · road" (mono 12.5 dim)
+///   · single compact meta line (walk + soonest arrival with "~" whisper)
+///   · trailing chevron.
 ///
-/// The chip row is wrapped in ListenableBuilder(AppModel.shared) so ETAs
-/// tick on the 1-second heartbeat without rebuilding the whole card.
+/// No divider, no mini-chip bus row (removed for parity with iOS). The whole
+/// card taps to open the full stop view. `pin.nickname` and `pin.tracked`
+/// handling is in the caller (_pinCard); the card just renders the resolved
+/// name/desc and services it receives.
 class _FavStopCard extends StatelessWidget {
   const _FavStopCard({
     required this.name,
@@ -800,8 +807,6 @@ class _FavStopCard extends StatelessWidget {
     required this.feed,
     required this.onTap,
   });
-
-  static const int _maxChips = 4;
 
   final String name;
   final String code;
@@ -816,7 +821,6 @@ class _FavStopCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.t;
-    final sorted = [...services]..sort(_compareEta);
 
     return Semantics(
       button: true,
@@ -833,21 +837,32 @@ class _FavStopCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: t.line, width: 1),
             ),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                _identityRow(context, t),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Divider(height: 1, thickness: 1, color: t.line),
+                // 46×46 place tile — location glyph. Star badge removed:
+                // everything in this tab is already saved, so the badge adds
+                // noise without info.
+                Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: t.surfaceHi,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.location_on, size: 20, color: t.fg),
                 ),
-                ListenableBuilder(
-                  listenable: AppModel.shared,
-                  builder: (context, _) => sorted.isEmpty
-                      ? _quietRow(t)
-                      : _chipRow(context, t, sorted),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ListenableBuilder(
+                    listenable: AppModel.shared,
+                    builder: (context, _) => _identityText(context, t),
+                  ),
                 ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right, size: 18, color: t.faint),
               ],
             ),
           ),
@@ -856,195 +871,86 @@ class _FavStopCard extends StatelessWidget {
     );
   }
 
-  Widget _identityRow(BuildContext context, LyneTheme t) {
+  Widget _identityText(BuildContext context, LyneTheme t) {
     final subtitle = road.isEmpty ? 'Stop $code' : 'Stop $code · $road';
-    final hasLocation = walkMin > 0 || distanceM > 0;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 46×46 place tile — location glyph. Star badge removed: everything
-        // in this tab is already saved, so the badge adds noise without info.
-        Container(
-          width: 46,
-          height: 46,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: t.surfaceHi,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(Icons.location_on, size: 20, color: t.fg),
+        Text(
+          name,
+          style: t.sans(17, weight: FontWeight.w600, color: t.fg),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                name,
-                style: t.sans(17, weight: FontWeight.w600, color: t.fg),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 3),
-              Text(
-                subtitle,
-                style: t.mono(12.5, color: t.dim),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (hasLocation) ...[
-                const SizedBox(height: 3),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.directions_walk, size: 13, color: t.soon),
-                    const SizedBox(width: 3),
-                    Text(
-                      '${walkMin < 1 ? 1 : walkMin} min walk',
-                      style: t.mono(12.5,
-                          weight: FontWeight.w500, color: t.soon),
-                    ),
-                    const SizedBox(width: 5),
-                    Text('·', style: t.mono(12.5, color: t.faint)),
-                    const SizedBox(width: 5),
-                    Text(
-                      fmtDistance(distanceM),
-                      style: t.mono(12.5, color: t.dim),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: t.mono(12.5, color: t.dim),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(width: 8),
-        Icon(Icons.chevron_right, size: 18, color: t.faint),
+        const SizedBox(height: 3),
+        _compactMeta(t),
       ],
     );
   }
 
-  Widget _chipRow(BuildContext context, LyneTheme t, List<Service> sorted) {
+  /// Single merged meta line: walk time + soonest arrival with "~" whisper.
+  /// Mirrors iOS FavStopCard.compactMeta — no chip row, no divider.
+  Widget _compactMeta(LyneTheme t) {
     final now = DateTime.now();
-    final visible = sorted.take(_maxChips).toList();
-    final overflow = sorted.length > _maxChips ? sorted.length - _maxChips : 0;
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        for (final s in visible)
-          _MiniChip(
-            svc: s.no,
-            etaSec: s.arrivalDate != null
-                ? s.arrivalDate!
-                    .difference(now)
-                    .inSeconds
-                    .clamp(0, 1 << 30)
-                : s.etaSec,
-            confidence: ArrivalConfidence.of(
-              monitored: s.monitored,
-              feed: feed,
-            ),
-          ),
-        if (overflow > 0)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: Text(
-              '+$overflow',
-              style:
-                  t.mono(12, weight: FontWeight.w600, color: t.faint),
-            ),
-          ),
-      ],
-    );
-  }
+    final sorted = [...services]..sort(_compareEta);
+    final soonest = sorted.isEmpty ? null : sorted.first;
+    final hasLocation = walkMin > 0 || distanceM > 0;
+    if (!hasLocation && soonest == null) return const SizedBox.shrink();
 
-  Widget _quietRow(LyneTheme t) {
+    ArrivalConfidence? conf;
+    String? whenText;
+    if (soonest != null) {
+      conf = ArrivalConfidence.of(monitored: soonest.monitored, feed: feed);
+      final sec = soonest.arrivalDate != null
+          ? soonest.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
+          : soonest.etaSec;
+      final eta = fmtEta(sec);
+      whenText = eta.big == 'Arr'
+          ? 'next now'
+          : 'next in ${eta.big} ${eta.small}';
+    }
+
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        const ConfidenceDot(confidence: ArrivalConfidence.stale, size: 6),
-        const SizedBox(width: 7),
-        Text('No live arrivals right now',
-            style: t.mono(12, color: t.faint)),
-      ],
-    );
-  }
-
-  static int _compareEta(Service a, Service b) =>
-      a.etaSec.compareTo(b.etaSec);
-}
-
-// ─── Mini chip ───────────────────────────────────────────────────────────────
-
-/// Compact "88 · 3 min" chip — same shape as _MiniBusChip in soft_home_screen.
-class _MiniChip extends StatelessWidget {
-  const _MiniChip({
-    required this.svc,
-    required this.etaSec,
-    required this.confidence,
-  });
-
-  final String svc;
-  final int etaSec;
-  final ArrivalConfidence confidence;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.t;
-    final eta = fmtEta(etaSec);
-    final arriving = eta.big == 'Arr';
-    final imminent = confidence == ArrivalConfidence.live && eta.live;
-    final whisper = confidence == ArrivalConfidence.stale ||
-        confidence == ArrivalConfidence.unconfirmed;
-    final label = arriving ? 'now' : '${eta.big} ${eta.small}';
-
-    return Container(
-      height: 27,
-      padding: const EdgeInsets.only(left: 4, right: 9),
-      decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(LyneRadius.full),
-        border: Border.all(color: t.line, width: 0.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            constraints: const BoxConstraints(minWidth: 22),
-            height: 18,
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            decoration: BoxDecoration(
-              color: t.surface,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: t.line, width: 0.5),
-            ),
-            child: Text(
-              svc,
-              style: t.mono(12, weight: FontWeight.w700, color: t.fg),
-            ),
-          ),
-          const SizedBox(width: 5),
+        if (hasLocation) ...[
+          Icon(Icons.directions_walk, size: 12, color: t.soon),
+          const SizedBox(width: 3),
           Text(
-            label,
-            style: t.mono(
-              12,
-              weight: FontWeight.w600,
-              color: imminent ? t.accent : t.dim,
-            ),
+            '${walkMin < 1 ? 1 : walkMin} min',
+            style: t.mono(12, weight: FontWeight.w500, color: t.soon),
           ),
-          if (whisper) ...[
-            const SizedBox(width: 1),
-            ExcludeSemantics(
-              child: Opacity(
-                opacity: 0.7,
-                child: Text('~', style: t.mono(9, color: t.faint)),
-              ),
-            ),
+          if (soonest != null) ...[
+            const SizedBox(width: 5),
+            Text('·', style: t.mono(12, color: t.faint)),
+            const SizedBox(width: 5),
           ],
         ],
-      ),
+        if (soonest != null && whenText != null) ...[
+          Icon(Icons.directions_bus_outlined, size: 11, color: t.dim),
+          const SizedBox(width: 3),
+          if (conf == ArrivalConfidence.unconfirmed)
+            ExcludeSemantics(
+              child: Text(
+                '~',
+                style: t.mono(11, weight: FontWeight.w400, color: t.faint),
+              ),
+            ),
+          Text(
+            whenText,
+            style: t.mono(12, weight: FontWeight.w500, color: t.fg),
+          ),
+        ],
+      ],
     );
   }
+
+  static int _compareEta(Service a, Service b) => a.etaSec.compareTo(b.etaSec);
 }
