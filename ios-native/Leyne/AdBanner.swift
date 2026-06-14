@@ -470,19 +470,18 @@ private struct BannerAdView: UIViewRepresentable {
     /// Stop-screen MREC passes 300×250 + `AdConfig.mrecUnitID`.
     let adSize: AdSize
     let unitID: String
+    /// Called the first time a creative loads, so the SwiftUI gutter can expand
+    /// from its collapsed (zero-height) state. Never called on failure — a failed
+    /// refresh keeps the last ad on screen, so the gutter stays expanded.
+    var onAdLoaded: () -> Void = {}
 
-    func makeCoordinator() -> Coordinator { Coordinator(adSize: adSize) }
+    func makeCoordinator() -> Coordinator { Coordinator(adSize: adSize, onAdLoaded: onAdLoaded) }
 
     func makeUIView(context: Context) -> BannerHostView {
         let host = context.coordinator.host
         let banner = host.banner
         banner.adUnitID = unitID
         banner.delegate = context.coordinator
-        // ILRD — attribute each paid impression's value to the user in GA4
-        // (revenue-per-cohort). Mirrors the App Open / Interstitial wiring.
-        banner.paidEventHandler = { value in
-            AnalyticsService.recordAdImpression(value, format: "Banner", unitID: unitID)
-        }
         // Wire the onReady closure: called by dispatchLoad() each time a
         // fresh request should go out. rootViewController is set immediately
         // before load() inside dispatchLoad, so it's always current.
@@ -500,11 +499,16 @@ private struct BannerAdView: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, BannerViewDelegate {
         let host: BannerHostView
-        init(adSize: AdSize) { host = BannerHostView(adSize: adSize) }
+        private let onAdLoaded: () -> Void
+        init(adSize: AdSize, onAdLoaded: @escaping () -> Void) {
+            self.onAdLoaded = onAdLoaded
+            host = BannerHostView(adSize: adSize)
+        }
 
         func bannerViewDidReceiveAd(_ bannerView: BannerView) {
             adLog.notice("Banner loaded \(bannerView.adUnitID ?? "?")")
             host.didReceiveAd()
+            onAdLoaded()
         }
         func bannerView(_ bannerView: BannerView,
                         didFailToReceiveAdWithError error: Error) {
@@ -554,21 +558,36 @@ private enum BottomAdBannerProbe {
 /// banner look like it wasn't mounted at all.
 struct AdBanner: View {
     @EnvironmentObject private var m: AppModel
+    /// False until a creative actually loads. The banner stays mounted the whole
+    /// time (so it keeps requesting + retrying), but the gutter collapses to zero
+    /// height until something loads — so a no-fill shows nothing instead of an
+    /// empty grey strip.
+    @State private var loaded = false
+
     var body: some View {
         let _ = AdBannerProbe.logOnce()
         ZStack {
-            // Slightly darker than the page background (surfaceHi vs surface)
-            // so the accessory area is perceptible even before an ad loads —
-            // iOS 26's tabViewBottomAccessory collapses fully-transparent
-            // content. surfaceHi == hero-card colour, so it reads as part
-            // of the design language, not a stray panel.
-            m.t.surfaceHi
+            // Faint surface behind the creative — only once one has loaded.
+            if loaded { m.t.surfaceHi }
             BannerAdView(adSize: AdConfig.adaptiveBannerAdSize,
-                         unitID: AdConfig.bannerUnitID)
+                         unitID: AdConfig.bannerUnitID,
+                         onAdLoaded: { loaded = true })
                 .frame(width: AdConfig.adaptiveBannerWidth,
                        height: AdConfig.adaptiveBannerHeight)
+                // Mounted (so it keeps loading) but unseen until a creative fills.
+                .opacity(loaded ? 1 : 0)
         }
-        .frame(maxWidth: .infinity, minHeight: AdConfig.adaptiveBannerHeight)
+        // Collapse to zero height until a creative loads; clip the still-mounted
+        // banner while collapsed. The rounded card + padding only apply once visible.
+        .frame(maxWidth: .infinity,
+               minHeight: loaded ? AdConfig.adaptiveBannerHeight : 0,
+               maxHeight: loaded ? AdConfig.adaptiveBannerHeight : 0)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, loaded ? 16 : 0)
+        .padding(.bottom, loaded ? 4 : 0)
+        // Stay pinned to the bottom gutter when a keyboard opens (e.g. Search).
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .animation(.easeInOut(duration: 0.25), value: loaded)
     }
 }
 

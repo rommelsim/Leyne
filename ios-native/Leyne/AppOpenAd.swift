@@ -149,10 +149,6 @@ final class AppOpenAdManager: NSObject {
                 return
             }
             ad?.fullScreenContentDelegate = self
-            ad?.paidEventHandler = { value in
-                AnalyticsService.recordAdImpression(value, format: "AppOpen",
-                                                    unitID: AppOpenAdConfig.unitID)
-            }
             self.ad = ad
             self.loadTime = Date()
             aoaLog.notice("App Open loaded")

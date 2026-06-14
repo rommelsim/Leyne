@@ -39,20 +39,9 @@ extension View {
     @ViewBuilder
     func adBannerGutter() -> some View {
         if !AdConfig.adsSuppressed {
-            self.safeAreaInset(edge: .bottom) {
-                AdBanner()
-                    .frame(height: AdConfig.adaptiveBannerHeight)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12,
-                                                style: .continuous))
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 4)
-                    // Stay pinned to the bottom gutter when a keyboard opens
-                    // (e.g. the Search tab). Without this the inset rides up
-                    // above the keyboard and the banner appears to float in the
-                    // middle of the screen.
-                    .ignoresSafeArea(.keyboard, edges: .bottom)
-            }
+            // AdBanner self-sizes: it collapses to zero height until a creative
+            // loads (so a no-fill shows nothing), then expands to the banner card.
+            self.safeAreaInset(edge: .bottom) { AdBanner() }
         } else {
             self
         }
