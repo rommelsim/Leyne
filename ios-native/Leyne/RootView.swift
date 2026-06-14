@@ -8,6 +8,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
+    @EnvironmentObject var prompts: PromptCenter
 
     @Environment(\.colorScheme) private var systemScheme
 
@@ -57,6 +58,12 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
         .animation(.easeInOut(duration: 0.3), value: m.whatsNewVersion)
+        // Contextual review / "buy me a coffee" prompts — paced by PromptCenter.
+        .sheet(item: $prompts.active) { prompt in
+            PromptCard(prompt: prompt)
+                .environmentObject(m)
+                .environmentObject(fb)
+        }
         // Mirror the iOS appearance — system, or overridden by the user's
         // Settings ▸ Appearance pick — into the model so the custom Theme
         // (m.t / m.isDark) follows the resolved palette.
@@ -90,6 +97,9 @@ struct RootView: View {
                 if status == .notDetermined && m.notificationsEnabled {
                     await m.setNotificationsEnabled(true)
                 }
+                // Count this launch toward the contextual review / support
+                // prompts (all pacing + caps live in PromptCenter).
+                PromptCenter.shared.noteAppOpen()
             }
         }
         // Notification / Spotlight deep links surface as `m.openCard`; SoftRoot

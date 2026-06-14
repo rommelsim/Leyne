@@ -107,10 +107,6 @@ final class InterstitialAdManager: NSObject {
                 return
             }
             ad?.fullScreenContentDelegate = self
-            ad?.paidEventHandler = { value in
-                AnalyticsService.recordAdImpression(value, format: "Interstitial",
-                                                    unitID: InterstitialAdConfig.unitID)
-            }
             self.ad = ad
             interLog.notice("Interstitial loaded")
         }

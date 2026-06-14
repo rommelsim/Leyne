@@ -1043,6 +1043,12 @@ final class AppModel: ObservableObject {
             arrivalsSeenInbound.remove(id)
             removeAlert(id: id)
         }
+        // The user's tracked bus just arrived — a textbook "Leyne worked for me"
+        // moment. Hand it to the prompt coordinator (it decides whether/when to
+        // surface a review or support ask, with all the pacing + caps).
+        if !fulfilled.isEmpty {
+            PromptCenter.shared.noteSuccessfulJourney()
+        }
     }
 
     // ─── Tick: smooth countdown + keep visible stops fresh ─

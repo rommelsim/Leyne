@@ -13,7 +13,7 @@ private enum SettingsDest: Hashable { case manageAlerts, hiddenStops, about }
 /// Where the "Buy me a coffee" row opens — the Stripe Payment Link for the
 /// "Support Leyne" product (accepts PayNow + cards + Apple Pay, settles SGD to
 /// bank). Leyne is ad-funded, not paywalled; this is an optional way to chip in.
-private let kCoffeeURL = URL(string: "https://buy.stripe.com/6oU3cv5689oB3PI6R68so00")!
+private let kCoffeeURL = AppLinks.coffee
 
 struct SoftSettingsView: View {
     @EnvironmentObject var m: AppModel

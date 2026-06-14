@@ -1,12 +1,15 @@
 //  AnalyticsService.swift
 //
 //  Thin, typed wrapper over Firebase Analytics — the app's high-signal product
-//  events plus Impression-Level Ad Revenue (ILRD) attribution. Centralising the
-//  Firebase import here means the rest of the app logs via a typed API
-//  (`AnalyticsService.log(.stopViewed(...))`) and never imports FirebaseAnalytics
-//  directly, so event names + parameters have one source of truth that the
-//  Android side mirrors. `app_open` is logged automatically by the SDK, so it is
-//  deliberately not represented here.
+//  events. Centralising the Firebase import here means the rest of the app logs
+//  via a typed API (`AnalyticsService.log(.stopViewed(...))`) and never imports
+//  FirebaseAnalytics directly, so event names + parameters have one source of
+//  truth that the Android side mirrors. `app_open` is logged automatically by the
+//  SDK, so it is deliberately not represented here.
+//
+//  NOTE: ad revenue (`ad_impression`) is NOT logged here — the Google Mobile Ads
+//  SDK auto-logs it once the AdMob↔Firebase link is active. Don't re-add a manual
+//  paidEventHandler logger, or impressions double-count in GA4.
 //
 //  Firebase is configured at launch in `LeyneApp` (LeyneAppDelegate). When the
 //  GoogleService-Info.plist is absent (e.g. a fork / CI without the config),
@@ -14,7 +17,6 @@
 
 import Foundation
 import FirebaseAnalytics
-import GoogleMobileAds
 
 enum AnalyticsService {
 
@@ -62,24 +64,5 @@ enum AnalyticsService {
     /// Log a product event. Safe to call before Firebase is configured (no-op).
     static func log(_ event: Event) {
         Analytics.logEvent(event.name, parameters: event.parameters)
-    }
-
-    // MARK: - Impression-Level Ad Revenue (ILRD)
-
-    /// Logs the Firebase `ad_impression` event from an ad format's
-    /// `paidEventHandler`, so ad revenue attributes to GA4 user cohorts
-    /// (revenue-per-segment, audiences). Note: the AdMob console's own *Ads ARPU*
-    /// card comes from the AdMob↔Firebase link automatically — this event is the
-    /// richer GA4-side stream, not what unblocks that card.
-    static func recordAdImpression(_ adValue: AdValue,
-                                   format: String,
-                                   unitID: String?) {
-        Analytics.logEvent(AnalyticsEventAdImpression, parameters: [
-            AnalyticsParameterAdPlatform: "googleAdMob",
-            AnalyticsParameterAdFormat: format,
-            AnalyticsParameterAdUnitName: unitID ?? "",
-            AnalyticsParameterCurrency: adValue.currencyCode,
-            AnalyticsParameterValue: adValue.value,
-        ])
     }
 }
