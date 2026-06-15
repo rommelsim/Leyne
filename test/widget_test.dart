@@ -1,5 +1,5 @@
 // Smoke test for the app shell. Verifies:
-//   • The four navigation destinations are present and labeled correctly.
+//   • The five navigation destinations are present and labeled correctly.
 //   • Tapping a tab switches the visible screen.
 //
 // Doesn't drive DataStore.bootstrap (which would hit the real LTA API);
@@ -31,22 +31,24 @@ void main() {
     await tester.pump(); // initial frame
 
     // All five destinations are present in the bottom navigation
-    // (current order: Bus · MRT · Saved · Search · Settings).
+    // (current order: Bus · MRT · Saved · Search · Alerts). Settings is no
+    // longer a tab — it opens as a gear sheet from the Alerts tab.
     expect(find.text('Bus'), findsAtLeastNWidgets(1));
     expect(find.text('MRT'), findsAtLeastNWidgets(1));
     expect(find.text('Saved'), findsAtLeastNWidgets(1));
     expect(find.text('Search'), findsAtLeastNWidgets(1));
-    expect(find.text('Settings'), findsAtLeastNWidgets(1));
+    expect(find.text('Alerts'), findsAtLeastNWidgets(1));
 
     // The Bus (Home) tab is the initial tab — its empty-state copy is visible.
     expect(find.text('No stops yet'), findsOneWidget);
 
-    // Switch to Settings; pump one frame for the tap, one for the layout.
-    await tester.tap(find.byIcon(Icons.settings_outlined));
+    // Switch to Alerts; pump one frame for the tap, one for the layout.
+    await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    // The Soft settings screen leads with the Appearance section.
-    expect(find.text('Appearance'), findsOneWidget);
+    // The Alerts screen header carries its subtitle unconditionally.
+    expect(
+        find.text('Service status & your notifications'), findsOneWidget);
 
     // Drain the bounded App-Open-ad preload poll (15 × 800 ms chained timers
     // scheduled from SoftRoot.initState) so no timer is left pending at

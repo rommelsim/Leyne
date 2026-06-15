@@ -57,9 +57,11 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
     final ds = DataStore.shared;
     ds.refreshTrainAlertsIfStale(force: force);
     ds.refreshLiftMaintenanceIfStale(force: force);
-    // Refresh crowd for all relevant lines.
+    // Refresh crowd + 30-min forecast for all relevant lines, mirroring iOS
+    // SoftMrtStationView.swift fetchCrowdForStation which calls both.
     for (final line in _relevantLines()) {
       ds.refreshCrowd(line, force: force);
+      ds.refreshForecast(line, force: force);
     }
   }
 
@@ -161,6 +163,7 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
                           station: widget.station,
                           lines: lines,
                           crowdByLine: ds.crowdByLine,
+                          forecastByLine: ds.forecastByLine,
                           t: t,
                         ),
                       ],
@@ -514,12 +517,14 @@ class _CrowdSection extends StatelessWidget {
     required this.station,
     required this.lines,
     required this.crowdByLine,
+    required this.forecastByLine,
     required this.t,
   });
 
   final MrtGeoStation station;
   final List<MRTLine> lines;
   final Map<MRTLine, List<StationCrowd>?> crowdByLine;
+  final Map<MRTLine, List<StationCrowd>?> forecastByLine;
   final LyneTheme t;
 
   @override
@@ -538,12 +543,14 @@ class _CrowdSection extends StatelessWidget {
         ),
         ...lines.map((line) {
           final crowdList = crowdByLine[line];
+          final forecastList = forecastByLine[line];
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: _LineCrowdCard(
               line: line,
               station: station,
               crowdList: crowdList,
+              forecastList: forecastList,
               t: t,
             ),
           );
@@ -558,20 +565,20 @@ class _LineCrowdCard extends StatelessWidget {
     required this.line,
     required this.station,
     required this.crowdList,
+    required this.forecastList,
     required this.t,
   });
 
   final MRTLine line;
   final MrtGeoStation station;
   final List<StationCrowd>? crowdList;
+  final List<StationCrowd>? forecastList;
   final LyneTheme t;
 
-  /// Find the StationCrowd entry for this station on this line by matching
+  /// Find a StationCrowd entry for this station from [list] by matching
   /// against the station's codes. Mirrors SoftMrtStationView.swift crowd lookup.
-  StationCrowd? _matchCrowd() {
-    final list = crowdList;
+  StationCrowd? _matchFrom(List<StationCrowd>? list) {
     if (list == null) return null;
-    // Match any of the station's codes (an interchange may have EW+NS codes).
     for (final crowd in list) {
       for (final code in station.codes) {
         if (crowd.code.toUpperCase() == code.toUpperCase()) return crowd;
@@ -580,9 +587,34 @@ class _LineCrowdCard extends StatelessWidget {
     return null;
   }
 
+  int _levelRank(CrowdLevel l) {
+    switch (l) {
+      case CrowdLevel.low:
+        return 1;
+      case CrowdLevel.moderate:
+        return 2;
+      case CrowdLevel.high:
+        return 3;
+      case CrowdLevel.unknown:
+        return 0;
+    }
+  }
+
+  /// Trend arrow comparing now vs the 30-min forecast.
+  /// Mirrors SoftMrtStationView.swift trendIcon(now:next:).
+  IconData _trendIcon(CrowdLevel now, CrowdLevel next) {
+    final a = _levelRank(now);
+    final b = _levelRank(next);
+    if (a == 0 || b == 0) return Icons.arrow_forward;
+    if (b > a) return Icons.arrow_upward;
+    if (b < a) return Icons.arrow_downward;
+    return Icons.arrow_forward;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final matched = _matchCrowd();
+    final matched = _matchFrom(crowdList);
+    final forecastMatch = _matchFrom(forecastList);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -591,6 +623,7 @@ class _LineCrowdCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Line code chip.
           Container(
@@ -625,48 +658,97 @@ class _LineCrowdCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  station.name,
-                  style: TextStyle(fontSize: 12, color: t.dim),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                // Current crowd level indicator row.
+                if (crowdList == null)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: t.dim,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Loading…',
+                        style: TextStyle(fontSize: 12, color: t.dim),
+                      ),
+                    ],
+                  )
+                else if (matched == null)
+                  Text(
+                    'Unavailable',
+                    style: TextStyle(fontSize: 12, color: t.faint),
+                  )
+                else ...[
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: _crowdColor(matched.level),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        _crowdLabel(matched.level),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: matched.level == CrowdLevel.unknown
+                              ? t.dim
+                              : t.fg,
+                        ),
+                      ),
+                    ],
+                  ),
+                  // 30-min forecast trend — mirrors SoftMrtStationView.swift.
+                  // Shown when both current and forecast levels are known.
+                  if (matched.level != CrowdLevel.unknown &&
+                      forecastMatch != null &&
+                      forecastMatch.level != CrowdLevel.unknown) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _trendIcon(matched.level, forecastMatch.level),
+                          size: 10,
+                          color: t.dim,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          'In 30 min · ${_crowdLabel(forecastMatch.level)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: t.dim,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures(),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          // Crowd indicator.
-          if (crowdList == null)
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 1.5, color: t.dim),
-            )
-          else if (matched == null)
+          // Right-aligned station code for the matched entry.
+          if (matched != null && matched.level != CrowdLevel.unknown) ...[
+            const SizedBox(width: 12),
             Text(
-              '—',
+              matched.code,
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 11,
                 color: t.faint,
                 fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            )
-          else ...[
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                color: _crowdColor(matched.level),
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              _crowdLabel(matched.level),
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: t.dim,
               ),
             ),
           ],

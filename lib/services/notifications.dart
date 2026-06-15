@@ -226,6 +226,60 @@ class NotificationsService {
     await _plugin.cancel(_ongoingNotifId);
   }
 
+  // ─── MRT/LRT disruption notifications ────────────────────
+  //
+  // Mirrors iOS NotificationsManager.notifyTrainDisruption(lineCode:title:detail:).
+  // Shows an immediate heads-up notification when a new disruption appears for
+  // a line. Uses the same arrivals channel (Importance.high → heads-up banner)
+  // so no additional channel setup is required.
+  //
+  // Notification id is stable per line code so a re-fire of the same line
+  // (e.g. app re-launched while the disruption is still active) replaces the
+  // existing notification rather than stacking a duplicate.
+
+  static const String _disruptionIdPrefix = 'disruption.';
+
+  /// Show an immediate disruption notification for the given MRT/LRT line.
+  /// Safe to call from a background isolate — uses `show()`, not
+  /// `zonedSchedule()`, so it has no AlarmManager dependency.
+  Future<void> notifyTrainDisruption({
+    required String lineCode,
+    required String title,
+    required String detail,
+  }) async {
+    if (!_initialized) return;
+    final identifier = '$_disruptionIdPrefix$lineCode';
+    final notifId = identifier.hashCode & 0x7fffffff;
+    try {
+      await _plugin.show(
+        notifId,
+        title,
+        detail,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            _channelName,
+            channelDescription: _channelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+            category: AndroidNotificationCategory.status,
+            ticker: title,
+            groupKey: 'leyne.disruptions',
+          ),
+          iOS: const DarwinNotificationDetails(
+            interruptionLevel: InterruptionLevel.timeSensitive,
+          ),
+        ),
+        payload: identifier,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        // ignore: avoid_print
+        print('[notif] disruption notify $lineCode failed: $e');
+      }
+    }
+  }
+
   /// Reads the system `POST_NOTIFICATIONS` permission state. Android
   /// 13+ requires the runtime permission; older versions return granted
   /// because there's no opt-in concept.

@@ -293,7 +293,16 @@ class _NativeAdCardState extends State<NativeAdCard> {
   void initState() {
     super.initState();
     if (!kLyneAdsEnabled || kLyneScreenshotMode) return;
-    _attemptLoad();
+    // Defer the first load to after the initial frame: _load() reads the theme
+    // (context.t → dependOnInheritedWidgetOfExactType), which is illegal during
+    // initState and throws "...was called before _NativeAdCardState.initState()
+    // completed" when consent is already resolved (so _load would run
+    // synchronously here). The load is async/consent-gated anyway, so a
+    // one-frame delay is invisible. (The retry path already runs off a Timer.)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _attemptLoad();
+    });
   }
 
   void _attemptLoad() {

@@ -437,7 +437,8 @@ final class AppModel: ObservableObject {
     @AppStorage("leyne.onboardingDone") var onboarded = false
 
     // 24-hour clock display in the LIVE header. Defaults to true (SG locale).
-    @AppStorage("leyne.use24h") var use24h = true
+    // 12-hour clock app-wide; no in-app toggle (the option was removed).
+    @AppStorage("leyne.use24h") var use24h = false
 
     // Appearance override (Settings ▸ Appearance). Defaults to .system — the
     // theme follows OS Settings ▸ Display & Brightness — but the user can
@@ -565,6 +566,13 @@ final class AppModel: ObservableObject {
         didSet { persistSavedMrt() }
     }
 
+    // Ids of train disruptions + lift maintenance the user has already viewed on
+    // the Alerts tab. "Unseen" = current alert ids minus this set → drives the
+    // Alerts-tab badge. Persisted so the badge survives relaunch.
+    @Published var seenAlertIds: Set<String> = [] {
+        didSet { persistSeenAlerts() }
+    }
+
     // ─── Notification alerts (the redesign's single source of truth) ───
     // Both alert kinds — "notify me when my bus reaches MY STOP" (arrival)
     // and "…MY DESTINATION" (destination) — live here, persisted as JSON.
@@ -585,6 +593,7 @@ final class AppModel: ObservableObject {
         loadRecents()
         loadAlerts()
         loadHiddenNearby()
+        loadSeenAlerts()
         timer = Timer.publish(every: 1, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
@@ -647,6 +656,36 @@ final class AppModel: ObservableObject {
         if let d = try? JSONEncoder().encode(hiddenNearby) {
             UserDefaults.standard.set(d, forKey: "leyne.hiddenNearby")
         }
+    }
+    private func loadSeenAlerts() {
+        if let d = UserDefaults.standard.data(forKey: "leyne.seenAlertIds"),
+           let s = try? JSONDecoder().decode(Set<String>.self, from: d) {
+            seenAlertIds = s
+        }
+    }
+    private func persistSeenAlerts() {
+        if let d = try? JSONEncoder().encode(seenAlertIds) {
+            UserDefaults.standard.set(d, forKey: "leyne.seenAlertIds")
+        }
+    }
+
+    // MARK: - Alerts-tab "unseen" badge
+
+    /// Live disruption + lift-maintenance ids from DataStore.
+    private func currentAlertIds() -> Set<String> {
+        Set(ds.trainAlerts.map(\.id)).union(ds.liftMaintenance.map(\.id))
+    }
+
+    /// Count of service alerts not yet viewed on the Alerts tab. Drives the badge.
+    var unseenAlertCount: Int {
+        currentAlertIds().subtracting(seenAlertIds).count
+    }
+
+    /// Mark all currently-active alerts as seen (Alerts tab opened / on screen).
+    /// Replaces the set with the live ids so resolved alerts don't accumulate.
+    func markAllAlertsSeen() {
+        let current = currentAlertIds()
+        if seenAlertIds != current { seenAlertIds = current }
     }
     private func loadSavedMrt() {
         if let d = UserDefaults.standard.data(forKey: "leyne.savedMrt"),

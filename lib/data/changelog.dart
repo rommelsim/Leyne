@@ -30,6 +30,35 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.8.0': WhatsNewEntry(
+    headline: 'MRT, reimagined — plus alerts in one place.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.train_rounded,
+        title: 'A reimagined MRT tab',
+        body:
+            'Browse the whole network at a glance, with your nearest '
+            'station up top. Tap a line for live station crowd and how '
+            'busy it\'ll be in 30 minutes; tap a station for its details.',
+      ),
+      WhatsNewItem(
+        icon: Icons.notifications_rounded,
+        title: 'A new Alerts tab',
+        body:
+            'Train disruptions, lift maintenance, and your own bus alerts '
+            'now live in one place — with a badge when something new lands. '
+            'Settings moved to the gear in the top corner.',
+      ),
+      WhatsNewItem(
+        icon: Icons.warning_amber_rounded,
+        title: 'Know the moment a line goes down',
+        body:
+            'Leyne now notifies you when a new train disruption appears, '
+            'even in the background, so you can reroute before you reach '
+            'the platform.',
+      ),
+    ],
+  ),
   '2.7.0': WhatsNewEntry(
     headline: 'A live MRT board — free for everyone.',
     items: [

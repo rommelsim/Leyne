@@ -50,6 +50,7 @@ const _kHapticsKey = 'lyne.haptics';
 const _kAlertsKey = 'lyne.alerts'; // JSON list of BusAlert (notifs redesign)
 const _kHiddenNearbyKey = 'lyne.hiddenNearby'; // stop codes hidden from Nearby
 const _kSavedMrtKey = 'lyne.savedMrt'; // JSON list of MrtGeoStation
+const _kSeenAlertIdsKey = 'lyne.seenAlertIds'; // alert-badge seen tracking
 
 /// The currently-armed on-bus alert: which bus, where to alight, when
 /// the heads-up notification fires. Single ride at a time — see
@@ -233,9 +234,9 @@ class AppModel extends ChangeNotifier {
   }
 
   // ─── Preferences (persisted) ──────────────────────────────
-  // Display preference for 24-hour vs 12-hour clock in the LIVE header.
-  // Defaults to true to match the SG locale convention.
-  bool _use24h = true;
+  // 12-hour vs 24-hour clock. The in-app toggle was removed; the app uses a
+  // 12-hour clock app-wide, so this defaults to false.
+  bool _use24h = false;
   bool get use24h => _use24h;
 
   void setUse24h(bool v) {
@@ -530,6 +531,36 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Alert-badge seen tracking (persisted) ───────────────────────────────
+  // Mirrors iOS AppModel.seenAlertIds / unseenAlertCount / markAllAlertsSeen.
+  // Stores the ids of TrainAlert + LiftMaintenance entries the user has already
+  // seen (i.e. visited the Alerts tab while they were present). The badge on
+  // the Alerts tab is the count of current alerts whose id is NOT in this set.
+  Set<String> _seenAlertIds = <String>{};
+
+  /// How many current service-status alerts (train disruptions + lift
+  /// maintenance) the user has not yet seen on the Alerts tab.
+  /// Read by SoftRoot to badge the Alerts tab item.
+  int unseenAlertCount(List<String> currentAlertIds) {
+    var count = 0;
+    for (final id in currentAlertIds) {
+      if (!_seenAlertIds.contains(id)) count++;
+    }
+    return count;
+  }
+
+  /// Mark every currently-known alert id as seen. Called whenever the Alerts
+  /// tab is active and new data lands, so the badge reflects only NEW items.
+  void markAllAlertsSeen(List<String> currentAlertIds) {
+    var changed = false;
+    for (final id in currentAlertIds) {
+      if (_seenAlertIds.add(id)) changed = true;
+    }
+    if (!changed) return;
+    _prefs?.setStringList(_kSeenAlertIdsKey, _seenAlertIds.toList());
+    notifyListeners();
+  }
+
   // ─── Configurable alerts (persisted, notifications redesign) ────────────
   // The single source of truth for notification alerts (both kinds). Arrival
   // alerts are re-armed from the live ETA each coarse tick; destination alerts
@@ -634,7 +665,7 @@ class AppModel extends ChangeNotifier {
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
     _onboardingDone = _prefs!.getBool(_kOnboardingDoneKey) ?? false;
-    _use24h = _prefs!.getBool(_kUse24hKey) ?? true;
+    _use24h = _prefs!.getBool(_kUse24hKey) ?? false;
     final tm = _prefs!.getString(_kThemeModeKey);
     _themeMode = ThemeMode.values.firstWhere(
       (m) => m.name == tm,
@@ -684,6 +715,10 @@ class AppModel extends ChangeNotifier {
         /* corrupt — start empty */
       }
     }
+    // Seen alert ids for the Alerts tab badge.
+    _seenAlertIds =
+        (_prefs!.getStringList(_kSeenAlertIdsKey) ?? const []).toSet();
+
     // Restore any in-flight alight ride so the picker still shows the
     // armed stop on reopen. We don't re-schedule the notification — the
     // system already holds the AlarmManager registration from when we
@@ -721,6 +756,20 @@ class AppModel extends ChangeNotifier {
     // start there's nothing driving it — but the OS may still be showing a
     // stale, frozen notification from the killed session. Clear it.
     NotificationsService.shared.stopOngoing();
+
+    // Wire the disruption-notification callback. Mirrors iOS DataStore
+    // .fetchTrainAlerts → NotificationsManager.shared.notifyTrainDisruption,
+    // gated on `notificationsEnabled`. Each new disruption line fires an
+    // immediate heads-up notification keyed by line code.
+    _ds.onNewDisruption = (alert) {
+      if (!_notificationsEnabled) return;
+      NotificationsService.shared.notifyTrainDisruption(
+        lineCode: alert.lineCode,
+        title: alert.title,
+        detail: alert.detail,
+      );
+    };
+
     notifyListeners();
   }
 

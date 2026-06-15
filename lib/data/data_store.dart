@@ -304,6 +304,14 @@ class DataStore extends ChangeNotifier {
   DateTime? _lastTrainAlertFetch;
   bool _trainAlertsInflight = false;
 
+  /// Optional callback invoked for each newly-appeared disruption (i.e. a
+  /// `TrainAlert` whose line code was absent from the previous snapshot).
+  /// Mirrors iOS DataStore.fetchTrainAlerts's `NotificationsManager.shared
+  /// .notifyTrainDisruption(...)` call. Set by AppModel (foreground) and by
+  /// the WorkManager background entrypoint, where the gate on
+  /// `notificationsEnabled` lives so DataStore stays pref-free.
+  void Function(TrainAlert alert)? onNewDisruption;
+
   /// Network-wide lift maintenance items (FacilitiesMaintenance v2).
   /// Empty = no current lift outages. Refreshed lazily when the MRT board opens.
   List<LiftMaintenance> _liftMaintenance = const [];
@@ -338,6 +346,10 @@ class DataStore extends ChangeNotifier {
     _lastTrainAlertFetch = DateTime.now();
     () async {
       try {
+        // Snapshot the previous set of line codes BEFORE the network hit.
+        // Mirrors iOS DataStore.fetchTrainAlerts's `let previousIds = Set(...)`.
+        final previousIds = _trainAlerts.map((a) => a.id).toSet();
+
         final r = await _api.trainServiceAlerts();
         final next = (r.status == 2)
             ? r.affectedSegments
@@ -355,6 +367,22 @@ class DataStore extends ChangeNotifier {
                   )
                   .toList(growable: false)
             : const <TrainAlert>[];
+
+        // Notify about lines that just became disrupted — present now but
+        // absent from the previous snapshot. Keyed by line code so a
+        // persisting disruption isn't re-announced every 60 s refresh.
+        // The [onNewDisruption] gate (set by AppModel / background task) is
+        // where the `notificationsEnabled` check lives, matching iOS's
+        // `NotificationsManager.shared.notifyTrainDisruption` gate pattern.
+        final notify = onNewDisruption;
+        if (notify != null) {
+          for (final alert in next) {
+            if (!previousIds.contains(alert.id)) {
+              notify(alert);
+            }
+          }
+        }
+
         // Skip a rebuild when nothing changed.
         final unchanged =
             next.length == _trainAlerts.length &&
@@ -372,6 +400,47 @@ class DataStore extends ChangeNotifier {
         _trainAlertsInflight = false;
       }
     }();
+  }
+
+  /// Awaitable alert refresh for the background WorkManager task. Forces a
+  /// train-alert fetch (which fires [onNewDisruption] for newly-appeared lines)
+  /// and returns when done so the background task can report completion.
+  /// Mirrors iOS DataStore.refreshAlertsInBackground().
+  Future<void> refreshAlertsInBackground() async {
+    // Reset the staleness gate so the fetch always runs.
+    _lastTrainAlertFetch = null;
+    _trainAlertsInflight = false;
+    // Run synchronously-in-async so we can await completion.
+    final previousIds = _trainAlerts.map((a) => a.id).toSet();
+    try {
+      final r = await _api.trainServiceAlerts();
+      final next = (r.status == 2)
+          ? r.affectedSegments
+                .map(
+                  (seg) => TrainAlert(
+                    id: seg.line,
+                    lineCode: seg.line,
+                    line: MRTLine.fromLtaCode(seg.line),
+                    title: '${MRTLine.shortLabelForLta(seg.line)} · disrupted',
+                    detail: _trainAlertSummary(seg, r.messages),
+                    freeBus: (seg.freePublicBus ?? '').trim().isNotEmpty,
+                    freeShuttle: (seg.freeMrtShuttle ?? '').trim().isNotEmpty,
+                  ),
+                )
+                .toList(growable: false)
+          : const <TrainAlert>[];
+      final notify = onNewDisruption;
+      if (notify != null) {
+        for (final alert in next) {
+          if (!previousIds.contains(alert.id)) {
+            notify(alert);
+          }
+        }
+      }
+      _trainAlerts = next;
+    } catch (_) {
+      // Network blip — keep the previous snapshot and return gracefully.
+    }
   }
 
   String _trainAlertSummary(

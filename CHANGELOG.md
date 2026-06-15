@@ -8,6 +8,43 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.8.0 · Android (39) · 2026-06-16
+
+**2026-06-16 — Android AAB (2.8.0, build 39):** _(versionName jumped 2.5.1 →
+2.8.0 to align the Android train with iOS now that the MRT overhaul has landed;
+versionCode 39, as 38 is already on Play.)_ The big parity release — brings the
+iOS 2.6.0–2.8.0 feature set to Android. Ported to Flutter / Material 3 (no
+cross-platform idiom bleed). Output:
+`build/app/outputs/bundle/release/app-release.aab`.
+
+- **MRT, reimagined (the headline):** the MRT tab now opens on a **NETWORK**
+  grid (2-column line tiles) with your **nearest station** featured at the top.
+  Tap a line → a **crowd card** (not a new page) showing live per-station
+  density with station codes and a people-density glyph, plus a **Now / +30 min**
+  toggle that reads as a wall-clock time. Tap a station → a station detail with a
+  30-minute crowd **forecast + trend arrow**, lines, and lift status. Saved MRT
+  stations get drag-to-reorder and swipe-to-delete.
+  (`soft_mrt_screen.dart`, `soft_mrt_line_screen.dart`,
+  `soft_mrt_station_screen.dart`, `mrt_geo.dart`)
+- **New Alerts tab:** replaces the Settings tab (order Bus · MRT · Saved · Search
+  · **Alerts**). Surfaces **service status** — train disruptions + lift
+  maintenance — alongside **your own bus alerts**, with an **unseen badge** on
+  the tab. Settings moved to a **gear sheet** in the top corner; the Home-screen
+  bell was removed. (`soft_alerts_screen.dart`, `soft_root.dart`,
+  `soft_tab_bar.dart`, `soft_home_screen.dart`, `soft_settings_screen.dart`)
+- **Disruption notifications:** a newly-appeared train disruption now fires a
+  heads-up notification, gated on the notifications setting. A **WorkManager**
+  background poll (~15 min, Android's enforced minimum) catches new disruptions
+  while the app is closed — an opportunistic booster, not a guaranteed-timely
+  push. (`data_store.dart`, `notifications.dart`, `alerts_background.dart`,
+  `main.dart`, `AndroidManifest.xml`, `workmanager` dependency)
+- **Search now finds MRT stations** and the **Saved tab gained an MRT filter**,
+  matching iOS. (`soft_search_screen.dart`, `soft_favourites_screen.dart`)
+- **Settings cleanup:** dropped the 24-hour-clock toggle (the app is 12-hour
+  throughout) and the postal-code search-radius option, matching iOS.
+- **Analytics + ad revenue:** Firebase Analytics with Impression-Level Ad Revenue
+  reporting, plus a PromptCenter pass refining ad handling. (`ad_banner.dart`)
+
 ## Leyne 2.8.0 · iOS (25) · 2026-06-13
 
 **2026-06-13 — MRT overhaul + Live Activity + bus-view UX (iOS, build 25):** A

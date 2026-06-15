@@ -1,21 +1,27 @@
-// SoftMrtScreen — MRT tab root (Leyne 2.7 Android, Phase 2).
+// SoftMrtScreen — MRT tab root (Leyne 2.7 Android, Phase 3 redesign).
 //
-// Flutter/Android port of ios-native/Leyne/V2/SoftMrtView.swift.
+// Flutter/Android port of ios-native/Leyne/V2/SoftMrtView.swift (Phase 3).
 //
-// Layout (mirrors SoftMrtView.swift):
-//   1. Title block — "MRT" + "Stations near you"
-//   2. System map button → MrtMapScreen (full-screen sheet)
-//   3. "Closest to you" section — up to 6 nearest stations from MrtGeo
-//   4. "All lines" section — existing line-status board (intact)
+// Layout (mirrors SoftMrtView.swift Phase 3):
+//   1. SliverAppBar — "MRT" title + map icon action button (top-right).
+//   2. Disruption banner — compact, only when a line is affected.
+//   3. NETWORK section:
+//      a. Nearest-MRT featured tile (full-width, folded in from old
+//         "Closest to you" section) — shown only when located.
+//      b. 2-column grid of tappable line tiles (badge + status + name +
+//         "Normal service / Disrupted").
 //
-// Four LTA DataMall feeds:
-//   • TrainServiceAlerts       → per-line operating status (disrupted / normal)
-//   • FacilitiesMaintenance v2 → network-wide lifts currently under maintenance
-//   • PCDRealTime              → live per-station crowdedness, fetched lazily on expand
-//   • PCDForecast              → 30-min crowd forecast, shown via Now/Next toggle
+// Navigation:
+//   • Tap a line tile → pushes SoftMrtLineScreen (new, internal Navigator).
+//   • Tap the nearest-station featured tile → pushes SoftMrtStationScreen.
+//   • Map button → pushes MrtMapScreen (fullscreenDialog).
+//   • onOpenStation callback still accepted (SoftRoot may wire it for Search)
+//     but the MRT screen no longer calls it internally.
 //
-// Free for all users. Crowd colours (green/amber/red) and MRT line colours are
-// the only colour in the otherwise-monochrome app — intentional, don't remove.
+// DataStore getters used (READ-ONLY):
+//   ds.trainAlerts, ds.crowdByLine, ds.forecastByLine, ds.liftMaintenance
+// DataStore mutators used:
+//   ds.refreshTrainAlertsIfStale, ds.refreshLiftMaintenanceIfStale
 
 import 'package:flutter/material.dart';
 
@@ -23,54 +29,44 @@ import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
 import '../../services/location_service.dart';
-import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 import 'mrt_map_screen.dart';
+import 'soft_mrt_line_screen.dart';
+import 'soft_mrt_station_screen.dart';
 
 class SoftMrtScreen extends StatefulWidget {
   const SoftMrtScreen({
     super.key,
     required this.onTab,
     required this.onOpenStation,
-    required this.onOpenStationPlain,
   });
 
   final ValueChanged<SoftTab> onTab;
 
-  /// Called when the user taps a nearest-station card. The root pushes the
-  /// station detail screen. Walk/distance context is passed alongside.
+  /// Legacy callback kept so SoftRoot's constructor signature is unchanged.
+  /// The MRT screen no longer calls it internally — navigation now happens
+  /// via an internal Navigator.push. Search may still supply it for its own
+  /// station-open path.
   final void Function(MrtGeoStation station, int distanceM, int walkMin)
   onOpenStation;
-
-  /// Called when the user taps a SAVED-station card. Opens the station detail
-  /// without walk/distance context (the saved list carries no proximity).
-  /// Mirrors iOS SoftMrtRoute.station(station) vs the nearest variant.
-  final void Function(MrtGeoStation station) onOpenStationPlain;
 
   @override
   State<SoftMrtScreen> createState() => _SoftMrtScreenState();
 }
 
 class _SoftMrtScreenState extends State<SoftMrtScreen> {
-  /// The line whose live station crowd is currently expanded (one at a time).
-  MRTLine? _expandedLine;
-
-  /// Whether the crowd section is showing the 30-min forecast (true) or live
-  /// realtime data (false). Reset to false whenever the expanded line changes.
-  bool _showForecast = false;
-
-  /// Most-recently computed nearest station list (rebuilt on location changes).
+  /// Most-recently computed nearest station list, rebuilt on location changes.
+  /// Only the first entry is used (featured tile). Capped at 1 to avoid
+  /// doing unnecessary work for entries we don't render on this screen.
   List<MrtNearestResult> _nearest = [];
 
   @override
   void initState() {
     super.initState();
     LocationService.shared.addListener(_onLocationChanged);
-    // Non-force refresh on mount — honours the staleness windows.
     _refresh(force: false);
-    // Kick off location if already authorised; mirrors SoftHomeScreen.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await LocationService.shared.startIfAuthorized();
       _rebuildNearest();
@@ -91,22 +87,13 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
       if (_nearest.isNotEmpty) setState(() => _nearest = []);
       return;
     }
-    final results = MrtGeo.nearest(lat: loc.lat, lon: loc.lon, limit: 6);
+    final results = MrtGeo.nearest(lat: loc.lat, lon: loc.lon, limit: 1);
     setState(() => _nearest = results);
   }
 
   void _refresh({required bool force}) {
-    final ds = DataStore.shared;
-    ds.refreshTrainAlertsIfStale(force: force);
-    ds.refreshLiftMaintenanceIfStale(force: force);
-    if (_expandedLine != null) {
-      if (_showForecast) {
-        ds.refreshForecast(_expandedLine!, force: force);
-      } else {
-        ds.refreshCrowd(_expandedLine!, force: force);
-      }
-    }
-    // Also rebuild nearest with fresh location.
+    DataStore.shared.refreshTrainAlertsIfStale(force: force);
+    DataStore.shared.refreshLiftMaintenanceIfStale(force: force);
     _rebuildNearest();
   }
 
@@ -119,7 +106,33 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
     );
   }
 
-  /// Disrupted lines derived from the LTA alerts, keyed by MRTLine enum.
+  void _openLine(MRTLine line) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SoftMrtLineScreen(
+          line: line,
+          onTab: widget.onTab,
+          tabSelection: SoftTab.mrt,
+        ),
+      ),
+    );
+  }
+
+  void _openStation(MrtGeoStation station, {int? distanceM, int? walkMin}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SoftMrtStationScreen(
+          station: station,
+          onBack: () => Navigator.of(context).pop(),
+          onTab: widget.onTab,
+          tabSelection: SoftTab.mrt,
+          distanceM: distanceM,
+          walkMin: walkMin,
+        ),
+      ),
+    );
+  }
+
   Map<MRTLine, TrainAlert> _disruptedLines(List<TrainAlert> alerts) {
     final map = <MRTLine, TrainAlert>{};
     for (final alert in alerts) {
@@ -132,16 +145,11 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
   Widget build(BuildContext context) {
     final t = context.t;
     return ListenableBuilder(
-      listenable: Listenable.merge([
-        DataStore.shared,
-        LocationService.shared,
-        AppModel.shared,
-      ]),
+      listenable: Listenable.merge([DataStore.shared, LocationService.shared]),
       builder: (context, _) {
         final ds = DataStore.shared;
         final disrupted = _disruptedLines(ds.trainAlerts);
         final loc = LocationService.shared.lastLocation;
-        final saved = AppModel.shared.savedMrtStations;
 
         return Scaffold(
           backgroundColor: t.bg,
@@ -156,96 +164,40 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-                      // ── System map button ──────────────────────────────
-                      _MapButton(onTap: _openMap, t: t),
+                      // ── Disruption banner ───────────────────────────────
+                      _DisruptionBanner(disrupted: disrupted, t: t),
                       const SizedBox(height: 20),
 
-                      // ── Saved stations (only when non-empty) ───────────
-                      if (saved.isNotEmpty) ...[
-                        const Eyebrow('Saved'),
-                        const SizedBox(height: 10),
-                        ...saved.map(
-                          (station) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _SavedStationCard(
-                              station: station,
-                              onTap: () => widget.onOpenStationPlain(station),
-                              t: t,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                      ],
-
-                      // ── "Closest to you" nearest stations ──────────────
-                      const Eyebrow('Closest to you'),
+                      // ── NETWORK section header ──────────────────────────
+                      const Eyebrow('Network'),
                       const SizedBox(height: 10),
+
+                      // ── Nearest MRT featured tile (full-width) ──────────
+                      if (loc != null && _nearest.isNotEmpty)
+                        _NearestFeaturedTile(
+                          result: _nearest.first,
+                          onTap: () => _openStation(
+                            _nearest.first.station,
+                            distanceM: _nearest.first.distanceM,
+                            walkMin: _nearest.first.walkMin,
+                          ),
+                          t: t,
+                        ),
                       if (loc == null)
-                        _NoLocationCard(
+                        _NoLocationHint(
                           onUseLocation: () async {
                             await LocationService.shared.requestAndStart();
                             _rebuildNearest();
                           },
                           t: t,
-                        )
-                      else if (_nearest.isEmpty)
-                        _EmptyNearestCard(t: t)
-                      else ...[
-                        ..._nearest.map(
-                          (result) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _NearestStationCard(
-                              result: result,
-                              onTap: () => widget.onOpenStation(
-                                result.station,
-                                result.distanceM,
-                                result.walkMin,
-                              ),
-                              t: t,
-                            ),
-                          ),
                         ),
-                      ],
 
-                      const SizedBox(height: 20),
-
-                      // ── "All lines" board (existing) ───────────────────
-                      const Eyebrow('All lines'),
                       const SizedBox(height: 10),
-                      _OverallBanner(disrupted: disrupted, t: t),
-                      _LiftMaintenanceCard(items: ds.liftMaintenance, t: t),
-                      const SizedBox(height: 4),
-                      _LinesList(
+
+                      // ── 2-column line grid ─────────────────────────────
+                      _LineGrid(
                         disrupted: disrupted,
-                        crowdByLine: ds.crowdByLine,
-                        forecastByLine: ds.forecastByLine,
-                        expandedLine: _expandedLine,
-                        showForecast: _showForecast,
-                        onToggle: (line) {
-                          setState(() {
-                            if (_expandedLine == line) {
-                              _expandedLine = null;
-                            } else {
-                              _expandedLine = line;
-                              _showForecast = false;
-                              DataStore.shared.refreshCrowd(line);
-                            }
-                          });
-                        },
-                        onForecastToggle: (show) {
-                          setState(() {
-                            _showForecast = show;
-                            if (_expandedLine != null) {
-                              if (show) {
-                                DataStore.shared.refreshForecast(
-                                  _expandedLine!,
-                                );
-                              } else {
-                                DataStore.shared.refreshCrowd(_expandedLine!);
-                              }
-                            }
-                          });
-                        },
+                        onTapLine: _openLine,
                         t: t,
                       ),
                     ]),
@@ -267,14 +219,9 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
     return SliverAppBar(
       backgroundColor: t.bg,
       surfaceTintColor: Colors.transparent,
-      // floating/snap disabled so the app bar does not animate in from the top
-      // when the MRT tab is mounted fresh (e.g. on a tab switch). Plain scroll-
-      // away behaviour matches the other V2 tab screens.
       pinned: false,
       floating: false,
       snap: false,
-      expandedHeight: null,
-      flexibleSpace: null,
       titleSpacing: 20,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -299,590 +246,103 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ─── Overall disruption banner ────────────────────────────────────────────────
-
-class _OverallBanner extends StatelessWidget {
-  const _OverallBanner({required this.disrupted, required this.t});
-
-  final Map<MRTLine, TrainAlert> disrupted;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    final count = disrupted.length;
-    if (count == 0) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(LyneRadius.lg),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(
-              Icons.warning_amber_rounded,
-              size: 22,
-              color: Colors.orange,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$count line${count == 1 ? '' : 's'} disrupted',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: t.fg,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Tap a line below for details.',
-                    style: TextStyle(fontSize: 13, color: t.dim),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Lift maintenance card ────────────────────────────────────────────────────
-
-class _LiftMaintenanceCard extends StatelessWidget {
-  const _LiftMaintenanceCard({required this.items, required this.t});
-
-  final List<LiftMaintenance> items;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(LyneRadius.lg),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.build_rounded, size: 14, color: Colors.orange),
-                const SizedBox(width: 8),
-                Text(
-                  'Lift maintenance',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: t.fg,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${items.length}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: t.dim,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ...items.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6, right: 8),
-                      child: Container(
-                        width: 5,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: t.faint,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.stationName,
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: t.fg,
-                            ),
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            item.detail,
-                            style: TextStyle(fontSize: 12, color: t.dim),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Per-line list ────────────────────────────────────────────────────────────
-
-class _LinesList extends StatelessWidget {
-  const _LinesList({
-    required this.disrupted,
-    required this.crowdByLine,
-    required this.forecastByLine,
-    required this.expandedLine,
-    required this.showForecast,
-    required this.onToggle,
-    required this.onForecastToggle,
-    required this.t,
-  });
-
-  final Map<MRTLine, TrainAlert> disrupted;
-  final Map<MRTLine, List<StationCrowd>?> crowdByLine;
-  final Map<MRTLine, List<StationCrowd>?> forecastByLine;
-  final MRTLine? expandedLine;
-  final bool showForecast;
-  final ValueChanged<MRTLine> onToggle;
-  final ValueChanged<bool> onForecastToggle;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: MRTLine.values.map((line) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _LineRow(
-            line: line,
-            alert: disrupted[line],
-            crowdData: crowdByLine[line],
-            forecastData: forecastByLine[line],
-            isExpanded: expandedLine == line,
-            showForecast: showForecast,
-            onToggle: () => onToggle(line),
-            onForecastToggle: onForecastToggle,
-            t: t,
+      actions: [
+        // Direct map button — no ••• menu (mirrors iOS Phase 3 titleBlock).
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: IconButton(
+            icon: Icon(Icons.map_rounded, size: 22, color: t.fg),
+            onPressed: _openMap,
+            tooltip: 'System map',
           ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-// ─── Single line row (header + expandable crowd section) ─────────────────────
-
-class _LineRow extends StatelessWidget {
-  const _LineRow({
-    required this.line,
-    required this.alert,
-    required this.crowdData,
-    required this.forecastData,
-    required this.isExpanded,
-    required this.showForecast,
-    required this.onToggle,
-    required this.onForecastToggle,
-    required this.t,
-  });
-
-  final MRTLine line;
-  final TrainAlert? alert;
-  final List<StationCrowd>? crowdData;
-  final List<StationCrowd>? forecastData;
-  final bool isExpanded;
-  final bool showForecast;
-  final VoidCallback onToggle;
-  final ValueChanged<bool> onForecastToggle;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSize(
-      duration: LyneMotion.emphasis,
-      curve: LyneMotion.standardCurve,
-      alignment: Alignment.topCenter,
-      child: Container(
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header row — always tappable.
-            InkWell(
-              onTap: onToggle,
-              borderRadius: BorderRadius.circular(14),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: _LineHeader(
-                  line: line,
-                  alert: alert,
-                  isExpanded: isExpanded,
-                  t: t,
-                ),
-              ),
-            ),
-            // Crowd section — only when expanded.
-            if (isExpanded)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                child: _CrowdSection(
-                  crowdData: crowdData,
-                  forecastData: forecastData,
-                  showForecast: showForecast,
-                  onForecastToggle: onForecastToggle,
-                  t: t,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Line header ──────────────────────────────────────────────────────────────
-
-class _LineHeader extends StatelessWidget {
-  const _LineHeader({
-    required this.line,
-    required this.alert,
-    required this.isExpanded,
-    required this.t,
-  });
-
-  final MRTLine line;
-  final TrainAlert? alert;
-  final bool isExpanded;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    final disrupted = alert != null;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Coloured line-code chip.
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: line.color,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            line.code,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${line.displayName} Line',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: t.fg,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                disrupted ? (alert!.detail) : 'Operating normally',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: disrupted ? Colors.orange : t.dim,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              // Free service chips — only shown when disrupted and at least
-              // one free-service option is available.
-              if (disrupted && (alert!.freeBus || alert!.freeShuttle)) ...[
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    if (alert!.freeBus)
-                      _FreeServiceChip(
-                        label: 'Free bus rides',
-                        icon: Icons.directions_bus_rounded,
-                        t: t,
-                      ),
-                    if (alert!.freeShuttle)
-                      _FreeServiceChip(
-                        label: 'Free MRT shuttle',
-                        icon: Icons.tram_rounded,
-                        t: t,
-                      ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        Column(
-          children: [
-            Icon(
-              disrupted ? Icons.error_rounded : Icons.check_circle_rounded,
-              size: 16,
-              color: disrupted
-                  ? Colors.orange
-                  : Colors.green.withValues(alpha: 0.7),
-            ),
-            const SizedBox(height: 4),
-            AnimatedRotation(
-              turns: isExpanded ? 0.5 : 0,
-              duration: LyneMotion.emphasis,
-              curve: LyneMotion.standardCurve,
-              child: Icon(Icons.expand_more_rounded, size: 18, color: t.faint),
-            ),
-          ],
         ),
       ],
     );
   }
 }
 
-// ─── Crowd section (expanded) ─────────────────────────────────────────────────
+// ─── Disruption banner ────────────────────────────────────────────────────────
+// Compact, only visible when disruptions exist. Mirrors SoftMrtView.swift
+// topDisruptionBanner. When all clear, shows a quiet one-liner (no card surface).
 
-class _CrowdSection extends StatelessWidget {
-  const _CrowdSection({
-    required this.crowdData,
-    required this.forecastData,
-    required this.showForecast,
-    required this.onForecastToggle,
-    required this.t,
-  });
+class _DisruptionBanner extends StatelessWidget {
+  const _DisruptionBanner({required this.disrupted, required this.t});
 
-  final List<StationCrowd>? crowdData;
-  final List<StationCrowd>? forecastData;
-  final bool showForecast;
-  final ValueChanged<bool> onForecastToggle;
+  final Map<MRTLine, TrainAlert> disrupted;
   final LyneTheme t;
 
   @override
   Widget build(BuildContext context) {
-    final activeData = showForecast ? forecastData : crowdData;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Divider(color: t.line, height: 24, thickness: 1),
-        // Now / Next 30 min toggle — monochrome segmented control.
-        _CrowdToggle(
-          showForecast: showForecast,
-          onToggle: onForecastToggle,
-          t: t,
-        ),
-        const SizedBox(height: 12),
-        if (activeData == null) ...[
-          // Loading state.
-          Row(
-            children: [
-              SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
-                  color: t.dim,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                showForecast ? 'Loading forecast…' : 'Loading live crowd…',
-                style: TextStyle(fontSize: 13, color: t.dim),
-              ),
-            ],
+    if (disrupted.isEmpty) {
+      // All-clear: quiet single line, no raised card (mirrors iOS).
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.check_circle_rounded,
+            size: 13,
+            color: Colors.green.withValues(alpha: 0.8),
           ),
-        ] else if (activeData.isEmpty) ...[
+          const SizedBox(width: 6),
           Text(
-            showForecast
-                ? 'Forecast unavailable right now.'
-                : 'Crowd data unavailable right now.',
-            style: TextStyle(fontSize: 13, color: t.faint),
-          ),
-        ] else ...[
-          _CrowdLegend(t: t),
-          const SizedBox(height: 10),
-          ..._sortedCrowd(activeData).map(
-            (stop) => Padding(
-              padding: const EdgeInsets.only(bottom: 11),
-              child: _CrowdRow(stop: stop, t: t),
-            ),
+            'All lines running normally',
+            style: TextStyle(fontSize: 13, color: t.dim),
           ),
         ],
-      ],
-    );
-  }
-
-  /// Sort by the numeric suffix of the station code (e.g. "EW13" → 13).
-  /// Mirrors iOS SoftMrtView.swift: sortedCrowd / codeNum.
-  static List<StationCrowd> _sortedCrowd(List<StationCrowd> items) {
-    int codeNum(String code) {
-      final match = RegExp(r'\d+').firstMatch(code);
-      return match == null ? 0 : int.tryParse(match.group(0)!) ?? 0;
+      );
     }
 
-    final sorted = List<StationCrowd>.from(items);
-    sorted.sort((a, b) => codeNum(a.code).compareTo(codeNum(b.code)));
-    return sorted;
-  }
-}
+    final count = disrupted.length;
+    final sortedLines =
+        disrupted.keys.toList()..sort((a, b) => a.code.compareTo(b.code));
 
-// ─── Crowd toggle (Now / Next 30 min) ────────────────────────────────────────
-
-class _CrowdToggle extends StatelessWidget {
-  const _CrowdToggle({
-    required this.showForecast,
-    required this.onToggle,
-    required this.t,
-  });
-
-  final bool showForecast;
-  final ValueChanged<bool> onToggle;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.orange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          _ToggleSegment(
-            label: 'Now',
-            selected: !showForecast,
-            onTap: () => onToggle(false),
-            t: t,
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 16,
+            color: Colors.orange,
           ),
-          _ToggleSegment(
-            label: 'Next 30 min',
-            selected: showForecast,
-            onTap: () => onToggle(true),
-            t: t,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToggleSegment extends StatelessWidget {
-  const _ToggleSegment({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    required this.t,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeInOut,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: selected ? t.surface : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            color: selected ? t.fg : t.dim,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Free service chip ────────────────────────────────────────────────────────
-
-class _FreeServiceChip extends StatelessWidget {
-  const _FreeServiceChip({
-    required this.label,
-    required this.icon,
-    required this.t,
-  });
-
-  final String label;
-  final IconData icon;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 10, color: t.dim),
-          const SizedBox(width: 4),
+          const SizedBox(width: 10),
           Text(
-            label,
+            '$count line${count == 1 ? '' : 's'} disrupted',
             style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: t.dim,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: t.fg,
             ),
+          ),
+          const SizedBox(width: 8),
+          // Coloured line-code pills for disrupted lines.
+          Wrap(
+            spacing: 4,
+            children: sortedLines.map((line) {
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: line.color,
+                  borderRadius: BorderRadius.circular(LyneRadius.full),
+                ),
+                child: Text(
+                  line.code,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              );
+            }).toList(),
           ),
         ],
       ),
@@ -890,192 +350,13 @@ class _FreeServiceChip extends StatelessWidget {
   }
 }
 
-// ─── Crowd legend ─────────────────────────────────────────────────────────────
+// ─── Nearest MRT featured tile ────────────────────────────────────────────────
+// Full-width tile at the top of the Network grid. Eyebrow "Nearest MRT" +
+// station name + coloured line-code pills + walk/distance meta.
+// Mirrors SoftMrtView.swift nearestFeaturedTile.
 
-class _CrowdLegend extends StatelessWidget {
-  const _CrowdLegend({required this.t});
-
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    const levels = [CrowdLevel.low, CrowdLevel.moderate, CrowdLevel.high];
-    return Row(
-      children: [
-        ...levels.map(
-          (level) => Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: _crowdColor(level, t: t),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Text(
-                  _crowdLabel(level),
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: t.dim,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Single crowd row ─────────────────────────────────────────────────────────
-
-class _CrowdRow extends StatelessWidget {
-  const _CrowdRow({required this.stop, required this.t});
-
-  final StationCrowd stop;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    final unknown = stop.level == CrowdLevel.unknown;
-    return Row(
-      children: [
-        Container(
-          width: 9,
-          height: 9,
-          decoration: BoxDecoration(
-            color: _crowdColor(stop.level, t: t),
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            stop.name,
-            style: TextStyle(fontSize: 15, color: unknown ? t.dim : t.fg),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          _crowdLabel(stop.level),
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: t.dim,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Crowd helpers ────────────────────────────────────────────────────────────
-
-/// Crowd level dot colour. `t` is used for the unknown/faint slot so the
-/// colour adapts to dark/light mode correctly — the others are semantic
-/// transit colours that don't change between modes.
-Color _crowdColor(CrowdLevel level, {LyneTheme? t}) {
-  switch (level) {
-    case CrowdLevel.low:
-      return Colors.green;
-    case CrowdLevel.moderate:
-      return Colors.orange;
-    case CrowdLevel.high:
-      return Colors.red;
-    case CrowdLevel.unknown:
-      return t?.faint ?? const Color.fromRGBO(128, 128, 128, 0.35);
-  }
-}
-
-String _crowdLabel(CrowdLevel level) {
-  switch (level) {
-    case CrowdLevel.low:
-      return 'Low';
-    case CrowdLevel.moderate:
-      return 'Moderate';
-    case CrowdLevel.high:
-      return 'High';
-    case CrowdLevel.unknown:
-      return '—'; // em dash
-  }
-}
-
-// ─── System map button ────────────────────────────────────────────────────────
-
-class _MapButton extends StatelessWidget {
-  const _MapButton({required this.onTap, required this.t});
-
-  final VoidCallback onTap;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: t.surfaceHi,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.map_rounded, size: 20, color: t.fg),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'System map',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: t.fg,
-                      ),
-                    ),
-                    Text(
-                      'Zoomable MRT network map',
-                      style: TextStyle(fontSize: 12, color: t.dim),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, size: 18, color: t.faint),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Nearest station card ─────────────────────────────────────────────────────
-
-/// A single nearby MRT station card — mirrors the Bus nearby card style.
-/// Station name + coloured line-code pills + walk/distance + trailing chevron.
-class _NearestStationCard extends StatelessWidget {
-  const _NearestStationCard({
+class _NearestFeaturedTile extends StatelessWidget {
+  const _NearestFeaturedTile({
     required this.result,
     required this.onTap,
     required this.t,
@@ -1088,117 +369,122 @@ class _NearestStationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final station = result.station;
+    final walkMin = result.walkMin < 1 ? 1 : result.walkMin;
     return Semantics(
       button: true,
-      label: 'Open ${station.name} station',
+      label: 'Nearest MRT, ${station.name}, $walkMin minute walk',
       child: Material(
         color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
+        borderRadius: BorderRadius.circular(16),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(LyneRadius.md),
+          borderRadius: BorderRadius.circular(16),
           onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: t.line),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Leading tram icon tile.
-                Container(
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: t.surfaceHi,
-                    borderRadius: BorderRadius.circular(LyneRadius.md),
-                  ),
-                  child: Icon(Icons.tram_rounded, size: 20, color: t.fg),
+                // Eyebrow row: walk icon + "Nearest MRT" + trailing chevron.
+                Row(
+                  children: [
+                    Icon(
+                      Icons.directions_walk,
+                      size: 12,
+                      color: t.soon,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'NEAREST MRT',
+                      style: t
+                          .mono(10, weight: FontWeight.w600, color: t.dim)
+                          .copyWith(letterSpacing: 1.2),
+                    ),
+                    const Spacer(),
+                    Icon(Icons.chevron_right, size: 16, color: t.faint),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
+                const SizedBox(height: 8),
+                // Station name + line-code pills on the same row.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Text(
                         station.name,
                         style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
                           color: t.fg,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 5),
-                      // Line-code pills row.
-                      Wrap(
-                        spacing: 5,
-                        runSpacing: 4,
-                        children: station.codes.map((code) {
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: lineColorFor(code),
-                              borderRadius: BorderRadius.circular(
-                                LyneRadius.full,
-                              ),
-                            ),
-                            child: Text(
-                              code,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                                fontFeatures: [FontFeature.tabularFigures()],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 5),
-                      // Walk + distance meta.
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.directions_walk, size: 12, color: t.dim),
-                          const SizedBox(width: 3),
-                          Text(
-                            '${result.walkMin < 1 ? 1 : result.walkMin} min',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: t.dim,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
+                    ),
+                    const SizedBox(width: 8),
+                    Wrap(
+                      spacing: 4,
+                      children: station.codes.map((code) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: lineColorFor(code),
+                            borderRadius:
+                                BorderRadius.circular(LyneRadius.full),
+                          ),
+                          child: Text(
+                            code,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              fontFeatures: [FontFeature.tabularFigures()],
                             ),
                           ),
-                          const SizedBox(width: 5),
-                          Text(
-                            '·',
-                            style: TextStyle(fontSize: 12, color: t.faint),
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            _fmtDist(result.distanceM),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: t.faint,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Icon(Icons.chevron_right, size: 18, color: t.faint),
+                const SizedBox(height: 6),
+                // Walk + distance meta.
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '$walkMin min',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: t.soon,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    Text(
+                      ' · ',
+                      style: TextStyle(fontSize: 12, color: t.faint),
+                    ),
+                    Text(
+                      _fmtDist(result.distanceM),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: t.dim,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    Text(
+                      ' away',
+                      style: TextStyle(fontSize: 12, color: t.dim),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1214,192 +500,212 @@ class _NearestStationCard extends StatelessWidget {
   }
 }
 
-// ─── Saved station card (no walk meta) ───────────────────────────────────────
+// ─── No-location hint ─────────────────────────────────────────────────────────
+// Compact inline hint shown in place of the featured tile when location is
+// unavailable. Lighter weight than the old full no-location card.
 
-/// A saved MRT station card — tram tile + name + coloured line-code pills +
-/// trailing chevron. Mirrors the nearest card minus the walk/distance row
-/// (saved stations carry no proximity context), like iOS compactStationRow.
-class _SavedStationCard extends StatelessWidget {
-  const _SavedStationCard({
-    required this.station,
-    required this.onTap,
-    required this.t,
-  });
-
-  final MrtGeoStation station;
-  final VoidCallback onTap;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Open ${station.name} station, saved',
-      child: Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(LyneRadius.md),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: t.surfaceHi,
-                    borderRadius: BorderRadius.circular(LyneRadius.md),
-                  ),
-                  child: Icon(Icons.tram_rounded, size: 20, color: t.fg),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        station.name,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: t.fg,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 5),
-                      Wrap(
-                        spacing: 5,
-                        runSpacing: 4,
-                        children: station.codes.map((code) {
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: lineColorFor(code),
-                              borderRadius: BorderRadius.circular(
-                                LyneRadius.full,
-                              ),
-                            ),
-                            child: Text(
-                              code,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                                fontFeatures: [FontFeature.tabularFigures()],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(Icons.chevron_right, size: 18, color: t.faint),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── No-location empty state ──────────────────────────────────────────────────
-
-class _NoLocationCard extends StatelessWidget {
-  const _NoLocationCard({required this.onUseLocation, required this.t});
+class _NoLocationHint extends StatelessWidget {
+  const _NoLocationHint({required this.onUseLocation, required this.t});
 
   final VoidCallback onUseLocation;
   final LyneTheme t;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.lg),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: t.surfaceHi,
-              borderRadius: BorderRadius.circular(14),
+    return GestureDetector(
+      onTap: onUseLocation,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.line),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.location_off_rounded, size: 16, color: t.faint),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Enable location to see your nearest station',
+                style: TextStyle(fontSize: 13, color: t.dim),
+              ),
             ),
-            child: Icon(Icons.location_off_rounded, size: 24, color: t.dim),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Location off',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-              color: t.fg,
+            Text(
+              'Enable',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: t.fg,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Turn on location to see stations near you.',
-            style: TextStyle(fontSize: 13, color: t.dim),
-          ),
-          const SizedBox(height: 14),
-          FilledButton(
-            onPressed: onUseLocation,
-            style: FilledButton.styleFrom(
-              backgroundColor: t.accent,
-              foregroundColor: t.onAccent,
-            ),
-            child: const Text('Use location'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-// ─── Empty nearest state (geo not yet loaded) ─────────────────────────────────
+// ─── 2-column line grid ───────────────────────────────────────────────────────
+// Replaces the old inline-expand line list. Each tile is badge + status icon +
+// name + status text. Mirrors SoftMrtView.swift networkSection LazyVGrid.
 
-class _EmptyNearestCard extends StatelessWidget {
-  const _EmptyNearestCard({required this.t});
+class _LineGrid extends StatelessWidget {
+  const _LineGrid({
+    required this.disrupted,
+    required this.onTapLine,
+    required this.t,
+  });
 
+  final Map<MRTLine, TrainAlert> disrupted;
+  final ValueChanged<MRTLine> onTapLine;
   final LyneTheme t;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
+    final lines = MRTLine.values;
+    // Build rows of 2.
+    final rows = <Widget>[];
+    for (var i = 0; i < lines.length; i += 2) {
+      rows.add(
+        Row(
+          children: [
+            Expanded(
+              child: _LineTile(
+                line: lines[i],
+                alert: disrupted[lines[i]],
+                onTap: () => onTapLine(lines[i]),
+                t: t,
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (i + 1 < lines.length)
+              Expanded(
+                child: _LineTile(
+                  line: lines[i + 1],
+                  alert: disrupted[lines[i + 1]],
+                  onTap: () => onTapLine(lines[i + 1]),
+                  t: t,
+                ),
+              )
+            else
+              const Expanded(child: SizedBox()),
+          ],
+        ),
+      );
+      if (i + 2 < lines.length) rows.add(const SizedBox(height: 10));
+    }
+    return Column(children: rows);
+  }
+}
+
+// ─── Single line tile ─────────────────────────────────────────────────────────
+// Coloured line-code badge (top-left) + status icon (top-right) + name +
+// "Normal service / Disrupted" text. Tapping pushes SoftMrtLineScreen.
+// Disrupted tiles get an orange border accent.
+
+class _LineTile extends StatelessWidget {
+  const _LineTile({
+    required this.line,
+    required this.alert,
+    required this.onTap,
+    required this.t,
+  });
+
+  final MRTLine line;
+  final TrainAlert? alert;
+  final VoidCallback onTap;
+  final LyneTheme t;
+
+  @override
+  Widget build(BuildContext context) {
+    final disrupted = alert != null;
+    return Semantics(
+      button: true,
+      label:
+          '${line.displayName} Line, ${disrupted ? 'disrupted' : 'operating normally'}',
+      child: Material(
         color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.lg),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(strokeWidth: 1.5, color: t.dim),
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 92),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: disrupted
+                    ? Colors.orange.withValues(alpha: 0.4)
+                    : t.line,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Top row: line-code badge + status icon.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: line.color,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        line.code,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      disrupted
+                          ? Icons.warning_amber_rounded
+                          : Icons.check_circle_rounded,
+                      size: 14,
+                      color: disrupted
+                          ? Colors.orange
+                          : Colors.green.withValues(alpha: 0.75),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // Line name.
+                Text(
+                  line.displayName,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: t.fg,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                // Status text.
+                Text(
+                  disrupted ? 'Disrupted' : 'Normal service',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: disrupted ? Colors.orange : t.dim,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
-          const SizedBox(width: 12),
-          Text(
-            'Finding nearby stations…',
-            style: TextStyle(fontSize: 13, color: t.dim),
-          ),
-        ],
+        ),
       ),
     );
   }

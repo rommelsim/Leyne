@@ -3,6 +3,7 @@ import CoreSpotlight
 import UserNotifications
 import StoreKit
 import FirebaseCore
+import BackgroundTasks
 
 @main
 struct LeyneApp: App {
@@ -62,6 +63,7 @@ struct LeyneApp: App {
                     switch new {
                     case .background:
                         AppOpenAdManager.shared.noteBackgrounded()
+                        LeyneAppDelegate.scheduleAlertsRefresh()
                     case .active:
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(500))
@@ -104,7 +106,38 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
             FirebaseApp.configure()
         }
         UNUserNotificationCenter.current().delegate = self
+        // Background app refresh — poll LTA train alerts opportunistically so a
+        // newly-detected disruption can fire its local notification even if the
+        // app hasn't been opened. Must register before launch completes.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.alertsRefreshTaskID, using: nil
+        ) { task in
+            Self.handleAlertsRefresh(task as! BGAppRefreshTask)
+        }
         return true
+    }
+
+    // MARK: - Background app refresh
+
+    static let alertsRefreshTaskID = "com.leyne.Leyne.alertsRefresh"
+
+    /// Request the next opportunistic refresh (~15 min out). iOS decides the
+    /// actual timing from usage patterns, so this is best-effort, not a guarantee.
+    static func scheduleAlertsRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: alertsRefreshTaskID)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    /// Runs when iOS grants a refresh window: refresh alerts (which fires the
+    /// new-disruption notification), reschedule the next pass, and report done.
+    static func handleAlertsRefresh(_ task: BGAppRefreshTask) {
+        scheduleAlertsRefresh()
+        let work = Task { @MainActor in
+            await DataStore.shared.refreshAlertsInBackground()
+            task.setTaskCompleted(success: true)
+        }
+        task.expirationHandler = { work.cancel() }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

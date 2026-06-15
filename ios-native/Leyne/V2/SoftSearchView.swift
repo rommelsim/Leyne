@@ -119,8 +119,12 @@ struct SoftSearchView: View {
             if focused {
                 Button {
                     fb.select()
+                    // Search is a first-class tab now — Cancel only dismisses
+                    // the keyboard and clears the field. It must NOT call
+                    // onClose (that switched to the Bus tab). onClose is kept
+                    // for the legacy modal route's caller.
                     focused = false
-                    onClose()
+                    query = ""
                 } label: {
                     Text("Cancel")
                         .font(t.sans(14, weight: .medium))
@@ -168,11 +172,21 @@ struct SoftSearchView: View {
         }
         .padding(.horizontal, 15)
         .frame(height: 52)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(fieldFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(query.isEmpty ? t.line : t.accent.opacity(0.6), lineWidth: 1)
         )
+    }
+
+    /// iOS 26 Liquid Glass fill for the search field (the same `.regularMaterial`
+    /// the tab bar / IOSGlassPill use); opaque surface fallback on iOS 25-.
+    private var fieldFill: AnyShapeStyle {
+        if #available(iOS 26.0, *) {
+            AnyShapeStyle(.regularMaterial)
+        } else {
+            AnyShapeStyle(t.surface)
+        }
     }
 
     // MARK: Results / empty state router

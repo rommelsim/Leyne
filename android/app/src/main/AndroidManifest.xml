@@ -30,6 +30,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- WorkManager background tasks (leyne.alertsRefresh periodic poll).
+         FOREGROUND_SERVICE is required when WorkManager is configured to run
+         as an expedited job on Android 12+ (not currently the case here, but
+         included so upgrading to expedited mode later doesn't break silently).
+         No WAKE_LOCK declaration is needed — WorkManager holds a wake lock
+         internally for the duration of each task run. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 
     <application
         android:label="Leyne"
@@ -97,6 +104,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- WorkManager service for the leyne.alertsRefresh background task.
+             The workmanager Flutter plugin uses its own JobService subclass
+             (be.tramckrijte.workmanager.BackgroundWorker) to host each task.
+             `android:exported="false"` keeps it private — WorkManager is the
+             only caller. The DartWorkerTask and related classes are provided
+             by the workmanager plugin; no additional Kotlin code is needed
+             beyond the plugin's auto-registration via FlutterActivity. -->
+        <service
+            android:name="be.tramckrijte.workmanager.BackgroundWorker"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE"/>
 
         <!-- flutter_local_notifications receivers — fire the broadcast that
              becomes a system notification at the scheduled time, and re-

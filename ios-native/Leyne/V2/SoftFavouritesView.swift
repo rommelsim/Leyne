@@ -226,17 +226,17 @@ struct SoftFavouritesView: View {
     // MARK: Segmented control
 
     private var segmentedControl: some View {
-        HStack(spacing: 0) {
-            segmentPill("All",   for: .all)
-            segmentPill("Stops", for: .stops)
-            segmentPill("Buses", for: .buses)
-            segmentPill("MRT",   for: .mrt)
+        // Native segmented control — picks up the system iOS 26 Liquid Glass
+        // styling automatically (the same native treatment as the tab bar),
+        // instead of the previous hand-rolled pill row.
+        Picker("Filter", selection: $segment) {
+            Text("All").tag(FavSegment.all)
+            Text("Stops").tag(FavSegment.stops)
+            Text("Buses").tag(FavSegment.buses)
+            Text("MRT").tag(FavSegment.mrt)
         }
-        .padding(3)
-        .background(
-            t.glassSurface()
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        )
+        .pickerStyle(.segmented)
+        .onChange(of: segment) { _, _ in fb.select() }
     }
 
     /// Toggles List edit mode so saved stops / services can be dragged into the
@@ -252,25 +252,6 @@ struct SoftFavouritesView: View {
             Text(editMode.isEditing ? "Done" : "Edit")
                 .font(t.sans(15, weight: editMode.isEditing ? .semibold : .medium))
                 .foregroundStyle(t.meBlue)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func segmentPill(_ label: String, for value: FavSegment) -> some View {
-        let active = segment == value
-        return Button {
-            fb.select()
-            withAnimation(.easeInOut(duration: 0.15)) { segment = value }
-        } label: {
-            Text(label)
-                .font(t.sans(13, weight: .semibold))
-                .foregroundStyle(active ? t.contrastFg : t.dim)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(
-                    active ? AnyShapeStyle(t.soon) : AnyShapeStyle(Color.clear),
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-                )
         }
         .buttonStyle(.plain)
     }

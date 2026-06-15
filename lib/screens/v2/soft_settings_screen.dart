@@ -1,9 +1,10 @@
 // SoftSettingsScreen — Leyne 2.0 Settings (Material 3 Android variant).
 // Restyled for the 2.4.0 design language: grouped Material cards, icon chips,
 // chevron-trailing nav rows, SoftToggle for binary settings.
-// Settings: manage alerts, appearance, 24h time, haptics, search radius,
-// about. Notification permission is requested once at onboarding (no in-app
-// on/off toggle); the app ships English-only (no language picker).
+// Settings: appearance, haptics, hidden stops, buy-me-a-coffee.
+// The app uses a 12-hour clock (no time-format toggle). Notification
+// permission is requested once at onboarding (no in-app on/off toggle);
+// the app ships English-only (no language picker).
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -13,9 +14,7 @@ import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
-import '../about_screen.dart';
 import 'hidden_stops_screen.dart';
-import 'manage_alerts_screen.dart';
 
 /// Where the "Buy me a coffee" row opens — the Stripe Payment Link for the
 /// "Support Leyne" product (accepts PayNow + cards + Google Pay, settles SGD to
@@ -24,8 +23,17 @@ import 'manage_alerts_screen.dart';
 const String _kCoffeeUrl = 'https://buy.stripe.com/6oU3cv5689oB3PI6R68so00';
 
 class SoftSettingsScreen extends StatefulWidget {
-  const SoftSettingsScreen({super.key, required this.onTab});
+  const SoftSettingsScreen({
+    super.key,
+    required this.onTab,
+    /// When true the screen is presented inside a modal bottom sheet (from the
+    /// Alerts tab gear button) — the bottom navigation bar is suppressed so it
+    /// doesn't appear inside the sheet. Mirrors iOS SoftSettingsView which is
+    /// always presented as a sheet since the Settings tab was removed.
+    this.asSheet = false,
+  });
   final ValueChanged<SoftTab> onTab;
+  final bool asSheet;
 
   @override
   State<SoftSettingsScreen> createState() => _SoftSettingsScreenState();
@@ -49,13 +57,6 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     ThemeMode.light  => 'Light',
     ThemeMode.dark   => 'Dark',
   };
-
-  String _radiusLabel(int metres) {
-    if (metres < 1000) return '$metres m';
-    final km = metres / 1000;
-    if (metres % 1000 == 0) return '${km.toInt()} km';
-    return '${km.toStringAsFixed(1)} km';
-  }
 
   // ── Sheets ───────────────────────────────────────────────────────────────
 
@@ -129,85 +130,6 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     );
   }
 
-  void _showRadiusSheet() {
-    const radii = [250, 500, 1000, 2000];
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.t.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(LyneRadius.lg)),
-      ),
-      builder: (_) => ListenableBuilder(
-        listenable: AppModel.shared,
-        builder: (ctx, _) {
-          final t = ctx.t;
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: t.line,
-                    borderRadius: BorderRadius.circular(LyneRadius.full),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      Text('Search radius',
-                          style: t.sans(18, weight: FontWeight.w600, color: t.fg)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Text(
-                    'When you search a 6-digit postal code, bus stops within this '
-                    'distance of that address are shown.',
-                    style: t.sans(12, color: t.dim),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final r in radii) ...[
-                  InkWell(
-                    onTap: () {
-                      AppModel.shared.setSearchRadiusM(r);
-                      Navigator.of(ctx).pop();
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(_radiusLabel(r),
-                                style: t.sans(15,
-                                    weight: FontWeight.w500, color: t.fg)),
-                          ),
-                          if (AppModel.shared.searchRadiusM == r)
-                            Icon(Icons.check, size: 18, color: t.fg),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (r != radii.last)
-                    Divider(color: t.line, height: 1, indent: 20),
-                ],
-                const SizedBox(height: 16),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -215,10 +137,17 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      bottomNavigationBar: SoftBottomBar(
-        selection: SoftTab.settings,
-        onSelect: widget.onTab,
-      ),
+      // Suppress the bottom nav bar when presented as a modal sheet (from the
+      // Alerts tab gear). When used as the standalone Settings tab it still
+      // renders. The `settings` tab enum value is kept for compatibility even
+      // though the tab itself is no longer shown; once the old tab routing is
+      // fully retired this can be cleaned up.
+      bottomNavigationBar: widget.asSheet
+          ? null
+          : SoftBottomBar(
+              selection: SoftTab.alerts,
+              onSelect: widget.onTab,
+            ),
       body: SafeArea(
         child: ListenableBuilder(
           listenable: AppModel.shared,
@@ -238,21 +167,6 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                 _sectionLabel(context, 'Preferences'),
                 const SizedBox(height: 8),
                 _card(context, [
-                  // Manage alerts → central alerts list. Notification
-                  // permission itself is requested once at onboarding, so
-                  // there is no separate in-app on/off toggle here.
-                  _navRow(
-                    context,
-                    icon: Icons.tune_rounded,
-                    title: 'Manage alerts',
-                    detail: m.alerts.isEmpty ? null : '${m.alerts.length}',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ManageAlertsScreen(),
-                      ),
-                    ),
-                  ),
-                  _divider(context),
                   // Appearance → sheet picker
                   _navRow(
                     context,
@@ -279,18 +193,6 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                     ),
                   ],
                   _divider(context),
-                  // About → AboutScreen
-                  _navRow(
-                    context,
-                    icon: Icons.info_outline,
-                    title: 'About',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const AboutScreen(),
-                      ),
-                    ),
-                  ),
-                  _divider(context),
                   // Buy me a coffee → opens the Stripe donation link in the
                   // browser. Optional supporter tier; the app is ad-funded, not
                   // paywalled. Mirrors iOS SoftSettingsView coffee row.
@@ -299,33 +201,16 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
 
                 const SizedBox(height: 24),
 
-                // ── Section 2: Time & Feedback ────────────────────────────
-                _sectionLabel(context, 'Time & Feedback'),
+                // ── Section 2: Feedback ───────────────────────────────────
+                _sectionLabel(context, 'Feedback'),
                 const SizedBox(height: 8),
                 _card(context, [
-                  _toggleRow(
-                    context,
-                    icon: Icons.access_time,
-                    title: '24-hour time',
-                    value: m.use24h,
-                    onChanged: m.setUse24h,
-                  ),
-                  _divider(context),
                   _toggleRow(
                     context,
                     icon: Icons.vibration,
                     title: 'Haptics',
                     value: m.hapticsEnabled,
                     onChanged: m.setHaptics,
-                  ),
-                  _divider(context),
-                  // Search radius → sheet picker
-                  _navRow(
-                    context,
-                    icon: Icons.radar,
-                    title: 'Search radius',
-                    detail: _radiusLabel(m.searchRadiusM),
-                    onTap: _showRadiusSheet,
                   ),
                 ]),
 

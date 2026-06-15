@@ -3,9 +3,8 @@
 // Layout (top → bottom):
 //   1. Title "MRT" + ••• menu (system map / news & advisories).
 //   2. Disruption banner — compact, only when a line is affected.
-//   3. Saved stations section — user's saved MRT stations (omit when empty).
-//   4. Closest to you — nearest stations, capped at 3.
-//   5. Lines section — compact one-row-per-line list; tap → SoftMrtLineView.
+//   3. Closest to you — nearest stations, capped at 3.
+//   4. Lines section — compact one-row-per-line list; tap → SoftMrtLineView.
 //
 // Lift maintenance has moved to SoftMrtNewsView.
 // Live station crowd has moved to SoftMrtLineView (expanded inline was too long).
@@ -20,6 +19,13 @@ struct SoftMrtView: View {
 
     /// Controls the full-screen system-map sheet.
     @State private var showMap = false
+
+    /// Line whose detail is shown as a sheet-card (nil = none). Tapping a line
+    /// tile presents SoftMrtLineView as a card instead of pushing a page.
+    @State private var sheetLine: MRTLine?
+
+    /// Station whose detail is shown as a sheet-card (nil = none).
+    @State private var sheetStation: MrtGeoStation?
 
     /// Nearest stations within the user's search radius, rebuilt on location or
     /// radius changes. Capped at 3 per the redesign.
@@ -48,13 +54,10 @@ struct SoftMrtView: View {
             VStack(alignment: .leading, spacing: 16) {
                 titleBlock
                 topDisruptionBanner
-                if !m.savedMrtStations.isEmpty { savedSection }
-                nearestSection
-                // One native ad per screen — placed after "Closest to you" to
-                // mirror the Home tab placement. NativeAdCard renders EmptyView
-                // when no ad is loaded or ads are suppressed; no gap otherwise.
+                // One native ad per screen. NativeAdCard renders EmptyView when
+                // no ad is loaded or ads are suppressed; no gap otherwise.
                 NativeAdCard()
-                linesSection
+                networkSection
             }
             .padding(20)
         }
@@ -73,6 +76,21 @@ struct SoftMrtView: View {
         }
         .sheet(isPresented: $showMap) {
             MrtMapView()
+        }
+        // Line tile → detail as a card (sheet) rather than a pushed page.
+        .sheet(item: $sheetLine) { line in
+            SoftMrtLineView(line: line, onBack: { sheetLine = nil })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        // Nearest-station tap (in the Network section) → detail as a card.
+        .sheet(item: $sheetStation) { station in
+            SoftMrtStationView(station: station,
+                               distanceM: nil,
+                               walkMin: nil,
+                               onBack: { sheetStation = nil })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -106,34 +124,27 @@ struct SoftMrtView: View {
                     .foregroundStyle(t.dim)
             }
             Spacer(minLength: 8)
-            moreMenu
+            mapButton
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Top-right ••• menu — system map and news/advisories.
-    private var moreMenu: some View {
-        Menu {
-            Button {
-                Feedback.shared.tap()
-                showMap = true
-            } label: {
-                Label("System map", systemImage: "map.fill")
-            }
-            Button {
-                Feedback.shared.tap()
-                onOpenNews()
-            } label: {
-                Label("News & advisories", systemImage: "newspaper.fill")
-            }
+    /// Top-right button — opens the zoomable system map. (Previously a ••• menu
+    /// that also held "News & advisories"; that content now lives in the
+    /// Alerts tab, so this collapses to a direct map button.)
+    private var mapButton: some View {
+        Button {
+            Feedback.shared.tap()
+            showMap = true
         } label: {
-            Image(systemName: "ellipsis.circle.fill")
-                .font(.system(size: 22, weight: .semibold))
+            Image(systemName: "map.fill")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(t.fg)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .accessibilityLabel("More options")
+        .buttonStyle(.plain)
+        .accessibilityLabel("System map")
     }
 
     // MARK: - Top disruption banner
@@ -177,79 +188,7 @@ struct SoftMrtView: View {
         }
     }
 
-    // MARK: - Saved stations section
-
-    private var savedSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Saved")
-            ForEach(m.savedMrtStations, id: \.id) { station in
-                NavigationLink(value: SoftMrtRoute.station(station)) {
-                    compactStationRow(station)
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityLabel("\(station.name) MRT station, saved")
-            }
-        }
-    }
-
     // MARK: - Nearest stations section
-
-    @ViewBuilder
-    private var nearestSection: some View {
-        if nearestStations.isEmpty {
-            if !loc.authorized {
-                SoftEmptyState(
-                    t: t,
-                    onNearby: { loc.requestAndStart() },
-                    onSearch: {}
-                )
-            } else if loc.location != nil {
-                VStack(alignment: .leading, spacing: 10) {
-                    sectionHeader("Closest to you")
-                    noStationWithinRadiusCard
-                }
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                sectionHeader("Closest to you")
-                ForEach(nearestStations, id: \.station.id) { entry in
-                    nearbyStationCard(entry.station,
-                                      distanceM: entry.distanceM,
-                                      walkMin: entry.walkMin)
-                }
-            }
-        }
-    }
-
-    private var noStationWithinRadiusCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: "tram")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(t.dim)
-                Text("No MRT stations within \(radiusLabel(m.searchRadiusM)).")
-                    .font(t.sans(15, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                Spacer(minLength: 0)
-            }
-            if let hint = absoluteNearest {
-                Text("Nearest: \(hint.station.name) · \(hint.distanceM) m away — widen your radius in Settings.")
-                    .font(t.sans(13))
-                    .foregroundStyle(t.dim)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func radiusLabel(_ metres: Int) -> String {
-        if metres < 1000 { return "\(metres) m" }
-        let km = Double(metres) / 1000
-        if metres % 1000 == 0 { return "\(Int(km)) km" }
-        return String(format: "%.1f km", km)
-    }
 
     private func sectionHeader(_ text: String) -> some View {
         Text(text.uppercased())
@@ -259,151 +198,137 @@ struct SoftMrtView: View {
             .padding(.leading, 2)
     }
 
-    // MARK: - Nearby station card (with walk meta)
+    // MARK: - Nearest featured tile (grid header, spans full width)
 
-    private func nearbyStationCard(
-        _ station: MrtGeoStation,
-        distanceM: Int,
-        walkMin: Int
+    /// The user's nearest station as the Network grid's featured header tile —
+    /// full width above the 2-column line grid. Walk eyebrow + station name +
+    /// line-code pills + walk/distance meta. Opens the station detail as a card.
+    private func nearestFeaturedTile(
+        _ entry: (station: MrtGeoStation, distanceM: Int, walkMin: Int)
     ) -> some View {
-        NavigationLink(value: SoftMrtRoute.station(station, distanceM: distanceM, walkMin: walkMin)) {
-            HStack(spacing: 0) {
-                MrtLineColorBar(codes: station.codes, width: 4, height: 44)
-                VStack(alignment: .center, spacing: 3) {
-                    ForEach(station.codes, id: \.self) { code in
-                        MrtCodePill(t: t, code: code)
-                    }
+        let station = entry.station
+        return Button {
+            Feedback.shared.tap()
+            sheetStation = station
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                // Eyebrow — walk glyph + "Nearest MRT"
+                HStack(spacing: 6) {
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(t.soon)
+                    Text("Nearest MRT")
+                        .font(t.mono(10, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(t.dim)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(t.faint)
                 }
-                .frame(width: 52, alignment: .center)
-                .padding(.leading, 10)
-
-                VStack(alignment: .leading, spacing: 3) {
+                // Station name + line-code pills
+                HStack(alignment: .center, spacing: 8) {
                     Text(station.name)
-                        .font(t.sans(16, weight: .semibold))
+                        .font(t.sans(20, weight: .bold))
                         .foregroundStyle(t.fg)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                        .truncationMode(.tail)
-
-                    HStack(spacing: 5) {
-                        Image(systemName: "figure.walk")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(t.soon)
-                        Text("\(max(1, walkMin)) min")
-                            .foregroundStyle(t.soon)
-                        Text("·").foregroundStyle(t.faint)
-                        Text("\(distanceM) m")
-                            .foregroundStyle(t.dim)
+                        .minimumScaleFactor(0.8)
+                    HStack(spacing: 4) {
+                        ForEach(station.codes, id: \.self) { code in
+                            MrtCodePill(t: t, code: code)
+                        }
                     }
-                    .font(t.mono(12.5))
+                    Spacer(minLength: 0)
                 }
-                .padding(.leading, 8)
-
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                // Meta — walk minutes · distance
+                HStack(spacing: 5) {
+                    Text("\(max(1, entry.walkMin)) min")
+                        .foregroundStyle(t.soon)
+                    Text("·").foregroundStyle(t.faint)
+                    Text("\(entry.distanceM) m away")
+                        .foregroundStyle(t.dim)
+                }
+                .font(t.mono(12.5))
             }
             .contentShape(Rectangle())
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(t.line, lineWidth: 1)
             )
         }
         .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("\(station.name) MRT station, \(max(1, walkMin)) minute walk")
+        .accessibilityLabel("Nearest MRT, \(station.name), \(max(1, entry.walkMin)) minute walk")
     }
 
-    // MARK: - Compact station row (saved section — no walk meta)
+    // MARK: - Network section (nearest station + line grid)
 
-    private func compactStationRow(_ station: MrtGeoStation) -> some View {
-        HStack(spacing: 0) {
-            MrtLineColorBar(codes: station.codes, width: 4, height: 40)
-            VStack(alignment: .center, spacing: 3) {
-                ForEach(station.codes, id: \.self) { code in
-                    MrtCodePill(t: t, code: code)
-                }
-            }
-            .frame(width: 52, alignment: .center)
-            .padding(.leading, 10)
-
-            Text(station.name)
-                .font(t.sans(15, weight: .semibold))
-                .foregroundStyle(t.fg)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .truncationMode(.tail)
-                .padding(.leading, 8)
-
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(t.faint)
-        }
-        .contentShape(Rectangle())
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(t.line, lineWidth: 1)
-        )
-    }
-
-
-    // MARK: - Lines section (compact one-row-per-line)
-
-    private var linesSection: some View {
+    private var networkSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Lines")
-            VStack(spacing: 8) {
+            sectionHeader("Network")
+            // Your nearest station as the grid's featured header tile (full
+            // width), folded in from the old "Closest to you" section. Opens
+            // its detail as a card. Shown only when located.
+            if let nearest = nearestStations.first {
+                nearestFeaturedTile(nearest)
+            }
+            // A 2-column grid of colour tiles instead of a row-per-line list —
+            // more glanceable, and each tile taps into the per-line detail.
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10),
+                ],
+                spacing: 10
+            ) {
                 ForEach(MRTLine.allCases, id: \.self) { line in
-                    compactLineRow(line, alert: disruptedLines[line])
+                    lineTile(line, alert: disruptedLines[line])
                 }
             }
         }
     }
 
-    private func compactLineRow(_ line: MRTLine, alert: TrainAlert?) -> some View {
+    /// One MRT line as a tappable colour tile: line badge + at-a-glance status
+    /// chip on top, line name + status text below. Opens the per-line detail.
+    private func lineTile(_ line: MRTLine, alert: TrainAlert?) -> some View {
         let disrupted = alert != nil
         return Button {
             Feedback.shared.tap()
-            onOpenLine(line)
+            sheetLine = line
         } label: {
-            HStack(spacing: 12) {
-                // Line pill
-                Text(line.rawValue)
-                    .font(t.mono(12, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(line.color, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                // Name
-                Text(line.displayName + " Line")
-                    .font(t.sans(15, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-
-                // Status dot
-                Circle()
-                    .fill(disrupted ? Color.orange : Color.green.opacity(0.8))
-                    .frame(width: 8, height: 8)
-
-                // Chevron
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text(line.rawValue)
+                        .font(t.mono(13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 28)
+                        .background(line.color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Spacer(minLength: 0)
+                    Image(systemName: disrupted ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(disrupted ? .orange : Color.green.opacity(0.75))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(line.displayName)
+                        .font(t.sans(14, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(disrupted ? "Disrupted" : "Normal service")
+                        .font(t.sans(11))
+                        .foregroundStyle(disrupted ? .orange : t.dim)
+                        .lineLimit(1)
+                }
             }
-            .contentShape(Rectangle())
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(disrupted ? Color.orange.opacity(0.4) : t.line, lineWidth: 1)
+            )
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel("\(line.displayName) Line, \(disrupted ? "disrupted" : "operating normally")")
@@ -411,3 +336,6 @@ struct SoftMrtView: View {
 }
 
 extension CrowdLevel: Hashable {}
+
+// Lets a tapped line drive a `.sheet(item:)` card presentation.
+extension MRTLine: Identifiable { public var id: String { rawValue } }

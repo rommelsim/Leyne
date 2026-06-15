@@ -187,7 +187,7 @@ struct SoftMrtStationView: View {
     private var crowdSection: some View {
         if !relevantLines.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                eyebrow("Crowd now")
+                eyebrow("Crowd")
 
                 ForEach(relevantLines, id: \.self) { line in
                     crowdCard(line)
@@ -244,6 +244,19 @@ struct SoftMrtStationView: View {
                     Text("Unavailable")
                         .font(t.mono(12))
                         .foregroundStyle(t.faint)
+                }
+
+                // 30-min forecast trend (Station Crowd Density Forecast).
+                if let entry = match, entry.level != .unknown,
+                   let next = forecastMatch(line), next.level != .unknown {
+                    HStack(spacing: 4) {
+                        Image(systemName: trendIcon(now: entry.level, next: next.level))
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(t.dim)
+                        Text("In 30 min · \(crowdLabel(next.level))")
+                            .font(t.mono(10.5))
+                            .foregroundStyle(t.dim)
+                    }
                 }
             }
 
@@ -392,6 +405,7 @@ struct SoftMrtStationView: View {
         ds.refreshLiftMaintenanceIfStale(force: force)
         for line in relevantLines {
             ds.refreshCrowd(line: line, force: force)
+            ds.refreshForecast(line: line, force: force)
         }
     }
 
@@ -407,6 +421,29 @@ struct SoftMrtStationView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(t.surfaceHi, in: Capsule())
+    }
+
+    /// Forecast crowd entry for this line at this station (30-min outlook).
+    private func forecastMatch(_ line: MRTLine) -> StationCrowd? {
+        ds.forecastByLine[line]?.first { station.codes.contains($0.code) }
+    }
+
+    private func levelRank(_ l: CrowdLevel) -> Int {
+        switch l {
+        case .low:      return 1
+        case .moderate: return 2
+        case .high:     return 3
+        case .unknown:  return 0
+        }
+    }
+
+    /// Trend glyph comparing the current crowd vs the 30-min forecast.
+    private func trendIcon(now: CrowdLevel, next: CrowdLevel) -> String {
+        let a = levelRank(now), b = levelRank(next)
+        if a == 0 || b == 0 { return "arrow.right" }
+        if b > a { return "arrow.up.right" }
+        if b < a { return "arrow.down.right" }
+        return "arrow.right"
     }
 
     private func crowdColor(_ l: CrowdLevel) -> Color {

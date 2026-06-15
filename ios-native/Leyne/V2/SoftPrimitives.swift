@@ -23,38 +23,6 @@ struct WalkTile: View {
     }
 }
 
-/// Toggle switch — Soft variant of LeyneSwitch with accent track when on.
-/// 38×22 pill per the Soft prototype (`proto-soft-ios.jsx:455`).
-struct SoftToggle: View {
-    let t: Theme
-    @Binding var value: Bool
-
-    // Custom monochrome switch. A native Toggle tinted with t.soon goes
-    // white-on-white in dark mode (the system thumb is always white, and
-    // t.soon/accent is white in dark) — the knob vanishes. We draw our own so
-    // both states read in both modes: ON = accent-filled track with a
-    // contrasting onAccent thumb; OFF = subtle track with a dim thumb.
-    var body: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) { value.toggle() }
-        } label: {
-            ZStack(alignment: value ? .trailing : .leading) {
-                Capsule()
-                    .fill(value ? t.accent : t.surfaceHi)
-                    .overlay(Capsule().stroke(t.line, lineWidth: 1))
-                    .frame(width: 46, height: 28)
-                Circle()
-                    .fill(value ? t.onAccent : t.dim)
-                    .frame(width: 22, height: 22)
-                    .padding(3)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityValue(value ? "On" : "Off")
-    }
-}
-
 /// "Eyebrow" mono caption — used above page titles ("STOP 80071", "LIVE MAP").
 struct Eyebrow: View {
     let text: String

@@ -14,18 +14,24 @@ import '../ad_banner.dart';
 // 2.4.0: Added `favourites` tab — mirrors iOS SoftRoot 4-tab layout.
 // 2.7.0: Added `mrt` tab — mirrors iOS SoftRoot.
 // Phase 1: Reordered to Bus · MRT · Saved · Search · Settings.
-// Android visible order: Bus(Home) · MRT · Saved · Search · Settings.
-enum SoftTab { home, favourites, mrt, settings, search }
+// Phase 2: Replaced `settings` tab with `alerts` — Settings is now a gear-
+//          button sheet accessed from the Alerts tab. Mirrors iOS SoftRoot.
+// Android visible order: Bus(Home) · MRT · Saved · Search · Alerts.
+enum SoftTab { home, favourites, mrt, alerts, search }
 
 class SoftTabBar extends StatelessWidget {
   const SoftTabBar({
     super.key,
     required this.selection,
     required this.onSelect,
+    this.alertBadgeCount = 0,
   });
 
   final SoftTab selection;
   final ValueChanged<SoftTab> onSelect;
+
+  /// Number of unseen alerts. When > 0, the Alerts tab shows a badge dot.
+  final int alertBadgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -35,43 +41,55 @@ class SoftTabBar extends StatelessWidget {
       onDestinationSelected: (i) => onSelect(_visibleTabs[i]),
       backgroundColor: t.bg,
       surfaceTintColor: Colors.transparent,
-      destinations: const [
-        NavigationDestination(
+      destinations: [
+        const NavigationDestination(
           icon: Icon(Icons.directions_bus_outlined),
           selectedIcon: Icon(Icons.directions_bus_rounded),
           label: 'Bus',
         ),
-        NavigationDestination(
+        const NavigationDestination(
           icon: Icon(Icons.train_outlined),
           selectedIcon: Icon(Icons.train_rounded),
           label: 'MRT',
         ),
-        NavigationDestination(
+        const NavigationDestination(
           icon: Icon(Icons.star_outline_rounded),
           selectedIcon: Icon(Icons.star_rounded),
           label: 'Saved',
         ),
-        NavigationDestination(
+        const NavigationDestination(
           icon: Icon(Icons.search_rounded),
           selectedIcon: Icon(Icons.search_rounded),
           label: 'Search',
         ),
         NavigationDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings_rounded),
-          label: 'Settings',
+          icon: Badge(
+            isLabelVisible: alertBadgeCount > 0,
+            label: alertBadgeCount > 9
+                ? const Text('9+')
+                : Text('$alertBadgeCount'),
+            child: const Icon(Icons.notifications_outlined),
+          ),
+          selectedIcon: Badge(
+            isLabelVisible: alertBadgeCount > 0,
+            label: alertBadgeCount > 9
+                ? const Text('9+')
+                : Text('$alertBadgeCount'),
+            child: const Icon(Icons.notifications_rounded),
+          ),
+          label: 'Alerts',
         ),
       ],
     );
   }
 
-  // Order mirrors iOS SoftRoot: Bus · MRT · Saved · Search · Settings.
+  // Order mirrors iOS SoftRoot: Bus · MRT · Saved · Search · Alerts.
   static const _visibleTabs = [
     SoftTab.home,
     SoftTab.mrt,
     SoftTab.favourites,
     SoftTab.search,
-    SoftTab.settings,
+    SoftTab.alerts,
   ];
 
   static int _visibleIndex(SoftTab t) {
@@ -89,10 +107,14 @@ class SoftBottomBar extends StatelessWidget {
     super.key,
     required this.selection,
     required this.onSelect,
+    this.alertBadgeCount = 0,
   });
 
   final SoftTab selection;
   final ValueChanged<SoftTab> onSelect;
+
+  /// Forwarded to [SoftTabBar] to badge the Alerts destination.
+  final int alertBadgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -100,7 +122,11 @@ class SoftBottomBar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         const AdBanner(),
-        SoftTabBar(selection: selection, onSelect: onSelect),
+        SoftTabBar(
+          selection: selection,
+          onSelect: onSelect,
+          alertBadgeCount: alertBadgeCount,
+        ),
       ],
     );
   }

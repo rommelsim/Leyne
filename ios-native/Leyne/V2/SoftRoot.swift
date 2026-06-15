@@ -59,6 +59,7 @@ enum SoftMrtRoute: Hashable {
 struct SoftRoot: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
+    @ObservedObject private var ds = DataStore.shared
 
     @State private var tab: SoftTab = .home
     // One navigation stack per tab so a drill-down in Home doesn't follow
@@ -67,80 +68,94 @@ struct SoftRoot: View {
     @State private var homeStack: [SoftRoute] = []
     @State private var mrtStack: [SoftMrtRoute] = []
     @State private var favouritesStack: [SoftRoute] = []
-    @State private var settingsStack: [SoftRoute] = []
+    @State private var alertsStack: [SoftRoute] = []
     @State private var searchStack: [SoftRoute] = []
     @State private var mapHandoff: MapHandoffKind = .none
 
     private var t: Theme { m.t }
 
+    /// The native 5-tab bar (Bus · MRT · Saved · Search · Alerts). Each tab owns
+    /// its own NavigationStack so child pushes keep the native slide + swipe-back.
+    /// Extracted from `body` to keep the view-builder type-check tractable.
+    private var tabView: some View {
+        TabView(selection: $tab) {
+            // 1. Bus — nearby bus stops home screen
+            Tab("Bus", systemImage: "bus.fill", value: SoftTab.home) {
+                navStack($homeStack) {
+                    SoftHomeView(
+                        onTab: { tab = $0 },
+                        onOpenStop: { homeStack.append(.stop($0)) },
+                        onOpenSearch: { tab = .search }
+                    )
+                }
+            }
+            // 2. MRT — station map + live crowd / service alerts
+            Tab("MRT", systemImage: "tram.fill", value: SoftTab.mrt) {
+                mrtNavStack($mrtStack)
+            }
+            // 3. Saved — pinned stops and favourite services
+            Tab("Saved", systemImage: "star.fill", value: SoftTab.favourites) {
+                navStack($favouritesStack) {
+                    SoftFavouritesView(
+                        onOpenStop: { favouritesStack.append(.stop($0)) },
+                        onOpenBus: { code, svc in
+                            favouritesStack.append(.bus(stopCode: code, svc: svc))
+                        },
+                        onOpenSearch: { tab = .search },
+                        onOpenMrtStation: { station in
+                            // Switch to the MRT tab and push the station detail.
+                            tab = .mrt
+                            mrtStack = [.station(station)]
+                        }
+                    )
+                }
+            }
+            // 4. Search
+            Tab("Search", systemImage: "magnifyingglass", value: SoftTab.search) {
+                navStack($searchStack) {
+                    SoftSearchView(
+                        onClose: { tab = .home },
+                        onOpenStop: { searchStack.append(.stop($0)) },
+                        onOpenBus: { stopCode, svcNo in
+                            searchStack.append(.bus(stopCode: stopCode,
+                                                    svc: svcNo,
+                                                    fullRoute: true))
+                        },
+                        onOpenMrtStation: { station in
+                            navigateToStation(station)
+                        }
+                    )
+                }
+            }
+            // 5. Alerts — service status (disruptions / maintenance / advisories)
+            //    + personal bus alerts; gear → Settings sheet.
+            Tab("Alerts", systemImage: "bell.fill", value: SoftTab.alerts) {
+                navStack($alertsStack) {
+                    SoftAlertsView()
+                }
+            }
+            .badge(m.unseenAlertCount)
+        }
+        .tint(t.meBlue)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
-            // Native TabView with four inline labelled tabs — Home ·
-            // Favourites · Settings · Search — matching the 2.4.0 mockup's
-            // standard bottom bar. Search is a normal tab (not the detached
-            // `.search` role circle) so it reads as the fourth labelled item.
-            // Each tab owns a NavigationStack so child pushes (Stop / Bus)
-            // keep the native slide + edge-swipe-back. Selection tint is the
-            // location blue used across the redesign.
-            TabView(selection: $tab) {
-                // 1. Bus — nearby bus stops home screen
-                Tab("Bus", systemImage: "bus.fill", value: SoftTab.home) {
-                    navStack($homeStack) {
-                        SoftHomeView(
-                            onTab: { tab = $0 },
-                            onOpenStop: { homeStack.append(.stop($0)) },
-                            onOpenSearch: { tab = .search }
-                        )
-                    }
+            tabView
+                // Alerts-tab badge: mark seen when the user is on (or switches
+                // to) the Alerts tab, including when fresh disruptions/maintenance
+                // land while it's open. Otherwise the badge counts the unseen.
+                .onChange(of: tab) { _, newTab in
+                    if newTab == .alerts { m.markAllAlertsSeen() }
                 }
-                // 2. MRT — station map + live crowd / service alerts
-                Tab("MRT", systemImage: "tram.fill", value: SoftTab.mrt) {
-                    mrtNavStack($mrtStack)
+                .onChange(of: ds.trainAlerts) { _, _ in
+                    if tab == .alerts { m.markAllAlertsSeen() }
                 }
-                // 3. Saved — pinned stops and favourite services
-                Tab("Saved", systemImage: "star.fill", value: SoftTab.favourites) {
-                    navStack($favouritesStack) {
-                        SoftFavouritesView(
-                            onOpenStop: { favouritesStack.append(.stop($0)) },
-                            onOpenBus: { code, svc in
-                                favouritesStack.append(.bus(stopCode: code, svc: svc))
-                            },
-                            onOpenSearch: { tab = .search },
-                            onOpenMrtStation: { station in
-                                // Switch to the MRT tab and push the station detail.
-                                tab = .mrt
-                                mrtStack = [.station(station)]
-                            }
-                        )
-                    }
+                .onChange(of: ds.liftMaintenance) { _, _ in
+                    if tab == .alerts { m.markAllAlertsSeen() }
                 }
-                // 4. Search
-                Tab("Search", systemImage: "magnifyingglass", value: SoftTab.search) {
-                    navStack($searchStack) {
-                        SoftSearchView(
-                            onClose: { tab = .home },
-                            onOpenStop: { searchStack.append(.stop($0)) },
-                            onOpenBus: { stopCode, svcNo in
-                                searchStack.append(.bus(stopCode: stopCode,
-                                                        svc: svcNo,
-                                                        fullRoute: true))
-                            },
-                            onOpenMrtStation: { station in
-                                navigateToStation(station)
-                            }
-                        )
-                    }
-                }
-                // 5. Settings
-                Tab("Settings", systemImage: "gearshape.fill", value: SoftTab.settings) {
-                    navStack($settingsStack) {
-                        SoftSettingsView(onTab: { tab = $0 })
-                    }
-                }
-            }
-            .tint(t.meBlue)
 
             // Map handoff toast overlays the whole stack.
             VStack {
@@ -159,7 +174,7 @@ struct SoftRoot: View {
         .onChange(of: homeStack) { old, new in handleStackPop(old, new) }
         .onChange(of: favouritesStack) { old, new in handleStackPop(old, new) }
         .onChange(of: searchStack) { old, new in handleStackPop(old, new) }
-        .onChange(of: settingsStack) { old, new in handleStackPop(old, new) }
+        .onChange(of: alertsStack) { old, new in handleStackPop(old, new) }
         // Notification / Spotlight / Live Activity deep links arrive via
         // AppModel.openCard. Route them into the Home tab's stack, then clear so
         // the same trigger fires the next tap. `initial: true` is essential for

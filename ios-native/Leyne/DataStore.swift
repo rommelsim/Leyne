@@ -235,6 +235,15 @@ final class DataStore: ObservableObject {
         Task { await self.fetchTrainAlerts() }
     }
 
+    /// Awaitable alert refresh for the background app-refresh task. Forces a
+    /// train-alert fetch (which fires the new-disruption notification when a
+    /// line just went down) and returns when done so the BGTask can report
+    /// completion.
+    func refreshAlertsInBackground() async {
+        lastTrainAlertFetch = Date()
+        await fetchTrainAlerts()
+    }
+
     private func fetchTrainAlerts() async {
         do {
             let r = try await api.trainServiceAlerts()

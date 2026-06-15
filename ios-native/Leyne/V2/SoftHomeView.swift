@@ -19,9 +19,6 @@ struct SoftHomeView: View {
     /// when the app cold-starts so a new disruption surfaces again.
     @State private var dismissedAlerts: Set<String> = []
 
-    /// Drives the push to the central alerts list from the header bell.
-    @State private var showAlerts = false
-
     let onTab: (SoftTab) -> Void
     let onOpenStop: (String) -> Void
     let onOpenSearch: () -> Void
@@ -102,11 +99,6 @@ struct SoftHomeView: View {
         .onChange(of: loc.location) { _, new in
             if let l = new { ds.updateNearby(l); ds.prefetchNearbyArrivals() }
         }
-        // Header bell → central alerts list, pushed onto the Home stack so it
-        // keeps its own nav bar (title + Edit) and the swipe-back gesture.
-        .navigationDestination(isPresented: $showAlerts) {
-            ManageAlertsView().toolbar(.hidden, for: .tabBar)
-        }
     }
 
     // MARK: Header / live row
@@ -119,47 +111,14 @@ struct SoftHomeView: View {
             WeatherHeader(t: t)
                 .padding(.horizontal, -16)  // bleed to scroll-view edge
 
-            HStack(alignment: .center, spacing: 12) {
-                Text("Stops near you")
-                    .font(t.sans(33, weight: .bold))
-                    .foregroundStyle(t.fg)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                alertButton
-            }
+            Text("Stops near you")
+                .font(t.sans(33, weight: .bold))
+                .foregroundStyle(t.fg)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
-    }
-
-    /// Top-right bell → the central alerts list, with a count badge when the
-    /// user has any alerts set.
-    private var alertButton: some View {
-        Button {
-            fb.tap()
-            showAlerts = true
-        } label: {
-            Image(systemName: "bell.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(t.fg)
-                .frame(width: 44, height: 44)
-                .background(t.surface, in: Circle())
-                .overlay(Circle().stroke(t.line, lineWidth: 1))
-                .overlay(alignment: .topTrailing) {
-                    if !m.alerts.isEmpty {
-                        Text("\(m.alerts.count)")
-                            .font(t.sans(11, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 5)
-                            .frame(minWidth: 18, minHeight: 18)
-                            .background(t.soon, in: Capsule())
-                            .overlay(Capsule().stroke(t.bg, lineWidth: 1.5))
-                            .offset(x: 5, y: -5)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(m.alerts.isEmpty ? "Alerts" : "Alerts, \(m.alerts.count) set")
     }
 
     private var liveRow: some View {

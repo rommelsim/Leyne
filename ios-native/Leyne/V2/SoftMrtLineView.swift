@@ -20,6 +20,10 @@ struct SoftMrtLineView: View {
 
     @State private var showForecast = false
 
+    /// When set, the line card swaps to show this station's detail (tapped from
+    /// the crowd list); the station view's own back button clears it to return.
+    @State private var stationDetail: MrtGeoStation?
+
     private var t: Theme { m.t }
 
     /// The alert for this line, if any.
@@ -28,20 +32,48 @@ struct SoftMrtLineView: View {
     }
 
     var body: some View {
+        ZStack {
+            if let station = stationDetail {
+                SoftMrtStationView(station: station,
+                                   distanceM: nil,
+                                   walkMin: nil,
+                                   onBack: {
+                                       withAnimation(.easeInOut(duration: 0.25)) {
+                                           stationDetail = nil
+                                       }
+                                   })
+                    .transition(.move(edge: .trailing))
+            } else {
+                lineContent
+                    .transition(.move(edge: .leading))
+            }
+        }
+    }
+
+    private var lineContent: some View {
+        // The sheet itself is the card, so the header + crowd list fill it
+        // edge-to-edge (no inner inset card). The sheet surface is t.surface.
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                topBar
+            VStack(alignment: .leading, spacing: 0) {
                 lineHeader
+                    .padding(.horizontal, 16)
+                    .padding(.top, 28)
+                    .padding(.bottom, 14)
+
+                Rectangle().fill(t.line).frame(height: 1)
+
                 if let a = alert {
                     alertCard(a)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 14)
                 }
+
                 crowdSection
+                    .padding(.top, 14)
+                    .padding(.bottom, 20)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 20)
         }
-        .background(t.bg.ignoresSafeArea())
+        .background(t.surface.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .enableSwipeBack()
         .refreshable {
@@ -53,29 +85,6 @@ struct SoftMrtLineView: View {
             ds.refreshTrainAlertsIfStale(force: false)
             ds.refreshCrowd(line: line, force: false)
         }
-    }
-
-    // MARK: - Top bar
-
-    private var topBar: some View {
-        HStack {
-            Button { onBack() } label: {
-                circleButton(icon: "chevron.left")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back")
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 4)
-    }
-
-    private func circleButton(icon: String) -> some View {
-        Image(systemName: icon)
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(t.fg)
-            .frame(width: 44, height: 44)
-            .background(t.surface, in: Circle())
-            .overlay(Circle().stroke(t.line, lineWidth: 1))
     }
 
     // MARK: - Line header
@@ -141,16 +150,22 @@ struct SoftMrtLineView: View {
     @ViewBuilder
     private var crowdSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            eyebrow("Live station crowd")
-
-            Picker("", selection: $showForecast) {
-                Text("Now").tag(false)
-                Text("Next 30 min").tag(true)
+            // Now / +30 min toggle collapsed into the section header to free
+            // vertical space (it used to take a full-width row of its own).
+            HStack(spacing: 8) {
+                eyebrow("Station crowd")
+                Spacer(minLength: 8)
+                Picker("", selection: $showForecast) {
+                    Text("Now").tag(false)
+                    Text(forecastTimeLabel).tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+                .onChange(of: showForecast) { _, isForecast in
+                    if isForecast { ds.refreshForecast(line: line) }
+                }
             }
-            .pickerStyle(.segmented)
-            .onChange(of: showForecast) { _, isForecast in
-                if isForecast { ds.refreshForecast(line: line) }
-            }
+            .padding(.horizontal, 16)
 
             if showForecast {
                 crowdList(ds.forecastByLine[line], emptyText: "Forecast unavailable right now.")
@@ -171,9 +186,18 @@ struct SoftMrtLineView: View {
                     .foregroundStyle(t.faint)
             } else {
                 crowdLegend
-                    .padding(.bottom, 4)
-                VStack(spacing: 11) {
-                    ForEach(sortedCrowd(items)) { crowdRow($0) }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 2)
+                let sorted = sortedCrowd(items)
+                VStack(spacing: 0) {
+                    ForEach(Array(sorted.enumerated()), id: \.element.id) { i, stop in
+                        crowdRow(stop)
+                        if i < sorted.count - 1 {
+                            // Full-bleed divider so the list fills the card width
+                            // (matches the header divider above).
+                            Rectangle().fill(t.line).frame(height: 1)
+                        }
+                    }
                 }
             }
         } else {
@@ -181,6 +205,7 @@ struct SoftMrtLineView: View {
                 ProgressView().tint(t.dim)
                 Text("Loading…").font(t.sans(13)).foregroundStyle(t.dim)
             }
+            .padding(.horizontal, 16)
             .padding(.vertical, 2)
         }
     }
@@ -200,16 +225,68 @@ struct SoftMrtLineView: View {
     }
 
     private func crowdRow(_ stop: StationCrowd) -> some View {
-        HStack(spacing: 10) {
-            Circle().fill(crowdColor(stop.level)).frame(width: 9, height: 9)
-            Text(stop.name)
-                .font(t.sans(15))
-                .foregroundStyle(stop.level == .unknown ? t.dim : t.fg)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Text(crowdLabel(stop.level))
-                .font(t.mono(12, weight: .medium))
-                .foregroundStyle(t.dim)
+        // Resolve the geo station so the row can open the station detail.
+        let station = MrtGeo.station(forCode: stop.code)
+        return Button {
+            guard let station else { return }
+            Feedback.shared.tap()
+            withAnimation(.easeInOut(duration: 0.22)) { stationDetail = station }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(stop.name)
+                        .font(t.sans(15, weight: .medium))
+                        .foregroundStyle(stop.level == .unknown ? t.dim : t.fg)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    // Station code — wayfinding (how stations are referenced here).
+                    Text(stop.code)
+                        .font(t.mono(10.5, weight: .medium))
+                        .foregroundStyle(t.faint)
+                }
+                Spacer(minLength: 8)
+                crowdGlyph(stop.level)
+                if station != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(t.faint)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(CrowdRowButtonStyle(pressedColor: t.surfaceHi))
+        .disabled(station == nil)
+    }
+
+    /// People-density indicator: three silhouettes, filled + coloured by level
+    /// so Low reads visually sparse and High reads full (replaces the signal
+    /// bars). The filled count carries the level too, not colour alone.
+    private func crowdGlyph(_ level: CrowdLevel) -> some View {
+        let filled = switch level {
+        case .low:      1
+        case .moderate: 2
+        case .high:     3
+        case .unknown:  0
+        }
+        return HStack(spacing: 2) {
+            ForEach(0..<3, id: \.self) { i in
+                Image(systemName: "person.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(i < filled ? crowdColor(level) : t.line)
+            }
+        }
+        .accessibilityLabel(crowdLabel(level))
+    }
+
+    /// Row style with a subtle pressed-background highlight so the tappable
+    /// crowd rows feel responsive.
+    private struct CrowdRowButtonStyle: ButtonStyle {
+        let pressedColor: Color
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .background(configuration.isPressed ? pressedColor : Color.clear)
         }
     }
 
@@ -221,6 +298,17 @@ struct SoftMrtLineView: View {
 
     private func codeNum(_ code: String) -> Int {
         Int(code.drop(while: { !$0.isNumber })) ?? 0
+    }
+
+    /// Wall-clock time 30 minutes from now (e.g. "10:30 AM") for the forecast
+    /// toggle — concrete instead of a vague "+30 min". Read in `body`, which
+    /// re-renders on the app's ~1-second tick, so it rolls to the next minute
+    /// on its own and always reflects the current time.
+    private var forecastTimeLabel: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_SG")
+        f.dateFormat = m.use24h ? "HH:mm" : "h:mm a"
+        return f.string(from: Date().addingTimeInterval(30 * 60))
     }
 
     private func crowdColor(_ l: CrowdLevel) -> Color {

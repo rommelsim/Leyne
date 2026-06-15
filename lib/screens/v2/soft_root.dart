@@ -1,20 +1,23 @@
 // SoftRoot — Leyne 2.0 Android root composition. Manages a simple stack
-// (Home / Favourites / Settings tabs; Search / Stop / Bus / AllArrivals
-// pushed) using a Navigator.
+// (Bus · MRT · Saved · Search · Alerts tabs; Stop / Bus / Search / Station
+// pushed) using a Navigator. Settings is no longer a tab — it opens as a
+// modal bottom sheet from the Alerts tab's gear button.
 
 import 'package:flutter/material.dart';
 
+import 'soft_alerts_screen.dart';
 import 'soft_bus_screen.dart';
 import 'soft_favourites_screen.dart';
 import 'soft_home_screen.dart';
 import 'soft_mrt_screen.dart';
 import 'soft_mrt_station_screen.dart';
 import 'soft_search_screen.dart';
-import 'soft_settings_screen.dart';
 import 'soft_stop_screen.dart';
+import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
 import '../../services/app_open_ad.dart';
 import '../../services/interstitial_ad.dart';
+import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
@@ -80,7 +83,32 @@ class _SoftRootState extends State<SoftRoot> {
     super.dispose();
   }
 
+  /// Returns the ids of every current service-status alert (train + lift).
+  /// Used for the badge count and for marking items as seen.
+  List<String> _currentAlertIds() {
+    final ids = <String>[];
+    for (final a in DataStore.shared.trainAlerts) {
+      ids.add(a.id);
+    }
+    for (final lm in DataStore.shared.liftMaintenance) {
+      ids.add(lm.id);
+    }
+    return ids;
+  }
+
+  /// Mark all current alerts as seen and dismiss the badge. Called when the
+  /// Alerts tab is active (on switch-to and on new data landing).
+  void _markAlertsSeen() {
+    AppModel.shared.markAllAlertsSeen(_currentAlertIds());
+  }
+
   void _handleTab(SoftTab next) {
+    if (next == SoftTab.alerts) {
+      setState(() => _tab = next);
+      _navKey.currentState?.popUntil((r) => r.isFirst);
+      _markAlertsSeen();
+      return;
+    }
     if (next == SoftTab.search) {
       _navKey.currentState?.push(
         // Fade-through instead of MaterialPageRoute's slide so that opening
@@ -199,20 +227,39 @@ class _SoftRootState extends State<SoftRoot> {
   }
 
   Widget _rootTab() {
-    // Material 3 "fade-through" — the standard tab-swap transition.
-    // AnimatedSwitcher cross-fades; child keying by _tab ensures the
-    // switcher sees a new widget identity on every tab change.
-    return AnimatedSwitcher(
-      duration: LyneMotion.standard,
-      switchInCurve: LyneMotion.enter,
-      switchOutCurve: LyneMotion.exit,
-      transitionBuilder: (child, anim) =>
-          FadeTransition(opacity: anim, child: child),
-      child: KeyedSubtree(key: ValueKey(_tab), child: _tabBody()),
+    // Badge count is derived from DataStore (alert lists) + AppModel (seen
+    // ids). Both are ChangeNotifiers — merge them so the badge stays live.
+    return ListenableBuilder(
+      listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
+      builder: (_, _) {
+        final badgeCount =
+            AppModel.shared.unseenAlertCount(_currentAlertIds());
+        // When the Alerts tab is open and fresh data lands, mark it seen
+        // immediately so the badge never increments while the user is there.
+        if (_tab == SoftTab.alerts && badgeCount > 0) {
+          // Schedule post-frame so we don't mutate state during build.
+          WidgetsBinding.instance.addPostFrameCallback((_) => _markAlertsSeen());
+        }
+        // Material 3 "fade-through" — the standard tab-swap transition.
+        // AnimatedSwitcher cross-fades; child keying on _tab + badgeCount
+        // ensures the switcher sees a new identity on tab change (not on
+        // badge-only updates, which must not reset the active screen).
+        return AnimatedSwitcher(
+          duration: LyneMotion.standard,
+          switchInCurve: LyneMotion.enter,
+          switchOutCurve: LyneMotion.exit,
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          child: KeyedSubtree(
+            key: ValueKey(_tab),
+            child: _tabBody(badgeCount),
+          ),
+        );
+      },
     );
   }
 
-  Widget _tabBody() {
+  Widget _tabBody(int alertBadgeCount) {
     switch (_tab) {
       case SoftTab.home:
         return SoftHomeScreen(
@@ -232,10 +279,13 @@ class _SoftRootState extends State<SoftRoot> {
         return SoftMrtScreen(
           onTab: _handleTab,
           onOpenStation: _pushMrtStation,
-          onOpenStationPlain: _pushMrtStationFromSearch,
         );
-      case SoftTab.settings:
-        return SoftSettingsScreen(onTab: _handleTab);
+      case SoftTab.alerts:
+        return SoftAlertsScreen(
+          onTab: _handleTab,
+          alertBadgeCount: alertBadgeCount,
+          onAlertsDataChanged: _markAlertsSeen,
+        );
       case SoftTab.search:
         // Search is always pushed as a route, never the base tab.
         return SoftHomeScreen(

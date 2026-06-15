@@ -8,9 +8,11 @@
 // • Warns at debug time if LTA_API_KEY is missing.
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:workmanager/workmanager.dart';
 
 import 'data/changelog.dart';
 import 'data/data_store.dart';
@@ -23,6 +25,7 @@ import 'screens/v2/soft_root.dart';
 import 'screens/v2/soft_stop_screen.dart';
 import 'screens/whats_new_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
+import 'services/alerts_background.dart';
 import 'services/app_open_ad.dart';
 import 'services/deep_link_service.dart';
 import 'services/location_service.dart';
@@ -122,6 +125,30 @@ void main() async {
   // mode is no-notifications, which the toggle already gracefully
   // handles via the auth state.
   NotificationsService.shared.init();
+
+  // Register WorkManager for the background train-alerts poll (Android only).
+  // The task runs ~every 15 minutes (WorkManager's OS-enforced minimum)
+  // even when the app is closed, so a new MRT/LRT breakdown can notify
+  // without the user having the app open. iOS uses BGAppRefreshTask instead
+  // (see LeyneApp.swift / BGTaskScheduler registration there).
+  if (Platform.isAndroid) {
+    await Workmanager().initialize(
+      callbackDispatcher,
+      // isInDebugMode: true, // uncomment to force immediate execution in debug
+    );
+    await Workmanager().registerPeriodicTask(
+      kAlertsRefreshTask,          // unique task name
+      kAlertsRefreshTask,          // task name passed to callbackDispatcher
+      frequency: const Duration(minutes: 15),
+      // keepAlive: true so Android 12+ doesn't skip our task on the
+      // first few scheduling windows.
+      constraints: Constraints(
+        networkType: NetworkType.connected,
+      ),
+      existingWorkPolicy:
+          ExistingPeriodicWorkPolicy.keep, // don't reset the clock
+    );
+  }
 
   // Boot-time prompt for existing users past onboarding: if the system
   // has never asked for POST_NOTIFICATIONS and our intent (toggle) is
