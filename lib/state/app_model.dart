@@ -21,6 +21,7 @@ import '../data/changelog.dart';
 import '../data/data_store.dart';
 import '../data/geo.dart';
 import '../data/models.dart';
+import '../data/mrt_geo.dart';
 import '../data/weather_store.dart';
 import '../services/location_service.dart';
 import '../services/notifications.dart';
@@ -48,6 +49,7 @@ const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
 const _kHapticsKey = 'lyne.haptics';
 const _kAlertsKey = 'lyne.alerts'; // JSON list of BusAlert (notifs redesign)
 const _kHiddenNearbyKey = 'lyne.hiddenNearby'; // stop codes hidden from Nearby
+const _kSavedMrtKey = 'lyne.savedMrt'; // JSON list of MrtGeoStation
 
 /// The currently-armed on-bus alert: which bus, where to alight, when
 /// the heads-up notification fires. Single ride at a time — see
@@ -472,6 +474,62 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Saved MRT stations (persisted) ──────────────────────────
+  // Mirrors favServices/pins. Persisted as JSON under lyne.savedMrt. Pure local
+  // state — the MRT station detail toggles membership; the Saved tab and the
+  // MRT tab surface the list. Mirrors iOS AppModel.savedMrtStations.
+  List<MrtGeoStation> _savedMrtStations = const [];
+  List<MrtGeoStation> get savedMrtStations =>
+      List.unmodifiable(_savedMrtStations);
+
+  void _persistSavedMrt() {
+    _prefs?.setString(
+      _kSavedMrtKey,
+      jsonEncode(_savedMrtStations.map((s) => s.toJson()).toList()),
+    );
+  }
+
+  /// True if this station is already saved (matched by stable id).
+  bool isMrtSaved(MrtGeoStation station) =>
+      _savedMrtStations.any((s) => s.id == station.id);
+
+  /// Add or remove the station from the saved list.
+  void toggleMrtSaved(MrtGeoStation station) {
+    if (isMrtSaved(station)) {
+      _savedMrtStations = _savedMrtStations
+          .where((s) => s.id != station.id)
+          .toList();
+    } else {
+      _savedMrtStations = [..._savedMrtStations, station];
+    }
+    _persistSavedMrt();
+    notifyListeners();
+  }
+
+  void removeMrtSaved(MrtGeoStation station) {
+    _savedMrtStations = _savedMrtStations
+        .where((s) => s.id != station.id)
+        .toList();
+    _persistSavedMrt();
+    notifyListeners();
+  }
+
+  /// Reorder saved stations to [newIds] (list of MrtGeoStation.id). Any id not
+  /// present is appended at the end (preserves concurrently-added items).
+  /// Persists immediately. Mirrors [reorderFavServices].
+  void reorderSavedMrt(List<String> newIds) {
+    final byId = {for (final s in _savedMrtStations) s.id: s};
+    final next = <MrtGeoStation>[];
+    for (final id in newIds) {
+      final s = byId.remove(id);
+      if (s != null) next.add(s);
+    }
+    next.addAll(byId.values);
+    _savedMrtStations = next;
+    _persistSavedMrt();
+    notifyListeners();
+  }
+
   // ─── Configurable alerts (persisted, notifications redesign) ────────────
   // The single source of truth for notification alerts (both kinds). Arrival
   // alerts are re-armed from the live ETA each coarse tick; destination alerts
@@ -611,6 +669,17 @@ class AppModel extends ChangeNotifier {
       try {
         final list = (jsonDecode(favRaw) as List).cast<Map<String, dynamic>>();
         _favServices = list.map(FavService.fromJson).toList();
+      } catch (_) {
+        /* corrupt — start empty */
+      }
+    }
+    // Load saved MRT stations.
+    final savedMrtRaw = _prefs!.getString(_kSavedMrtKey);
+    if (savedMrtRaw != null) {
+      try {
+        final list = (jsonDecode(savedMrtRaw) as List)
+            .cast<Map<String, dynamic>>();
+        _savedMrtStations = list.map(MrtGeoStation.fromJson).toList();
       } catch (_) {
         /* corrupt — start empty */
       }

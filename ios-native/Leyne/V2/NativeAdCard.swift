@@ -202,6 +202,26 @@ struct NativeAdUIView: UIViewRepresentable {
     let nativeAd: NativeAd
     let theme: Theme
 
+    /// Retains the themeable subviews so colours can be re-applied when the
+    /// appearance (light ⇄ dark) flips. `makeUIView` styles the card once with
+    /// the theme captured at creation; without re-styling, a card built in
+    /// light mode keeps its black label ink after the user/system switches to
+    /// dark — black text on the now-dark surface, i.e. unreadable. `appliedIsDark`
+    /// lets `updateUIView` detect the flip and re-tint.
+    final class Coordinator {
+        weak var iconTile: UIView?
+        weak var placeholderImageView: UIImageView?
+        // Typed as UILabel (its public superclass) rather than the private
+        // PaddedLabel — applyColors only touches UILabel/UIView colour props.
+        weak var adBadge: UILabel?
+        weak var headlineLabel: UILabel?
+        weak var secondaryLabel: UILabel?
+        weak var ctaButton: UIButton?
+        var appliedIsDark: Bool?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> NativeAdView {
         let adView = NativeAdView()
         adView.backgroundColor = .clear
@@ -321,8 +341,8 @@ struct NativeAdUIView: UIViewRepresentable {
             outerH.bottomAnchor.constraint(equalTo: adView.bottomAnchor, constant: -pad),
         ])
 
-        // ── Populate asset values (must happen before .nativeAd is set) ──
-        applyAssets(
+        // ── Populate creative content (theme-independent) ───────────────
+        applyContent(
             nativeAd: nativeAd,
             iconTile: iconTile,
             iconImageView: iconImageView,
@@ -333,6 +353,19 @@ struct NativeAdUIView: UIViewRepresentable {
             ctaButton: ctaButton
         )
 
+        // Retain the themeable views so updateUIView can re-tint on a mode flip.
+        let c = context.coordinator
+        c.iconTile = iconTile
+        c.placeholderImageView = placeholderImageView
+        c.adBadge = adBadge
+        c.headlineLabel = headlineLabel
+        c.secondaryLabel = secondaryLabel
+        c.ctaButton = ctaButton
+        c.appliedIsDark = theme.isDark
+
+        // ── Apply the colour palette for the current mode ───────────────
+        applyColors(coordinator: c)
+
         // Register outlets — MUST happen after all outlet properties are set.
         adView.nativeAd = nativeAd
 
@@ -340,14 +373,24 @@ struct NativeAdUIView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: NativeAdView, context: Context) {
-        // Single-use; the loader never replaces an ad mid-session.
+        // The creative is single-use (never replaced mid-session), so the only
+        // thing that can change here is the light/dark palette. Re-tint when the
+        // appearance flips so a card built in one mode stays readable after a
+        // switch (e.g. "Automatic" appearance going dark at sunset).
+        let c = context.coordinator
+        if c.appliedIsDark != theme.isDark {
+            applyColors(coordinator: c)
+            c.appliedIsDark = theme.isDark
+        }
     }
 
-    // MARK: - Asset population
+    // MARK: - Content population (theme-independent)
 
-    /// Populate creative content and style every subview.
+    /// Populate creative content (text, images, visibility, fonts) — none of
+    /// which depend on light/dark. Colours are applied separately by
+    /// [applyColors] so they can be re-applied on an appearance flip.
     /// Called once in makeUIView, before nativeAd is assigned to the outlet.
-    private func applyAssets(
+    private func applyContent(
         nativeAd: NativeAd,
         iconTile: UIView,
         iconImageView: UIImageView,
@@ -357,28 +400,17 @@ struct NativeAdUIView: UIViewRepresentable {
         secondaryLabel: UILabel,
         ctaButton: UIButton
     ) {
-        let fg        = UIColor(theme.fg)
-        let dim       = UIColor(theme.dim)
-        let surfaceHi = UIColor(theme.surfaceHi)
-        let accent    = UIColor(theme.accent)
-        let onAccent  = UIColor(theme.onAccent)
-
         // Ad badge
         adBadge.font = UIFontMetrics.default.scaledFont(
             for: UIFont.systemFont(ofSize: 10, weight: .semibold))
-        adBadge.textColor = dim
-        adBadge.backgroundColor = surfaceHi
 
         // Icon tile — always present; fills with creative icon or placeholder
         if let icon = nativeAd.icon?.image {
             iconImageView.image = icon
-            iconTile.backgroundColor = .clear
             placeholderImageView.isHidden = true
         } else {
             iconImageView.image = nil
-            iconTile.backgroundColor = surfaceHi
             placeholderImageView.isHidden = false
-            placeholderImageView.tintColor = dim
             let cfg = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
             placeholderImageView.image = UIImage(systemName: "tag.fill", withConfiguration: cfg)
         }
@@ -387,7 +419,6 @@ struct NativeAdUIView: UIViewRepresentable {
         headlineLabel.text = nativeAd.headline
         headlineLabel.font = UIFontMetrics.default.scaledFont(
             for: UIFont.systemFont(ofSize: 14, weight: .semibold))
-        headlineLabel.textColor = fg
 
         // Secondary line — body wins; fall back to advertiser; hide when neither
         if let body = nativeAd.body, !body.isEmpty {
@@ -402,18 +433,51 @@ struct NativeAdUIView: UIViewRepresentable {
         }
         secondaryLabel.font = UIFontMetrics.default.scaledFont(
             for: UIFont.systemFont(ofSize: 12, weight: .regular))
-        secondaryLabel.textColor = dim
 
         // CTA button — hidden when absent; UIStackView collapses it automatically
         if let cta = nativeAd.callToAction, !cta.isEmpty {
             var config = ctaButton.configuration ?? UIButton.Configuration.filled()
             config.title = cta
-            config.baseForegroundColor = onAccent
-            config.baseBackgroundColor = accent
             ctaButton.configuration = config
             ctaButton.isHidden = false
         } else {
             ctaButton.isHidden = true
+        }
+    }
+
+    // MARK: - Colour application (re-run on appearance change)
+
+    /// Apply every theme-dependent colour from `theme` to the retained
+    /// subviews. Called once in makeUIView and again from updateUIView when the
+    /// light/dark mode flips — the single source of truth for the card's
+    /// palette, so text never ends up baked to the wrong mode's ink.
+    private func applyColors(coordinator c: Coordinator) {
+        let fg        = UIColor(theme.fg)
+        let dim       = UIColor(theme.dim)
+        let surfaceHi = UIColor(theme.surfaceHi)
+        let accent    = UIColor(theme.accent)
+        let onAccent  = UIColor(theme.onAccent)
+
+        c.adBadge?.textColor = dim
+        c.adBadge?.backgroundColor = surfaceHi
+
+        // Icon tile fill is surfaceHi only behind the placeholder glyph; a real
+        // creative icon sits on a clear tile.
+        if nativeAd.icon?.image != nil {
+            c.iconTile?.backgroundColor = .clear
+        } else {
+            c.iconTile?.backgroundColor = surfaceHi
+            c.placeholderImageView?.tintColor = dim
+        }
+
+        c.headlineLabel?.textColor = fg
+        c.secondaryLabel?.textColor = dim
+
+        // Only the colours change; the title was set in applyContent.
+        if let cta = c.ctaButton, var config = cta.configuration {
+            config.baseForegroundColor = onAccent
+            config.baseBackgroundColor = accent
+            cta.configuration = config
         }
     }
 

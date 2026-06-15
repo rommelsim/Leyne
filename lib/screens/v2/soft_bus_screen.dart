@@ -670,7 +670,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                     _heroEtaRow(t, s, now),
                     const SizedBox(height: 2),
                     Text(
-                      _approachContext(s != null),
+                      _approachContext(s),
                       style: t.sans(13, color: t.dim),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -775,13 +775,28 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     return '${parts.join(" · ")} min';
   }
 
-  String _approachContext(bool hasService) {
-    if (!hasService) return 'Waiting for the next ${widget.svc}';
+  /// Formats [s.arrivalDate] as a display clock (e.g. "7:39 PM" / "19:39"),
+  /// honouring the app-wide 24h preference via [fmtClock]. Returns null when
+  /// the arrival date is absent or the bus is fewer than 30 seconds out
+  /// (mirrors iOS arrivalClock nil rule).
+  String? _arrivalClock(Service s) {
+    final d = s.arrivalDate;
+    if (d == null) return null;
+    if (d.difference(DateTime.now()).inSeconds < 30) return null;
+    final hhmm =
+        '${d.hour.toString().padLeft(2, '0')}${d.minute.toString().padLeft(2, '0')}';
+    return fmtClock(hhmm, use24h: AppModel.shared.use24h);
+  }
+
+  String _approachContext(Service? s) {
+    if (s == null) return 'Waiting for the next ${widget.svc}';
     final n = _stopsRemaining();
-    if (n != null) {
-      return n == 0 ? 'At your stop now' : '$n stop${n == 1 ? '' : 's'} away';
-    }
-    return 'On the way to your stop';
+    final stopsPart = n != null
+        ? (n == 0 ? 'At your stop now' : '$n stop${n == 1 ? '' : 's'} away')
+        : 'On the way to your stop';
+    final clock = _arrivalClock(s);
+    if (clock != null) return 'Arrives $clock · $stopsPart';
+    return stopsPart;
   }
 
   // ── 4. Live module — compact vertical mini-timeline (no map on Android) ─

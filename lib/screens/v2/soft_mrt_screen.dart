@@ -23,6 +23,7 @@ import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
 import '../../services/location_service.dart';
+import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -33,6 +34,7 @@ class SoftMrtScreen extends StatefulWidget {
     super.key,
     required this.onTab,
     required this.onOpenStation,
+    required this.onOpenStationPlain,
   });
 
   final ValueChanged<SoftTab> onTab;
@@ -41,6 +43,11 @@ class SoftMrtScreen extends StatefulWidget {
   /// station detail screen. Walk/distance context is passed alongside.
   final void Function(MrtGeoStation station, int distanceM, int walkMin)
   onOpenStation;
+
+  /// Called when the user taps a SAVED-station card. Opens the station detail
+  /// without walk/distance context (the saved list carries no proximity).
+  /// Mirrors iOS SoftMrtRoute.station(station) vs the nearest variant.
+  final void Function(MrtGeoStation station) onOpenStationPlain;
 
   @override
   State<SoftMrtScreen> createState() => _SoftMrtScreenState();
@@ -125,11 +132,16 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
   Widget build(BuildContext context) {
     final t = context.t;
     return ListenableBuilder(
-      listenable: Listenable.merge([DataStore.shared, LocationService.shared]),
+      listenable: Listenable.merge([
+        DataStore.shared,
+        LocationService.shared,
+        AppModel.shared,
+      ]),
       builder: (context, _) {
         final ds = DataStore.shared;
         final disrupted = _disruptedLines(ds.trainAlerts);
         final loc = LocationService.shared.lastLocation;
+        final saved = AppModel.shared.savedMrtStations;
 
         return Scaffold(
           backgroundColor: t.bg,
@@ -147,6 +159,23 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
                       // ── System map button ──────────────────────────────
                       _MapButton(onTap: _openMap, t: t),
                       const SizedBox(height: 20),
+
+                      // ── Saved stations (only when non-empty) ───────────
+                      if (saved.isNotEmpty) ...[
+                        const Eyebrow('Saved'),
+                        const SizedBox(height: 10),
+                        ...saved.map(
+                          (station) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _SavedStationCard(
+                              station: station,
+                              onTap: () => widget.onOpenStationPlain(station),
+                              t: t,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
 
                       // ── "Closest to you" nearest stations ──────────────
                       const Eyebrow('Closest to you'),
@@ -1182,6 +1211,106 @@ class _NearestStationCard extends StatelessWidget {
     if (m < 1000) return '$m m';
     final km = m / 1000.0;
     return '${km.toStringAsFixed(km.truncateToDouble() == km ? 0 : 1)} km';
+  }
+}
+
+// ─── Saved station card (no walk meta) ───────────────────────────────────────
+
+/// A saved MRT station card — tram tile + name + coloured line-code pills +
+/// trailing chevron. Mirrors the nearest card minus the walk/distance row
+/// (saved stations carry no proximity context), like iOS compactStationRow.
+class _SavedStationCard extends StatelessWidget {
+  const _SavedStationCard({
+    required this.station,
+    required this.onTap,
+    required this.t,
+  });
+
+  final MrtGeoStation station;
+  final VoidCallback onTap;
+  final LyneTheme t;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Open ${station.name} station, saved',
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(LyneRadius.md),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: t.surfaceHi,
+                    borderRadius: BorderRadius.circular(LyneRadius.md),
+                  ),
+                  child: Icon(Icons.tram_rounded, size: 20, color: t.fg),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        station.name,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: t.fg,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 5),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 4,
+                        children: station.codes.map((code) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: lineColorFor(code),
+                              borderRadius: BorderRadius.circular(
+                                LyneRadius.full,
+                              ),
+                            ),
+                            child: Text(
+                              code,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right, size: 18, color: t.faint),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

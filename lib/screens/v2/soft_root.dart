@@ -225,10 +225,15 @@ class _SoftRootState extends State<SoftRoot> {
           onTab: _handleTab,
           onOpenStop: _pushStop,
           onOpenBus: (stopCode, svc) => _pushBus(stopCode, svc),
+          onOpenStation: _pushMrtStationFromSearch,
           onOpenSearch: () => _handleTab(SoftTab.search),
         );
       case SoftTab.mrt:
-        return SoftMrtScreen(onTab: _handleTab, onOpenStation: _pushMrtStation);
+        return SoftMrtScreen(
+          onTab: _handleTab,
+          onOpenStation: _pushMrtStation,
+          onOpenStationPlain: _pushMrtStationFromSearch,
+        );
       case SoftTab.settings:
         return SoftSettingsScreen(onTab: _handleTab);
       case SoftTab.search:

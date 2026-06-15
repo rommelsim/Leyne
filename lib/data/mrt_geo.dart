@@ -39,6 +39,13 @@ class MrtGeoStation {
     lon: (json['lon'] as num).toDouble(),
   );
 
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'codes': codes,
+    'lat': lat,
+    'lon': lon,
+  };
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||

@@ -22,7 +22,7 @@ import 'package:lyne/state/app_model.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('Root shell shows the four tabs and switches between them',
+  testWidgets('Root shell shows the five tabs and switches between them',
       (tester) async {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
@@ -30,14 +30,15 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
 
-    // All four destinations are present in the bottom navigation
-    // (2.4.0 redesign: Nearby · Saved · Search · Settings).
-    expect(find.text('Nearby'), findsAtLeastNWidgets(1));
+    // All five destinations are present in the bottom navigation
+    // (current order: Bus · MRT · Saved · Search · Settings).
+    expect(find.text('Bus'), findsAtLeastNWidgets(1));
+    expect(find.text('MRT'), findsAtLeastNWidgets(1));
     expect(find.text('Saved'), findsAtLeastNWidgets(1));
     expect(find.text('Search'), findsAtLeastNWidgets(1));
     expect(find.text('Settings'), findsAtLeastNWidgets(1));
 
-    // Home is the initial tab — its empty-state copy is visible.
+    // The Bus (Home) tab is the initial tab — its empty-state copy is visible.
     expect(find.text('No stops yet'), findsOneWidget);
 
     // Switch to Settings; pump one frame for the tap, one for the layout.
@@ -46,5 +47,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     // The Soft settings screen leads with the Appearance section.
     expect(find.text('Appearance'), findsOneWidget);
+
+    // Drain the bounded App-Open-ad preload poll (15 × 800 ms chained timers
+    // scheduled from SoftRoot.initState) so no timer is left pending at
+    // teardown. Consent never resolves under the test binding, so the poll
+    // runs to its attempt cap and then stops scheduling.
+    await tester.pump(const Duration(seconds: 13));
   });
 }

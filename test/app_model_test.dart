@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:lyne/data/mrt_geo.dart';
 import 'package:lyne/state/app_model.dart';
 
 void main() {
@@ -117,6 +118,77 @@ void main() {
       // a known code missing from newCodes is preserved at the end.
       m.reorderPins(['A']);
       expect(m.pins.map((p) => p.code).toList(), ['A', 'C', 'B']);
+    });
+  });
+
+  group('Saved MRT stations', () {
+    MrtGeoStation station(String name, List<String> codes) =>
+        MrtGeoStation(name: name, codes: codes, lat: 1.3, lon: 103.8);
+
+    test('toggleMrtSaved is symmetric; isMrtSaved tracks membership', () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      final s = station('Bishan', ['NS17', 'CC15']);
+      expect(m.savedMrtStations, isEmpty);
+      expect(m.isMrtSaved(s), isFalse);
+      m.toggleMrtSaved(s);
+      expect(m.isMrtSaved(s), isTrue);
+      expect(m.savedMrtStations.length, 1);
+      m.toggleMrtSaved(s);
+      expect(m.isMrtSaved(s), isFalse);
+      expect(m.savedMrtStations, isEmpty);
+    });
+
+    test('removeMrtSaved removes only the matching station', () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      final a = station('Dhoby Ghaut', ['NS24', 'NE6', 'CC1']);
+      final b = station('Bugis', ['EW12', 'DT14']);
+      m.toggleMrtSaved(a);
+      m.toggleMrtSaved(b);
+      expect(m.savedMrtStations.length, 2);
+      m.removeMrtSaved(a);
+      expect(m.isMrtSaved(a), isFalse);
+      expect(m.isMrtSaved(b), isTrue);
+      expect(m.savedMrtStations.length, 1);
+    });
+
+    test('reorderSavedMrt applies new order; missing ids preserved at end',
+        () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      final a = station('A', ['NS1']);
+      final b = station('B', ['NS2']);
+      final c = station('C', ['NS3']);
+      m.toggleMrtSaved(a);
+      m.toggleMrtSaved(b);
+      m.toggleMrtSaved(c);
+      expect(m.savedMrtStations.map((s) => s.name).toList(), ['A', 'B', 'C']);
+      m.reorderSavedMrt([c.id, a.id, b.id]);
+      expect(m.savedMrtStations.map((s) => s.name).toList(), ['C', 'A', 'B']);
+      // An id missing from the new order is preserved at the end.
+      m.reorderSavedMrt([a.id]);
+      expect(m.savedMrtStations.map((s) => s.name).toList(), ['A', 'C', 'B']);
+    });
+
+    test('saved stations survive a load() round-trip', () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      m.toggleMrtSaved(station('Jurong East', ['NS1', 'EW24']));
+      // A fresh model on the same prefs sees the saved station.
+      final m2 = AppModel.forTesting();
+      await m2.load();
+      expect(m2.savedMrtStations.length, 1);
+      expect(m2.savedMrtStations.first.name, 'Jurong East');
+      expect(m2.savedMrtStations.first.codes, ['NS1', 'EW24']);
+    });
+
+    test('corrupt savedMrt JSON falls back to empty list (no crash)',
+        () async {
+      SharedPreferences.setMockInitialValues({'lyne.savedMrt': '{ not json'});
+      final m = AppModel.forTesting();
+      await m.load();
+      expect(m.savedMrtStations, isEmpty);
     });
   });
 

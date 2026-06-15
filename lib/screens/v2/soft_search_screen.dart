@@ -55,9 +55,16 @@ class SoftSearchScreen extends StatefulWidget {
   State<SoftSearchScreen> createState() => _SoftSearchScreenState();
 }
 
+// ─── Search filter enum ───────────────────────────────────────────────────────
+
+enum _SearchFilter { all, stops, buses, mrt }
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
 class _SoftSearchScreenState extends State<SoftSearchScreen> {
   final _ctrl = TextEditingController();
   final _focus = FocusNode();
+  _SearchFilter _filter = _SearchFilter.all;
 
   // Postal-code geocoding state — `_geoFor` is the code `_geo` resolved for,
   // so each distinct code geocodes at most once. `_geo` is null while loading
@@ -92,7 +99,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   void _onFocusChanged() => setState(() {});
 
   void _onQueryChanged() {
-    setState(() {});
+    // Reset the category filter on every new query so results from a prior
+    // search don't leave the user looking at an empty filtered view.
+    setState(() => _filter = _SearchFilter.all);
     _maybeGeocode(_ctrl.text);
   }
 
@@ -473,11 +482,15 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   // ─── Combined Services + Bus stops + MRT stations ────────────
   // Mirrors SoftSearchView.swift:124-141 (resultsContent else branch),
   // extended with an "MRT stations" section from MrtGeo.matching().
+  // The segmented filter control sits above the list; each section is gated
+  // by the active filter. Per-filter empty hints appear when a specific
+  // (non-.all) filter yields no matches in that category.
   Widget _combinedResults(BuildContext context, String q) {
     final services = DataStore.shared.searchServices(q);
     final stops = DataStore.shared.searchStops(q);
     final stations = MrtGeo.matching(q);
 
+    // Global empty — no filter control, just the catch-all hint.
     if (services.isEmpty && stops.isEmpty && stations.isEmpty) {
       return _emptyHint(
         context,
@@ -486,36 +499,139 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       );
     }
 
+    // Derive which sections are visible under the active filter.
+    final showBuses =
+        _filter == _SearchFilter.all || _filter == _SearchFilter.buses;
+    final showStops =
+        _filter == _SearchFilter.all || _filter == _SearchFilter.stops;
+    final showMrt =
+        _filter == _SearchFilter.all || _filter == _SearchFilter.mrt;
+
+    // Per-specific-filter empty hints (only when a non-.all filter is active
+    // and that category has no matches for this query).
+    final busesEmpty =
+        _filter == _SearchFilter.buses && services.isEmpty;
+    final stopsEmpty =
+        _filter == _SearchFilter.stops && stops.isEmpty;
+    final mrtEmpty =
+        _filter == _SearchFilter.mrt && stations.isEmpty;
+
+    // Track whether any prior section was rendered (for inter-section spacing).
+    var sectionRendered = false;
+
+    // Build children list so spacing between sections is correct.
+    final items = <Widget>[];
+
+    if (showBuses) {
+      if (busesEmpty) {
+        items.add(
+          _filterEmptyHint(context, 'No buses match "$q"'),
+        );
+      } else if (services.isNotEmpty) {
+        items.add(_sectionLabel(context, 'Services'));
+        items.add(const SizedBox(height: 8));
+        for (int i = 0; i < services.length; i++) {
+          items.add(_serviceCard(context, services[i]));
+          if (i < services.length - 1) items.add(const SizedBox(height: 8));
+        }
+        sectionRendered = true;
+      }
+    }
+
+    if (showStops) {
+      if (stopsEmpty) {
+        if (sectionRendered) items.add(const SizedBox(height: 16));
+        items.add(_filterEmptyHint(context, 'No stops match "$q"'));
+      } else if (stops.isNotEmpty) {
+        if (sectionRendered) items.add(const SizedBox(height: 16));
+        items.add(_sectionLabel(context, 'Bus stops'));
+        items.add(const SizedBox(height: 8));
+        for (int i = 0; i < stops.length; i++) {
+          items.add(_stopCard(context, stops[i]));
+          if (i < stops.length - 1) items.add(const SizedBox(height: 8));
+        }
+        sectionRendered = true;
+      }
+    }
+
+    if (showMrt) {
+      if (mrtEmpty) {
+        if (sectionRendered) items.add(const SizedBox(height: 16));
+        items.add(_filterEmptyHint(context, 'No stations match "$q"'));
+      } else if (stations.isNotEmpty) {
+        if (sectionRendered) items.add(const SizedBox(height: 16));
+        items.add(_sectionLabel(context, 'MRT stations'));
+        items.add(const SizedBox(height: 8));
+        for (int i = 0; i < stations.length; i++) {
+          items.add(_stationCard(context, stations[i]));
+          if (i < stations.length - 1) items.add(const SizedBox(height: 8));
+        }
+      }
+    }
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       children: [
-        if (services.isNotEmpty) ...[
-          _sectionLabel(context, 'Services'),
-          const SizedBox(height: 8),
-          for (int i = 0; i < services.length; i++) ...[
-            _serviceCard(context, services[i]),
-            if (i < services.length - 1) const SizedBox(height: 8),
-          ],
-        ],
-        if (stops.isNotEmpty) ...[
-          SizedBox(height: services.isEmpty ? 0 : 16),
-          _sectionLabel(context, 'Bus stops'),
-          const SizedBox(height: 8),
-          for (int i = 0; i < stops.length; i++) ...[
-            _stopCard(context, stops[i]),
-            if (i < stops.length - 1) const SizedBox(height: 8),
-          ],
-        ],
-        if (stations.isNotEmpty) ...[
-          SizedBox(height: (services.isEmpty && stops.isEmpty) ? 0 : 16),
-          _sectionLabel(context, 'MRT stations'),
-          const SizedBox(height: 8),
-          for (int i = 0; i < stations.length; i++) ...[
-            _stationCard(context, stations[i]),
-            if (i < stations.length - 1) const SizedBox(height: 8),
-          ],
-        ],
+        // Filter control: above results, below the search field.
+        _searchFilterControl(context),
+        const SizedBox(height: 12),
+        ...items,
       ],
+    );
+  }
+
+  // ─── Search filter segmented control ─────────────────────────────────────
+  // Reuses the exact pill/container pattern from SoftFavouritesScreen so
+  // both screens look consistent. Shown only when there is an active query
+  // with combined results (not postal, not empty state).
+  Widget _searchFilterControl(BuildContext context) {
+    final t = context.t;
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+      ),
+      child: Row(
+        children: [
+          _searchFilterPill(context, 'All', _SearchFilter.all, t),
+          _searchFilterPill(context, 'Stops', _SearchFilter.stops, t),
+          _searchFilterPill(context, 'Buses', _SearchFilter.buses, t),
+          _searchFilterPill(context, 'MRT', _SearchFilter.mrt, t),
+        ],
+      ),
+    );
+  }
+
+  Widget _searchFilterPill(
+    BuildContext context,
+    String label,
+    _SearchFilter value,
+    LyneTheme t,
+  ) {
+    final active = _filter == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _filter = value),
+        child: AnimatedContainer(
+          duration: LyneMotion.short,
+          curve: LyneMotion.standardCurve,
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          decoration: BoxDecoration(
+            color: active ? t.soon : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: t.sans(
+              13,
+              weight: FontWeight.w600,
+              color: active ? t.contrastFg : t.dim,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -853,6 +969,21 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
             textAlign: TextAlign.center,
           ),
         ],
+      ),
+    );
+  }
+
+  /// Inline single-line hint shown when a specific filter (non-.all) has no
+  /// matches in that category. Rendered inside the results list — not centred
+  /// full-screen — so it coexists with the filter control and stays at the
+  /// top of the list area rather than vertically centred.
+  Widget _filterEmptyHint(BuildContext context, String text) {
+    final t = context.t;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 4),
+      child: Text(
+        text,
+        style: t.sans(13, color: t.dim),
       ),
     );
   }

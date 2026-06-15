@@ -23,6 +23,8 @@ import 'package:flutter/material.dart';
 import '../../data/data_store.dart';
 import '../../data/geo.dart';
 import '../../data/models.dart';
+import '../../data/mrt_geo.dart';
+import '../../data/mrt_stations.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
@@ -32,7 +34,7 @@ import '../../widgets/v2/soft_tab_bar.dart';
 
 // ─── Segment enum ─────────────────────────────────────────────────────────────
 
-enum _Segment { all, stops, buses }
+enum _Segment { all, stops, buses, mrt }
 
 // ─── Distance helpers ─────────────────────────────────────────────────────────
 
@@ -62,12 +64,14 @@ class SoftFavouritesScreen extends StatefulWidget {
     required this.onTab,
     required this.onOpenStop,
     required this.onOpenBus,
+    required this.onOpenStation,
     required this.onOpenSearch,
   });
 
   final ValueChanged<SoftTab> onTab;
   final ValueChanged<String> onOpenStop;
   final void Function(String stopCode, String svc) onOpenBus;
+  final void Function(MrtGeoStation station) onOpenStation;
   final VoidCallback onOpenSearch;
 
   @override
@@ -116,6 +120,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       case _Segment.stops:
         return AppModel.shared.pins;
       case _Segment.buses:
+      case _Segment.mrt:
         return const [];
     }
   }
@@ -126,12 +131,26 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       case _Segment.buses:
         return AppModel.shared.favServices;
       case _Segment.stops:
+      case _Segment.mrt:
+        return const [];
+    }
+  }
+
+  List<MrtGeoStation> get _visibleStations {
+    switch (_segment) {
+      case _Segment.all:
+      case _Segment.mrt:
+        return AppModel.shared.savedMrtStations;
+      case _Segment.stops:
+      case _Segment.buses:
         return const [];
     }
   }
 
   bool get _isEmpty =>
-      AppModel.shared.pins.isEmpty && AppModel.shared.favServices.isEmpty;
+      AppModel.shared.pins.isEmpty &&
+      AppModel.shared.favServices.isEmpty &&
+      AppModel.shared.savedMrtStations.isEmpty;
 
   // ── Arrival resolution for services section ─────────────────────────────
 
@@ -196,6 +215,15 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                     if (_visibleServices.isNotEmpty) ...[
                       const SizedBox(height: 20),
                       _servicesSection(context),
+                    ],
+                    // Saved MRT stations. In the MRT segment, show a hint when
+                    // none are saved (the segment is otherwise empty); in All,
+                    // only render the section when there are stations.
+                    if (_segment == _Segment.mrt && _visibleStations.isEmpty)
+                      _mrtEmptyHint(context)
+                    else if (_visibleStations.isNotEmpty) ...[
+                      if (_segment == _Segment.all) const SizedBox(height: 20),
+                      _stationsSection(context),
                     ],
                     const SizedBox(height: 16),
                     _addStopRow(context),
@@ -263,6 +291,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
           _segmentPill(context, 'All', _Segment.all, t),
           _segmentPill(context, 'Stops', _Segment.stops, t),
           _segmentPill(context, 'Buses', _Segment.buses, t),
+          _segmentPill(context, 'MRT', _Segment.mrt, t),
         ],
       ),
     );
@@ -308,8 +337,10 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
     // In the "all" segment, show the section header above stops.
     // In "stops" segment the section is self-evident — omit.
-    // In "buses" segment there are no pins to render.
-    if (_segment == _Segment.buses) return const SizedBox.shrink();
+    // In "buses"/"mrt" segments there are no pins to render.
+    if (_segment == _Segment.buses || _segment == _Segment.mrt) {
+      return const SizedBox.shrink();
+    }
 
     if (pins.isEmpty) {
       return Padding(
@@ -745,6 +776,193 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
+  // ─── Saved MRT stations section ───────────────────────────────────────────
+
+  Widget _stationsSection(BuildContext context) {
+    final t = context.t;
+    final items = _visibleStations;
+
+    final sectionHeader = Row(
+      children: [
+        Icon(Icons.tram_rounded, size: 14, color: t.soon),
+        const SizedBox(width: 6),
+        Text(
+          'Saved stations',
+          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+        ),
+      ],
+    );
+
+    if (_editing) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          sectionHeader,
+          const SizedBox(height: 10),
+          ReorderableListView(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            proxyDecorator: (child, index, animation) =>
+                Material(elevation: 0, color: Colors.transparent, child: child),
+            onReorderItem: (oldIndex, newIndex) {
+              final reordered = [...items];
+              final item = reordered.removeAt(oldIndex);
+              reordered.insert(newIndex, item);
+              AppModel.shared.reorderSavedMrt(
+                reordered.map((s) => s.id).toList(),
+              );
+            },
+            children: [
+              for (final station in items)
+                Padding(
+                  key: ValueKey('reorder-mrt-${station.id}'),
+                  padding: EdgeInsets.only(
+                    bottom: station == items.last ? 0 : 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(child: _stationCard(context, station)),
+                      const SizedBox(width: 8),
+                      ReorderableDragStartListener(
+                        index: items.indexOf(station),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Icon(
+                            Icons.drag_handle_rounded,
+                            size: 22,
+                            color: t.dim,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Normal (non-edit) mode — Dismissible swipe-to-delete.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        sectionHeader,
+        const SizedBox(height: 10),
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _stationRow(context, items[i]),
+        ],
+      ],
+    );
+  }
+
+  Widget _stationRow(BuildContext context, MrtGeoStation station) {
+    final t = context.t;
+    return Dismissible(
+      key: ValueKey('fav-mrt-${station.id}'),
+      direction: DismissDirection.endToStart,
+      background: const SizedBox.shrink(),
+      secondaryBackground: _dismissBackground(
+        context: context,
+        color: t.crit,
+        icon: Icons.delete,
+        label: 'Delete',
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+      ),
+      confirmDismiss: (_) async {
+        AppModel.shared.removeMrtSaved(station);
+        return false;
+      },
+      child: _stationCard(context, station),
+    );
+  }
+
+  Widget _stationCard(BuildContext context, MrtGeoStation station) {
+    final t = context.t;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => widget.onOpenStation(station),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: t.surfaceHi,
+                  borderRadius: BorderRadius.circular(LyneRadius.md),
+                ),
+                child: Icon(Icons.tram_rounded, size: 20, color: t.fg),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      station.name,
+                      style: t.sans(16, weight: FontWeight.w600, color: t.fg),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 5),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 4,
+                      children: station.codes.map((code) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: lineColorFor(code),
+                            borderRadius: BorderRadius.circular(LyneRadius.full),
+                          ),
+                          child: Text(
+                            code,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right, size: 16, color: t.faint),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Hint shown in the MRT segment when no stations are saved yet (mirrors iOS
+  /// hint "Save an MRT station to track it here.").
+  Widget _mrtEmptyHint(BuildContext context) {
+    final t = context.t;
+    return Padding(
+      padding: const EdgeInsets.only(left: 2),
+      child: Text(
+        'Save an MRT station to see it here.',
+        style: t.sans(13, color: t.faint),
+      ),
+    );
+  }
+
   // ─── Add stop row ─────────────────────────────────────────────────────────
 
   Widget _addStopRow(BuildContext context) {
@@ -753,8 +971,18 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     // otherwise it adds a stop. Search finds both either way — only the label
     // follows the section the user is looking at.
     final isBuses = _segment == _Segment.buses;
+    final isMrt = _segment == _Segment.mrt;
+    final addLabel = isBuses
+        ? 'Add bus'
+        : isMrt
+        ? 'Add station'
+        : 'Add stop';
     return Semantics(
-      label: isBuses ? 'Add a bus to favourites' : 'Add a stop to favourites',
+      label: isBuses
+          ? 'Add a bus to favourites'
+          : isMrt
+          ? 'Add an MRT station to favourites'
+          : 'Add a stop to favourites',
       button: true,
       child: Material(
         color: t.surface,
@@ -778,7 +1006,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  isBuses ? 'Add bus' : 'Add stop',
+                  addLabel,
                   style: t.sans(
                     15,
                     weight: FontWeight.w600,

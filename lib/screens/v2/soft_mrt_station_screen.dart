@@ -12,10 +12,12 @@
 //   • The Search screen (distance/walk may be null).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
+import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
@@ -173,6 +175,32 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
     );
   }
 
+  /// Trailing star toggle — saves/un-saves this station. Mirrors iOS
+  /// SoftMrtStationView.saveButton. Listens to AppModel so the icon reflects
+  /// the current saved state; the Saved tab and MRT tab read the same list.
+  Widget _saveAction(LyneTheme t) {
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) {
+        final saved = AppModel.shared.isMrtSaved(widget.station);
+        return IconButton(
+          icon: Icon(
+            saved ? Icons.star_rounded : Icons.star_outline_rounded,
+            size: 22,
+            color: saved ? t.soon : t.fg,
+          ),
+          tooltip: saved ? 'Remove from saved' : 'Save station',
+          onPressed: () {
+            if (AppModel.shared.hapticsEnabled) {
+              HapticFeedback.selectionClick();
+            }
+            AppModel.shared.toggleMrtSaved(widget.station);
+          },
+        );
+      },
+    );
+  }
+
   SliverAppBar _buildAppBar(LyneTheme t) {
     return SliverAppBar(
       backgroundColor: t.bg,
@@ -185,6 +213,7 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
         onPressed: widget.onBack,
         tooltip: 'Back',
       ),
+      actions: [_saveAction(t)],
       titleSpacing: 0,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
