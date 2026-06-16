@@ -118,7 +118,7 @@ class _PinnedCardState extends State<PinnedCard> {
             ],
           ),
         ),
-        Icon(Icons.chevron_right, size: 18, color: t.faint),
+        Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
       ],
     );
   }

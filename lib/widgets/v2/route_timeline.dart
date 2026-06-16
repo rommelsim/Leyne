@@ -249,8 +249,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
                   ),
                   Icon(
                     _expanded
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
                     size: 16,
                     color: t.dim,
                   ),
@@ -308,8 +308,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
                     ),
                   Icon(
                     _tailExpanded
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
                     size: 16,
                     color: t.dim,
                   ),
@@ -589,7 +589,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.tram, size: 9, color: t.dim),
+            Icon(Icons.train_rounded, size: 9, color: t.dim),
             const SizedBox(width: 3),
             Text(
               'MRT',

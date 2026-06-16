@@ -243,7 +243,7 @@ class _SoftMrtLineScreenState extends State<SoftMrtLineScreen> {
       floating: false,
       snap: false,
       leading: IconButton(
-        icon: Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: t.fg),
+        icon: Icon(Icons.arrow_back_rounded, size: 20, color: t.fg),
         onPressed: () => Navigator.of(context).pop(),
         tooltip: 'Back',
       ),
@@ -388,7 +388,7 @@ class _AlertCard extends StatelessWidget {
                 if (alert.freeShuttle)
                   _FreeServiceChip(
                     label: 'Free MRT shuttle',
-                    icon: Icons.tram_rounded,
+                    icon: Icons.train_rounded,
                     t: t,
                   ),
               ],
@@ -691,7 +691,7 @@ class _CrowdRowState extends State<_CrowdRow> {
             // Trailing chevron — only when the row is tappable.
             if (widget.onTap != null) ...[
               const SizedBox(width: 6),
-              Icon(Icons.chevron_right, size: 14, color: t.faint),
+              Icon(Icons.chevron_right_rounded, size: 14, color: t.faint),
             ],
           ],
         ),
@@ -729,7 +729,7 @@ class _PeopleDensityGlyph extends StatelessWidget {
           return Padding(
             padding: const EdgeInsets.only(right: 2),
             child: Icon(
-              Icons.person,
+              Icons.person_rounded,
               size: 13,
               color: i < filled ? activeColor : t.line,
             ),

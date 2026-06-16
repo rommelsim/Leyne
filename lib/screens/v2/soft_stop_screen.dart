@@ -16,6 +16,7 @@ import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
 import '../../data/geo.dart';
 import '../../data/models.dart';
+import '../../services/analytics_service.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
@@ -71,6 +72,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DataStore.shared.ensureArrivals(widget.stopCode);
     });
+    AnalyticsService.stopViewed(code: widget.stopCode, kind: StopKind.bus);
   }
 
   @override
@@ -138,7 +140,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           button: true,
           child: _circleButton(
             context,
-            icon: Icons.arrow_back,
+            icon: Icons.arrow_back_rounded,
             onTap: widget.onBack,
           ),
         ),
@@ -455,7 +457,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                 padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
                 child: Row(
                   children: [
-                    Icon(Icons.visibility, size: 18, color: t.soon),
+                    Icon(Icons.visibility_rounded, size: 18, color: t.soon),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text.rich(
@@ -718,7 +720,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             ),
             backgroundColor: on ? t.surfaceHi : t.soon,
             foregroundColor: on ? t.fg : t.onAccent,
-            icon: on ? Icons.visibility_off : Icons.visibility,
+            icon: on ? Icons.visibility_off : Icons.visibility_rounded,
             label: on ? 'Stop' : 'Notify',
           ),
         ],

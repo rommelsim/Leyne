@@ -53,8 +53,10 @@ void callbackDispatcher() {
 
     final prefs = await SharedPreferences.getInstance();
 
-    // Gate: if the user turned off notifications, do nothing.
-    final notifEnabled = prefs.getBool('lyne.notifications') ?? false;
+    // Gate: only skip when the user explicitly turned notifications off.
+    // Default ON when unset, matching AppModel (so a new user who never set a
+    // bus alert still gets background disruption pushes — the iOS parity fix).
+    final notifEnabled = prefs.getBool('lyne.notifications') ?? true;
     if (!notifEnabled) return true;
 
     // Load the last-persisted disrupted line codes so we can diff.

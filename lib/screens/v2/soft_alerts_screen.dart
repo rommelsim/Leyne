@@ -71,6 +71,17 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: context.t.bg,
+      // A drag handle + safe area give an always-available dismiss affordance.
+      // Without these (and with the full-height settings content capturing
+      // vertical drags) there was no obvious way to close the sheet, which read
+      // as the app being locked. SoftSettingsScreen also renders an explicit
+      // close button in asSheet mode. Cap the height so a sliver of tappable
+      // scrim remains above the sheet too.
+      showDragHandle: true,
+      useSafeArea: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.92,
+      ),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(LyneRadius.lg)),
       ),
@@ -403,7 +414,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Icon(Icons.chevron_right, color: t.faint, size: 18),
+                  Icon(Icons.chevron_right_rounded, color: t.faint, size: 18),
                 ],
               ),
             ),

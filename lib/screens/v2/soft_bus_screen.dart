@@ -66,6 +66,10 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   // ── Route data ──────────────────────────────────────────────────────
   RouteInfo? _route;
   ServiceRoute? _serviceRoute;
+  // False until the (deferred) route fetch resolves — drives the live module's
+  // loading state so we never show the "see the full route" hint over a blank
+  // route, or open an empty route sheet, before the data lands.
+  bool _routeLoaded = false;
   int _dirIndex = 0;
 
   // Periodic ticker (1.5 s) — keeps this stop's arrivals fresh while the view
@@ -130,6 +134,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     if (mounted) {
       setState(() {
         _serviceRoute = sr;
+        _routeLoaded = true;
         if (sr != null) {
           _dirIndex = sr.initialIndex;
           _route = _routeFromDir(sr.directions[_dirIndex]);
@@ -308,6 +313,19 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                                     ),
                                     child: _buildFirstLastFooter(t),
                                   ),
+                                  const SizedBox(height: 14),
+                                  // Labeled action row (Track arrival · Save
+                                  // service · More) — mirrors iOS SoftBusView.
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: ListenableBuilder(
+                                      listenable: AppModel.shared,
+                                      builder: (context, _) =>
+                                          _buildActionButtons(t),
+                                    ),
+                                  ),
                                   const SizedBox(height: 12),
                                   // INNER listener: AppModel only — rebuilds
                                   // every second so the ETA countdown ticks.
@@ -350,12 +368,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  // ── 1. Top bar ────────────────────────────────────────────────────────
+  // ── 1. Top bar — back only (the toggles live in the labeled action row
+  //    below the title, matching iOS SoftBusView). ─────────────────────────
   Widget _buildTopBar(LyneTheme t) {
-    final boardingOn = _boardingAlertOn;
-    final saved =
-        AppModel.shared.isFavService(no: widget.svc, stop: widget.stopCode) ||
-        AppModel.shared.isFavService(no: widget.svc, stop: null);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -363,100 +378,161 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           _CircleButton(
             onTap: widget.onBack,
             semanticsLabel: 'Back',
-            child: Icon(Icons.arrow_back, size: 20, color: t.fg),
+            child: Icon(Icons.arrow_back_rounded, size: 20, color: t.fg),
           ),
-          const Spacer(),
-          _CircleButton(
-            onTap: _toggleBoardingAlert,
-            semanticsLabel: boardingOn
-                ? 'Boarding alert on for bus ${widget.svc}. Tap to cancel.'
-                : 'Notify me before bus ${widget.svc} reaches this stop',
-            child: Icon(
-              boardingOn ? Icons.visibility : Icons.visibility_outlined,
-              size: 20,
-              color: boardingOn ? t.soon : t.fg,
-            ),
-          ),
-          const SizedBox(width: 8),
-          _CircleButton(
-            onTap: _toggleServiceSaved,
-            semanticsLabel: saved
-                ? 'Bus ${widget.svc} saved. Tap to remove.'
-                : 'Save bus ${widget.svc}',
-            child: Icon(
-              saved
-                  ? Icons.directions_bus_rounded
-                  : Icons.directions_bus_outlined,
-              size: 20,
-              color: saved ? t.soon : t.fg,
-            ),
-          ),
-          const SizedBox(width: 8),
-          _buildOverflow(t),
         ],
       ),
     );
   }
 
-  /// "⋯" overflow — manage alerts + share. A single bordered circle (no outer
-  /// surface ring, no shadow) so it matches the other top-bar buttons.
-  Widget _buildOverflow(LyneTheme t) {
-    return SizedBox(
-      width: 48,
-      height: 48,
-      child: Center(
-        child: PopupMenuButton<String>(
-          tooltip: 'More options',
-          padding: EdgeInsets.zero,
-          color: t.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(LyneRadius.md),
+  // ── Action row — three labeled buttons (Track arrival · Save service ·
+  //    More), mirroring iOS. Self-describing labels + larger tap targets
+  //    replace the old cryptic icon-only top-bar toggles. ──────────────────
+  Widget _buildActionButtons(LyneTheme t) {
+    final boardingOn = _boardingAlertOn;
+    final saved =
+        AppModel.shared.isFavService(no: widget.svc, stop: widget.stopCode) ||
+        AppModel.shared.isFavService(no: widget.svc, stop: null);
+    return Row(
+      children: [
+        Expanded(
+          child: _actionPill(
+            t,
+            icon: boardingOn
+                ? Icons.notifications_active_rounded
+                : Icons.notifications_outlined,
+            label: 'Track arrival',
+            active: boardingOn,
+            onTap: _toggleBoardingAlert,
+            semantics: boardingOn
+                ? 'Arrival tracking on for bus ${widget.svc}. Tap to cancel.'
+                : 'Track arrival of bus ${widget.svc}',
           ),
-          onSelected: (v) {
-            if (v == 'manage') {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
-              );
-            } else if (v == 'share') {
-              _shareBus();
-            }
-          },
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              value: 'manage',
-              child: Row(
-                children: [
-                  Icon(Icons.notifications_rounded, size: 18, color: t.dim),
-                  const SizedBox(width: 10),
-                  Text('Manage alerts', style: t.sans(14, color: t.fg)),
-                ],
-              ),
-            ),
-            PopupMenuItem(
-              value: 'share',
-              child: Row(
-                children: [
-                  Icon(Icons.ios_share_rounded, size: 18, color: t.dim),
-                  const SizedBox(width: 10),
-                  Text(
-                    'Share bus ${widget.svc}',
-                    style: t.sans(14, color: t.fg),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _actionPill(
+            t,
+            icon: saved ? Icons.star_rounded : Icons.star_outline_rounded,
+            label: 'Save service',
+            active: saved,
+            onTap: _toggleServiceSaved,
+            semantics: saved
+                ? 'Bus ${widget.svc} saved. Tap to remove.'
+                : 'Save bus ${widget.svc}',
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(child: _moreActionPill(t)),
+      ],
+    );
+  }
+
+  /// A single labeled action pill (icon + label) used in the action row.
+  Widget _actionPill(
+    LyneTheme t, {
+    required IconData icon,
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+    required String semantics,
+  }) {
+    final fg = active ? t.soon : t.fg;
+    return Semantics(
+      button: true,
+      label: semantics,
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
           child: Container(
-            width: 40,
-            height: 40,
+            height: 48,
             decoration: BoxDecoration(
-              color: t.surface,
-              shape: BoxShape.circle,
-              border: Border.all(color: t.line, width: 1),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: active ? t.soon : t.line, width: 1),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.more_horiz, size: 20, color: t.fg),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: fg),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.sans(13, weight: FontWeight.w600, color: fg),
+                  ),
+                ),
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// The "More" action pill — manage alerts + share, via a popup menu.
+  Widget _moreActionPill(LyneTheme t) {
+    return PopupMenuButton<String>(
+      tooltip: 'More options',
+      padding: EdgeInsets.zero,
+      color: t.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+      ),
+      onSelected: (v) {
+        if (v == 'manage') {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
+          );
+        } else if (v == 'share') {
+          _shareBus();
+        }
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: 'manage',
+          child: Row(
+            children: [
+              Icon(Icons.notifications_rounded, size: 18, color: t.dim),
+              const SizedBox(width: 10),
+              Text('Manage alerts', style: t.sans(14, color: t.fg)),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'share',
+          child: Row(
+            children: [
+              Icon(Icons.ios_share_rounded, size: 18, color: t.dim),
+              const SizedBox(width: 10),
+              Text('Share bus ${widget.svc}', style: t.sans(14, color: t.fg)),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        height: 48,
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.line, width: 1),
+        ),
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.more_horiz, size: 18, color: t.fg),
+            const SizedBox(width: 6),
+            Text(
+              'More',
+              style: t.sans(13, weight: FontWeight.w600, color: t.fg),
+            ),
+          ],
         ),
       ),
     );
@@ -814,12 +890,35 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
         : const <String>[];
     final between = resolvedDir != null ? _betweenCaption(resolvedDir) : null;
 
+    // The route data is ready once _routeLoaded is true AND a route came back.
+    final hasRoute = _routeLoaded && _serviceRoute != null;
+    // Only let the user open the full-route sheet once there's actually a route
+    // to show — otherwise the sheet opens empty while the fetch is in flight.
+    final tappable = hasRoute;
+
+    final Widget body;
+    if (resolvedDir != null) {
+      // Loaded + live bus position resolved → the rich mini-timeline.
+      body = _buildMiniTimeline(t, resolvedDir, upcoming, between, remaining);
+    } else if (!_routeLoaded) {
+      // Still fetching the route — show a loading state, not the (misleading)
+      // "see the full route" hint over a blank route.
+      body = _routeLoadingState(t);
+    } else if (hasRoute) {
+      // Route is ready but we can't place the live bus yet — the static route
+      // is still viewable, so keep the tappable placeholder.
+      body = _routePlaceholder(t);
+    } else {
+      // Fetch finished but returned no route (unavailable for this service).
+      body = _routeUnavailableState(t);
+    }
+
     return Material(
       color: t.surface,
       borderRadius: BorderRadius.circular(18),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: _openRouteCard,
+        onTap: tappable ? _openRouteCard : null,
         child: Container(
           width: double.infinity,
           decoration: BoxDecoration(
@@ -830,16 +929,46 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (resolvedDir != null)
-                _buildMiniTimeline(t, resolvedDir, upcoming, between, remaining)
-              else
-                _routePlaceholder(t),
-              const SizedBox(height: 10),
-              _viewFullRouteHint(t),
+              body,
+              // The "VIEW FULL ROUTE" affordance only makes sense once a route
+              // is actually available to open.
+              if (hasRoute) ...[
+                const SizedBox(height: 10),
+                _viewFullRouteHint(t),
+              ],
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// Shown while the route fetch is in flight — a spinner + label instead of
+  /// the "see the full route" hint sitting over an empty route.
+  Widget _routeLoadingState(LyneTheme t) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(strokeWidth: 2.4, color: t.dim),
+        ),
+        const SizedBox(height: 12),
+        Text('Loading route…', style: t.sans(14, color: t.dim)),
+      ],
+    );
+  }
+
+  /// Shown when the fetch resolves with no route for this service.
+  Widget _routeUnavailableState(LyneTheme t) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.route_rounded, size: 30, color: t.faint),
+        const SizedBox(height: 10),
+        Text('Route unavailable', style: t.sans(14, color: t.dim)),
+      ],
     );
   }
 

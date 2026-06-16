@@ -6,7 +6,6 @@
 //   → MRT alerts
 //   → "Closest to you" section (1 highlighted card)
 //   → "Other nearby stops" section (up to 11 cards)
-//   → "Live updates" banner
 //   → empty state (when no nearby stops)
 //
 // Saved stops live on the Saved tab but ALSO appear here when they're near
@@ -79,8 +78,6 @@ class _AlertItem extends _Item {
 }
 
 class _NativeAdItem extends _Item {}
-
-class _LiveBannerItem extends _Item {}
 
 class _EmptyItem extends _Item {}
 
@@ -290,13 +287,17 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
   void _copyCode(String code) {
     Clipboard.setData(ClipboardData(text: code));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    const duration = Duration(seconds: 2);
+    final controller = ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Stop code $code copied'),
-        duration: const Duration(seconds: 2),
+        duration: duration,
         behavior: SnackBarBehavior.floating,
       ),
     );
+    // Fallback dismiss for devices with animations disabled (Flutter's built-in
+    // SnackBar auto-hide timer doesn't fire then).
+    Future.delayed(duration, controller.close);
   }
 
   List<_Item> _buildItems({
@@ -359,10 +360,6 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         }
       }
     }
-
-    // "Live updates" banner
-    items.add(_GapItem(16));
-    items.add(_LiveBannerItem());
 
     return items;
   }
@@ -433,7 +430,6 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       ),
       _AlertItem(:final alert) => _mrtAlertCard(context, alert),
       _NativeAdItem() => const NativeAdCard(),
-      _LiveBannerItem() => _liveUpdatesBanner(context, pins: pins),
       _EmptyItem() => _EmptyState(
         onNearby: () async {
           await LocationService.shared.requestAndStart();
@@ -469,7 +465,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     return Row(
       children: [
         Icon(
-          located ? Icons.location_on : Icons.location_off,
+          located ? Icons.location_on_rounded : Icons.location_off,
           size: 13,
           color: located ? LyneSignal.meBlue : t.dim,
         ),
@@ -539,55 +535,6 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _liveUpdatesBanner(BuildContext context, {required List<Pin> pins}) {
-    final t = context.t;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-        onTap: () => _refresh(pins),
-        child: Semantics(
-          label:
-              'Live updates. Arrival times update every few seconds. Tap to refresh.',
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Icon(Icons.sensors, size: 18, color: t.soon),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: RichText(
-                    maxLines: 2,
-                    text: TextSpan(
-                      children: [
-                        TextSpan(
-                          text: 'Live updates  ',
-                          style: t.sans(
-                            13,
-                            weight: FontWeight.w600,
-                            color: t.fg,
-                          ),
-                        ),
-                        TextSpan(
-                          text: 'Arrival times update every few seconds.',
-                          style: t.sans(13, color: t.dim),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(Icons.chevron_right, size: 16, color: t.faint),
-              ],
-            ),
           ),
         ),
       ),
@@ -704,7 +651,7 @@ class _NearbyCard extends StatelessWidget {
             color: t.surfaceHi,
             borderRadius: BorderRadius.circular(LyneRadius.md),
           ),
-          child: Icon(Icons.location_on, size: 20, color: t.fg),
+          child: Icon(Icons.location_on_rounded, size: 20, color: t.fg),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -730,7 +677,7 @@ class _NearbyCard extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Icon(Icons.chevron_right, size: 18, color: t.faint),
+        Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
       ],
     );
   }
@@ -762,7 +709,7 @@ class _NearbyCard extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (walkMin > 0) ...[
-          Icon(Icons.directions_walk, size: 12, color: t.soon),
+          Icon(Icons.directions_walk_rounded, size: 12, color: t.soon),
           const SizedBox(width: 3),
           Text(
             '${walkMin < 1 ? 1 : walkMin} min',

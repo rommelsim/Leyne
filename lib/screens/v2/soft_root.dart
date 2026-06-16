@@ -119,7 +119,6 @@ class _SoftRootState extends State<SoftRoot> {
           transitionDuration: LyneMotion.standard,
           reverseTransitionDuration: LyneMotion.standard,
           pageBuilder: (_, _, _) => SoftSearchScreen(
-            onClose: () => _navKey.currentState?.pop(),
             // Push the result ON TOP of search (don't pop search first) so
             // Back from the stop/bus/station returns to the search results,
             // then Back again returns Home — instead of jumping straight to Home.
@@ -231,7 +230,7 @@ class _SoftRootState extends State<SoftRoot> {
     // ids). Both are ChangeNotifiers — merge them so the badge stays live.
     return ListenableBuilder(
       listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
-      builder: (_, _) {
+      builder: (context, _) {
         final badgeCount =
             AppModel.shared.unseenAlertCount(_currentAlertIds());
         // When the Alerts tab is open and fresh data lands, mark it seen
@@ -244,15 +243,23 @@ class _SoftRootState extends State<SoftRoot> {
         // AnimatedSwitcher cross-fades; child keying on _tab + badgeCount
         // ensures the switcher sees a new identity on tab change (not on
         // badge-only updates, which must not reset the active screen).
-        return AnimatedSwitcher(
-          duration: LyneMotion.standard,
-          switchInCurve: LyneMotion.enter,
-          switchOutCurve: LyneMotion.exit,
-          transitionBuilder: (child, anim) =>
-              FadeTransition(opacity: anim, child: child),
-          child: KeyedSubtree(
-            key: ValueKey(_tab),
-            child: _tabBody(badgeCount),
+        //
+        // The ColoredBox is essential: mid cross-fade both the outgoing and
+        // incoming screens are semi-transparent, so without an opaque backdrop
+        // the bare Navigator behind them shows through as a dark/grey flash.
+        // Painting the theme background here keeps the fade clean.
+        return ColoredBox(
+          color: context.t.bg,
+          child: AnimatedSwitcher(
+            duration: LyneMotion.standard,
+            switchInCurve: LyneMotion.enter,
+            switchOutCurve: LyneMotion.exit,
+            transitionBuilder: (child, anim) =>
+                FadeTransition(opacity: anim, child: child),
+            child: KeyedSubtree(
+              key: ValueKey(_tab),
+              child: _tabBody(badgeCount),
+            ),
           ),
         );
       },

@@ -113,7 +113,7 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
                                     weight: FontWeight.w500, color: t.fg)),
                           ),
                           if (AppModel.shared.themeMode == mode)
-                            Icon(Icons.check, size: 18, color: t.fg),
+                            Icon(Icons.check_rounded, size: 18, color: t.fg),
                         ],
                       ),
                     ),
@@ -156,10 +156,37 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
-                // ── Large page title ──────────────────────────────────────
-                Text(
-                  'Settings',
-                  style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+                // ── Large page title (+ explicit close when shown as a sheet,
+                //    so the user is never trapped without a dismiss control) ──
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Settings',
+                        style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+                      ),
+                    ),
+                    if (widget.asSheet)
+                      Semantics(
+                        button: true,
+                        label: 'Close',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(99),
+                          onTap: () => Navigator.of(context).maybePop(),
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: t.surface,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: t.line, width: 1),
+                            ),
+                            child: Icon(Icons.close_rounded, size: 18, color: t.fg),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 20),
 
@@ -277,7 +304,7 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
               Text(detail, style: t.sans(13, color: t.dim)),
               const SizedBox(width: 4),
             ],
-            Icon(Icons.chevron_right, color: t.faint, size: 18),
+            Icon(Icons.chevron_right_rounded, color: t.faint, size: 18),
           ],
         ),
       ),
@@ -326,12 +353,16 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     final uri = Uri.parse(_kCoffeeUrl);
     if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    final controller = ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Couldn't open the donation page"),
         behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 4),
       ),
     );
+    // Fallback dismiss for devices with animations disabled (Flutter's built-in
+    // SnackBar auto-hide timer doesn't fire then).
+    Future.delayed(const Duration(seconds: 4), controller.close);
   }
 
   /// Toggle row: icon chip + title + SoftToggle (no chevron).

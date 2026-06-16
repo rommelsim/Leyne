@@ -98,7 +98,7 @@ class _ManageAlertsScreenState extends State<ManageAlertsScreen> {
                   border: Border.all(color: t.line, width: 1),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.arrow_back, size: 20, color: t.fg),
+                child: Icon(Icons.arrow_back_rounded, size: 20, color: t.fg),
               ),
             ),
           ),

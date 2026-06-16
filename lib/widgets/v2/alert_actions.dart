@@ -66,12 +66,20 @@ void _alertSnack(String message, {required VoidCallback onUndo}) {
   final messenger = lyneMessengerKey.currentState;
   if (messenger == null) return;
   messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
+  const duration = Duration(seconds: 4);
+  final controller = messenger.showSnackBar(
     SnackBar(
       content: Text(message),
       behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 4),
+      duration: duration,
       action: SnackBarAction(label: 'Undo', onPressed: onUndo),
     ),
   );
+  // Fallback auto-dismiss. When the device has animations disabled ("Remove
+  // animations" / animator scale 0 — common on test devices), Flutter's
+  // SnackBar never fires its internal auto-hide timer and the toast stays on
+  // screen indefinitely. Closing the controller ourselves guarantees it goes
+  // away. Harmless in the normal case (already-dismissed → no-op) and if Undo
+  // was tapped or another snackbar replaced this one.
+  Future.delayed(duration, controller.close);
 }

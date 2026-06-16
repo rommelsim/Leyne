@@ -16,6 +16,7 @@ import '../../data/models.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
 import '../../data/search_logic.dart';
+import '../../services/analytics_service.dart';
 import '../../services/geocode_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
@@ -30,13 +31,11 @@ bool detectIsPostal(String q) => RegExp(r'^\d{6}$').hasMatch(q);
 class SoftSearchScreen extends StatefulWidget {
   const SoftSearchScreen({
     super.key,
-    required this.onClose,
     required this.onOpenStop,
     required this.onOpenBus,
     required this.onOpenStation,
     required this.onTab,
   });
-  final VoidCallback onClose;
   final ValueChanged<String> onOpenStop;
 
   /// Open the bus ROUTE view for a service. The first arg is an anchor stop
@@ -65,6 +64,12 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   final _ctrl = TextEditingController();
   final _focus = FocusNode();
   _SearchFilter _filter = _SearchFilter.all;
+
+  // Log one search_performed per search session: fire on the keystroke that
+  // first makes the query non-empty, then re-arm once it's cleared. Avoids one
+  // analytics event per character while still counting each distinct search.
+  // Mirrors iOS SoftSearchView (`loggedSearchSession`).
+  bool _loggedSearchSession = false;
 
   // Postal-code geocoding state — `_geoFor` is the code `_geo` resolved for,
   // so each distinct code geocodes at most once. `_geo` is null while loading
@@ -102,6 +107,13 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     // Reset the category filter on every new query so results from a prior
     // search don't leave the user looking at an empty filtered view.
     setState(() => _filter = _SearchFilter.all);
+    final hasQuery = _ctrl.text.trim().isNotEmpty;
+    if (hasQuery && !_loggedSearchSession) {
+      _loggedSearchSession = true;
+      AnalyticsService.searchPerformed();
+    } else if (!hasQuery) {
+      _loggedSearchSession = false;
+    }
     _maybeGeocode(_ctrl.text);
   }
 
@@ -198,8 +210,10 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
           style: t.sans(28, weight: FontWeight.w700, color: t.fg),
         ),
         const Spacer(),
-        // Cancel only appears while the field is focused — lets the user
-        // dismiss the keyboard and, if they choose, exit via onClose.
+        // Cancel only appears while the field is focused — it clears the query
+        // and dismisses the keyboard, but STAYS on Search (matching iOS, where
+        // Cancel does not leave the Search surface). To exit Search the user
+        // uses the bottom tab bar or system back — Cancel must not pop the route.
         // Uses AnimatedSwitcher so it slides+fades in and out smoothly.
         AnimatedSwitcher(
           duration: LyneMotion.short,
@@ -217,8 +231,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               ? TextButton(
                   key: const ValueKey('cancel'),
                   onPressed: () {
+                    _ctrl.clear();
+                    _onQueryChanged();
                     _focus.unfocus();
-                    widget.onClose();
                   },
                   style: TextButton.styleFrom(
                     foregroundColor: LyneSignal.meBlue,
@@ -262,7 +277,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
           prefixIcon: Padding(
             padding: const EdgeInsets.only(left: 14, right: 10),
             child: Icon(
-              Icons.search,
+              Icons.search_rounded,
               size: 20,
               color: hasText ? t.accent : t.dim,
             ),
@@ -274,7 +289,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
           // Trailing: clear button OR mic icon (visual-only).
           suffixIcon: hasText
               ? IconButton(
-                  icon: Icon(Icons.close, size: 18, color: t.dim),
+                  icon: Icon(Icons.close_rounded, size: 18, color: t.dim),
                   onPressed: () {
                     _ctrl.clear();
                     _onQueryChanged();
@@ -424,8 +439,8 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   Widget _recentRow(BuildContext context, LyneTheme t, String recent) {
     final kind = detectQueryKind(recent).kind;
     final IconData icon = switch (kind) {
-      'bus' => Icons.directions_bus,
-      'stopcode' => Icons.location_on,
+      'bus' => Icons.directions_bus_rounded,
+      'stopcode' => Icons.location_on_rounded,
       'postal' || 'block' || 'text' => Icons.place,
       _ => Icons.history,
     };
@@ -469,7 +484,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
                 onTap: () => AppModel.shared.removeRecent(recent),
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.close, size: 16, color: t.faint),
+                  child: Icon(Icons.close_rounded, size: 16, color: t.faint),
                 ),
               ),
             ],
@@ -682,7 +697,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               ],
             ),
           ),
-          Icon(Icons.chevron_right, color: t.dim),
+          Icon(Icons.chevron_right_rounded, color: t.dim),
         ],
       ),
     );
@@ -703,7 +718,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               color: t.surfaceHi,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.location_on, size: 18, color: t.fg),
+            child: Icon(Icons.location_on_rounded, size: 18, color: t.fg),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -725,7 +740,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               ],
             ),
           ),
-          Icon(Icons.chevron_right, color: t.dim),
+          Icon(Icons.chevron_right_rounded, color: t.dim),
         ],
       ),
     );
@@ -746,7 +761,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               color: t.surfaceHi,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.tram_rounded, size: 18, color: t.fg),
+            child: Icon(Icons.train_rounded, size: 18, color: t.fg),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -789,7 +804,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               ],
             ),
           ),
-          Icon(Icons.chevron_right, color: t.dim),
+          Icon(Icons.chevron_right_rounded, color: t.dim),
         ],
       ),
     );
@@ -879,7 +894,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
             ),
             const SizedBox(height: 16),
             FilledButton.tonalIcon(
-              icon: const Icon(Icons.refresh, size: 16),
+              icon: const Icon(Icons.refresh_rounded, size: 16),
               label: const Text('Retry'),
               onPressed: () => _maybeGeocode(_ctrl.text, force: true),
             ),
@@ -929,7 +944,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               ],
             ),
           ),
-          Icon(Icons.chevron_right, color: t.dim),
+          Icon(Icons.chevron_right_rounded, color: t.dim),
         ],
       ),
     );

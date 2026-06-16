@@ -31,6 +31,70 @@ stays 2.8.0. No user-facing feature changes — compliance only.
   condition / rain-hint readout is gone. Reply to Apple: "the app does not use
   WeatherKit." (`SoftHomeView.swift`)
 
+## Leyne 2.8.0 · Android (40) · 2026-06-16
+
+**2026-06-16 — Android AAB (2.8.0, build 40):** _(supersedes build 39 — same
+versionName 2.8.0, versionCode bumped 39 → 40.)_ Analytics + two iOS-parity
+fixes surfaced by a full parity audit. Output:
+`build/app/outputs/bundle/release/app-release.aab`.
+
+- **Firebase Analytics wired up (parity with iOS):** `Firebase.initializeApp()`
+  now runs at launch (guarded — a build without `google-services.json` stays a
+  no-op), and the six high-signal product events fire from the same sites as
+  iOS: `stop_viewed`, `search_performed`, `notification_tapped`, `alert_set`,
+  `favourite_added`, `onboarding_completed`. Ad-revenue / impressions flow into
+  the same GA4 property via the AdMob↔Firebase link, so impressions are **not**
+  logged manually (would double-count). (`main.dart`, `analytics_service.dart`,
+  `app_model.dart`, `soft_stop_screen.dart`, `soft_mrt_station_screen.dart`,
+  `soft_search_screen.dart`, `google-services.json`)
+- **Disruption notifications now reach new users:** the notifications intent now
+  defaults **on** (mirroring iOS) instead of off, so MRT/lift disruption pushes
+  reach a user who has granted the OS permission but never set a bus alert.
+  Setting an alert still requests permission correctly; an explicit opt-out is
+  still honoured. (`app_model.dart`, `alerts_background.dart`)
+- **Onboarding location primer (Play/iOS parity):** the location step now shows
+  a neutral **"Continue"** with no skip before the system prompt, matching the
+  iOS onboarding (App Store 5.1.1(iv) pattern). The notification step keeps its
+  "Maybe later". (`onboarding_screen.dart`)
+- **Native ads fixed — wrong unit ID:** the inline native card (Home, after the
+  3rd nearby stop) was pointed at `…/3213886079`, which matches **no unit** in
+  the Leyne AdMob account, so every request returned NO_FILL and the slot stayed
+  empty. Corrected to the real "Native Ad Unit" id **`…/8207836651`**; verified
+  filling + rendering on-device against the AdMob native validator. Also added a
+  **retry with linear backoff** on transient NO_FILL so a single early miss no
+  longer leaves the slot empty for the whole session. (`ad_banner.dart`)
+- **Navigation / UX bug fixes:**
+  - Tab switches no longer flash a dark/grey tint — the cross-fade now paints
+    the theme background behind it instead of revealing the bare Navigator.
+    (`soft_root.dart`)
+  - **Search "Cancel"** clears the field and dismisses the keyboard but stays on
+    Search (it used to pop back to the previous screen).
+    (`soft_search_screen.dart`, `soft_root.dart`)
+  - The **Settings sheet** (Alerts-tab gear) can no longer trap the user — it
+    now has a drag handle, a capped height with tappable scrim, and an explicit
+    close button. (`soft_alerts_screen.dart`, `soft_settings_screen.dart`)
+  - The **bus route module** shows a "Loading route…" state instead of a blank
+    route under a "view full route" hint, and won't open an empty route sheet
+    while the route is still fetching. (`soft_bus_screen.dart`)
+  - **Toasts now always auto-dismiss.** On devices with animations disabled
+    ("Remove animations"/animator scale 0) Flutter's SnackBar timer never fires,
+    so the "We'll alert you 3 & 1 min…" confirmation (and other toasts) stayed
+    on screen forever. Added a fallback timed close. (`alert_actions.dart`,
+    `soft_home_screen.dart`, `soft_settings_screen.dart`)
+  - Removed the Android-only **"Live updates" banner** from Home (not present on
+    iOS). (`soft_home_screen.dart`)
+  - **Auto-rotation disabled app-wide** — locked to portrait via
+    `android:screenOrientation="portrait"` + `SystemChrome` preferred
+    orientations. (`AndroidManifest.xml`, `main.dart`)
+  - **Icon consistency pass** — normalised the UI to the `_rounded` Material
+    family and fixed same-concept mismatches (one back-arrow glyph; MRT uses
+    `train_rounded` everywhere instead of mixing `tram`; one expand glyph).
+    (~40 sites across the v2 screens)
+  - **Bus view action buttons match iOS** — replaced the cryptic icon-only
+    top-bar circles (eye / bus / ⋯) with three self-describing labeled buttons
+    below the title: **Track arrival · Save service · More** (save now uses a
+    star, like iOS). Larger tap targets, clearer intent. (`soft_bus_screen.dart`)
+
 ## Leyne 2.8.0 · Android (39) · 2026-06-16
 
 **2026-06-16 — Android AAB (2.8.0, build 39):** _(versionName jumped 2.5.1 →

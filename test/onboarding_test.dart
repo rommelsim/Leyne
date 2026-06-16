@@ -126,8 +126,11 @@ void main() {
         expect(locationCalls, 0);
         expect(notificationCalls, 0);
 
-        // Step 2 → 3: "Allow location" fires onRequestLocation + advances.
-        await tester.tap(find.text('Allow location'));
+        // Step 2 → 3: location primary is the neutral "Continue" (no skip, per
+        // App Store 5.1.1(iv) / iOS parity) — it fires onRequestLocation + advances.
+        // `.last`: the live step (step 1) also says "Continue" and lingers one
+        // frame in the AnimatedSwitcher; the incoming step's CTA is built last.
+        await tester.tap(find.text('Continue').last);
         await tester.pump(const Duration(milliseconds: 500));
         expect(locationCalls, 1);
         expect(notificationCalls, 0);
@@ -149,43 +152,50 @@ void main() {
       },
     );
 
-    testWidgets('secondary buttons advance without firing priming callbacks', (
-      tester,
-    ) async {
-      var locationCalls = 0;
-      var notificationCalls = 0;
+    testWidgets(
+      'location step has no skip; notification "Maybe later" advances without '
+      'firing the notifications callback',
+      (tester) async {
+        var notificationCalls = 0;
 
-      await tester.pumpWidget(
-        _host(
-          OnboardingScreen(
-            onRequestLocation: () => locationCalls++,
-            onRequestNotifications: () => notificationCalls++,
-            onFinish: () {},
+        await tester.pumpWidget(
+          _host(
+            OnboardingScreen(
+              onRequestLocation: () {},
+              onRequestNotifications: () => notificationCalls++,
+              onFinish: () {},
+            ),
           ),
-        ),
-      );
-      await tester.pump();
+        );
+        await tester.pump();
 
-      // Advance to step 2 (location primer).
-      await tester.tap(find.text('Get started'));
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.tap(find.text('Continue'));
-      await tester.pump(const Duration(milliseconds: 500));
+        // Advance to step 2 (location primer).
+        await tester.tap(find.text('Get started'));
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.tap(find.text('Continue'));
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(find.textContaining('Find stops around you'), findsOneWidget);
 
-      // Tap secondary "Not now" — advances but does NOT call onRequestLocation.
-      await tester.tap(find.text('Not now'));
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(locationCalls, 0);
-      // Should now be on step 3 (notif primer).
-      expect(find.textContaining('Never miss your bus'), findsOneWidget);
+        // Location step must NOT offer any skip/exit before the prompt
+        // (App Store 5.1.1(iv) / iOS parity): no "Not now", no "Skip".
+        expect(find.text('Not now'), findsNothing);
+        expect(find.text('Skip'), findsNothing);
 
-      // Tap secondary "Maybe later" — advances but does NOT call onRequestNotifications.
-      await tester.tap(find.text('Maybe later'));
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(notificationCalls, 0);
-      // Should now be on step 4 (done).
-      expect(find.textContaining('You\'re all set'), findsOneWidget);
-    });
+        // The only way forward is the neutral "Continue" primary. `.last`
+        // disambiguates from the live step's lingering "Continue" mid-transition.
+        await tester.tap(find.text('Continue').last);
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(find.textContaining('Never miss your bus'), findsOneWidget);
+
+        // Notification step DOES keep a skip — "Maybe later" advances but does
+        // NOT call onRequestNotifications.
+        await tester.tap(find.text('Maybe later'));
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(notificationCalls, 0);
+        // Should now be on step 4 (done).
+        expect(find.textContaining('You\'re all set'), findsOneWidget);
+      },
+    );
 
     testWidgets('Back walks the user back one step', (tester) async {
       await tester.pumpWidget(
@@ -236,9 +246,11 @@ void main() {
 
         // Two taps in quick succession — the second must be swallowed by the
         // multi-tap lock so onRequestNotifications never fires off the back of it.
-        await tester.tap(find.text('Allow location'));
+        // `.last` targets the location step's "Continue" (the live step's
+        // identically-labelled CTA lingers one frame mid-transition).
+        await tester.tap(find.text('Continue').last);
         await tester.pump(const Duration(milliseconds: 50));
-        await tester.tap(find.text('Allow location'), warnIfMissed: false);
+        await tester.tap(find.text('Continue').last, warnIfMissed: false);
         await tester.pump(const Duration(milliseconds: 500));
 
         expect(locationCalls, 1);

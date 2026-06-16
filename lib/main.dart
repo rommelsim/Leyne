@@ -10,7 +10,9 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -26,6 +28,7 @@ import 'screens/v2/soft_stop_screen.dart';
 import 'screens/whats_new_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
 import 'services/alerts_background.dart';
+import 'services/analytics_service.dart';
 import 'services/app_open_ad.dart';
 import 'services/deep_link_service.dart';
 import 'services/location_service.dart';
@@ -40,7 +43,24 @@ final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Lock the whole app to portrait — no auto-rotation. Belt-and-braces with
+  // android:screenOrientation="portrait" in AndroidManifest.xml (the manifest
+  // is the authoritative OS-level lock; this also pins the Flutter engine).
+  await SystemChrome.setPreferredOrientations(const [
+    DeviceOrientation.portraitUp,
+  ]);
   LtaConfig.assertConfigured();
+  // Initialise Firebase before the first frame so product events log from
+  // launch. Guarded: a build without google-services.json (forks / CI /
+  // pre-setup) has no default options and initializeApp throws — we swallow
+  // it and AnalyticsService stays in its no-op state (markReady never runs).
+  // Mirrors iOS, where a missing GoogleService-Info.plist skips configure().
+  try {
+    await Firebase.initializeApp();
+    AnalyticsService.markReady();
+  } catch (e) {
+    debugPrint('[firebase] init skipped (no config?): $e');
+  }
   // AppModel reads persisted pins/recents/settings from shared_preferences;
   // await this so Home opens with the user's saved pins on screen, not an
   // empty list that flickers in once load() resolves.
@@ -64,6 +84,9 @@ void main() async {
     // the App Open ad on this foreground so they get content, not an ad.
     AppOpenAdManager.instance.suppressNext();
     final parts = payload.split('.');
+    // A notification tap is a strong value signal — record it for retention
+    // analysis (kind = arrival / track / alight). Mirrors iOS LeyneApp.swift.
+    AnalyticsService.notificationTapped(parts.isNotEmpty ? parts.first : '');
     if (parts.length < 3) return;
     final kind = parts[0];
     String? stopCode;

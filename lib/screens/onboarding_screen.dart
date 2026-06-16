@@ -288,11 +288,15 @@ class _StepBody extends StatelessWidget {
     return switch (step) {
       0 => _WelcomeStep(t: t, busy: busy, onNext: onNext),
       1 => _LiveStep(t: t, busy: busy, onNext: onNext),
+      // Location step: neutral "Continue" and NO skip/secondary. App Store
+      // Guideline 5.1.1(iv) forbids an exit/delay before the location prompt;
+      // we mirror the iOS onboarding here so the flow is identical. (The
+      // notification step below keeps its "Maybe later" — a skip is permitted
+      // there.)
       2 => _PrimerStep(
         t: t,
         busy: busy,
         onPrimaryTap: () => onPrimePrimary(onRequestLocation),
-        onSecondaryTap: onPrimeSecondary,
         icon: Icons.location_on_rounded,
         kicker: 'Permission 1 of 2',
         title: 'Find stops around you',
@@ -302,8 +306,7 @@ class _StepBody extends StatelessWidget {
           (Icons.my_location_rounded, 'Nearest stops, sorted by distance'),
           (Icons.map_outlined, 'See exactly where your stop is'),
         ],
-        primaryLabel: 'Allow location',
-        secondaryLabel: 'Not now',
+        primaryLabel: 'Continue',
       ),
       3 => _PrimerStep(
         t: t,
@@ -447,14 +450,14 @@ class _PrimerStep extends StatelessWidget {
     required this.t,
     required this.busy,
     required this.onPrimaryTap,
-    required this.onSecondaryTap,
+    this.onSecondaryTap,
     required this.icon,
     required this.kicker,
     required this.title,
     required this.body,
     required this.points,
     required this.primaryLabel,
-    required this.secondaryLabel,
+    this.secondaryLabel,
   });
 
   final LyneTheme t;
@@ -463,15 +466,18 @@ class _PrimerStep extends StatelessWidget {
   /// Primary: fires the OS permission prompt then advances the step.
   final VoidCallback onPrimaryTap;
 
-  /// Secondary: advances the step without firing a permission prompt.
-  final VoidCallback onSecondaryTap;
+  /// Secondary: advances the step without firing a permission prompt. When
+  /// null (with [secondaryLabel] also null) the secondary button is omitted —
+  /// required for the location step, where App Store Guideline 5.1.1(iv)
+  /// forbids any skip/exit before the permission request (iOS parity).
+  final VoidCallback? onSecondaryTap;
   final IconData icon;
   final String kicker;
   final String title;
   final String body;
   final List<(IconData, String)> points;
   final String primaryLabel;
-  final String secondaryLabel;
+  final String? secondaryLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -525,19 +531,24 @@ class _PrimerStep extends StatelessWidget {
             busy: busy,
             onTap: onPrimaryTap,
           ),
-          // Secondary: just advances, no permission prompt.
-          TextButton(
-            onPressed: busy ? null : onSecondaryTap,
-            style: TextButton.styleFrom(
-              foregroundColor: t.dim,
-              minimumSize: const Size(double.infinity, 44),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          // Secondary: just advances, no permission prompt. Omitted entirely
+          // when no label/handler is supplied (the location step has none).
+          if (secondaryLabel != null && onSecondaryTap != null)
+            TextButton(
+              onPressed: busy ? null : onSecondaryTap,
+              style: TextButton.styleFrom(
+                foregroundColor: t.dim,
+                minimumSize: const Size(double.infinity, 44),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                secondaryLabel!,
+                style: t.sans(
+                  14,
+                  weight: FontWeight.w600,
+                ).copyWith(color: t.dim),
+              ),
             ),
-            child: Text(
-              secondaryLabel,
-              style: t.sans(14, weight: FontWeight.w600).copyWith(color: t.dim),
-            ),
-          ),
           const SizedBox(height: 4),
         ],
       ),

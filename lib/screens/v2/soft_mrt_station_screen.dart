@@ -17,6 +17,7 @@ import 'package:flutter/services.dart';
 import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
+import '../../services/analytics_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -51,6 +52,14 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
   void initState() {
     super.initState();
     _refreshAll(force: false);
+    // Mirror iOS SoftMrtStationView.onAppear: log the station view keyed by its
+    // first code (falling back to the name when codeless).
+    AnalyticsService.stopViewed(
+      code: widget.station.codes.isNotEmpty
+          ? widget.station.codes.first
+          : widget.station.name,
+      kind: StopKind.mrt,
+    );
   }
 
   void _refreshAll({required bool force}) {
@@ -212,7 +221,7 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
       floating: false,
       snap: false,
       leading: IconButton(
-        icon: Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: t.fg),
+        icon: Icon(Icons.arrow_back_rounded, size: 20, color: t.fg),
         onPressed: widget.onBack,
         tooltip: 'Back',
       ),
@@ -247,7 +256,7 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
               // Walk/distance context (only when opened from nearby).
               if (widget.walkMin != null) ...[
                 const SizedBox(width: 8),
-                Icon(Icons.directions_walk, size: 11, color: t.dim),
+                Icon(Icons.directions_walk_rounded, size: 11, color: t.dim),
                 const SizedBox(width: 2),
                 Text(
                   '${widget.walkMin} min',
@@ -397,7 +406,7 @@ class _AlertRow extends StatelessWidget {
                 if (alert.freeShuttle)
                   _FreeChip(
                     label: 'Free MRT shuttle',
-                    icon: Icons.tram_rounded,
+                    icon: Icons.train_rounded,
                     t: t,
                   ),
               ],
@@ -605,10 +614,10 @@ class _LineCrowdCard extends StatelessWidget {
   IconData _trendIcon(CrowdLevel now, CrowdLevel next) {
     final a = _levelRank(now);
     final b = _levelRank(next);
-    if (a == 0 || b == 0) return Icons.arrow_forward;
-    if (b > a) return Icons.arrow_upward;
-    if (b < a) return Icons.arrow_downward;
-    return Icons.arrow_forward;
+    if (a == 0 || b == 0) return Icons.arrow_forward_rounded;
+    if (b > a) return Icons.arrow_upward_rounded;
+    if (b < a) return Icons.arrow_downward_rounded;
+    return Icons.arrow_forward_rounded;
   }
 
   @override

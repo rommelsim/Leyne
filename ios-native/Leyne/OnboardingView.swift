@@ -51,13 +51,23 @@ struct OnboardingView: View {
                 // Group, whose modifiers distribute to children and break the
                 // transition). The whole subtree slides as one unit so text,
                 // cards and CTA move together.
-                stepContent
-                    .id(step)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: goingBack ? .leading : .trailing),
-                        removal: .move(edge: goingBack ? .trailing : .leading)
-                    ).combined(with: .opacity))
+                //
+                // It's wrapped in a ZStack so the outgoing and incoming steps
+                // OVERLAP during a step change and slide across each other. As a
+                // direct child of the outer VStack they'd be laid out stacked
+                // vertically while both exist mid-transition — the VStack splits
+                // the area between two `maxHeight: .infinity` siblings, squishing
+                // and shifting the content so it doesn't move with the slide.
+                ZStack {
+                    stepContent
+                        .id(step)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: goingBack ? .leading : .trailing),
+                            removal: .move(edge: goingBack ? .trailing : .leading)
+                        ).combined(with: .opacity))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.vertical, 20)
         }
@@ -188,8 +198,7 @@ struct OnboardingView: View {
                    trackingTapped = true
                    onRequestTracking()
                    advance()
-               },
-               secondary: "Skip", onSecondary: { advance() })
+               })
     }
 
     // MARK: 5 · Done

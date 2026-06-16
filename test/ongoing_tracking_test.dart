@@ -121,6 +121,9 @@ void main() {
     test('completes without throwing when notifications are off', () async {
       final m = AppModel.forTesting();
       await m.load();
+      // Notifications now default ON (iOS parity) — explicitly turn them off
+      // for this test, which exercises the notifications-disabled reschedule path.
+      await m.setNotificationsEnabled(false);
       expect(m.notificationsEnabled, isFalse);
       await expectLater(m.rescheduleIfNeeded(), completes);
     });

@@ -444,7 +444,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       secondaryBackground: _dismissBackground(
         context: context,
         color: t.crit,
-        icon: Icons.delete,
+        icon: Icons.delete_rounded,
         label: 'Delete',
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
@@ -584,7 +584,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       secondaryBackground: _dismissBackground(
         context: context,
         color: t.crit,
-        icon: Icons.delete,
+        icon: Icons.delete_rounded,
         label: 'Delete',
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
@@ -690,7 +690,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                 builder: (context, _) => _serviceEtas(context, svc, conf),
               ),
               const SizedBox(width: 6),
-              Icon(Icons.chevron_right, size: 16, color: t.faint),
+              Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
             ],
           ),
         ),
@@ -784,7 +784,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
     final sectionHeader = Row(
       children: [
-        Icon(Icons.tram_rounded, size: 14, color: t.soon),
+        Icon(Icons.train_rounded, size: 14, color: t.soon),
         const SizedBox(width: 6),
         Text(
           'Saved stations',
@@ -866,7 +866,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       secondaryBackground: _dismissBackground(
         context: context,
         color: t.crit,
-        icon: Icons.delete,
+        icon: Icons.delete_rounded,
         label: 'Delete',
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
@@ -899,7 +899,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                   color: t.surfaceHi,
                   borderRadius: BorderRadius.circular(LyneRadius.md),
                 ),
-                child: Icon(Icons.tram_rounded, size: 20, color: t.fg),
+                child: Icon(Icons.train_rounded, size: 20, color: t.fg),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -942,7 +942,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.chevron_right, size: 16, color: t.faint),
+              Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
             ],
           ),
         ),
@@ -1002,7 +1002,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                     color: t.surfaceHi,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(Icons.add, size: 18, color: LyneSignal.meBlue),
+                  child: Icon(Icons.add_rounded, size: 18, color: LyneSignal.meBlue),
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -1226,7 +1226,7 @@ class _FavStopCard extends StatelessWidget {
                     color: t.surfaceHi,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(Icons.location_on, size: 20, color: t.fg),
+                  child: Icon(Icons.location_on_rounded, size: 20, color: t.fg),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1236,7 +1236,7 @@ class _FavStopCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(Icons.chevron_right, size: 18, color: t.faint),
+                Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
               ],
             ),
           ),
@@ -1295,7 +1295,7 @@ class _FavStopCard extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (hasLocation) ...[
-          Icon(Icons.directions_walk, size: 12, color: t.soon),
+          Icon(Icons.directions_walk_rounded, size: 12, color: t.soon),
           const SizedBox(width: 3),
           Text(
             '${walkMin < 1 ? 1 : walkMin} min',

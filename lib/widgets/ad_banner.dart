@@ -241,7 +241,11 @@ String _nativeUnitId() {
   if (kDebugMode || kLyneAdsTest) {
     return 'ca-app-pub-3940256099942544/2247696110';
   }
-  return 'ca-app-pub-5864511655536507/3213886079';
+  // "Native Ad Unit" (Native advanced) in the Leyne AdMob account
+  // (pub-5864511655536507). The previous value (…/3213886079) did not match any
+  // unit in the account and always returned NO_FILL — confirmed against the
+  // AdMob console on 2026-06-16.
+  return 'ca-app-pub-5864511655536507/8207836651';
 }
 
 /// Inline native ad card using NativeTemplateStyle (TemplateType.medium).
@@ -285,6 +289,12 @@ class _NativeAdCardState extends State<NativeAdCard> {
   NativeAd? _ad;
   bool _loaded = false;
   Timer? _retry;
+  int _retries = 0;
+  // Native fill is best-effort: a freshly-created unit (or the first request
+  // right after SDK init, before the consent/test-device config lands) often
+  // returns a transient NO_FILL. Retry a few times with linear backoff so the
+  // slot fills once inventory is available instead of staying empty all session.
+  static const int _maxRetries = 5;
 
   // The stop-card corner radius — 18 pt, matching _NearbyCard exactly.
   static const double _cardRadius = 18;
@@ -330,6 +340,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
       listener: NativeAdListener(
         onAdLoaded: (_) {
           if (!mounted) return;
+          _retries = 0;
           setState(() => _loaded = true);
         },
         onAdFailedToLoad: (ad, error) {
@@ -337,7 +348,17 @@ class _NativeAdCardState extends State<NativeAdCard> {
           _ad = null;
           if (kDebugMode) {
             // ignore: avoid_print
-            print('[ads] native failed: ${error.message}');
+            print('[ads] native failed (code ${error.code}): ${error.message}');
+          }
+          // Retry a transient NO_FILL with linear backoff (15s, 30s, …) so the
+          // slot isn't left empty for the whole session after one early miss.
+          if (mounted && _retries < _maxRetries) {
+            _retries++;
+            _retry?.cancel();
+            _retry = Timer(Duration(seconds: 15 * _retries), () {
+              if (!mounted) return;
+              _attemptLoad();
+            });
           }
         },
       ),

@@ -91,12 +91,14 @@ void main() {
       expect(AppModel.shared.locale?.languageCode, 'zh');
     });
 
-    test('notifications toggle defaults off and persists', () async {
+    test('notifications toggle defaults on and persists an explicit off',
+        () async {
+      // Default ON now (iOS parity) so disruption pushes reach new users.
+      expect(AppModel.shared.notificationsEnabled, isTrue);
+      await AppModel.shared.setNotificationsEnabled(false);
       expect(AppModel.shared.notificationsEnabled, isFalse);
-      await AppModel.shared.setNotificationsEnabled(true);
-      expect(AppModel.shared.notificationsEnabled, isTrue);
       await AppModel.shared.load();
-      expect(AppModel.shared.notificationsEnabled, isTrue);
+      expect(AppModel.shared.notificationsEnabled, isFalse);
     });
 
     test('search radius defaults to 500 m and persists a pick', () async {
@@ -187,10 +189,11 @@ void main() {
       await tester.tap(find.text('Notifications'));
       await tester.pumpAndSettle();
       expect(find.byType(NotificationsScreen), findsOneWidget);
-      expect(AppModel.shared.notificationsEnabled, isFalse);
+      // Defaults ON now (iOS parity); tapping the row toggles it OFF.
+      expect(AppModel.shared.notificationsEnabled, isTrue);
       await tester.tap(find.text('Arrival alerts'));
       await tester.pumpAndSettle();
-      expect(AppModel.shared.notificationsEnabled, isTrue);
+      expect(AppModel.shared.notificationsEnabled, isFalse);
     });
   });
 }

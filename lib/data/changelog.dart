@@ -175,7 +175,7 @@ const Map<String, WhatsNewEntry> kChangelog = {
     headline: 'A brighter, clearer Leyne.',
     items: [
       WhatsNewItem(
-        icon: Icons.palette_outlined,
+        icon: Icons.palette_rounded,
         title: 'Arrivals you can read at a glance',
         body:
             'A fresh, colourful look — green means a bus is close, '

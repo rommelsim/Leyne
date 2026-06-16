@@ -393,7 +393,7 @@ class _NearestFeaturedTile extends StatelessWidget {
                 Row(
                   children: [
                     Icon(
-                      Icons.directions_walk,
+                      Icons.directions_walk_rounded,
                       size: 12,
                       color: t.soon,
                     ),
@@ -405,7 +405,7 @@ class _NearestFeaturedTile extends StatelessWidget {
                           .copyWith(letterSpacing: 1.2),
                     ),
                     const Spacer(),
-                    Icon(Icons.chevron_right, size: 16, color: t.faint),
+                    Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
                   ],
                 ),
                 const SizedBox(height: 8),

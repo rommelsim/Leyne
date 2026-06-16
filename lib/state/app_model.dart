@@ -23,6 +23,7 @@ import '../data/geo.dart';
 import '../data/models.dart';
 import '../data/mrt_geo.dart';
 import '../data/weather_store.dart';
+import '../services/analytics_service.dart';
 import '../services/location_service.dart';
 import '../services/notifications.dart';
 import 'bus_alert.dart';
@@ -176,6 +177,7 @@ class AppModel extends ChangeNotifier {
     if (_onboardingDone) return;
     _onboardingDone = true;
     _prefs?.setBool(_kOnboardingDoneKey, true);
+    AnalyticsService.onboardingCompleted();
     // A user who just finished onboarding is, by definition, current — pin
     // the running version so the What's New screen doesn't fire on their
     // very next launch for the version they just installed.
@@ -280,7 +282,16 @@ class AppModel extends ChangeNotifier {
   // intent through `setNotificationsEnabled(...)` so permission is
   // requested at the right moment; the raw storage flag below is the
   // persisted result of that flow.
-  bool _notificationsEnabled = false;
+  //
+  // Default ON, mirroring iOS (`AppModel.notificationsEnabled = true`). The
+  // intent being on by default is what lets MRT/lift disruption pushes reach
+  // a brand-new user who has granted the OS permission but never set a bus
+  // alert — previously this defaulted off, so those users got zero disruption
+  // notifications (the iOS↔Android parity gap). OS permission is a separate
+  // layer: if POST_NOTIFICATIONS isn't granted the system simply drops the
+  // notification, and refreshNotificationAuth() flips this off on an explicit
+  // denial so the Settings toggle stays honest.
+  bool _notificationsEnabled = true;
   bool get notificationsEnabled => _notificationsEnabled;
 
   /// Last observed system permission state, refreshed on launch and
@@ -464,6 +475,7 @@ class AppModel extends ChangeNotifier {
       _favServices = [..._favServices]..removeAt(idx);
     } else {
       _favServices = [..._favServices, FavService(no: no, stop: stop)];
+      AnalyticsService.favouriteAdded(FavKind.service);
     }
     _persistFavServices();
     notifyListeners();
@@ -598,16 +610,22 @@ class AppModel extends ChangeNotifier {
       _alerts[idx] = a;
     } else {
       _alerts = [..._alerts, a];
+      AnalyticsService.alertSet(kind: a.kind.name, busNo: a.busNo);
     }
     _persistAlerts();
-    // Setting an alert IS the opt-in to notifications. If they're not enabled
-    // yet (e.g. the user skipped the onboarding prompt, or never visited
-    // Settings ▸ Notifications), turn them on now — this requests
+    // Setting an alert IS the opt-in to notifications. Ensure the OS
+    // permission is actually granted and the intent flag is on — this requests
     // POST_NOTIFICATIONS + exact-alarm permission and schedules the pending
-    // alerts. Without this the alert is stored but NEVER fires, which is
-    // exactly the "Android notifications don't work" report: scheduling is
-    // gated behind `_notificationsEnabled`, and it defaults to off.
-    if (!_notificationsEnabled) {
+    // alerts. Without it the alert is stored but NEVER fires.
+    //
+    // `_notificationsEnabled` now defaults ON (iOS parity), so it can no longer
+    // double as a proxy for "permission granted" — we also check the real auth
+    // state. Re-run setNotificationsEnabled when EITHER the user previously
+    // turned notifications off (flag false → re-opt-in) OR the OS hasn't
+    // granted us permission yet. Requesting when already granted is a no-op
+    // (no second dialog), so this is safe in the common case too.
+    if (!_notificationsEnabled ||
+        _notificationAuth != NotifPermStatus.granted) {
       await setNotificationsEnabled(true);
     }
     if (a.kind == AlertKind.destination &&
@@ -673,11 +691,12 @@ class AppModel extends ChangeNotifier {
     );
     final lc = _prefs!.getString(_kLocaleKey);
     _locale = (lc == null || lc.isEmpty) ? null : Locale(lc);
-    // Default OFF: the flag is the persisted result of the permission
-    // flow (see setNotificationsEnabled). Defaulting ON would show the
-    // toggle enabled before POST_NOTIFICATIONS was ever granted, so no
-    // alerts would actually fire — a lying toggle. Opt-in only.
-    _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? false;
+    // Default ON for users with no persisted choice yet, mirroring iOS so
+    // disruption pushes reach them out of the box (see the field declaration
+    // for the full rationale). A user who explicitly toggled notifications off
+    // has `false` persisted and keeps it; refreshNotificationAuth() corrects
+    // the flag down on an explicit OS denial so the toggle never lies.
+    _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? true;
     _hapticsEnabled = _prefs!.getBool(_kHapticsKey) ?? true;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
     _lastSeenVersion = _prefs!.getString(_kLastSeenVersionKey);
@@ -1027,6 +1046,7 @@ class AppModel extends ChangeNotifier {
     } else {
       _pins = [..._pins, Pin(code: code, nickname: _ds.stopName(code))];
       _markRecentlyAdded(code);
+      AnalyticsService.favouriteAdded(FavKind.stop);
     }
     _persistPins();
     notifyListeners();
