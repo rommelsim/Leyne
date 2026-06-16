@@ -8,6 +8,29 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.8.0 · iOS (29) · 2026-06-16
+
+**2026-06-16 — iOS Archive (2.8.0, build 29):** App Store review resubmission —
+resolves the two issues raised against build 28 (submission
+2b3b75e3-…). Build number jumped 25 → 29 (26–28 are burned on App Store Connect;
+26/27/28 were archived from Xcode without committing the bump). Marketing version
+stays 2.8.0. No user-facing feature changes — compliance only.
+
+- **Guideline 5.1.1(iv) — location permission priming:** the onboarding location
+  primer no longer uses an "Allow location" button or a "Not now" skip. It now
+  shows a neutral **"Continue"** button and **no in-app skip/exit** before the
+  system prompt — the OS dialog is where the user grants or denies. The notif /
+  tracking primers are unchanged (not flagged; a skip there is permitted).
+  (`OnboardingView.swift` — `primer()` secondary made optional, `locationPrimer`)
+- **Guideline 5.2.5 — WeatherKit removed:** rather than carry the WeatherKit
+  attribution + per-submission screen-recording overhead, WeatherKit was removed
+  entirely — deleted `WeatherService.swift` + `WeatherHeader.swift`, dropped the
+  `com.apple.developer.weatherkit` entitlement and the `WeatherKit.framework`
+  link from `project.pbxproj`. The Home header keeps its **greeting + clock**
+  context line (no entitlement / attribution needed); only the temperature /
+  condition / rain-hint readout is gone. Reply to Apple: "the app does not use
+  WeatherKit." (`SoftHomeView.swift`)
+
 ## Leyne 2.8.0 · Android (39) · 2026-06-16
 
 **2026-06-16 — Android AAB (2.8.0, build 39):** _(versionName jumped 2.5.1 →
@@ -42,8 +65,9 @@ cross-platform idiom bleed). Output:
   matching iOS. (`soft_search_screen.dart`, `soft_favourites_screen.dart`)
 - **Settings cleanup:** dropped the 24-hour-clock toggle (the app is 12-hour
   throughout) and the postal-code search-radius option, matching iOS.
-- **Analytics + ad revenue:** Firebase Analytics with Impression-Level Ad Revenue
-  reporting, plus a PromptCenter pass refining ad handling. (`ad_banner.dart`)
+- **Fewer launch ads:** the App Open (full-screen) frequency cap was raised
+  6h → 24h, so the warm-return launch ad shows at most once a day. Cold-launch
+  App Open stays disabled. (`app_open_ad.dart`)
 
 ## Leyne 2.8.0 · iOS (25) · 2026-06-13
 

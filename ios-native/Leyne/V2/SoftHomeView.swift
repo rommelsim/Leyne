@@ -1,5 +1,5 @@
-// SoftHomeView — Leyne Home ("Stops near you"): a one-line greeting · clock ·
-// weather context strip, the "Stops near you" title with an alerts bell, a
+// SoftHomeView — Leyne Home ("Stops near you"): a one-line greeting · clock
+// context strip, the "Stops near you" title with an alerts bell, a
 // compact LIVE status line, then the single closest stop (marked by its own
 // "Closest stop" badge) followed by the rest under "More stops". Each card
 // shows the stop's identity and its soonest service's next three arrivals.
@@ -13,7 +13,6 @@ struct SoftHomeView: View {
     @EnvironmentObject var fb: Feedback
     @EnvironmentObject var ds: DataStore
     @StateObject private var loc = LocationManager.shared
-    @ObservedObject private var ws = WeatherService.shared
 
     /// Line codes the user has tapped to dismiss this session. Cleared
     /// when the app cold-starts so a new disruption surfaces again.
@@ -105,11 +104,10 @@ struct SoftHomeView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Weather + greeting + clock — degrades invisibly when
-            // WeatherKit is unavailable (WeatherHeader shows only the
-            // greeting row in that case).
-            WeatherHeader(t: t)
-                .padding(.horizontal, -16)  // bleed to scroll-view edge
+            // Greeting + clock context line. WeatherKit was removed in 2.8.0
+            // build 29 (App Store 5.2.5 attribution overhead); the time-of-day
+            // context stays since it needs no entitlement or attribution.
+            greetingClock
 
             Text("Stops near you")
                 .font(t.sans(33, weight: .bold))
@@ -119,6 +117,44 @@ struct SoftHomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
+    }
+
+    /// A compact "Good morning · 8:41 PM" context line. The clock refreshes each
+    /// minute via TimelineView; the format follows the device's 12/24-hour
+    /// setting (.short style).
+    private var greetingClock: some View {
+        TimelineView(.everyMinute) { ctx in
+            HStack(spacing: 6) {
+                Text(greeting(for: ctx.date))
+                    .font(t.sans(13, weight: .medium))
+                    .foregroundStyle(t.dim)
+                Text("·")
+                    .font(t.sans(13))
+                    .foregroundStyle(t.faint)
+                Text(timeString(ctx.date))
+                    .font(t.mono(13, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                Spacer(minLength: 0)
+            }
+            .lineLimit(1)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func greeting(for date: Date) -> String {
+        switch Calendar.current.component(.hour, from: date) {
+        case 5..<12:  return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default:      return "Good night"
+        }
+    }
+
+    private func timeString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f.string(from: date)
     }
 
     private var liveRow: some View {

@@ -162,8 +162,10 @@ struct OnboardingView: View {
                body: "Leyne uses your location to surface the nearest stops and place your bus, you and your stop on the map.",
                points: [("mappin.and.ellipse", "Nearest stops, sorted by distance"),
                         ("bus.fill", "See exactly where your stop is")],
-               primary: "Allow location", onPrimary: { onRequestLocation(); advance() },
-               secondary: "Not now", onSecondary: { advance() })
+               // Guideline 5.1.1(iv): neutral button wording ("Continue", not
+               // "Allow location") and NO in-app skip/exit before the system
+               // location prompt. The OS dialog is where allow/deny happens.
+               primary: "Continue", onPrimary: { onRequestLocation(); advance() })
     }
 
     private var notifPrimer: some View {
@@ -307,7 +309,8 @@ struct OnboardingView: View {
                         title: String, body: String,
                         points: [(String, String)],
                         primary: String, onPrimary: @escaping () -> Void,
-                        secondary: String, onSecondary: @escaping () -> Void) -> some View {
+                        secondary: String? = nil,
+                        onSecondary: (() -> Void)? = nil) -> some View {
         stepScaffold(dotsIndex: dotsIndex) {
             VStack(alignment: .leading, spacing: 0) {
                 ZStack {
@@ -351,12 +354,19 @@ struct OnboardingView: View {
         } cta: {
             VStack(spacing: 4) {
                 primaryButton(primary, action: onPrimary)
-                Button(action: onSecondary) {
-                    Text(secondary)
-                        .font(t.sans(14, weight: .semibold))
-                        .foregroundStyle(t.dim)
-                        .frame(maxWidth: .infinity).frame(height: 44)
-                }.buttonStyle(.plain)
+                // The secondary "skip" button is omitted on permission primers
+                // that must not offer an in-app delay/exit before the system
+                // prompt (App Store Guideline 5.1.1(iv) — location). When absent
+                // the only way forward is the primary button, which triggers the
+                // OS dialog where the user makes the actual allow/deny choice.
+                if let secondary, let onSecondary {
+                    Button(action: onSecondary) {
+                        Text(secondary)
+                            .font(t.sans(14, weight: .semibold))
+                            .foregroundStyle(t.dim)
+                            .frame(maxWidth: .infinity).frame(height: 44)
+                    }.buttonStyle(.plain)
+                }
             }
         }
     }

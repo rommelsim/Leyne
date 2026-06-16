@@ -18,6 +18,18 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+// Firebase (Google Services) — apply the plugin only when google-services.json
+// is present, mirroring the keystore guard above. The plugin reads that file to
+// generate the values Firebase.initializeApp() consumes at runtime. Without it
+// (fresh clone / CI / before Firebase is configured) we skip the plugin so the
+// build still succeeds; Firebase.initializeApp() is wrapped in main.dart so
+// analytics degrade to a no-op instead of crashing. To activate Android
+// analytics: export google-services.json from the Firebase console (package
+// com.leyne.leyne) into android/app/, then rebuild.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.leyne.leyne"
     compileSdk = flutter.compileSdkVersion

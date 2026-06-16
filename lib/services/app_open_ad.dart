@@ -17,8 +17,8 @@
 //
 // Fires on BOTH a cold launch ([showOnColdLaunch], for returning users — never
 // the very first launch) and warm foreground (AppLifecycleListener onResume).
-// The 4h cap means a brief in-and-out won't trigger one; a genuine new session
-// (launch, or a return after hours) will.
+// The 24h cap means brief in-and-out app-switching won't trigger one; only a
+// genuine new session (a return after a long break) can, at most once a day.
 
 import 'dart:async';
 
@@ -55,11 +55,13 @@ class AppOpenAdManager {
   /// restore cold-launch presentation.
   static const bool _coldLaunchEnabled = false;
 
-  /// Frequency cap — at most one App Open ad per this window. Raised from 4h to
-  /// 6h alongside disabling the cold-launch ad, so even warm-return ads are
-  /// infrequent (tester feedback: too many ads on launch). A genuine new
-  /// session after a long break can still trigger one.
-  static const Duration _minInterval = Duration(hours: 6);
+  /// Frequency cap — at most one App Open ad per this window. Raised 4h → 6h →
+  /// 24h as tester feedback kept flagging the warm-return launch ad as annoying
+  /// (a bus app is opened many times a day; an ad on re-entry interrupts exactly
+  /// when the user wants arrivals). At 24h it shows at most once per day, on a
+  /// genuine new session after a long break. Cold-launch stays disabled
+  /// ([_coldLaunchEnabled]); banners + the interstitial-on-exit carry the rest.
+  static const Duration _minInterval = Duration(hours: 24);
 
   /// App Open creatives expire 4h after load (AdMob). Drop + reload past this.
   static const Duration _maxCacheAge = Duration(hours: 4);

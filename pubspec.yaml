@@ -70,6 +70,8 @@ dependencies:
   # in a lightweight background isolate so a new breakdown notifies even
   # without the app open.
   workmanager: ^0.9.0
+  firebase_core: ^4.10.0
+  firebase_analytics: ^12.4.2
 
 dev_dependencies:
   flutter_test:
