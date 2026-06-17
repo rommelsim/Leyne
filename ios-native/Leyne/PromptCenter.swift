@@ -1,13 +1,11 @@
 //  PromptCenter.swift
 //
-//  Coordinates Leyne's two soft, contextual prompts:
-//    • an App Store **review** nudge, and
-//    • a "Buy me a coffee" **support** nudge.
+//  Coordinates Leyne's soft, contextual App Store **review** nudge.
 //
-//  Both are paced by one coordinator so the user is asked at a good moment but
-//  never nagged: at most ONE prompt per app session, a minimum gap between any
-//  two asks, the review at most twice per install (and never again once rated —
-//  Apple also caps its own sheet to ~3/year), and the coffee nudge rarely.
+//  Paced so the user is asked at a good moment but never nagged: at most ONE
+//  prompt per app session, a minimum gap between asks, and the review at most
+//  twice per install (and never again once rated — Apple also caps its own
+//  sheet to ~3/year).
 //
 //  App-Store-compliant: the review path opens the App Store review composer
 //  (apps.apple.com/.../?action=write-review) — Apple-sanctioned for "Rate us"
@@ -22,10 +20,6 @@ import SwiftUI
 
 /// One source of truth for the app's outbound links (also used by Settings).
 enum AppLinks {
-    /// Stripe Payment Link for "Support Leyne" — PayNow + cards + Apple Pay,
-    /// settles SGD. Leyne is ad-funded, not paywalled; this is optional.
-    static let coffee = URL(string: "https://buy.stripe.com/6oU3cv5689oB3PI6R68so00")!
-
     /// Leyne's App Store numeric ID (apps.apple.com/sg/app/leyne/id6770481761).
     static let appStoreID = "6770481761"
     /// Opens the App Store review composer directly — always works (unlike
@@ -34,9 +28,9 @@ enum AppLinks {
         string: "https://apps.apple.com/app/id\(appStoreID)?action=write-review")!
 }
 
-/// The two prompts Leyne can present.
+/// The prompts Leyne can present.
 enum AppPrompt: String, Identifiable {
-    case rateApp, buyCoffee
+    case rateApp
     var id: String { rawValue }
 }
 
@@ -54,12 +48,8 @@ final class PromptCenter: ObservableObject {
     /// Open-count fallback trigger for the review (the journey trigger usually
     /// fires first for engaged users).
     private let reviewAfterOpens = 4
-    /// The coffee nudge waits until the app is clearly part of the user's routine.
-    private let coffeeAfterOpens = 12
     /// Hard floor between any two prompts of any kind.
     private let minDaysBetweenPrompts = 3
-    /// Re-offer coffee at most this often.
-    private let coffeeCooldownDays = 45
     /// Show the review pre-prompt at most this many times, then stop.
     private let maxReviewAsks = 2
 
@@ -68,7 +58,6 @@ final class PromptCenter: ObservableObject {
     private let kLastPrompt   = "leyne.prompts.lastPromptAt"
     private let kReviewAsks   = "leyne.prompts.reviewAsks"
     private let kReviewDone   = "leyne.review.requested"     // legacy key (reused)
-    private let kCoffeeLastAt = "leyne.prompts.coffeeLastAt"
 
     private let d = UserDefaults.standard
     /// Only one prompt per launch, regardless of how many triggers fire.
@@ -103,14 +92,9 @@ final class PromptCenter: ObservableObject {
         let reviewDone = d.bool(forKey: kReviewDone)
         let reviewAsks = d.integer(forKey: kReviewAsks)
 
-        // 1) Review first — until rated, or we've asked the cap of times.
+        // Review — until rated, or we've asked the cap of times.
         if !reviewDone, reviewAsks < maxReviewAsks, afterJourney || opens >= reviewAfterOpens {
             present(.rateApp); return
-        }
-        // 2) Coffee — only once the review is resolved, and sparingly.
-        let reviewResolved = reviewDone || reviewAsks >= maxReviewAsks
-        if reviewResolved, opens >= coffeeAfterOpens, coffeeCooldownElapsed {
-            present(.buyCoffee); return
         }
     }
 
@@ -133,17 +117,6 @@ final class PromptCenter: ObservableObject {
     /// re-ask, so we don't mark it done (the user may rate later).
     func declineReview() { active = nil }
 
-    func confirmCoffee(open: (URL) -> Void) {
-        d.set(Date().timeIntervalSince1970, forKey: kCoffeeLastAt)
-        active = nil
-        open(AppLinks.coffee)
-    }
-
-    func declineCoffee() {
-        d.set(Date().timeIntervalSince1970, forKey: kCoffeeLastAt)  // cooldown either way
-        active = nil
-    }
-
     // MARK: - Helpers
 
     private var lastPromptDate: Date? {
@@ -152,10 +125,4 @@ final class PromptCenter: ObservableObject {
     }
 
     private func daysSince(_ date: Date) -> Double { -date.timeIntervalSinceNow / 86_400 }
-
-    private var coffeeCooldownElapsed: Bool {
-        let t = d.double(forKey: kCoffeeLastAt)
-        guard t > 0 else { return true }
-        return daysSince(Date(timeIntervalSince1970: t)) >= Double(coffeeCooldownDays)
-    }
 }

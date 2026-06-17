@@ -6,7 +6,7 @@
 //   • Your alerts — a row into the personal bus arrival/destination alerts
 //     (ManageAlertsView), folding in what the old Home bell used to open.
 //   • A gear (top-right) opens the trimmed Settings as a sheet — Appearance,
-//     Haptics, Hidden stops, Buy-me-a-coffee — so those still have a home.
+//     Haptics, Hidden stops — so those still have a home.
 //
 // Service-status cards mirror SoftMrtNewsView so the visual language matches.
 

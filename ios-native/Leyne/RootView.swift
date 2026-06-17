@@ -58,7 +58,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
         .animation(.easeInOut(duration: 0.3), value: m.whatsNewVersion)
-        // Contextual review / "buy me a coffee" prompts — paced by PromptCenter.
+        // Contextual App Store review prompt — paced by PromptCenter.
         .sheet(item: $prompts.active) { prompt in
             PromptCard(prompt: prompt)
                 .environmentObject(m)

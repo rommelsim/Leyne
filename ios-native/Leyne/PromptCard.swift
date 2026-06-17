@@ -1,6 +1,6 @@
 //  PromptCard.swift
 //
-//  The on-brand sheet shown for both soft prompts (review / coffee). It is a
+//  The on-brand sheet shown for the soft App Store review prompt. It is a
 //  pure presentation layer — all pacing + action logic lives in PromptCenter.
 //  For the review, "Rate Leyne" triggers Apple's native StoreKit sheet (via
 //  PromptCenter.confirmReview); we never fake the rating UI here.
@@ -82,47 +82,26 @@ struct PromptCard: View {
 
     // MARK: - Content per prompt
 
-    private var iconName: String {
-        prompt == .rateApp ? "star.fill" : "cup.and.saucer.fill"
-    }
+    private var iconName: String { "star.fill" }
     private var iconTint: Color {
-        prompt == .rateApp
-            ? Color(red: 1.0, green: 0.72, blue: 0.13)     // amber star
-            : Color(red: 0.76, green: 0.50, blue: 0.27)    // warm coffee
+        Color(red: 1.0, green: 0.72, blue: 0.13)     // amber star
     }
-    private var title: String {
-        prompt == .rateApp ? "Enjoying Leyne?" : "Support Leyne"
-    }
+    private var title: String { "Enjoying Leyne?" }
     private var message: String {
-        switch prompt {
-        case .rateApp:
-            return "A quick App Store rating helps other Singapore commuters find Leyne. It only takes a moment."
-        case .buyCoffee:
-            return "Leyne is free and ad-light. If it's saved you a wait, you can buy me a coffee — totally optional."
-        }
+        "A quick App Store rating helps other Singapore commuters find Leyne. It only takes a moment."
     }
-    private var primaryTitle: String {
-        prompt == .rateApp ? "Rate Leyne" : "Buy me a coffee"
-    }
-    private var secondaryTitle: String {
-        prompt == .rateApp ? "Not now" : "Maybe later"
-    }
+    private var primaryTitle: String { "Rate Leyne" }
+    private var secondaryTitle: String { "Not now" }
 
     // MARK: - Actions
 
     private func primary() {
         fb.success()
-        switch prompt {
-        case .rateApp:   PromptCenter.shared.confirmReview { openURL($0) }
-        case .buyCoffee: PromptCenter.shared.confirmCoffee { openURL($0) }
-        }
+        PromptCenter.shared.confirmReview { openURL($0) }
     }
 
     private func secondary() {
         fb.select()
-        switch prompt {
-        case .rateApp:   PromptCenter.shared.declineReview()
-        case .buyCoffee: PromptCenter.shared.declineCoffee()
-        }
+        PromptCenter.shared.declineReview()
     }
 }
