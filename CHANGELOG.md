@@ -8,6 +8,26 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.8.1 · Android (41) · 2026-06-17
+
+**2026-06-17 — Android AAB (2.8.1, build 41):** Bug-fix release. versionName
+bumped 2.8.0 → 2.8.1, versionCode 40 → 41. Output:
+`build/app/outputs/bundle/release/app-release.aab`.
+
+- **System BACK button no longer exits the app.** On Android, pressing the
+  3-button navigation-bar BACK key closed the app instead of returning to the
+  previous screen — even with a Stop / Bus / Search detail open. The predictive-
+  back swipe gesture already worked; only the button was affected. Root cause:
+  `SoftRoot` holds the real back-stack in a **nested** `Navigator`, but the
+  legacy button path (`WidgetsApp.didPopRoute`) only calls `maybePop()` on the
+  **root** navigator, which holds a single route, so the OS finished the
+  activity. Fixed by wrapping the nested `Navigator` in `NavigatorPopHandler`,
+  which intercepts the button-back via a `PopScope` on the root route and pops
+  the nested stack instead (deferring to the OS only once it's back at the first
+  route — so back at a bare tab root still exits, matching the gesture).
+  (`lib/screens/v2/soft_root.dart`) Regression test added in
+  `test/widget_test.dart` (simulates `handlePopRoute`).
+
 ## Leyne 2.8.0 · iOS (29) · 2026-06-16
 
 **2026-06-16 — iOS Archive (2.8.0, build 29):** App Store review resubmission —

@@ -218,10 +218,24 @@ class _SoftRootState extends State<SoftRoot> {
 
   @override
   Widget build(BuildContext context) {
-    return Navigator(
-      key: _navKey,
-      observers: [_exitObserver],
-      onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => _rootTab()),
+    // The Android 3-button BACK key is dispatched to the ROOT navigator
+    // (MaterialApp's), which only ever holds this single SoftRoot route — so
+    // WidgetsApp.didPopRoute()'s maybePop() finds nothing to pop and the OS
+    // finishes the activity, exiting the app even with a Stop / Bus / Search
+    // detail pushed on the nested navigator below. (The predictive-back GESTURE
+    // already works: a nested Navigator bubbles a NavigationNotification that
+    // routes the gesture into the framework's pop logic; the legacy button
+    // path does not.) NavigatorPopHandler closes that gap — it installs a
+    // PopScope on this root route that, while the nested stack can pop, pops
+    // THIS navigator instead, and defers to the OS (exit) once it's back at the
+    // first route. Fixes button/gesture parity with no double-pop on gestures.
+    return NavigatorPopHandler(
+      onPopWithResult: (_) => _navKey.currentState?.maybePop(),
+      child: Navigator(
+        key: _navKey,
+        observers: [_exitObserver],
+        onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => _rootTab()),
+      ),
     );
   }
 

@@ -56,4 +56,45 @@ void main() {
     // runs to its attempt cap and then stops scheduling.
     await tester.pump(const Duration(seconds: 13));
   });
+
+  // Regression: the Android 3-button BACK key (the WidgetsBinding.handlePopRoute
+  // → didPopRoute path) must pop a route pushed on SoftRoot's NESTED navigator
+  // and return to the previous view — NOT fall through to the root navigator
+  // and exit the app. Before the NavigatorPopHandler wrap, handlePopRoute()
+  // returned false here (root navigator has one route) and called
+  // SystemNavigator.pop() → the app exited even with a detail screen open.
+  // The predictive-back gesture was unaffected and already worked; this guards
+  // the button path that did not.
+  testWidgets('System back button pops the nested stack instead of exiting',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
+    await AppModel.shared.load();
+
+    await tester.pumpWidget(const LyneApp());
+    await tester.pump(); // initial frame
+    expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
+
+    // Open Search — SoftRoot PUSHES this onto the nested navigator (it is not a
+    // state-swap like the other tabs), so the nested stack now has 2 routes.
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // fade-through
+    expect(find.text('Find a stop, bus or place'), findsOneWidget);
+    expect(find.text('No stops yet'), findsNothing); // Home is offstage below
+
+    // Simulate the hardware/3-button BACK key. handlePopRoute returns true only
+    // if an in-app observer consumed it (i.e. the back did NOT escape to the OS
+    // and finish the activity).
+    final handled = await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(handled, isTrue); // consumed in-app, not an app exit
+    expect(find.text('Find a stop, bus or place'), findsNothing);
+    expect(find.text('No stops yet'), findsOneWidget); // back on Home
+
+    // Drain the bounded App-Open-ad preload poll (see note above) so no timer
+    // is left pending at teardown.
+    await tester.pump(const Duration(seconds: 13));
+  });
 }

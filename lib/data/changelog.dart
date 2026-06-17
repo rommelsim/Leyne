@@ -30,6 +30,18 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.8.1': WhatsNewEntry(
+    headline: 'A smoother Back button.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.arrow_back_rounded,
+        title: 'Back returns to where you were',
+        body:
+            'Pressing the system Back button now takes you to the previous '
+            'screen instead of closing the app. Tap away — your place is kept.',
+      ),
+    ],
+  ),
   '2.8.0': WhatsNewEntry(
     headline: 'MRT, reimagined — plus alerts in one place.',
     items: [
