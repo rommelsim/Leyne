@@ -200,6 +200,7 @@ final class AppOpenAdManager: NSObject {
         FullScreenAdGate.markShown()
         self.ad = nil   // hand ownership to the present() lifecycle
         aoaLog.notice("App Open present")
+        Self.ensureOpaquePresenter(root)
         ad.present(from: root)
     }
 
@@ -209,6 +210,21 @@ final class AppOpenAdManager: NSObject {
             .flatMap(\.windows)
             .first(where: \.isKeyWindow)?
             .rootViewController
+    }
+
+    /// Full-screen ads composite over the presenting controller. SwiftUI's root
+    /// `UIHostingController` view is transparent (RootView paints its background
+    /// inside a ZStack rather than on the host view), so without an opaque
+    /// backdrop the ad renders see-through onto the live app. Force the
+    /// presenter view and its window opaque before presenting. Idempotent and
+    /// invisible in normal use — the app's own opaque background sits on top.
+    static func ensureOpaquePresenter(_ vc: UIViewController) {
+        vc.view.backgroundColor = .systemBackground
+        vc.view.isOpaque = true
+        if let window = vc.view.window {
+            window.backgroundColor = .systemBackground
+            window.isOpaque = true
+        }
     }
 }
 

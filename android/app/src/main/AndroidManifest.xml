@@ -41,7 +41,16 @@
     <application
         android:label="Leyne"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:enableOnBackInvokedCallback="true">
+
+        <!-- enableOnBackInvokedCallback: opt into the Android 13+ predictive-back
+             dispatcher. WITHOUT this, on Android 13/14 (incl. Xiaomi HyperOS /
+             MIUI, which default to gesture nav) the system back BYPASSES
+             Flutter's PopScope and finishes the activity directly — i.e. the
+             app exits and SoftRoot's back-stack handling never runs. With it,
+             back is delivered to the framework so the PopScope retrace logic in
+             lib/screens/v2/soft_root.dart takes effect on every OEM. -->
 
         <!-- Maps use flutter_map with free CartoDB raster tiles (no API key,
              no billing) — a modern style, not the dated default OSM raster.

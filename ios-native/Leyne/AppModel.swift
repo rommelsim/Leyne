@@ -606,6 +606,14 @@ final class AppModel: ObservableObject {
         restoreLiveActivity()
         observeActivityRestores()
         mirrorPinsToWidget()
+        // Sync notification authorization from the system on every cold launch.
+        // `autoTrackSoonestAlert()` — which spawns the arrival Live Activity —
+        // is gated on `notificationAuth`, which otherwise stays `.notDetermined`
+        // for an already-authorized returning user until they next open Settings
+        // (the only other place it's refreshed). Without this, a fresh launch
+        // never auto-starts the Live Activity for an armed alert. Runs async and
+        // resolves well before the first ~5 s auto-track tick.
+        Task { await refreshNotificationAuth() }
     }
 
     /// iOS restores existing Live Activities asynchronously after a cold

@@ -30,6 +30,30 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.8.5': WhatsNewEntry(
+    headline: 'A little more polish.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.tune_rounded,
+        title: 'Two small fixes',
+        body:
+            'The full route card keeps its last stops clear of the navigation '
+            'bar, and swipe-to-delete now shows up correctly in dark mode.',
+      ),
+    ],
+  ),
+  '2.8.4': WhatsNewEntry(
+    headline: 'Back, done right.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.arrow_back_rounded,
+        title: 'A more reliable Back button',
+        body:
+            'The system Back button now reliably returns you to your previous '
+            'screen on every Android phone — no more surprise exits.',
+      ),
+    ],
+  ),
   '2.8.1': WhatsNewEntry(
     headline: 'A smoother Back button.',
     items: [

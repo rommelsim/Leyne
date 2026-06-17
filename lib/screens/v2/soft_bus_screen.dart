@@ -1348,7 +1348,14 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                   ),
                   Flexible(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                      // Pad the bottom by the system navigation-bar inset so the
+                      // last route rows (esp. once "show all stops" is expanded)
+                      // clear the OS nav bar instead of rendering under it. The
+                      // sheet itself stays edge-to-edge (bg fills to the screen
+                      // bottom); only the scrollable content is inset. `ctx`
+                      // carries the device viewPadding inside the modal route.
+                      padding: EdgeInsets.fromLTRB(
+                          16, 8, 16, 28 + MediaQuery.viewPaddingOf(ctx).bottom),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [

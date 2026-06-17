@@ -4,6 +4,7 @@
 // modal bottom sheet from the Alerts tab's gear button.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'soft_alerts_screen.dart';
 import 'soft_bus_screen.dart';
@@ -40,6 +41,38 @@ class _InterstitialOnExitObserver extends NavigatorObserver {
   }
 }
 
+/// Reports every push/pop/replace/remove on the nested navigator so the root
+/// PopScope can keep `canPop` in sync with whether a detail/Search route is
+/// currently pushed (i.e. whether BACK should pop a route vs. change tabs).
+class _StackChangeObserver extends NavigatorObserver {
+  _StackChangeObserver(this.onChanged);
+  final VoidCallback onChanged;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    onChanged();
+    super.didPush(route, previousRoute);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    onChanged();
+    super.didPop(route, previousRoute);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    onChanged();
+    super.didRemove(route, previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    onChanged();
+    super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+  }
+}
+
 class SoftRoot extends StatefulWidget {
   const SoftRoot({super.key});
 
@@ -49,9 +82,44 @@ class SoftRoot extends StatefulWidget {
 
 class _SoftRootState extends State<SoftRoot> {
   SoftTab _tab = SoftTab.home;
+
+  /// Tabs visited before [_tab], oldest first — the OS BACK button retraces
+  /// this so back returns to the *previous* view, not always straight to Home.
+  /// Only tab swaps are recorded; Search and detail screens are real routes on
+  /// the nested navigator, which owns their back-stack. The app starts on Home,
+  /// so Home is always the bottom of this stack: when it empties we're back on
+  /// Home and the next BACK exits.
+  final List<SoftTab> _tabHistory = [];
+
   final _navKey = GlobalKey<NavigatorState>();
   final _exitObserver = _InterstitialOnExitObserver();
   late final AppLifecycleListener _lifecycle;
+
+  /// True while a Stop / Bus / Station / Search route is pushed on the nested
+  /// navigator. One input to the root PopScope's `canPop`: while a route is
+  /// pushed, BACK pops it; otherwise BACK retraces [_tabHistory]; only at the
+  /// true root (Home, empty history, nothing pushed) does BACK exit the app.
+  /// Kept in sync by [_stackObserver].
+  bool _nestedHasDetail = false;
+  late final _StackChangeObserver _stackObserver =
+      _StackChangeObserver(_syncNestedStack);
+
+  /// Last value pushed to [SystemNavigator.setFrameworkHandlesBack], so we only
+  /// hit the platform channel when it actually flips. See [build].
+  bool? _lastFrameworkHandlesBack;
+
+  /// Recompute [_nestedHasDetail] after any nested navigation. Deferred to a
+  /// post-frame callback because navigator observers fire mid-navigation, when
+  /// calling setState synchronously would land during build/layout.
+  void _syncNestedStack() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final hasDetail = _navKey.currentState?.canPop() ?? false;
+      if (hasDetail != _nestedHasDetail) {
+        setState(() => _nestedHasDetail = hasDetail);
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -103,13 +171,9 @@ class _SoftRootState extends State<SoftRoot> {
   }
 
   void _handleTab(SoftTab next) {
-    if (next == SoftTab.alerts) {
-      setState(() => _tab = next);
-      _navKey.currentState?.popUntil((r) => r.isFirst);
-      _markAlertsSeen();
-      return;
-    }
     if (next == SoftTab.search) {
+      // Search is a pushed route, not a tab swap — the nested navigator owns
+      // its back-stack, so it never participates in the tab history below.
       _navKey.currentState?.push(
         // Fade-through instead of MaterialPageRoute's slide so that opening
         // Search feels identical to switching any other tab. Back-stack
@@ -134,8 +198,16 @@ class _SoftRootState extends State<SoftRoot> {
       );
       return;
     }
+    // Record the tab we're leaving so BACK can retrace to it. Only on an actual
+    // change — re-tapping the active tab just resets its stack (popUntil below).
+    if (next != _tab) {
+      _tabHistory.add(_tab);
+    }
     setState(() => _tab = next);
     _navKey.currentState?.popUntil((r) => r.isFirst);
+    if (next == SoftTab.alerts) {
+      _markAlertsSeen();
+    }
   }
 
   /// Push the bus route view for [svc] anchored at [stopCode]. [fullRoute]
@@ -218,23 +290,77 @@ class _SoftRootState extends State<SoftRoot> {
 
   @override
   Widget build(BuildContext context) {
-    // The Android 3-button BACK key is dispatched to the ROOT navigator
-    // (MaterialApp's), which only ever holds this single SoftRoot route — so
-    // WidgetsApp.didPopRoute()'s maybePop() finds nothing to pop and the OS
-    // finishes the activity, exiting the app even with a Stop / Bus / Search
-    // detail pushed on the nested navigator below. (The predictive-back GESTURE
-    // already works: a nested Navigator bubbles a NavigationNotification that
-    // routes the gesture into the framework's pop logic; the legacy button
-    // path does not.) NavigatorPopHandler closes that gap — it installs a
-    // PopScope on this root route that, while the nested stack can pop, pops
-    // THIS navigator instead, and defers to the OS (exit) once it's back at the
-    // first route. Fixes button/gesture parity with no double-pop on gestures.
-    return NavigatorPopHandler(
-      onPopWithResult: (_) => _navKey.currentState?.maybePop(),
-      child: Navigator(
-        key: _navKey,
-        observers: [_exitObserver],
-        onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => _rootTab()),
+    // The Android BACK key / predictive-back gesture is dispatched to the ROOT
+    // navigator (MaterialApp's), which only ever holds this single SoftRoot
+    // route. This PopScope is that route's back handler, with explicit priority:
+    //
+    //   1. A Stop / Bus / Station / Search route is pushed on the nested
+    //      navigator → pop it (return to the underlying view).
+    //   2. Tab history is non-empty → return to the *previous* tab the user was
+    //      on (retrace), rather than jumping straight to Home.
+    //   3. History empty but somehow off Home → step back to Home (safety net,
+    //      so BACK can never strand the user on, or exit from, a non-Home tab).
+    //   4. Home, nothing pushed, empty history → `canPop` is true, so the OS
+    //      handles BACK and the app exits (standard Android root behaviour).
+    //
+    // Why this is hand-rolled: tab switches mutate `_tab` via setState (an
+    // AnimatedSwitcher swap — NOT a navigator push), so the nested navigator has
+    // no back-stack of tabs to pop. `_tabHistory` IS that missing stack;
+    // `_nestedHasDetail` (kept current by `_stackObserver`) tracks whether a
+    // real route is pushed so `canPop` only lets the OS exit at the true root.
+    final canExit =
+        !_nestedHasDetail && _tabHistory.isEmpty && _tab == SoftTab.home;
+
+    // CRITICAL for the Android 13+ predictive-back / OnBackInvokedCallback path
+    // (the real BACK button & gesture; NOT the legacy injected key event).
+    // The engine only delivers BACK to Flutter while it believes the framework
+    // will consume it. That belief is normally derived from a NavigationNotification
+    // bubbling to WidgetsApp — but our NESTED navigator emits canHandlePop=false
+    // whenever it sits on a bare tab root, which overwrites our root PopScope and
+    // makes Flutter UNREGISTER its OnBackInvokedCallback. Android then runs its
+    // default handler and finishes the activity — the app exits with onPopInvoked
+    // never firing (verified via logcat: setTopOnBackInvokedCallback flips from
+    // FlutterActivity$1 back to the default Activity lambda).
+    //
+    // `canExit` already consolidates nested-detail + tab-history + current tab, so
+    // it is the single source of truth. We push it to the engine directly here,
+    // and (below) swallow the nested navigator's NavigationNotification so it can
+    // no longer override us. Guarded so the platform channel is only hit on flips.
+    if (_lastFrameworkHandlesBack != !canExit) {
+      _lastFrameworkHandlesBack = !canExit;
+      SystemNavigator.setFrameworkHandlesBack(!canExit);
+    }
+
+    return PopScope(
+      canPop: canExit,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        final nav = _navKey.currentState;
+        if (nav != null && nav.canPop()) {
+          nav.pop(); // 1 — pop a pushed Stop / Bus / Station / Search route
+          return;
+        }
+        if (_tabHistory.isNotEmpty) {
+          final prev = _tabHistory.removeLast(); // 2 — retrace to previous tab
+          setState(() => _tab = prev);
+          if (prev == SoftTab.alerts) _markAlertsSeen();
+          return;
+        }
+        if (_tab != SoftTab.home) {
+          setState(() => _tab = SoftTab.home); // 3 — safety net
+        }
+      },
+      // Swallow the nested navigator's NavigationNotification so it can't reach
+      // WidgetsApp and flip framework-handles-back to false behind our backs
+      // (see the setFrameworkHandlesBack note above). Returning true stops
+      // propagation; our explicit call is the authority on BACK handling.
+      child: NotificationListener<NavigationNotification>(
+        onNotification: (_) => true,
+        child: Navigator(
+          key: _navKey,
+          observers: [_exitObserver, _stackObserver],
+          onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => _rootTab()),
+        ),
       ),
     );
   }

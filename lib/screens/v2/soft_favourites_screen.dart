@@ -1031,6 +1031,13 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     required Alignment alignment,
     required EdgeInsets padding,
   }) {
+    // Ink must contrast the `color` fill (always t.crit). In Leyne's MONOCHROME
+    // palette t.crit is #111 ink in light mode but **white** in dark mode, so a
+    // hardcoded Colors.white icon/label rendered white-on-white in dark mode —
+    // the Delete affordance vanished. t.contrastFg is the ink paired with
+    // t.crit/t.contrast and flips correctly per mode (dark→#0F0F0F, light→white).
+    final t = context.t;
+    final ink = t.contrastFg;
     return Container(
       decoration: BoxDecoration(
         color: color,
@@ -1041,12 +1048,12 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: Colors.white, size: 20),
+          Icon(icon, color: ink, size: 20),
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: ink,
               fontSize: 14,
               fontWeight: FontWeight.w600,
             ),

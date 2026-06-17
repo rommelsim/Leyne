@@ -8,11 +8,140 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## iOS — unreleased (pending next Archive) · 2026-06-17
+
+Two iOS bug fixes landed in code; they ship with the next iOS Archive (version /
+build bump happens at archive time in Xcode).
+
+- **Live Activity now spawns on a cold launch.** For an already-authorized
+  returning user, `notificationAuth` stayed `.notDetermined` after a fresh launch
+  (it was only ever refreshed from Settings / the notifications toggle), so
+  `autoTrackSoonestAlert()` — gated on that value — silently bailed and never
+  started the arrival Live Activity until the user happened to open Settings.
+  Fixed by syncing notification authorization from the system in `AppModel.init()`
+  (`Task { await refreshNotificationAuth() }`), so the first ~5 s auto-track tick
+  spawns the LA for an armed alert. (`ios-native/Leyne/AppModel.swift`)
+- **Full-screen ads no longer render with a see-through background.** App Open /
+  Interstitial ads present over SwiftUI's root `UIHostingController`, whose view
+  is transparent (RootView paints its background inside a ZStack), so the ad
+  composited onto the live app. Added `ensureOpaquePresenter(_:)` which forces
+  the presenter view + its window opaque immediately before `present(from:)`, in
+  both managers. (`ios-native/Leyne/AppOpenAd.swift`, `InterstitialAd.swift`)
+
+## Leyne 2.8.5 · Android (46) · 2026-06-17
+
+**2026-06-17 — Android AAB + APK (2.8.5, build 46):** Bug-fix release. versionName
+bumped 2.8.4 → 2.8.5, versionCode 45 → 46. Output:
+`build/app/outputs/bundle/release/app-release.aab` (AAB) and
+`build/app/outputs/flutter-apk/app-release.apk` (APK). Two UI fixes on top of the
+2.8.4 back-button fix:
+
+- **Route card no longer hides its last stops under the system navigation bar.**
+  The full-route bottom sheet (bus view → "View full route") used a fixed
+  `bottom: 28` content padding with no system-inset handling — the only sheet in
+  the app missing it — so on a tall/expanded route ("show all N stops") the final
+  rows rendered behind the OS nav bar. Fixed by padding the scroll content by
+  `MediaQuery.viewPaddingOf(ctx).bottom`; the sheet stays edge-to-edge while its
+  content clears the nav bar. (`lib/screens/v2/soft_bus_screen.dart`) Verified
+  on-device: scrolled to the terminus, the last stop + "Hide later stops" sit
+  clear above the nav bar.
+- **Swipe-to-delete on a saved item is now visible in dark mode.** The Saved
+  view's `Dismissible` delete background (`_dismissBackground`) hardcoded its icon
+  and "Delete" label as `Colors.white`. In Leyne's monochrome palette `t.crit`
+  (the background fill) is **white** in dark mode, so the affordance rendered
+  white-on-white — invisible. Switched the ink to `t.contrastFg`, the color paired
+  with `t.crit`, which resolves to near-black in dark mode and white in light mode.
+  (`lib/screens/v2/soft_favourites_screen.dart`) Verified on-device in dark mode.
+
+## Leyne 2.8.4 · Android (45) · 2026-06-17
+
+**2026-06-17 — Android AAB + APK (2.8.4, build 45):** Bug-fix release. versionName
+bumped 2.8.3 → 2.8.4, versionCode 44 → 45. Output:
+`build/app/outputs/bundle/release/app-release.aab` (AAB) and
+`build/app/outputs/flutter-apk/app-release.apk` (APK).
+
+- **System BACK *still* exited the app — now actually fixed (and verified on a
+  real device this time).** 2.8.3's `enableOnBackInvokedCallback="true"` correctly
+  routed BACK through the Android 13+ predictive-back dispatcher — but doing so
+  *exposed* a latent bug on **every** Android 13+ device (Samsung included, not
+  just Xiaomi): SoftRoot's NESTED `Navigator` reports `canHandlePop=false` whenever
+  it sits on a bare tab root, and that bubbled up to `WidgetsApp` and forced
+  `setFrameworkHandlesBack(false)` — so the engine UNREGISTERED Flutter's
+  `OnBackInvokedCallback`, Android ran its default handler, and the activity was
+  finished (app exit). The 2.8.2 `PopScope` retrace logic was correct but
+  **unreachable** — `onPopInvoked` never ran. Fixed in
+  `lib/screens/v2/soft_root.dart` by (1) driving
+  `SystemNavigator.setFrameworkHandlesBack(!canExit)` directly from `build`
+  (`canExit` already consolidates nested-detail + tab-history + current tab, so it
+  is the single source of truth), and (2) wrapping the nested `Navigator` in a
+  `NotificationListener<NavigationNotification>` that swallows its signal so it can
+  no longer override us.
+- **Why 41 / 43 / 44 all shipped broken:** every back regression test drove
+  `WidgetsBinding.handlePopRoute()` (the legacy injected-key path), which reaches
+  `PopScope` regardless of the engine's callback registration — so they passed on
+  broken code; `adb keyevent 4` has the same blind spot. This build was verified
+  on-device against the REAL `OnBackInvoked` path (tapping the 3-button back),
+  confirmed in logcat: `setTopOnBackInvokedCallback` stays on
+  `FlutterActivity$1` and `ShellBackPreview mType=TYPE_CALLBACK (4)` instead of
+  reverting to the default `Activity` lambda / `TYPE_RETURN_TO_HOME`. Added a
+  `test/widget_test.dart` test that asserts `setFrameworkHandlesBack` flips
+  false→true→false across Home → tab → Home (it fails on the old code).
+- User-facing What's New entry added (`lib/data/changelog.dart`).
+
+## Leyne 2.8.3 · Android (44) · 2026-06-17
+
+**2026-06-17 — Android AAB (2.8.3, build 44):** Bug-fix release. versionName
+bumped 2.8.2 → 2.8.3, versionCode 43 → 44. Output:
+`build/app/outputs/bundle/release/app-release.aab`.
+
+- **System BACK exited the app on Xiaomi (and other Android 13+ OEMs).** The
+  2.8.2 `PopScope` retrace logic was correct but never *ran* on these devices:
+  the app didn't opt into the Android 13+ predictive-back dispatcher, so on
+  HyperOS / MIUI (which default to gesture nav) the system back BYPASSED Flutter's
+  `PopScope` and finished the activity directly — the app just exited. Fixed by
+  adding `android:enableOnBackInvokedCallback="true"` to `<application>` in
+  `AndroidManifest.xml`, which routes back through the framework so the existing
+  retrace handling (`lib/screens/v2/soft_root.dart`) takes effect on every OEM.
+  Devices on the legacy back path (Android < 13 / 3-button nav) are unaffected —
+  the flag is ignored there. Silent release (no What's New entry).
+
+## Leyne 2.8.2 · Android (43) · 2026-06-17
+
+**2026-06-17 — Android AAB (2.8.2, build 43):** Bug-fix release. versionName
+bumped 2.8.1 → 2.8.2, versionCode 41 → 43 (build 42 was an internal cut that
+fixed the exit but always jumped to Home from any tab — see below — and was
+never released). Output:
+`build/app/outputs/bundle/release/app-release.aab`.
+
+- **System BACK now retraces your path instead of exiting or jumping to Home.**
+  Two prior attempts were incomplete. The 2.8.1 `NavigatorPopHandler` fix only
+  bridged BACK to the nested navigator's `maybePop()`; because switching tabs is
+  a `setState` / `AnimatedSwitcher` swap (not a navigator push), the nested stack
+  sat at its first route on any non-Home tab, so BACK fell through to the OS and
+  closed the app. Build 42 fixed the exit but always jumped straight to the
+  **Home** (Bus) tab, dropping the middle of the user's path (Home → MRT →
+  Alerts → BACK landed on Home, not MRT). Final fix: an explicit, prioritized
+  `PopScope` on the root route plus a `_tabHistory` stack of visited tabs —
+  (1) a pushed Stop / Bus / Station / Search route pops first;
+  (2) else BACK retraces to the **previous tab** (Alerts → MRT → Home);
+  (3) safety net — never strand on, or exit from, a non-Home tab;
+  (4) only at the true root (Home, empty history, nothing pushed) does BACK exit,
+  matching the predictive-back gesture. `_nestedHasDetail` (via
+  `_StackChangeObserver`) keeps `canPop` accurate.
+  (`lib/screens/v2/soft_root.dart`) Regression tests in `test/widget_test.dart`
+  cover the pushed-route pop, the single-hop return, and the multi-tab retrace.
+- Silent release — no What's New entry (2.8.1 already announced "A smoother Back
+  button"; this just makes that promise true, so it doesn't re-interrupt users).
+
 ## Leyne 2.8.1 · Android (41) · 2026-06-17
 
 **2026-06-17 — Android AAB (2.8.1, build 41):** Bug-fix release. versionName
 bumped 2.8.0 → 2.8.1, versionCode 40 → 41. Output:
 `build/app/outputs/bundle/release/app-release.aab`.
+
+> **⚠️ Superseded by 2.8.2 (build 43).** This fix was incomplete — it only
+> handled BACK from a *pushed detail route*, not from a *tab switch*, so BACK
+> from any non-Home tab still exited the app. See the 2.8.2 entry above.
 
 - **System BACK button no longer exits the app.** On Android, pressing the
   3-button navigation-bar BACK key closed the app instead of returning to the

@@ -152,6 +152,7 @@ final class InterstitialAdManager: NSObject {
         FullScreenAdGate.markShown()
         self.ad = nil   // hand ownership to the present() lifecycle
         interLog.notice("Interstitial present")
+        AppOpenAdManager.ensureOpaquePresenter(root)
         ad.present(from: root)
     }
 }
