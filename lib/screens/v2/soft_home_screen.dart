@@ -67,9 +67,14 @@ class _EyebrowItem extends _Item {
 }
 
 class _NearbyCardItem extends _Item {
-  _NearbyCardItem(this.stop, {required this.highlight});
+  _NearbyCardItem(
+    this.stop, {
+    required this.highlight,
+    this.badgeText = 'Closest stop',
+  });
   final NearbyStop stop;
   final bool highlight;
+  final String badgeText;
 }
 
 class _AlertItem extends _Item {
@@ -80,6 +85,9 @@ class _AlertItem extends _Item {
 class _NativeAdItem extends _Item {}
 
 class _EmptyItem extends _Item {}
+
+/// A quiet prompt (shown under the saved-stop fallback) to enable location.
+class _LocationNudgeItem extends _Item {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -181,6 +189,22 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       ..removeWhere((s) => AppModel.shared.isHiddenNearby(s.stopCode))
       ..sort((a, b) => a.distanceM.compareTo(b.distanceM));
     return base.take(12).toList();
+  }
+
+  /// Builds a NearbyStop for a saved pin (no GPS). Distance/walk are 0 so the
+  /// card hides the walk chip; arrivals are read live from servicesFor(code).
+  NearbyStop _savedStop(String code) {
+    final s = DataStore.shared.stopByCode[code];
+    return NearbyStop(
+      id: code,
+      stopName: DataStore.shared.stopName(code),
+      stopCode: code,
+      lat: s?.latitude ?? 0,
+      lon: s?.longitude ?? 0,
+      distanceM: 0,
+      walkMin: 0,
+      services: const [],
+    );
   }
 
   Future<void> _refresh(List<Pin> pins) async {
@@ -325,8 +349,44 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     }
 
     if (nearby.isEmpty) {
-      items.add(_GapItem(8));
-      items.add(_EmptyItem());
+      final pins = AppModel.shared.pins;
+      if (pins.isNotEmpty) {
+        // No nearby stops (location off / denied, or none in range) but the
+        // user has saved stops — show those instead of a dead end, so the app
+        // still answers "when's my bus?". The first saved stop is the hero
+        // ("Your stop"); the rest follow. Mirrors iOS SoftHomeView.
+        items.add(_GapItem(16));
+        items.add(_EyebrowItem('Your stops'));
+        items.add(_GapItem(10));
+        items.add(
+          _NearbyCardItem(
+            _savedStop(pins.first.code),
+            highlight: true,
+            badgeText: 'Your stop',
+          ),
+        );
+        final rest = pins.skip(1).toList();
+        if (rest.isNotEmpty) {
+          items.add(_GapItem(16));
+          items.add(_EyebrowItem('More saved'));
+          items.add(_GapItem(10));
+          for (var i = 0; i < rest.length; i++) {
+            if (i > 0) items.add(_GapItem(10));
+            items.add(_NearbyCardItem(_savedStop(rest[i].code), highlight: false));
+            if (i == 2 && rest.length > 3) {
+              items.add(_GapItem(10));
+              items.add(_NativeAdItem());
+            }
+          }
+        }
+        if (LocationService.shared.lastLocation == null) {
+          items.add(_GapItem(10));
+          items.add(_LocationNudgeItem());
+        }
+      } else {
+        items.add(_GapItem(8));
+        items.add(_EmptyItem());
+      }
       return items;
     }
 
@@ -420,16 +480,19 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       _LiveRowItem() => _liveRow(context),
       _GapItem(:final height) => SizedBox(height: height),
       _EyebrowItem(:final label) => Eyebrow(label),
-      _NearbyCardItem(:final stop, :final highlight) => RepaintBoundary(
-        child: _NearbyCard(
-          stop: stop,
-          highlight: highlight,
-          onTap: () => widget.onOpenStop(stop.stopCode),
-          onLongPress: () => _showStopPeek(context, stop),
+      _NearbyCardItem(:final stop, :final highlight, :final badgeText) =>
+        RepaintBoundary(
+          child: _NearbyCard(
+            stop: stop,
+            highlight: highlight,
+            badgeText: badgeText,
+            onTap: () => widget.onOpenStop(stop.stopCode),
+            onLongPress: () => _showStopPeek(context, stop),
+          ),
         ),
-      ),
       _AlertItem(:final alert) => _mrtAlertCard(context, alert),
       _NativeAdItem() => const NativeAdCard(),
+      _LocationNudgeItem() => _locationNudge(context),
       _EmptyItem() => _EmptyState(
         onNearby: () async {
           await LocationService.shared.requestAndStart();
@@ -499,6 +562,50 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     );
   }
 
+  /// A quiet prompt under the saved list to turn on location for nearby stops.
+  Widget _locationNudge(BuildContext context) {
+    final t = context.t;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        onTap: () async {
+          await LocationService.shared.requestAndStart();
+          final loc = LocationService.shared.lastLocation;
+          if (loc != null) {
+            DataStore.shared.updateNearby(loc.lat, loc.lon);
+            DataStore.shared.prefetchNearbyArrivals();
+          }
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(LyneRadius.md),
+            border: Border.all(color: t.line, width: 1),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.location_on_rounded, size: 14, color: LyneSignal.meBlue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Turn on location for stops near you',
+                  style: t.sans(
+                    13,
+                    weight: FontWeight.w500,
+                    color: LyneSignal.meBlue,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _mrtAlertCard(BuildContext context, TrainAlert alert) {
     final t = context.t;
     final color = alert.line?.color ?? t.dim;
@@ -564,12 +671,14 @@ class _NearbyCard extends StatelessWidget {
     required this.highlight,
     required this.onTap,
     this.onLongPress,
+    this.badgeText = 'Closest stop',
   });
 
   final NearbyStop stop;
   final bool highlight;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final String badgeText;
 
   @override
   Widget build(BuildContext context) {
@@ -623,7 +732,7 @@ class _NearbyCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(LyneRadius.full),
       ),
       child: Text(
-        'Closest stop',
+        badgeText,
         style: t.sans(11, weight: FontWeight.w700, color: t.contrastFg),
       ),
     );

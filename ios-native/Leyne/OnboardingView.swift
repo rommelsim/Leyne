@@ -30,7 +30,21 @@ struct OnboardingView: View {
     // Single-shot guard so rapid taps don't spawn multiple consent flows.
     @State private var trackingTapped = false
 
-    private var stepAnimation: Animation { .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4) }
+    private var stepAnimation: Animation { .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.34) }
+
+    // A short horizontal slide + fade — a crisp "push". `.move(edge:)` slid a
+    // whole screen of content the full screen width each step, which read as
+    // heavy and smeared during the cross-fade; a small fixed offset settles in
+    // cleanly instead. Forward pushes both steps left, Back pushes both right.
+    private func stepTransition(_ back: Bool) -> AnyTransition {
+        let dx: CGFloat = 44
+        return .asymmetric(
+            insertion: .modifier(active: OnbSlide(dx: back ? -dx : dx, opacity: 0),
+                                 identity: OnbSlide(dx: 0, opacity: 1)),
+            removal: .modifier(active: OnbSlide(dx: back ? dx : -dx, opacity: 0),
+                               identity: OnbSlide(dx: 0, opacity: 1))
+        )
+    }
 
     private func advance() {
         goingBack = false
@@ -62,10 +76,7 @@ struct OnboardingView: View {
                     stepContent
                         .id(step)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: goingBack ? .leading : .trailing),
-                            removal: .move(edge: goingBack ? .trailing : .leading)
-                        ).combined(with: .opacity))
+                        .transition(stepTransition(goingBack))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -389,6 +400,18 @@ struct OnboardingView: View {
                 .background(t.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Step transition modifier
+
+/// Drives the onboarding step slide: a small horizontal offset paired with a
+/// fade. Used as the active/identity endpoints of an `.asymmetric` transition.
+private struct OnbSlide: ViewModifier {
+    let dx: CGFloat
+    let opacity: Double
+    func body(content: Content) -> some View {
+        content.opacity(opacity).offset(x: dx)
     }
 }
 

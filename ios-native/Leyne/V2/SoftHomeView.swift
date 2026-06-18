@@ -53,12 +53,7 @@ struct SoftHomeView: View {
                     stopCard(closest, highlight: true)
                     let others = Array(stops.dropFirst().prefix(11))
                     if !others.isEmpty {
-                        Text("More stops")
-                            .font(t.sans(15, weight: .semibold))
-                            .foregroundStyle(t.dim)
-                            .listRowInsets(EdgeInsets(top: 10, leading: 18, bottom: 2, trailing: 16))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        moreHeader("More stops")
                         // Insert native ad after the 3rd card (index 2 in `others`).
                         // NativeAdCard renders EmptyView when no ad is loaded or
                         // ads are suppressed, so this is always safe to emit.
@@ -69,6 +64,22 @@ struct SoftHomeView: View {
                             }
                         }
                     }
+                } else if !m.pins.isEmpty {
+                    // No nearby stops (location off / denied, or none in range)
+                    // but the user has saved stops — show those instead of a
+                    // dead end, so the app still answers "when's my bus?". The
+                    // first saved stop is the hero ("Your stop"); the rest follow.
+                    let pins = m.pins
+                    savedStopCard(pins[0].code, highlight: true)
+                    let rest = Array(pins.dropFirst())
+                    if !rest.isEmpty {
+                        moreHeader("More saved")
+                        ForEach(Array(rest.enumerated()), id: \.element.code) { index, pin in
+                            savedStopCard(pin.code, highlight: false)
+                            if index == 2 { NativeAdCard() }
+                        }
+                    }
+                    if loc.location == nil { locationNudge }
                 } else {
                     SoftEmptyState(t: t,
                                    onNearby: { loc.requestAndStart() },
@@ -233,6 +244,82 @@ struct SoftHomeView: View {
             // t.soon, which is white in dark mode → invisible glyph).
             .tint(.green)
         }
+    }
+
+    // MARK: Saved-stop fallback (location off)
+
+    /// A section header row ("More stops" / "More saved").
+    private func moreHeader(_ title: String) -> some View {
+        Text(title)
+            .font(t.sans(15, weight: .semibold))
+            .foregroundStyle(t.dim)
+            .listRowInsets(EdgeInsets(top: 10, leading: 18, bottom: 2, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+
+    /// A Home card for a saved stop (used when there are no nearby stops). Walk
+    /// time is omitted when location is off; arrivals come from the same warmed
+    /// cache as the nearby cards. Trailing swipe removes it from Saved.
+    private func savedStopCard(_ code: String, highlight: Bool) -> some View {
+        let name = ds.stopName(code).isEmpty ? code : ds.stopName(code)
+        return SoftNearbyStopCard(
+            t: t,
+            name: name,
+            code: code,
+            road: ds.roadName(code),
+            walkMin: walkMin(code),
+            arrivals: rankedArrivals(code),
+            feed: feed(code),
+            highlight: highlight,
+            badgeText: "Your stop",
+            tick: m.tick,
+            onTap: { fb.select(); m.addRecent(name); onOpenStop(code) },
+            isSaved: true
+        )
+        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                fb.success(); m.togglePin(code: code)
+            } label: {
+                Label("Remove", systemImage: "star.slash.fill")
+            }
+        }
+    }
+
+    /// A quiet prompt under the saved list to turn on location for nearby stops.
+    private var locationNudge: some View {
+        Button {
+            fb.select(); loc.requestAndStart()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(t.meBlue)
+                Text("Turn on location for stops near you")
+                    .font(t.sans(13, weight: .medium))
+                    .foregroundStyle(t.meBlue)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(t.line, lineWidth: 1))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 5, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    /// Walk time in minutes to a stop, or 0 when location is unknown (the card
+    /// then hides the walk chip).
+    private func walkMin(_ code: String) -> Int {
+        guard let here = loc.location, let stop = ds.stopByCode[code] else { return 0 }
+        let d = haversine(here.coordinate.latitude, here.coordinate.longitude,
+                          stop.Latitude, stop.Longitude)
+        return max(1, Int((d / 80).rounded()))
     }
 
     // MARK: Context-menu actions
@@ -421,6 +508,9 @@ struct SoftNearbyStopCard: View {
     let arrivals: [RankedArrival]
     let feed: Freshness
     let highlight: Bool
+    /// Badge shown on the highlighted hero card. "Closest stop" when ranked by
+    /// GPS; "Your stop" when Home is falling back to saved stops (location off).
+    var badgeText: String = "Closest stop"
     let tick: Int            // forces a per-second live ETA recompute
     /// Tapping the card opens the full stop view — there is no inline expand.
     let onTap: () -> Void
@@ -459,7 +549,7 @@ struct SoftNearbyStopCard: View {
     }
 
     private var closestBadge: some View {
-        Text("Closest stop")
+        Text(badgeText)
             .font(t.sans(11, weight: .bold))
             .foregroundStyle(t.contrastFg)
             .padding(.horizontal, 10)
@@ -515,14 +605,19 @@ struct SoftNearbyStopCard: View {
             stopTeaser(count: arrivals.count, soonestEtaSec: $0.service.etaSec)
         }
         HStack(spacing: 5) {
-            Image(systemName: "figure.walk")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(t.soon)
-            Text("\(max(1, walkMin)) min")
-                .foregroundStyle(t.soon)
+            // Walk time only when we know the distance — saved stops shown with
+            // location off carry walkMin == 0, so the walk chip is suppressed
+            // rather than showing a misleading "1 min".
+            if walkMin > 0 {
+                Image(systemName: "figure.walk")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(t.soon)
+                Text("\(walkMin) min")
+                    .foregroundStyle(t.soon)
+                if soonest != nil { Text("·").foregroundStyle(t.faint) }
+            }
             if let soonest, let summary {
                 let conf = ArrivalConfidence.of(monitored: soonest.service.monitored, feed: feed)
-                Text("·").foregroundStyle(t.faint)
                 Image(systemName: "bus.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(t.dim)
