@@ -88,6 +88,13 @@ let kChangelog: [String: WhatsNewEntry] = [
         headline: "Smarter bus tracking — plus a trip companion.",
         items: [
             WhatsNewItem(
+                icon: "magnifyingglass",
+                title: "Smarter Search",
+                body: "Search now shows live departure countdowns from your nearest "
+                    + "stop while the field is empty, and each stop result shows "
+                    + "the next bus ETA at a glance. A trip planner is on the way."
+            ),
+            WhatsNewItem(
                 icon: "play.fill",
                 title: "Start trip",
                 body: "Tap \"Start trip\" on any bus to open the GO companion — "

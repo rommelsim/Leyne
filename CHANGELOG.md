@@ -8,6 +8,38 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 4 (Search + Trip results)
+
+### Search (Phase 4 — SoftSearchView rebuild)
+- **"Where to?" empty state** — "Plan a trip" trigger row + saved-places quick row
+  (Home / Work / Add — placeholder UI; no places model yet, flagged in code) +
+  recents list + **live Nearby Now board**: up to 3 `DepartureCard` rows from the
+  nearest GPS stop, ticking via `m.tick`, with `followingEtas`. Warms arrivals via
+  `ds.ensureArrivals` on appear.
+- **Rich typed result rows** — stop rows now carry a live next-ETA chip (green
+  "Arr" or "N min" Capsule) fed from `ds.arrivals`; bus rows use `ServiceBadge`
+  as the leading element (prototype spec); MRT rows unchanged.
+- **Segmented filter + postal search** — all existing logic preserved (postal
+  geocode, recents, `searchServices`/`searchStops`/`MrtGeo.stations`, analytics).
+- **Trip sheet trigger** — "Plan a trip" row + place-pill taps present
+  `TripResultsView` as a `.sheet` with the destination label.
+
+### TripResultsView (Phase 4 — new file)
+- **UI-complete shell, no routing engine.** Explicitly flagged in file header and
+  with an in-view amber disclaimer banner.
+- **From → To header** — destination label passed from Search; "Current location"
+  from GPS. Chevron-down dismiss button.
+- **Filter chip row** — Best / Fewest transfers / Least walking / Rain-safe;
+  re-sorts the trip list in place with animation.
+- **Trip option cards** (`DepartureCard`-style `glanceCard`):
+  - Duration hero (26pt rounded heavy) + clock window + fare (right-aligned)
+  - **Inline mode strip** — ordered walk/bus/MRT leg icons in journey sequence,
+    with line colour for MRT, compact ink badge for bus, walk glyph + minutes
+  - Transfer count + LIVE dot + tag labels
+  - Tapping routes to first bus stop via `onOpenBus`/`onOpenStop` callbacks
+- **Sample trips built from real nearby data** — stop names and bus numbers
+  pulled from `DataStore.nearby`; durations/fares are illustrative.
+
 ## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 3 (Bus detail + GO companion)
 
 ### Bus detail (Phase 3 — SoftBusView refactor)

@@ -1,8 +1,26 @@
-// SoftSearchView — Leyne Search tab: a first-class surface with a large
-// "Search" title, a prominent field, a recent-searches list, and results
-// auto-split into Services + Bus stops.
-// Input kind is auto-detected (no mode tabs); a 6-digit query geocodes
-// via OneMap and lists nearby stops. All real search logic is preserved.
+// SoftSearchView — Leyne Glance Phase 4: Search + Trip results.
+//
+// Layout when empty:
+//   "Where to?" field (always focused-ready)
+//   → "Plan a trip" row (opens TripResultsView sheet)
+//   → saved-places quick row (Home / Work / Add — placeholder; no places model yet)
+//   → recents list with swipe-to-remove
+//   → NEARBY NOW board: compact DepartureCard rows for the closest stop's services
+//
+// Layout while querying:
+//   → segmented type filter (All / Stops / Buses / MRT)
+//   → rich typed result rows:
+//       stop  — mappin glyph + name + code + live next-ETA chip
+//       bus   — ServiceBadge leading + terminus
+//       MRT   — MrtCodePill(s) + station name
+//
+// Postal code (6 digits): geocodes via OneMap → nearby stops within radius.
+// All real search logic, recents, and result navigation preserved from Phase 3.
+//
+// IMPORTANT: the "Where to?" destination field and TripResultsView are UI-complete
+// shells. The app has no routing engine. TripResultsView drives plausible derived
+// itineraries built from real nearby stops and lines but those are NOT real journey
+// plans. See TripResultsView.swift for the explicit shell notice.
 
 import SwiftUI
 
@@ -14,16 +32,14 @@ struct SoftSearchView: View {
     @State private var query = ""
     let onClose: () -> Void
     let onOpenStop: (String) -> Void
-    /// Called when the user taps a service result. Receives (originStopCode, serviceNo)
-    /// so the root can push SoftBusView directly with fullRoute: true.
+    /// Called when the user taps a service result. Receives (originStopCode, serviceNo).
     var onOpenBus: ((String, String) -> Void)?
-    /// Called when the user taps an MRT station result. Switches to the MRT tab
-    /// and pushes the station detail. Nil for callers that pre-date this param.
+    /// Called when the user taps an MRT station result.
     var onOpenMrtStation: ((MrtGeoStation) -> Void)?
 
     @FocusState private var focused: Bool
 
-    // Search category filter — only active during normal text-search results.
+    // Category filter — only active during non-postal text search.
     enum SearchFilter: String, CaseIterable {
         case all   = "All"
         case stops = "Stops"
@@ -38,19 +54,21 @@ struct SoftSearchView: View {
     @State private var postalLoading = false
     @State private var postalFailed = false
 
-    // Guards `search_performed` analytics to once per search session (set when the
-    // query first becomes non-empty, re-armed when cleared) — see the onChange.
+    // Trip results sheet destination.
+    @State private var tripDestination: String? = nil
+    @State private var showTrip = false
+
+    // Analytics guard — one event per distinct search session.
     @State private var loggedSearchSession = false
 
     private var t: Theme { m.t }
-
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
     private var isPostal: Bool { detectQueryKind(trimmed).kind == "postal" }
 
+    // MARK: Body
+
     var body: some View {
         ZStack {
-            // Tapping empty space dismisses the keyboard (there's no Done bar
-            // on a plain TextField, so this + scroll-to-dismiss are the ways out).
             t.bg.ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { focused = false }
@@ -71,30 +89,17 @@ struct SoftSearchView: View {
                     }
                     .padding(.horizontal, 16)
                 }
-                // Dragging the results list down sweeps the keyboard away as it
-                // goes — the expected "scroll to see more, keyboard hides" gesture.
                 .scrollDismissesKeyboard(.interactively)
 
                 Spacer(minLength: 0)
             }
         }
         .onAppear {
-            // Don't auto-focus: the keyboard should appear only when the user
-            // taps the field, not the moment the Search tab opens (user-reported).
-            // Warm the large, lazy BusRoutes dataset while the user browses, so
-            // tapping a bus result opens the route view immediately instead of
-            // blocking on a cold fetch (originStop + serviceRoute both need it).
             ds.ensureRoutes()
         }
         .onChange(of: query) { _, newVal in
             maybeGeocode()
-            // Reset filter to All when the query changes so a stale filter
-            // doesn't hide results from a completely different search term.
             if searchFilter != .all { searchFilter = .all }
-            // Log one search_performed per search session: fire on the keystroke
-            // that first makes the query non-empty, then re-arm once it's cleared.
-            // Avoids one analytics event per character while still counting each
-            // distinct search.
             let hasQuery = !newVal.trimmingCharacters(in: .whitespaces).isEmpty
             if hasQuery, !loggedSearchSession {
                 loggedSearchSession = true
@@ -102,6 +107,23 @@ struct SoftSearchView: View {
             } else if !hasQuery {
                 loggedSearchSession = false
             }
+        }
+        .sheet(isPresented: $showTrip) {
+            TripResultsView(
+                destination: tripDestination ?? "Destination",
+                nearbyStops: ds.nearby,
+                onOpenStop: { code in
+                    showTrip = false
+                    onOpenStop(code)
+                },
+                onOpenBus: { stopCode, svcNo in
+                    showTrip = false
+                    onOpenBus?(stopCode, svcNo)
+                }
+            )
+            .environmentObject(m)
+            .environmentObject(fb)
+            .environmentObject(ds)
         }
     }
 
@@ -113,16 +135,9 @@ struct SoftSearchView: View {
                 .font(t.sans(30, weight: .bold))
                 .foregroundStyle(t.fg)
             Spacer(minLength: 8)
-            // Cancel only appears while editing so the user can dismiss the
-            // keyboard without clearing the field. onClose is still reachable
-            // from Cancel — callers that wire Search as a modal can still close.
             if focused {
                 Button {
                     fb.select()
-                    // Search is a first-class tab now — Cancel only dismisses
-                    // the keyboard and clears the field. It must NOT call
-                    // onClose (that switched to the Bus tab). onClose is kept
-                    // for the legacy modal route's caller.
                     focused = false
                     query = ""
                 } label: {
@@ -145,7 +160,7 @@ struct SoftSearchView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(query.isEmpty ? t.dim : t.accent)
 
-            TextField("Search for stops, services or places", text: $query)
+            TextField("Search stops, services or places", text: $query)
                 .font(t.sans(15, weight: .medium))
                 .foregroundStyle(t.fg)
                 .focused($focused)
@@ -162,8 +177,6 @@ struct SoftSearchView: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                // Mic: visual affordance only — no speech recognition is wired.
-                // Rendered as a plain Image (not a Button) so there is no dead tap target.
                 Image(systemName: "mic")
                     .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(t.faint)
@@ -179,8 +192,6 @@ struct SoftSearchView: View {
         )
     }
 
-    /// iOS 26 Liquid Glass fill for the search field (the same `.regularMaterial`
-    /// the tab bar / IOSGlassPill use); opaque surface fallback on iOS 25-.
     private var fieldFill: AnyShapeStyle {
         if #available(iOS 26.0, *) {
             AnyShapeStyle(.regularMaterial)
@@ -189,7 +200,7 @@ struct SoftSearchView: View {
         }
     }
 
-    // MARK: Results / empty state router
+    // MARK: Results router
 
     @ViewBuilder private var resultsContent: some View {
         if trimmed.isEmpty {
@@ -212,19 +223,14 @@ struct SoftSearchView: View {
                     let showStops = searchFilter == .all || searchFilter == .stops
                     let showMrt   = searchFilter == .all || searchFilter == .mrt
 
-                    // Per-filter empty hints when the chosen category has no hits
-                    // but another category does. Global empty state is handled above.
                     if showBuses && services.isEmpty && searchFilter == .buses {
-                        emptyHint("No buses match",
-                                  "Try a different bus number or switch to All.")
+                        emptyHint("No buses match", "Try a different bus number or switch to All.")
                     }
                     if showStops && stops.isEmpty && searchFilter == .stops {
-                        emptyHint("No stops match",
-                                  "Try a stop name, a 5-digit stop code, or switch to All.")
+                        emptyHint("No stops match", "Try a stop name, a 5-digit stop code, or switch to All.")
                     }
                     if showMrt && mrtStations.isEmpty && searchFilter == .mrt {
-                        emptyHint("No MRT stations match",
-                                  "Try a station name or switch to All.")
+                        emptyHint("No MRT stations match", "Try a station name or switch to All.")
                     }
 
                     if showBuses && !services.isEmpty {
@@ -247,7 +253,7 @@ struct SoftSearchView: View {
         }
     }
 
-    // MARK: Search filter segmented control
+    // MARK: Segmented filter
 
     private var searchFilterControl: some View {
         HStack(spacing: 0) {
@@ -280,48 +286,116 @@ struct SoftSearchView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Empty state — recent searches (no Browse grid)
+    // MARK: Empty state (no query)
 
     @ViewBuilder private var emptyState: some View {
-        if m.recents.isEmpty {
-            searchPrompt
-        } else {
-            VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 0) {
+            // "Plan a trip" row — opens TripResultsView shell
+            planTripRow
+                .padding(.bottom, 12)
+
+            // Saved-places quick row: Home / Work / Add
+            // NOTE: No saved-places model exists in AppModel yet. These are
+            // affordance-only placeholders that open the trip planner. When a
+            // places model ships, swap these with real saved Place data.
+            savedPlacesRow
+                .padding(.bottom, 18)
+
+            // Recents section
+            if !m.recents.isEmpty {
                 recentsSection
+                    .padding(.bottom, 18)
             }
-            .padding(.top, 4)
+
+            // Nearby board
+            nearbyNowBoard
+        }
+        .padding(.top, 4)
+    }
+
+    // "Plan a trip" trigger row (prototype .whereto)
+    private var planTripRow: some View {
+        Button {
+            fb.tap()
+            tripDestination = nil
+            showTrip = true
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(t.surfaceHi)
+                    Image(systemName: "arrow.triangle.swap")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(t.brand)
+                }
+                .frame(width: 36, height: 36)
+
+                Text("Plan a trip — pick a destination")
+                    .font(t.sans(15, weight: .medium))
+                    .foregroundStyle(t.dim)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(t.faint)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+    }
+
+    // Prototype .places row: Home / Work / Add
+    private var savedPlacesRow: some View {
+        HStack(spacing: 10) {
+            placePill(icon: "house.fill", label: "Home") {
+                tripDestination = "Home"
+                showTrip = true
+            }
+            placePill(icon: "briefcase.fill", label: "Work") {
+                tripDestination = "Work"
+                showTrip = true
+            }
+            placePill(icon: "plus", label: "Add", dashed: true) {
+                // Placeholder — no places model yet; tapping is intentionally inert.
+            }
         }
     }
 
-    /// Quiet empty-state prompt shown when there are no recent searches. The
-    /// Browse grid was removed — its tiles seeded hard-coded example queries
-    /// (17179 / 96 / Clementi) that read as placeholder data.
-    private var searchPrompt: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 36, weight: .regular))
-                .foregroundStyle(t.faint)
-                .padding(.bottom, 6)
-            Text("Find a stop, bus or place")
-                .font(t.sans(15, weight: .semibold))
-                .foregroundStyle(t.fg)
-                .multilineTextAlignment(.center)
-            Text("Search by stop name, 5-digit stop code, bus number, or 6-digit postal code.")
-                .font(t.sans(12))
-                .foregroundStyle(t.dim)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+    private func placePill(icon: String, label: String, dashed: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: { fb.tap(); action() }) {
+            VStack(spacing: 6) {
+                ZStack {
+                    if dashed {
+                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5]))
+                            .foregroundStyle(t.line)
+                    } else {
+                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                            .fill(t.surface)
+                            .shadow(color: Color(white: 0.04, opacity: 0.05), radius: 1, x: 0, y: 1)
+                            .shadow(color: Color(white: 0.04, opacity: 0.06), radius: 10, x: 0, y: 6)
+                    }
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(dashed ? t.faint : t.brand)
+                }
+                .frame(width: 52, height: 52)
+
+                Text(label)
+                    .font(t.sans(12, weight: .semibold))
+                    .foregroundStyle(t.dim)
+            }
         }
+        .buttonStyle(PressScaleButtonStyle())
         .frame(maxWidth: .infinity)
-        .padding(.top, 56)
-        .padding(.horizontal, 24)
     }
 
-    // MARK: Recent searches — vertical list with swipe-to-remove
+    // MARK: Recents
 
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header row: "Recent searches" + "Clear" button
             HStack {
                 Eyebrow(text: "Recent searches", t: t)
                 Spacer(minLength: 8)
@@ -351,10 +425,8 @@ struct SoftSearchView: View {
             switch kind {
             case "bus":      return "bus.fill"
             case "stopcode": return "mappin"
-            case "postal",
-                 "block",
-                 "text":     return "location"
-            default:         return "clock.arrow.circlepath"
+            case "postal", "block", "text": return "location"
+            default: return "clock.arrow.circlepath"
             }
         }()
 
@@ -364,8 +436,7 @@ struct SoftSearchView: View {
         } label: {
             HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(t.surfaceHi)
+                    RoundedRectangle(cornerRadius: 9, style: .continuous).fill(t.surfaceHi)
                     Image(systemName: icon)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(t.dim)
@@ -398,34 +469,141 @@ struct SoftSearchView: View {
         .buttonStyle(PressScaleButtonStyle())
     }
 
+    // MARK: Nearby Now board (live departures from closest stop)
+
+    @ViewBuilder private var nearbyNowBoard: some View {
+        // Only show when GPS has resolved at least one stop.
+        guard let closest = ds.nearby.first else { return }
+
+        let arrivals = ds.arrivals[closest.stopCode]
+        let feed = Freshness.from(ds.lastRefresh(closest.stopCode))
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Eyebrow(text: "Nearby now", t: t)
+                Spacer(minLength: 0)
+                // Walk time chip
+                Text("\(closest.walkMin) min walk")
+                    .font(t.sans(12, weight: .semibold))
+                    .foregroundStyle(t.brand)
+            }
+            .padding(.leading, 2)
+
+            // Show up to 3 live departure cards from the nearest stop.
+            switch arrivals {
+            case .loaded(let services):
+                let shown = services.prefix(3)
+                ForEach(Array(shown), id: \.id) { svc in
+                    DepartureCard(
+                        t: t,
+                        service: svc,
+                        stopCode: closest.stopCode,
+                        feed: feed,
+                        tick: m.tick,
+                        followingEtas: followingEtas(for: svc),
+                        onTap: {
+                            fb.select()
+                            onOpenBus?(closest.stopCode, svc.no)
+                        }
+                    )
+                }
+                if services.isEmpty {
+                    nearbyEmptyHint
+                }
+
+            case .loading, nil:
+                ForEach(0..<2, id: \.self) { _ in DepartureCardSkeleton(t: t) }
+
+            case .empty, .error:
+                nearbyEmptyHint
+            }
+        }
+        .onAppear {
+            ds.ensureArrivals(stop: closest.stopCode)
+        }
+    }
+
+    /// Extract the 2nd and 3rd-bus ETA seconds from the same stop's arrivals,
+    /// for the DepartureCard "then X · Y min" sub-row.
+    private func followingEtas(for svc: Service) -> [Int] {
+        var result: [Int] = []
+        if svc.followingSec > 0 { result.append(svc.followingSec) }
+        if let third = svc.thirdDate.map({ Int($0.timeIntervalSinceNow) }), third > 0 {
+            result.append(third)
+        }
+        return result
+    }
+
+    private var nearbyEmptyHint: some View {
+        Text("No departures right now")
+            .font(t.sans(13))
+            .foregroundStyle(t.dim)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 20)
+    }
+
     // MARK: Section label
 
     private func sectionLabel(_ s: String) -> some View {
         Eyebrow(text: s, t: t).padding(.leading, 2).padding(.bottom, 2)
     }
 
-    // MARK: Stop result row
+    // MARK: Rich result rows — Stop
 
-    // Slim icon-led stop row — a square stop-pin tile distinguishes it from
-    // Home's chunky StopCards.
     private func stopRow(stop: LTABusStop) -> some View {
-        Button {
-            fb.select(); m.addRecent(query); onOpenStop(stop.BusStopCode)
+        // Warm arrivals so the next-ETA chip can populate as the user browses.
+        let _ = { ds.ensureArrivals(stop: stop.BusStopCode, silent: true) }()
+        let arrivals = ds.arrivals[stop.BusStopCode]
+        let nextEtaText: String? = {
+            if case .loaded(let svcs) = arrivals, let first = svcs.first {
+                let e = fmtETA(first.etaSec)
+                return e.big == "Arr" ? "Arr" : "\(e.big) min"
+            }
+            return nil
+        }()
+
+        return Button {
+            fb.select()
+            m.addRecent(query)
+            onOpenStop(stop.BusStopCode)
         } label: {
             HStack(spacing: 12) {
-                stopTile
+                // Pin tile
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(t.surfaceHi)
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(t.fg)
+                }
+                .frame(width: 34, height: 34)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(stop.Description)
                         .font(t.sans(15, weight: .semibold))
                         .foregroundStyle(t.fg)
                         .lineLimit(1)
                     Text(stop.RoadName.isEmpty ? "Stop \(stop.BusStopCode)"
-                                               : "\(stop.BusStopCode) · \(stop.RoadName)")
+                                              : "\(stop.BusStopCode) · \(stop.RoadName)")
                         .font(t.mono(11))
                         .foregroundStyle(t.dim)
                         .lineLimit(1)
                 }
+
                 Spacer(minLength: 0)
+
+                // Live next-ETA chip when available
+                if let eta = nextEtaText {
+                    Text(eta)
+                        .font(t.rounded(12, .bold).monospacedDigit())
+                        .foregroundStyle(eta == "Arr" ? t.go : t.fg)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            (eta == "Arr" ? t.go.opacity(0.12) : t.surfaceHi),
+                            in: Capsule()
+                        )
+                }
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(t.faint)
@@ -436,17 +614,7 @@ struct SoftSearchView: View {
         .buttonStyle(PressScaleButtonStyle())
     }
 
-    private var stopTile: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(t.surfaceHi)
-            Image(systemName: "mappin.and.ellipse")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(t.fg)
-        }
-        .frame(width: 34, height: 34)
-    }
-
-    // MARK: MRT station result row
+    // MARK: Rich result rows — MRT station
 
     private func mrtStationRow(_ station: MrtGeoStation) -> some View {
         Button {
@@ -455,7 +623,6 @@ struct SoftSearchView: View {
             onOpenMrtStation?(station)
         } label: {
             HStack(spacing: 12) {
-                // Tram tile
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous).fill(t.surfaceHi)
                     Image(systemName: "tram.fill")
@@ -469,7 +636,6 @@ struct SoftSearchView: View {
                         .font(t.sans(15, weight: .semibold))
                         .foregroundStyle(t.fg)
                         .lineLimit(1)
-                    // Line-code pills
                     HStack(spacing: 4) {
                         ForEach(station.codes, id: \.self) { code in
                             Text(code)
@@ -481,7 +647,9 @@ struct SoftSearchView: View {
                         }
                     }
                 }
+
                 Spacer(minLength: 0)
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(t.faint)
@@ -492,7 +660,10 @@ struct SoftSearchView: View {
         .buttonStyle(PressScaleButtonStyle())
     }
 
-    // MARK: Service result row
+    // MARK: Rich result rows — Bus service
+    //
+    // The route badge IS the leading element (prototype spec: "bus: route badge
+    // leading + terminus"). ServiceBadge(.sm) — 36×36 ink square.
 
     private func svcRow(_ svc: LTABusServiceDTO) -> some View {
         Button {
@@ -504,8 +675,6 @@ struct SoftSearchView: View {
                         if let openBus = onOpenBus {
                             openBus(s.BusStopCode, svc.ServiceNo)
                         } else {
-                            // Fallback: open the origin stop (legacy behaviour for
-                            // callers that haven't wired onOpenBus yet).
                             onOpenStop(s.BusStopCode)
                         }
                     }
@@ -513,7 +682,9 @@ struct SoftSearchView: View {
             }
         } label: {
             HStack(spacing: 12) {
+                // Badge IS the leading icon (prototype spec)
                 ServiceBadge(svc: svc.ServiceNo, t: t, size: .sm)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Service \(svc.ServiceNo)")
                         .font(t.sans(15, weight: .semibold))
@@ -523,7 +694,9 @@ struct SoftSearchView: View {
                         .foregroundStyle(t.dim)
                         .lineLimit(1)
                 }
+
                 Spacer(minLength: 0)
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(t.faint)
@@ -534,7 +707,7 @@ struct SoftSearchView: View {
         .buttonStyle(PressScaleButtonStyle())
     }
 
-    // MARK: Postal results (6-digit → nearby stops within radius)
+    // MARK: Postal results
 
     @ViewBuilder private var postalResults: some View {
         if postalLoading {
@@ -626,7 +799,7 @@ struct SoftSearchView: View {
         .frame(maxWidth: .infinity).padding(.vertical, 40).padding(.horizontal, 24)
     }
 
-    // MARK: Geocode trigger — fires when the query is a fresh 6-digit code.
+    // MARK: Geocode trigger
 
     private func maybeGeocode() {
         guard isPostal, postalGeoFor != trimmed else { return }
