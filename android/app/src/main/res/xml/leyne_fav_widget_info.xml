@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Favourite Service widget — medium (4x2). Configure activity lets each
+     instance pick which favourited bus (no + stop) it tracks. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:configure="com.leyne.leyne.widget.FavPickerActivity"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_fav_desc"
+    android:previewImage="@drawable/widget_preview_fav" />

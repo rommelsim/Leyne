@@ -3,6 +3,11 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    // Compose compiler for Jetpack Glance home-screen widgets (@Composable
+    // widget content). Must be applied alongside the Kotlin plugin; Glance does
+    // NOT require buildFeatures.compose (that's for Compose UI) — only the
+    // compiler plugin to process the @Composable widget functions.
+    id("org.jetbrains.kotlin.plugin.compose")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -54,6 +59,24 @@ android {
         versionName = flutter.versionName
         // Maps use flutter_map with free CartoDB tiles — no API key, no
         // billing, no manifest placeholder needed.
+
+        // LTA DataMall key for the Kotlin/Glance widget refresh worker. The
+        // Glance widgets cannot call into the Dart runtime, so WidgetRefreshWorker
+        // hits v3/BusArrival directly and needs the key at the native layer.
+        // Sourced from the LTA_API_KEY env var (CI / local), falling back to the
+        // same embedded key the Dart side uses (lib/data/lta_config.dart) so a
+        // plain `flutter build` still produces working widgets.
+        buildConfigField(
+            "String",
+            "LTA_API_KEY",
+            "\"${System.getenv("LTA_API_KEY") ?: "+6zJ3XstTqOcDkvczHttWA=="}\"",
+        )
+    }
+
+    // BuildConfig.LTA_API_KEY above requires the buildConfig feature; AGP 8+
+    // defaults it off.
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -109,4 +132,18 @@ flutter {
 // safe within the major (2.x).
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // Jetpack Glance — the home-screen widgets are written in a Compose-like
+    // Kotlin DSL that compiles down to RemoteViews. Does not pull Compose into
+    // the Flutter app process; only the widget RemoteViews use it.
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.glance:glance-material3:1.1.1")
+    // WorkManager backstop that refreshes widget arrivals when the app is closed.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // StopPicker / FavPicker widget-configuration activities use AppCompat.
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    // GeofencingClient for the opt-in "Bus-coming alerts" feature. (geolocator
+    // pulls a play-services-location transitively, but we declare it explicitly
+    // so the GeofencingClient API version is pinned and not left to resolution.)
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }

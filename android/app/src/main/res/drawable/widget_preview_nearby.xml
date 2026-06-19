@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder gallery preview for the Nearest Stop widget. Replace with a
+     real rendered screenshot before the Play Store release. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <path android:fillColor="#FFFFFF" android:pathData="M0,0h120v120h-120z" />
+    <path android:fillColor="#73111111" android:pathData="M14,18h44v8h-44z" />
+    <path android:fillColor="#111111" android:pathData="M14,40h78v16h-78z" />
+    <path android:fillColor="#111111" android:pathData="M14,62h54v14h-54z" />
+    <path android:fillColor="#73111111" android:pathData="M14,92h40v9h-40z" />
+</vector>

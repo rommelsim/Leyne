@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder gallery preview for the Pinned Stop widget. Replace with a real
+     rendered screenshot before the Play Store release (docs/aso.md: the widget
+     shot is the best-converting store asset). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <path android:fillColor="#FFFFFF" android:pathData="M0,0h120v120h-120z" />
+    <path android:fillColor="#111111" android:pathData="M14,16h52v14h-52z" />
+    <path android:fillColor="#111111" android:pathData="M14,46h26v28h-26z" />
+    <path android:fillColor="#73111111" android:pathData="M48,54h58v12h-58z" />
+    <path android:fillColor="#1A111111" android:pathData="M14,88h92v2h-92z" />
+    <path android:fillColor="#73111111" android:pathData="M14,98h70v10h-70z" />
+</vector>

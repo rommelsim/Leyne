@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home-screen widget palette (light). Mirrors WidgetShared.swift exactly,
+     alpha included (#AARRGGBB). Glance resolves these per day/night via the
+     ColorProvider(resId) overload + the values-night variant. -->
+<resources>
+    <color name="w_bg">#FFFFFFFF</color>
+    <color name="w_fg">#FF111111</color>
+    <color name="w_dim">#A6111111</color>   <!-- fg @ 0.65 -->
+    <color name="w_faint">#73111111</color> <!-- fg @ 0.45 -->
+    <color name="w_line">#1A111111</color>  <!-- fg @ 0.10 -->
+    <color name="w_live">#FF111111</color>
+    <color name="w_live_bg">#FFEDEDED</color>
+    <color name="w_on_live">#FFFFFFFF</color>
+</resources>

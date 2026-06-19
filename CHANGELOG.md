@@ -8,6 +8,48 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Android — unreleased (pending next AAB) · 2026-06-19
+
+**Home Screen widgets land on Android** — closing the biggest iOS parity gap and
+adding a passive daily re-entry surface (the #1 DAU lever from the growth review).
+Three Jetpack Glance widgets mirror the iOS WidgetKit set:
+
+- **Pinned Stop** (2×2 / 4×2) — live arrivals for a stop you've pinned; a
+  configuration activity lets each instance pick which pinned stop it shows.
+- **Nearest Stop** (2×2) — the stop the app last resolved as nearest (the widget
+  never reads GPS itself).
+- **Favourite Service** (4×2) — next arrival for a favourited bus.
+
+Architecture: a Dart `WidgetBridge` (`lib/services/widget_bridge.dart`) mirrors
+pin/fav/nearby/arrival snapshots into the `home_widget` SharedPreferences store on
+every state change (resolving stop names + destinations app-side, converting ETA
+seconds→minutes); the Kotlin/Glance layer
+(`android/app/src/main/kotlin/com/leyne/leyne/widget/`) renders them with a palette
+matched to the iOS widgets, and a `WorkManager` task refreshes arrivals every 15 min
+when the app is closed. Taps open the relevant stop via the existing `lyne://` deep
+links. Scheduled-only ETAs keep the quiet "~" prefix (timely-over-honest rule).
+Builds clean (`flutter build apk --debug`). Preview images in the widget gallery are
+placeholders — replace with real screenshots before the store release.
+
+**Bus-coming alerts (opt-in geofence).** When you're near a stop you've favourited a
+bus at, Leyne pings you if that bus is within ~6 min — even with the app closed.
+~250m geofences (`GeofencingClient`) around favourited stops; on entry, a native
+receiver fetches arrivals (reusing the widget `LtaApiClient`) and posts to the
+existing `leyne.arrivals` channel, with a per-(stop,service) cooldown. OFF by
+default, behind a prominent-disclosure primer; uses `ACCESS_BACKGROUND_LOCATION`.
+Toggle in Notifications settings. Files: `lib/services/geofence_service.dart`,
+`android/app/src/main/kotlin/com/leyne/leyne/geofence/`. **Before release:** complete
+the Play background-location declaration + Data-Safety update — see
+`docs/android-bus-coming-alerts.md`.
+
+## iOS — unreleased (pending next Archive) · 2026-06-19
+
+- **Home Screen widgets are back.** The three home-screen widgets (Pinned Stop,
+  Nearest Stop, Favourite Service) were parked in `LeyneWidgetBundle` (only the
+  Live Activity shipped); re-enabled them. The app already publishes their data to
+  the App Group on every refresh, so no data wiring was needed.
+  (`ios-native/LeyneWidgets/LeyneLiveActivity.swift`)
+
 ## iOS — unreleased (pending next Archive) · 2026-06-17
 
 Two iOS bug fixes landed in code; they ship with the next iOS Archive (version /

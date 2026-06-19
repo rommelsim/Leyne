@@ -9,9 +9,9 @@ exist in the repo as of 2026-06-18.
 - `ios-native/LeyneWidgets/LeyneFavServiceWidget.swift`
 - `ios-native/LeyneWidgets/WidgetShared.swift` (palette, App Group readers, LTA client, shared atoms)
 
-> Note: iOS `LeyneWidgetBundle` currently parks the three home-screen widgets and ships only
-> `LeyneLiveActivity`. The widget code is complete and correct — they are simply commented-out in
-> the bundle. This spec targets re-enabling parity on Android.
+> Note: iOS `LeyneWidgetBundle` now ships all three home-screen widgets again (re-enabled
+> 2026-06-19) alongside `LeyneLiveActivity` — the app publishes their data to the App Group on
+> every refresh. This spec brings the same three widgets to Android for parity.
 
 ---
 
