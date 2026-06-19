@@ -106,7 +106,7 @@ private fun FavFilledContent(
             modifier          = GlanceModifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Use InkServiceBadge from LeyneStopWidget (same package, internal).
+            // Use InkServiceBadge from WidgetCommon (same package, internal).
             InkServiceBadge(no = fav.no, compact = false)
             Spacer(GlanceModifier.width(9.dp))
 

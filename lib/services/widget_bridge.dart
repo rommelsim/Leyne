@@ -49,14 +49,12 @@ class WidgetBridge {
   static final WidgetBridge instance = WidgetBridge._();
 
   // SharedPreferences keys — must match WidgetDataRepository.kt.
-  static const _kPins = 'leyne.widget.pins';
   static const _kNearby = 'leyne.widget.nearby';
   static const _kFavs = 'leyne.widget.favs';
   static String _arrivalsKey(String code) => 'leyne.widget.arrivals.$code';
 
   // Fully-qualified Glance receivers — must match AndroidManifest.xml.
   static const _pkg = 'com.leyne.leyne.widget';
-  static const _stopReceiver = '$_pkg.LeyneStopWidgetReceiver';
   static const _nearbyReceiver = '$_pkg.LeyneNearbyWidgetReceiver';
   static const _favReceiver = '$_pkg.LeyneFavServiceWidgetReceiver';
 
@@ -66,21 +64,13 @@ class WidgetBridge {
   DataStore get _ds => DataStore.shared;
 
   /// Cold-start / bulk seed — pushes every key from current state and refreshes
-  /// all three widgets. Safe to call repeatedly (e.g. once after AppModel.load()
-  /// and again once reference data resolves, so fav stop names fill in).
+  /// the widgets. Safe to call repeatedly (e.g. once after AppModel.load() and
+  /// again once reference data resolves, so fav stop names fill in).
   Future<void> pushAll() async {
     if (!_enabled) return;
-    await _writePins();
     await _writeFavs();
     await _writeNearby();
     await _updateAll();
-  }
-
-  /// Pinned stops changed (toggle / reorder / rename) — re-publish + redraw.
-  Future<void> pushPins() async {
-    if (!_enabled) return;
-    await _writePins();
-    await _update(_stopReceiver);
   }
 
   /// Favourite services changed — re-publish (resolving stop name + dest) +
@@ -98,31 +88,17 @@ class WidgetBridge {
     await _update(_nearbyReceiver);
   }
 
-  /// A stop's live arrivals settled — mirror them and nudge the stop + fav
-  /// widgets (either may be showing this stop). Throttled naturally by the
+  /// A stop's live arrivals settled — mirror them and nudge the favourite-
+  /// service widget (it may be showing this stop). Throttled naturally by the
   /// 25s arrival-refresh gate in DataStore, so this fires at most ~once/25s
   /// per active stop.
   Future<void> pushArrivals(String code, List<Service> services) async {
     if (!_enabled) return;
     await _writeArrivals(code, services);
-    await _update(_stopReceiver);
     await _update(_favReceiver);
   }
 
   // ─── Writers ──────────────────────────────────────────────────────────
-
-  Future<void> _writePins() async {
-    final arr = _app.pins.map((p) {
-      final name = p.nickname.isNotEmpty ? p.nickname : _ds.stopName(p.code);
-      return {'code': p.code, 'name': name};
-    }).toList();
-    await _save(_kPins, jsonEncode(arr));
-    // Seed arrivals for pinned stops from whatever's already loaded so the
-    // widget isn't blank before the next poll.
-    for (final p in _app.pins) {
-      await _writeArrivals(p.code, _ds.servicesFor(p.code));
-    }
-  }
 
   Future<void> _writeFavs() async {
     final arr = <Map<String, dynamic>>[];
@@ -208,7 +184,6 @@ class WidgetBridge {
   }
 
   Future<void> _updateAll() async {
-    await _update(_stopReceiver);
     await _update(_nearbyReceiver);
     await _update(_favReceiver);
   }

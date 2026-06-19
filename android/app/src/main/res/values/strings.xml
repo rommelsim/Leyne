@@ -1,20 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Home-screen widget gallery labels + descriptions. -->
-    <string name="widget_stop_label">Pinned Stop</string>
     <string name="widget_nearby_label">Nearest Stop</string>
     <string name="widget_fav_label">Favourite Bus</string>
 
-    <string name="widget_stop_desc">Live arrivals for a stop you\'ve pinned in Leyne.</string>
     <string name="widget_nearby_desc">Your nearest bus stop, one glance away.</string>
     <string name="widget_fav_desc">The next arrival for a bus you\'ve favourited.</string>
 
     <!-- Empty / prompt states rendered inside the widgets. -->
-    <string name="widget_no_pins">Pin a stop in Leyne</string>
     <string name="widget_no_nearby">Open Leyne to find nearby stops</string>
     <string name="widget_no_favs">Favourite a service in Leyne</string>
 
     <!-- Configuration activity titles. -->
-    <string name="widget_pick_stop_title">Choose a pinned stop</string>
     <string name="widget_pick_fav_title">Choose a favourite bus</string>
 </resources>

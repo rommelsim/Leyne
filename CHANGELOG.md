@@ -12,13 +12,13 @@ entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
 **Home Screen widgets land on Android** — closing the biggest iOS parity gap and
 adding a passive daily re-entry surface (the #1 DAU lever from the growth review).
-Three Jetpack Glance widgets mirror the iOS WidgetKit set:
+Two Jetpack Glance widgets mirror the iOS WidgetKit set:
 
-- **Pinned Stop** (2×2 / 4×2) — live arrivals for a stop you've pinned; a
-  configuration activity lets each instance pick which pinned stop it shows.
 - **Nearest Stop** (2×2) — the stop the app last resolved as nearest (the widget
   never reads GPS itself).
 - **Favourite Service** (4×2) — next arrival for a favourited bus.
+
+(A Pinned Stop widget was built then removed before release on both platforms.)
 
 Architecture: a Dart `WidgetBridge` (`lib/services/widget_bridge.dart`) mirrors
 pin/fav/nearby/arrival snapshots into the `home_widget` SharedPreferences store on
@@ -44,10 +44,11 @@ the Play background-location declaration + Data-Safety update — see
 
 ## iOS — unreleased (pending next Archive) · 2026-06-19
 
-- **Home Screen widgets are back.** The three home-screen widgets (Pinned Stop,
-  Nearest Stop, Favourite Service) were parked in `LeyneWidgetBundle` (only the
-  Live Activity shipped); re-enabled them. The app already publishes their data to
-  the App Group on every refresh, so no data wiring was needed.
+- **Home Screen widgets are back.** Re-enabled the **Nearest Stop** and
+  **Favourite Service** home-screen widgets in `LeyneWidgetBundle` (only the Live
+  Activity had been shipping). The app already publishes their data to the App
+  Group on every refresh, so no data wiring was needed. (Pinned Stop was
+  re-enabled then removed — left parked.)
   (`ios-native/LeyneWidgets/LeyneLiveActivity.swift`)
 
 ## iOS — unreleased (pending next Archive) · 2026-06-17

@@ -41,16 +41,6 @@ class WidgetRefreshWorker(
 
         val stopCodes = mutableSetOf<String>()
 
-        // Stop widget instances: use the configured stop or fall back to the first pin.
-        val pins = repo.getPins()
-        val stopInstances = glanceManager.getGlanceIds(LeyneStopWidget::class.java)
-        for (glanceId in stopInstances) {
-            val widgetId = glanceManager.getAppWidgetId(glanceId)
-            val code = repo.getConfiguredStopCode(widgetId)
-                ?: pins.firstOrNull()?.code
-            code?.let { stopCodes += it }
-        }
-
         // Fav widget instances: use the configured fav or fall back to the first fav.
         val favs = repo.getFavs()
         val favInstances = glanceManager.getGlanceIds(LeyneFavServiceWidget::class.java)
@@ -90,7 +80,6 @@ class WidgetRefreshWorker(
         // updateAll is a suspend function that enqueues a RemoteViews update for
         // every placed instance of that widget class. Called here in the worker's
         // coroutine scope — safe, no runBlocking needed.
-        LeyneStopWidget().updateAll(context)
         LeyneFavServiceWidget().updateAll(context)
 
         return Result.success()

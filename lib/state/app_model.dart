@@ -827,7 +827,6 @@ class AppModel extends ChangeNotifier {
     final p = _prefs;
     if (p == null) return;
     p.setString(_kPinsKey, jsonEncode(_pins.map((e) => e.toJson()).toList()));
-    WidgetBridge.instance.pushPins();
   }
 
   /// One-time migration from legacy state → BusAlerts. Best-effort: preserves

@@ -381,7 +381,6 @@ struct LeyneWidgetBundle: WidgetBundle {
         // data to the App Group every refresh (mirrorNearbyToWidget /
         // mirrorFavServicesToWidget / pinned-stop publish in AppModel+DataStore).
         LeyneNearbyWidget()        // Home Screen — nearest stop name + code
-        LeyneStopWidget()          // Home Screen — pinned stop arrivals
         LeyneFavServiceWidget()    // Home Screen — favourited service
         LeyneLiveActivity()        // Lock Screen / Dynamic Island
     }
