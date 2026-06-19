@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Leyne — Glance (redesign)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="stage">
+    <header class="controls">
+      <div class="controls__title">Leyne · <b>Glance</b> — redesign</div>
+      <button id="themeBtn" class="ctrl-btn">◐ Theme</button>
+      <span class="controls__hint">Departures-first. Live countdowns tick. Tokens in <code>styles.css :root</code>.</span>
+    </header>
+
+    <div class="device">
+      <div class="device__notch"></div>
+      <div class="statusbar"><span id="sbTime">8:41</span><span class="sb-r">􀙇 􀛨 􀊪</span></div>
+
+      <main id="screen" class="deck"></main>
+      <nav id="nav" class="navbar"></nav>
+
+      <!-- full-screen overlay: onboarding · search · GO trip companion -->
+      <div id="overlay" hidden></div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

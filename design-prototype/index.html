@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Leyne — design sandbox</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Desktop chrome: a controls bar + an iPhone frame holding the live app.
+       On a phone this collapses to just the app, full-bleed. -->
+  <div class="stage">
+    <header class="controls">
+      <div class="controls__title">Leyne — design sandbox</div>
+      <div class="controls__spacer"></div>
+      <button id="themeBtn" class="ctrl-btn" title="Toggle light / dark">◐ Theme</button>
+      <button id="dynaBtn" class="ctrl-btn" title="Bump text size (Dynamic Type)">A+ Text</button>
+      <span class="controls__hint">Edit <code>styles.css</code> tokens → refresh. Screens render from <code>app.js</code>.</span>
+    </header>
+
+    <div class="device" id="device">
+      <div class="device__notch"><span class="device__pill"></span></div>
+      <div class="statusbar">
+        <span class="statusbar__time" id="sbTime">8:41</span>
+        <span class="statusbar__icons">􀜺 􀙇 􀛨</span>
+      </div>
+
+      <!-- Screen content is rendered here by app.js -->
+      <main id="screen" class="screen"></main>
+
+      <!-- Floating tab bar (Liquid Glass) -->
+      <nav id="tabbar" class="tabbar"></nav>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
