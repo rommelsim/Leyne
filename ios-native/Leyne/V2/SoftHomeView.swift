@@ -43,6 +43,12 @@ struct SoftHomeView: View {
     /// Direct bus-detail push from a DepartureCard tap. Pushes `SoftRoute.bus`
     /// onto the Home stack so the user lands on the bus view, not the stop view.
     let onOpenBus: (String, String) -> Void  // (stopCode, serviceNo)
+    // Phase 5 IA — replaces the Saved/Alerts/Settings tabs with sheet entry points
+    // embedded in the search-bar row. Default no-op closures make these additive:
+    // callers that don't supply them (e.g. legacy SoftRoot) compile unchanged.
+    var onOpenSaved: (() -> Void)?    = nil
+    var onOpenAlerts: (() -> Void)?   = nil
+    var onOpenSettings: (() -> Void)? = nil
 
     private var t: Theme { m.t }
 
@@ -94,27 +100,78 @@ struct SoftHomeView: View {
 
     // MARK: - Search field
 
-    /// "Where to?" — a tappable search bar that switches to the Search tab.
-    /// Routing via `onOpenSearch()` keeps the Navigation stack unmodified and
-    /// matches how the existing search tab is already activated elsewhere.
+    /// "Where to?" — a tappable search bar.
+    /// Phase 5: Saved (star) + alerts bell + gear are embedded at the trailing
+    /// edge inside the card, matching the prototype's searchbar__me avatar.
+    /// When the Phase 5 callbacks are nil (legacy callers) the icons are hidden.
     private var searchField: some View {
-        Button(action: { fb.select(); onOpenSearch() }) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(t.ink3)
-                Text("Where to?")
-                    .font(t.sans(15, weight: .medium))
-                    .foregroundStyle(t.ink3)
-                Spacer(minLength: 0)
+        HStack(spacing: 0) {
+            // Tappable search portion
+            Button(action: { fb.select(); onOpenSearch() }) {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(t.ink3)
+                    Text("Where to?")
+                        .font(t.sans(15, weight: .medium))
+                        .foregroundStyle(t.ink3)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 13)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 15)
-            .padding(.vertical, 13)
-            .glanceCard(fill: t.surface)
-            .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .buttonStyle(.plain)
+            .accessibilityLabel("Search for buses, stops, or stations")
+
+            // Trailing action cluster (Phase 5 — only shown when callbacks are set)
+            if onOpenSaved != nil || onOpenAlerts != nil || onOpenSettings != nil {
+                HStack(spacing: 6) {
+                    if let openSaved = onOpenSaved {
+                        searchBarAction(icon: "star.fill", tint: t.brand) {
+                            fb.select(); openSaved()
+                        }
+                        .accessibilityLabel("Saved stops and services")
+                    }
+                    if let openAlerts = onOpenAlerts {
+                        ZStack(alignment: .topTrailing) {
+                            searchBarAction(icon: "bell.fill", tint: t.fg) {
+                                fb.select(); openAlerts()
+                            }
+                            if m.unseenAlertCount > 0 {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 2, y: -2)
+                            }
+                        }
+                        .accessibilityLabel(m.unseenAlertCount > 0
+                            ? "Alerts, \(m.unseenAlertCount) unseen" : "Alerts")
+                    }
+                    if let openSettings = onOpenSettings {
+                        searchBarAction(icon: "gearshape.fill", tint: t.fg) {
+                            fb.select(); openSettings()
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                }
+                .padding(.trailing, 10)
+            }
+        }
+        .glanceCard(fill: t.surface)
+    }
+
+    private func searchBarAction(icon: String,
+                                  tint: Color,
+                                  action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(t.surfaceHi, in: Circle())
         }
         .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("Search for buses, stops, or stations")
     }
 
     // MARK: - Context line

@@ -8,6 +8,40 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## iOS — 3.0.0 (build TBD) · unreleased · Glance Phase 5 (Settings/About, Onboarding, IA)
+
+### Information Architecture (Phase 5 — SoftRoot)
+- **5 → 2 tabs**: removed Saved, Search, and Alerts as permanent tabs; Now + Rail are the
+  only persistent tabs matching the prototype navbar model (`TABS = [{now},{rail}]`).
+- **Search** presented as `.fullScreenCover` from the "Where to?" bar (was tab switch).
+- **Saved** presented as `.sheet` from a star button in the Now search bar; contains all
+  favourite services + saved MRT stations (nothing orphaned).
+- **Alerts** presented as `.sheet` from a bell button in the Now search bar; unseen-count
+  badge maintained (red dot on bell icon); `markAllAlertsSeen` called on sheet appear.
+- **Settings** presented as `.sheet` from a gear button in the Now and Rail search bars.
+- Deep links (`lyne://` scheme + notification tap → `m.openCard`) routed to `homeStack`/
+  `mrtStack` exactly as before — no change to `RootView.onOpenURL` or the `openCard`
+  observer. `SwipeBackEnabler` preserved on all pushed destinations.
+- Live Activity restore: `m.openCard` initial-value observer still fires on cold launch.
+
+### Settings (Phase 5 — SoftSettingsView rewrite)
+- **Identity hero card**: gradient icon tile + "Leyne · Singapore bus & MRT · vX.Y.Z".
+- **Glyph-tile rows**: 30×30 coloured rounded tiles per prototype `.disclose__g` / `g-*`
+  (indigo moon / orange haptics / gray hidden-stops / red bell / gray info / gold star /
+  brown coffee). Native `Toggle` for haptics + notification toggle; chevron for nav rows.
+- **Section-footer microcopy**: `.set-foot` style per prototype.
+- **"About Leyne" row** navigates to the new `AboutView` (presented as a sheet).
+
+### AboutView (Phase 5 — new file, inline in SoftSettingsView.swift)
+- Icon hero (84×84 gradient tile) + version + build number.
+- LTA DataMall credit row + Rate on App Store + Send feedback (support URL) + Privacy Policy.
+- Prototype `screenAbout` parity.
+
+### OnboardingView (Phase 5 — no change)
+- The existing 6-step flow (welcome → live → location → notifications → ATT → done) already
+  matches the prototype's value-first, permission-priming design with Glance tokens.
+  No code changes required.
+
 ## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 4 (Search + Trip results)
 
 ### Search (Phase 4 — SoftSearchView rebuild)

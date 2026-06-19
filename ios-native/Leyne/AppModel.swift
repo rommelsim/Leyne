@@ -84,6 +84,32 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "3.0.0": WhatsNewEntry(
+        headline: "A simpler Leyne — everything one tap away.",
+        items: [
+            WhatsNewItem(
+                icon: "bus.fill",
+                title: "Now · Rail — two tabs, zero clutter",
+                body: "The app is now organised around two focused tabs: Now for buses "
+                    + "and Rail for MRT. Search, Saved, Alerts and Settings open as "
+                    + "sheets from the search bar — right where you already look."
+            ),
+            WhatsNewItem(
+                icon: "star.fill",
+                title: "Saved — always a tap away",
+                body: "Your pinned stops, saved bus services and saved MRT stations "
+                    + "are one tap from the Now search bar. Nothing was removed — just "
+                    + "moved closer."
+            ),
+            WhatsNewItem(
+                icon: "bell.fill",
+                title: "Alerts badge on the search bar",
+                body: "Service disruptions and your personal bus alerts now surface "
+                    + "from a bell on the search bar, with a red dot when there's "
+                    + "something new."
+            ),
+        ]
+    ),
     "2.9.0": WhatsNewEntry(
         headline: "Smarter bus tracking — plus a trip companion.",
         items: [
