@@ -85,8 +85,17 @@ struct WhatsNewEntry {
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
     "2.9.0": WhatsNewEntry(
-        headline: "Every departure, before you even look.",
+        headline: "MRT reimagined — plus a departures board.",
         items: [
+            WhatsNewItem(
+                icon: "tram.fill",
+                title: "Visual MRT line diagram",
+                body: "Tap any MRT line to see a visual spine diagram — "
+                    + "interchange nodes, your nearest station highlighted with "
+                    + "a pulse, crowd bars at every stop, and a direction toggle. "
+                    + "Station detail shows next trains (scheduled), crowd, lifts, "
+                    + "and exits."
+            ),
             WhatsNewItem(
                 icon: "bus.fill",
                 title: "Departures board",

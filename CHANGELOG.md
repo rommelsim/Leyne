@@ -8,8 +8,50 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 1
+## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 2 (Rail)
 
+**Visual MRT line diagram** — Rail tab and per-line/station views rebuilt around the
+Glance design language: line diagram spine, interchange nodes, crowd bars, scheduled
+next-trains, and progressive disclosure for lifts/exits/first-last trains.
+
+### Rail (Phase 2 — SoftMrtView / SoftMrtLineView / SoftMrtStationView rewrite)
+
+**SoftMrtView — network status board:**
+- One full-width `.glanceCard` row per line: line chip + name + status dot (neutral
+  `brand` for Normal, `warn` for Delays — not green, avoids EW-colour collision).
+- Contextual disruption banner (left amber border) only when lines are affected;
+  suppressed entirely when all clear.
+- "Near you" section: nearest 3 stations with line chips, ascending-bar crowd glyph,
+  and walk time. Taps open SoftMrtStationView as a sheet.
+- Prefetches crowd for all lines on appear.
+
+**SoftMrtLineView — visual line diagram:**
+- Vertical line-colour spine derived from `--x = 7` unit geometry (TfL standard).
+- Station nodes: normal 14×14 hollow, interchange 22×22 with double-ring overlay +
+  connecting-line mini chips, terminus caps (filled), you-are-here brand-colour node
+  with expanding pulse ring animation.
+- Crowd as ascending bars (3 heights: Low=1 bar, Moderate=2, High=3) — shape-encoded
+  never colour-alone. Legend inline below the direction control.
+- Direction segmented control → reverses diagram station order.
+- Circle line (CC): loop overview pill with circular SVG, "Loop line — runs both
+  directions" label.
+- Tap a station row → inline ZStack transition to SoftMrtStationView.
+- Station order derived from code numeric suffix (NS1 < NS2 … < NS27) via
+  `MrtGeo.all` — no hardcoded list.
+
+**SoftMrtStationView — station detail:**
+- Hero header: station name 27pt SF Pro Rounded bold, multi-colour line rule,
+  MrtCodePill chips, walk/distance meta.
+- "Next trains · scheduled" section: two direction cards (toward each terminus),
+  per-direction platform badge + crowd glyph + muted big ETA + "~" whisper prefix.
+  Explicitly labelled "scheduled" because LTA has no live train arrival API. VoiceOver
+  label says "scheduled estimate".
+- Live crowd cards (per-line, from PCDRealTime) with 30-min forecast trend — unchanged.
+- Progressive disclosure: Lifts (real ds.liftMaintenance data), Exits (static),
+  First/last train (static headway table), with icon tiles matching .disclose spec.
+- Disruption alerts, save-star, lift maintenance cards — all preserved.
+
+### Glance Phase 1 (carried from previous entry)
 **Departures board** — Home redesigned around the "Glance" identity. Every bus at
 every stop with a live countdown, visible with zero taps.
 

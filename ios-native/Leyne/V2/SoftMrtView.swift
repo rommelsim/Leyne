@@ -1,13 +1,29 @@
-// SoftMrtView — the MRT tab (Leyne 2.7 Phase 3 redesign).
+// SoftMrtView — Glance Phase 2 "Rail" network status board.
 //
-// Layout (top → bottom):
-//   1. Title "MRT" + ••• menu (system map / news & advisories).
-//   2. Disruption banner — compact, only when a line is affected.
-//   3. Closest to you — nearest stations, capped at 3.
-//   4. Lines section — compact one-row-per-line list; tap → SoftMrtLineView.
+// Layout (Glance spec → screenRail):
+//   1. Title + map button.
+//   2. Contextual disruption banner — only when ≥1 line is affected
+//      (orange left-border card matching .alert style). Hidden when all clear
+//      to keep the board calm — "all normal" is the default, not news.
+//   3. Network section:
+//      • Each line → a full-width `.glanceCard` row:
+//          [line chip]  [line name]  [status dot + text]  [chevron]
+//        Status: neutral `brand` dot for Normal, `warn` fill for Delays
+//        (NOT green — avoids EW-line colour collision per spec comment
+//        `.sdot { background: var(--brand) }`).
+//   4. Near you:
+//      • Up to 3 nearest stations — line chips + station name + crowd glyph
+//        + walk time.  Opens station detail as a card.
 //
-// Lift maintenance has moved to SoftMrtNewsView.
-// Live station crowd has moved to SoftMrtLineView (expanded inline was too long).
+// Data sources reused from existing SoftMrtView without change:
+//   • ds.trainAlerts     → disruptedLines
+//   • MrtGeo.nearestStations → nearestStations
+//   • ds.crowdByLine     → crowd glyphs on near-you rows
+//
+// Navigation:
+//   • Line row taps call onOpenLine(line) which the host (SoftRoot/mrtNavStack)
+//     pushes as .line(line) — no sheet; diagram is a pushed page.
+//   • Station rows call sheetStation to show SoftMrtStationView as a card.
 
 import SwiftUI
 import CoreLocation
@@ -17,23 +33,10 @@ struct SoftMrtView: View {
     @ObservedObject private var ds = DataStore.shared
     @StateObject private var loc = LocationManager.shared
 
-    /// Controls the full-screen system-map sheet.
     @State private var showMap = false
-
-    /// Line whose detail is shown as a sheet-card (nil = none). Tapping a line
-    /// tile presents SoftMrtLineView as a card instead of pushing a page.
-    @State private var sheetLine: MRTLine?
-
-    /// Station whose detail is shown as a sheet-card (nil = none).
     @State private var sheetStation: MrtGeoStation?
 
-    /// Nearest stations within the user's search radius, rebuilt on location or
-    /// radius changes. Capped at 3 per the redesign.
     @State private var nearestStations: [(station: MrtGeoStation, distanceM: Int, walkMin: Int)] = []
-
-    /// The absolute nearest station, regardless of radius — used for the
-    /// empty-state "nearest outside radius" hint.
-    @State private var absoluteNearest: (station: MrtGeoStation, distanceM: Int, walkMin: Int)? = nil
 
     let onOpenLine: (MRTLine) -> Void
     let onOpenNews: () -> Void
@@ -51,13 +54,12 @@ struct SoftMrtView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 20) {
                 titleBlock
-                topDisruptionBanner
-                // One native ad per screen. NativeAdCard renders EmptyView when
-                // no ad is loaded or ads are suppressed; no gap otherwise.
+                disruptionBanner
                 NativeAdCard()
                 networkSection
+                nearYouSection
             }
             .padding(20)
         }
@@ -74,20 +76,10 @@ struct SoftMrtView: View {
         .onChange(of: m.searchRadiusM) { _, _ in
             if let l = loc.location { rebuildNearest(l) }
         }
-        .sheet(isPresented: $showMap) {
-            MrtMapView()
-        }
-        // Line tile → detail as a card (sheet) rather than a pushed page.
-        .sheet(item: $sheetLine) { line in
-            SoftMrtLineView(line: line, onBack: { sheetLine = nil })
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        // Nearest-station tap (in the Network section) → detail as a card.
+        .sheet(isPresented: $showMap) { MrtMapView() }
         .sheet(item: $sheetStation) { station in
             SoftMrtStationView(station: station,
-                               distanceM: nil,
-                               walkMin: nil,
+                               distanceM: nil, walkMin: nil,
                                onBack: { sheetStation = nil })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
@@ -98,20 +90,20 @@ struct SoftMrtView: View {
 
     private func rebuildNearest(_ loc: CLLocation) {
         nearestStations = MrtGeo.nearestStations(
-            to: loc.coordinate,
-            limit: 3,
-            withinMeters: m.searchRadiusM
-        )
-        absoluteNearest = MrtGeo.nearestStation(to: loc.coordinate)
+            to: loc.coordinate, limit: 3, withinMeters: m.searchRadiusM)
     }
 
     private func refresh(force: Bool) {
         ds.refreshTrainAlertsIfStale(force: force)
         ds.refreshLiftMaintenanceIfStale(force: force)
+        // Prefetch crowd for all lines so near-you glyphs are ready.
+        for line in MRTLine.allCases {
+            ds.refreshCrowd(line: line, force: force)
+        }
         if let l = loc.location { rebuildNearest(l) }
     }
 
-    // MARK: - Title block
+    // MARK: - Title
 
     private var titleBlock: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -119,219 +111,267 @@ struct SoftMrtView: View {
                 Text("MRT")
                     .font(t.sans(32, weight: .bold))
                     .foregroundStyle(t.fg)
-                Text("Stations near you")
+                Text("Network status")
                     .font(t.sans(14, weight: .medium))
                     .foregroundStyle(t.dim)
             }
             Spacer(minLength: 8)
-            mapButton
+            Button {
+                Feedback.shared.tap()
+                showMap = true
+            } label: {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("System map")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Top-right button — opens the zoomable system map. (Previously a ••• menu
-    /// that also held "News & advisories"; that content now lives in the
-    /// Alerts tab, so this collapses to a direct map button.)
-    private var mapButton: some View {
-        Button {
-            Feedback.shared.tap()
-            showMap = true
-        } label: {
-            Image(systemName: "map.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(t.fg)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("System map")
-    }
-
-    // MARK: - Top disruption banner
+    // MARK: - Disruption banner
+    //
+    // Shown only when ≥1 line is disrupted — matches prototype .alert with a
+    // left accent border in warn colour. Suppressed entirely when all clear
+    // (the prototype doesn't render an "all clear" banner on Rail — it simply
+    // omits the element).
 
     @ViewBuilder
-    private var topDisruptionBanner: some View {
-        let count = disruptedLines.count
-        if count > 0 {
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.orange)
-                Text("\(count) line\(count == 1 ? "" : "s") disrupted")
-                    .font(t.sans(14, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                HStack(spacing: 4) {
-                    ForEach(Array(disruptedLines.keys).sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { line in
-                        Text(line.rawValue)
-                            .font(t.mono(10, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(line.color, in: Capsule())
+    private var disruptionBanner: some View {
+        let disrupted = Array(disruptedLines.keys).sorted(by: { $0.rawValue < $1.rawValue })
+        if !disrupted.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(disrupted, id: \.self) { line in
+                    if let alert = disruptedLines[line] {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(t.warnText)
+                                .padding(.top, 1)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(alert.title)
+                                    .font(t.sans(13.5, weight: .semibold))
+                                    .foregroundStyle(t.fg)
+                                Text(alert.detail)
+                                    .font(t.sans(12))
+                                    .foregroundStyle(t.dim)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(t.warnBg, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(t.warn)
+                                .frame(width: 4)
+                                .padding(.vertical, 6)
+                        }
                     }
                 }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        } else {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.green.opacity(0.8))
-                Text("All lines running normally")
-                    .font(t.sans(13))
-                    .foregroundStyle(t.dim)
             }
         }
     }
 
-    // MARK: - Nearest stations section
+    // MARK: - Network section (one row per line)
 
-    private func sectionHeader(_ text: String) -> some View {
+    private var networkSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            eyebrow("Network")
+            VStack(spacing: 9) {
+                ForEach(MRTLine.allCases, id: \.self) { line in
+                    lineRow(line, alert: disruptedLines[line])
+                }
+            }
+        }
+    }
+
+    /// One line as a full-width status row.
+    /// Line chip → name → status dot + label → chevron.
+    /// Normal: neutral `brand` dot (NOT green — avoids EW-colour collision).
+    /// Delayed: `warn` fill dot + warnText label.
+    private func lineRow(_ line: MRTLine, alert: TrainAlert?) -> some View {
+        let disrupted = alert != nil
+        return Button {
+            Feedback.shared.tap()
+            onOpenLine(line)
+        } label: {
+            HStack(spacing: 12) {
+                // Line identity chip
+                lineChip(line)
+
+                // Line name
+                Text(line.displayName + " Line")
+                    .font(t.sans(15, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Status
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(disrupted ? t.warn : t.brand)
+                        .frame(width: 8, height: 8)
+                    Text(disrupted ? "Delays" : "Normal")
+                        .font(t.sans(12.5, weight: .semibold))
+                        .foregroundStyle(disrupted ? t.warnText : t.dim)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(t.faint)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .glanceCard(fill: t.surface)
+        .accessibilityLabel("\(line.displayName) Line, \(disrupted ? "delays" : "normal service")")
+    }
+
+    // MARK: - Near you section
+
+    @ViewBuilder
+    private var nearYouSection: some View {
+        if !nearestStations.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                eyebrow("Near you")
+                VStack(spacing: 9) {
+                    ForEach(nearestStations, id: \.station.id) { entry in
+                        nearYouRow(entry)
+                    }
+                }
+            }
+        }
+    }
+
+    private func nearYouRow(
+        _ entry: (station: MrtGeoStation, distanceM: Int, walkMin: Int)
+    ) -> some View {
+        let station = entry.station
+        // Find the first crowd entry for this station across all loaded lines.
+        let crowdLevel: CrowdLevel? = {
+            for code in station.codes {
+                let prefix = String(code.prefix(2)).uppercased()
+                guard let line = MRTLine.allCases.first(where: { $0.rawValue == prefix || (prefix == "CG" && $0 == .EW) || (prefix == "CE" && $0 == .CC) }) else { continue }
+                if let entry = ds.crowdByLine[line]?.first(where: { station.codes.contains($0.code) }) {
+                    return entry.level
+                }
+            }
+            return nil
+        }()
+
+        return Button {
+            Feedback.shared.tap()
+            sheetStation = station
+        } label: {
+            HStack(spacing: 12) {
+                // Line chips
+                HStack(spacing: 4) {
+                    ForEach(station.codes.prefix(3), id: \.self) { code in
+                        miniLineChip(code)
+                    }
+                }
+
+                // Station name
+                Text(station.name)
+                    .font(t.sans(15, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Crowd glyph (shape-encoded, never colour-alone)
+                if let level = crowdLevel {
+                    crowdGlyph(level)
+                }
+
+                // Walk time
+                Text("\(max(1, entry.walkMin))m")
+                    .font(t.mono(12, weight: .semibold))
+                    .foregroundStyle(t.brand)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .glanceCard(fill: t.surface)
+        .accessibilityLabel("\(station.name) station, \(max(1, entry.walkMin)) minute walk")
+    }
+
+    // MARK: - Sub-components
+
+    /// Coloured line code chip — small rounded square (matches prototype .linechip).
+    /// Dark text on CC orange and EW green for WCAG AA contrast.
+    private func lineChip(_ line: MRTLine) -> some View {
+        let needsDarkText = line == .CC || line == .EW
+        return Text(line.rawValue)
+            .font(t.rounded(13, .bold))
+            .foregroundStyle(needsDarkText ? Color(hex: "161616") : Color.white)
+            .frame(width: 38, height: 28)
+            .background(line.color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    /// Mini code chip for "near you" rows — smaller height to fit inline.
+    private func miniLineChip(_ code: String) -> some View {
+        let prefix = String(code.prefix(2)).uppercased()
+        let color = mrtLineColorFor(code)
+        let needsDark = prefix == "CC" || prefix == "EW" || prefix == "CG" || prefix == "CE"
+        return Text(prefix == "CG" ? "EW" : prefix == "CE" ? "CC" : prefix)
+            .font(t.mono(10, weight: .bold))
+            .foregroundStyle(needsDark ? Color(hex: "161616") : Color.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(color, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    /// Shape-encoded crowd glyph — three ascending bars, filled by level.
+    /// The filled count encodes the level (Low=1, Moderate=2, High=3) so the
+    /// reading doesn't rely on colour alone, per spec "crowd as SHAPE-encoded".
+    private func crowdGlyph(_ level: CrowdLevel) -> some View {
+        let filled: Int
+        let barColor: Color
+        switch level {
+        case .low:      filled = 1; barColor = t.go
+        case .moderate: filled = 2; barColor = t.warn
+        case .high:     filled = 3; barColor = t.crit
+        case .unknown:  filled = 0; barColor = t.faint
+        }
+        let heights: [CGFloat] = [5, 8, 12]
+        return HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<3, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(i < filled ? barColor : t.line)
+                    .frame(width: 3.5, height: heights[i])
+            }
+        }
+        .accessibilityLabel(crowdLabel(level))
+        .accessibilityHidden(false)
+    }
+
+    private func crowdLabel(_ l: CrowdLevel) -> String {
+        switch l {
+        case .low:      return "Low crowd"
+        case .moderate: return "Moderate crowd"
+        case .high:     return "High crowd"
+        case .unknown:  return "Crowd unknown"
+        }
+    }
+
+    // MARK: - Eyebrow
+
+    private func eyebrow(_ text: String) -> some View {
         Text(text.uppercased())
             .font(t.mono(10, weight: .semibold))
             .tracking(1.5)
             .foregroundStyle(t.dim)
             .padding(.leading, 2)
-    }
-
-    // MARK: - Nearest featured tile (grid header, spans full width)
-
-    /// The user's nearest station as the Network grid's featured header tile —
-    /// full width above the 2-column line grid. Walk eyebrow + station name +
-    /// line-code pills + walk/distance meta. Opens the station detail as a card.
-    private func nearestFeaturedTile(
-        _ entry: (station: MrtGeoStation, distanceM: Int, walkMin: Int)
-    ) -> some View {
-        let station = entry.station
-        return Button {
-            Feedback.shared.tap()
-            sheetStation = station
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                // Eyebrow — walk glyph + "Nearest MRT"
-                HStack(spacing: 6) {
-                    Image(systemName: "figure.walk")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(t.soon)
-                    Text("Nearest MRT")
-                        .font(t.mono(10, weight: .semibold))
-                        .tracking(1.2)
-                        .foregroundStyle(t.dim)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(t.faint)
-                }
-                // Station name + line-code pills
-                HStack(alignment: .center, spacing: 8) {
-                    Text(station.name)
-                        .font(t.sans(20, weight: .bold))
-                        .foregroundStyle(t.fg)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    HStack(spacing: 4) {
-                        ForEach(station.codes, id: \.self) { code in
-                            MrtCodePill(t: t, code: code)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-                // Meta — walk minutes · distance
-                HStack(spacing: 5) {
-                    Text("\(max(1, entry.walkMin)) min")
-                        .foregroundStyle(t.soon)
-                    Text("·").foregroundStyle(t.faint)
-                    Text("\(entry.distanceM) m away")
-                        .foregroundStyle(t.dim)
-                }
-                .font(t.mono(12.5))
-            }
-            .contentShape(Rectangle())
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(t.line, lineWidth: 1)
-            )
-        }
-        .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("Nearest MRT, \(station.name), \(max(1, entry.walkMin)) minute walk")
-    }
-
-    // MARK: - Network section (nearest station + line grid)
-
-    private var networkSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Network")
-            // Your nearest station as the grid's featured header tile (full
-            // width), folded in from the old "Closest to you" section. Opens
-            // its detail as a card. Shown only when located.
-            if let nearest = nearestStations.first {
-                nearestFeaturedTile(nearest)
-            }
-            // A 2-column grid of colour tiles instead of a row-per-line list —
-            // more glanceable, and each tile taps into the per-line detail.
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 10),
-                    GridItem(.flexible(), spacing: 10),
-                ],
-                spacing: 10
-            ) {
-                ForEach(MRTLine.allCases, id: \.self) { line in
-                    lineTile(line, alert: disruptedLines[line])
-                }
-            }
-        }
-    }
-
-    /// One MRT line as a tappable colour tile: line badge + at-a-glance status
-    /// chip on top, line name + status text below. Opens the per-line detail.
-    private func lineTile(_ line: MRTLine, alert: TrainAlert?) -> some View {
-        let disrupted = alert != nil
-        return Button {
-            Feedback.shared.tap()
-            sheetLine = line
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Text(line.rawValue)
-                        .font(t.mono(13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 28)
-                        .background(line.color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    Spacer(minLength: 0)
-                    Image(systemName: disrupted ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(disrupted ? .orange : Color.green.opacity(0.75))
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(line.displayName)
-                        .font(t.sans(14, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Text(disrupted ? "Disrupted" : "Normal service")
-                        .font(t.sans(11))
-                        .foregroundStyle(disrupted ? .orange : t.dim)
-                        .lineLimit(1)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(disrupted ? Color.orange.opacity(0.4) : t.line, lineWidth: 1)
-            )
-        }
-        .buttonStyle(PressScaleButtonStyle())
-        .accessibilityLabel("\(line.displayName) Line, \(disrupted ? "disrupted" : "operating normally")")
     }
 }
 
