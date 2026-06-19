@@ -193,17 +193,34 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   switchOutCurve: _curve,
                   transitionBuilder: (child, anim) {
                     final dir = _direction.toDouble();
-                    // For the exiting child anim runs in reverse, so we
-                    // invert: incoming slides from dir-side, outgoing exits
-                    // to opposite side. Back looks like Back, Next like Next.
-                    final isIncoming = anim.status != AnimationStatus.reverse;
-                    final slide = Tween<Offset>(
-                      begin: Offset(isIncoming ? dir * 0.14 : -dir * 0.14, 0),
-                      end: Offset.zero,
-                    ).animate(anim);
-                    return FadeTransition(
-                      opacity: anim,
-                      child: SlideTransition(position: slide, child: child),
+                    // Read anim.status PER FRAME (inside the builder), not once
+                    // when this transition widget is first built. AnimatedSwitcher
+                    // builds the outgoing child's transition while its controller
+                    // is still `completed` and only calls reverse() afterwards — so
+                    // a build-time status check sees `forward`/`completed` for BOTH
+                    // children and slid the outgoing page the wrong way, making it
+                    // cross the incoming page instead of pushing with it. By the
+                    // time frames paint, the outgoing controller is reversing, so a
+                    // per-frame check reliably tells incoming from outgoing.
+                    return AnimatedBuilder(
+                      animation: anim,
+                      child: child,
+                      builder: (context, child) {
+                        final exiting =
+                            anim.status == AnimationStatus.reverse;
+                        // Incoming slides from the dir-side to centre; outgoing
+                        // exits to the opposite side. Both move the same way, so
+                        // it reads as one push (Next ←, Back →).
+                        final sign = exiting ? -dir : dir;
+                        final v = anim.value;
+                        return Opacity(
+                          opacity: v.clamp(0.0, 1.0),
+                          child: FractionalTranslation(
+                            translation: Offset((1 - v) * sign * 0.14, 0),
+                            child: child,
+                          ),
+                        );
+                      },
                     );
                   },
                   child: KeyedSubtree(

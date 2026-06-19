@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nearest Stop widget — small (2x2), no configuration. Shows the stop the
+     app last resolved as nearest (pushed by DataStore.updateNearby); the
+     widget itself never reads GPS. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:resizeMode="none"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_nearby_desc"
+    android:previewImage="@drawable/widget_preview_nearby" />

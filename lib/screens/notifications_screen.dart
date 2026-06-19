@@ -6,6 +6,8 @@
 // Android 13+ runtime permission, schedules the in-flight set of
 // alerts, and snaps back to off if the user denies.
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -124,6 +126,42 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         'behavior under Android Settings ▸ Notifications ▸ '
                         'Leyne ▸ Arrival alerts.',
                       ),
+                      if (Platform.isAndroid) ...[
+                        const SizedBox(height: 26),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4, bottom: 10),
+                          child: MicroLabel('Bus-coming alerts'),
+                        ),
+                        _busComingRow(t, m, context),
+                        const SizedBox(height: 14),
+                        _note(
+                          t,
+                          Icons.share_location,
+                          'When you\'re near a stop you\'ve favourited a bus '
+                          'at, Leyne checks that bus and pings you if it\'s a '
+                          'few minutes away — even when the app is closed.',
+                        ),
+                        const SizedBox(height: 10),
+                        _note(
+                          t,
+                          Icons.lock_outline,
+                          'Uses your location in the background only to match '
+                          'you to your favourited stops. It stays on your '
+                          'phone, is never shared, and you can turn it off any '
+                          'time.',
+                        ),
+                        if (m.busComingAlertsEnabled)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: _note(
+                              t,
+                              Icons.settings_outlined,
+                              'For alerts when Leyne is closed, set Location to '
+                              '"Allow all the time" under Android Settings ▸ '
+                              'Apps ▸ Leyne ▸ Permissions.',
+                            ),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -133,6 +171,91 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       ),
     );
+  }
+
+  Widget _busComingRow(LyneTheme t, AppModel m, BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () =>
+            _toggleBusComing(context, m, !m.busComingAlertsEnabled),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: t.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: t.line),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Icon(Icons.share_location, size: 20, color: t.dim),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Bus-coming alerts',
+                        style: t.sans(14, weight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    Text(
+                      m.busComingAlertsEnabled ? 'On' : 'Off',
+                      style: t.mono(11, color: t.dim)
+                          .copyWith(letterSpacing: 0.4),
+                    ),
+                  ],
+                ),
+              ),
+              LyneToggle(
+                on: m.busComingAlertsEnabled,
+                onChanged: (v) => _toggleBusComing(context, m, v),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Turning the feature on shows a prominent-disclosure primer FIRST (Play
+  /// policy for background location), then requests foreground + "Allow all the
+  /// time" location. Turning off just clears the flag (and the geofences).
+  Future<void> _toggleBusComing(
+      BuildContext context, AppModel m, bool want) async {
+    if (!want) {
+      m.setBusComingAlertsEnabled(false);
+      return;
+    }
+    final agreed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _BusComingPrimer(t: ctx.t),
+    );
+    if (agreed != true || !context.mounted) return;
+
+    // Foreground location first (standard in-app permission dialog).
+    final fg = await Permission.locationWhenInUse.request();
+    if (!fg.isGranted) {
+      if (context.mounted) {
+        _toast(context, 'Location permission is needed for bus-coming alerts.');
+      }
+      return;
+    }
+    // Background ("Allow all the time") — needed for alerts while the app is
+    // closed. On Android 11+ the OS only grants this from Settings; if it isn't
+    // granted we still enable (foreground geofences work) and nudge to Settings.
+    final bg = await Permission.locationAlways.request();
+    m.setBusComingAlertsEnabled(true);
+    if (!bg.isGranted && context.mounted) {
+      _toast(context,
+          'Set Location to "Allow all the time" so alerts work when Leyne is closed.');
+    }
+  }
+
+  void _toast(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Widget _topBar(LyneTheme t, BuildContext context) {
@@ -232,6 +355,53 @@ class _OpenSettingsButton extends StatelessWidget {
         child: Text('Open Android Settings',
             style: t.sans(12, color: t.bg, weight: FontWeight.w600)),
       ),
+    );
+  }
+}
+
+/// Prominent-disclosure primer shown BEFORE requesting background location —
+/// required by Google Play policy. States plainly what is collected (location,
+/// including in the background), why (to detect when you're near a favourited
+/// stop and alert you the bus is coming), and that it happens while the app is
+/// closed. The user must explicitly continue before any permission is asked.
+class _BusComingPrimer extends StatelessWidget {
+  const _BusComingPrimer({required this.t});
+  final LyneTheme t;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: t.surface,
+      title: Row(
+        children: [
+          Icon(Icons.share_location, size: 20, color: t.fg),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text('Bus-coming alerts',
+                style: t.sans(17, weight: FontWeight.w600)),
+          ),
+        ],
+      ),
+      content: Text(
+        'To ping you when a favourited bus is approaching a stop you use, Leyne '
+        'needs your location — including in the background, so it works even '
+        'when the app is closed.\n\n'
+        'Your location is used only on this device to match you to your '
+        'favourited stops. It is never shared and never leaves your phone. '
+        'You can turn this off any time.',
+        style: t.sans(13, color: t.dim).copyWith(height: 1.45),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text('Not now', style: t.sans(14, color: t.dim)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text('Continue',
+              style: t.sans(14, color: t.accent, weight: FontWeight.w600)),
+        ),
+      ],
     );
   }
 }

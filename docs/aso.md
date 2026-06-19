@@ -12,13 +12,19 @@ bus", "singapore bus", "bus eta"** — high intent, lower competition than gener
 
 ## App Store (iOS)
 
-- **Title (≤30 chars):** `Leyne: SG Bus Arrivals`
-- **Subtitle (≤30 chars):** `Live Singapore bus timings`
-- **Keywords field (≤100 chars, comma-sep, no spaces, don't repeat title/subtitle words):**
-  `arrival,timing,eta,lta,datamall,mrt,tracker,commute,when,next,stop,service,transport,singapore`
-- **Promotional text (≤170, editable without review):** lead with the freshest
-  feature, e.g. *"New: long-press any nearby stop for instant alerts, and
-  support Leyne with Buy me a coffee."*
+FINAL — paste-ready (char counts verified):
+
+- **Title (27/30):** `Leyne: SG Bus Arrival Times`
+- **Subtitle (29/30):** `Live MRT, train & ETA tracker`
+- **Keywords field (98/100, comma-sep, no spaces, no words repeated from title/subtitle):**
+  `singapore,timing,sbs,smrt,lta,commute,next,stop,service,transport,nearby,route,alert,schedule,when`
+  - Note: includes operator brand terms `sbs,smrt` (real, low-competition SG
+    searches). Apple auto-combines tokens across all three fields, so don't add
+    "sgbus" etc. Singular forms only; Apple stems plurals.
+- **Promotional text (≤170, editable anytime WITHOUT review):**
+  `Live arrivals for every SG bus stop & MRT line. Pin your stops, get a nudge before your bus pulls in. Free, no sign-up, no account.`
+  - If the Buy-me-a-coffee channel is live in prod, you can append:
+    ` Support Leyne with Buy me a coffee.`
 - **Screenshots (in order, each with a 3–5 word headline overlay):**
   1. Lock Screen widget showing a live ETA — *"Your bus, one glance away"* (ship Lock-Screen widget first — see iOS plan)
   2. Live Activity / Dynamic Island counting down — *"Never miss it"*
@@ -33,14 +39,30 @@ bus", "singapore bus", "bus eta"** — high intent, lower competition than gener
 
 ## Google Play (Android)
 
-- **Title (≤30):** `Leyne: SG Bus Arrival Times`
-- **Short description (≤80):** `Live bus arrival times & alerts for Singapore — LTA data, no sign-up needed.`
-- **Long description (first 2 lines matter most — front-load keywords naturally):**
-  > Leyne shows live bus arrival times for every stop in Singapore, straight
-  > from LTA DataMall. Pin your stops, get an alert before your bus arrives, and
-  > see the next buses, crowding and route at a glance — no account, no clutter.
-  > Then list features as bullets (live ETAs, arrival & alight alerts, nearby
-  > stops, route progress, saved stops/services, dark mode).
+FINAL — paste-ready:
+
+- **Title (27/30):** `Leyne: SG Bus Arrival Times`
+- **Short description (73/80, IS keyword-indexed — front-loaded):**
+  `Live bus & MRT arrival times for Singapore — LTA data, alerts, no sign-up.`
+- **Long description (keyword-indexed; natural density, no stuffing):**
+
+  > Leyne shows live bus arrival times for every bus stop in Singapore, straight from LTA DataMall — plus MRT and LRT lines, all in one clean, fast app. No account, no clutter, no sign-up.
+  >
+  > Pin the stops you use, see the next buses at a glance, and get a heads-up before your bus pulls in so you never run for it again.
+  >
+  > • Live bus arrival times (ETA) for every Singapore bus stop
+  > • MRT & LRT lines with service status and crowding
+  > • Nearby stops, sorted by walking distance
+  > • Pin your favourite stops and bus services
+  > • Arrival & "time to leave" alerts before your bus comes
+  > • Route progress — see where your bus is on the map
+  > • Seat availability / crowd levels for each bus
+  > • Dark mode, loads in seconds
+  > • 100% free — no account needed
+  >
+  > Whether you're catching a feeder bus, changing at an interchange, or timing the next train, Leyne keeps Singapore's buses and MRT one glance away.
+  >
+  > Bus data from LTA DataMall.
 - **Screenshots:** once Android widgets ship, make the **widget screenshot the
   first asset** (Play surfaces these prominently for utility apps). Use a device
   frame + real data.

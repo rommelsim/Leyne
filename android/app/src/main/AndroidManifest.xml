@@ -5,6 +5,14 @@
          both precise and approximate location options surfaced to the user. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Background location — ONLY for the opt-in "Bus-coming alerts" geofence
+         feature, so the GeofenceBroadcastReceiver fires when the user nears a
+         favourited stop while the app is closed (Android 10+ gates geofence
+         transitions behind this). OFF by default; requested only after the
+         user accepts the in-app prominent-disclosure primer. Play Data Safety
+         must declare: approximate+precise location, used in background, NOT
+         shared, optional. See docs/android-bus-coming-alerts.md. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
     <!-- Required for AdMob to read the Advertising ID on Android 13+ (API
          33+). Without it, ads still serve but in degraded-targeting mode.
          Combined with the consent flow in lib/services/ad_consent.dart so
@@ -141,6 +149,64 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
+
+        <!-- ── Bus-coming alerts (geofence) ────────────────────────────────
+             GeofenceBroadcastReceiver receives the GeofencingClient transition
+             PendingIntent (our own broadcast → exported=false). On ENTER it
+             fetches the stop's arrivals and posts a notification if a
+             favourited bus is near. GeofenceBootReceiver re-registers the
+             geofences after a reboot (the OS drops them on restart). -->
+        <receiver
+            android:name=".geofence.GeofenceBroadcastReceiver"
+            android:exported="false"/>
+        <receiver
+            android:name=".geofence.GeofenceBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- ── Home-screen widgets (Jetpack Glance) ───────────────────────
+             Each GlanceAppWidgetReceiver is an AppWidgetProvider; the Dart
+             WidgetBridge writes their data (via home_widget) and pokes them
+             with HomeWidget.updateWidget(qualifiedAndroidName: …). The Stop
+             and Fav widgets have an APPWIDGET_CONFIGURE activity so the user
+             picks which pinned stop / favourite service that instance shows;
+             the Nearest widget needs no configuration. Taps launch MainActivity
+             with a lyne:// VIEW intent → DeepLinkService. -->
+        <receiver
+            android:name=".widget.LeyneNearbyWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_nearby_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/leyne_nearby_widget_info"/>
+        </receiver>
+        <receiver
+            android:name=".widget.LeyneFavServiceWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_fav_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/leyne_fav_widget_info"/>
+        </receiver>
+
+        <activity
+            android:name=".widget.FavPickerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.DayNight.Dialog">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
+            </intent-filter>
+        </activity>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

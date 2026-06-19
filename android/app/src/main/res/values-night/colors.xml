@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home-screen widget palette (dark). Mirrors WidgetShared.swift dark scheme. -->
+<resources>
+    <color name="w_bg">#FF1A1A1A</color>
+    <color name="w_fg">#FFFFFFFF</color>
+    <color name="w_dim">#A6FFFFFF</color>   <!-- fg @ 0.65 -->
+    <color name="w_faint">#73FFFFFF</color> <!-- fg @ 0.45 -->
+    <color name="w_line">#1AFFFFFF</color>  <!-- fg @ 0.10 -->
+    <color name="w_live">#FFFFFFFF</color>
+    <color name="w_live_bg">#FF242424</color>
+    <color name="w_on_live">#FF111111</color>
+</resources>

@@ -17,6 +17,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+import '../services/geofence_service.dart';
+import '../services/widget_bridge.dart';
 import '../theme.dart' show MRTLine;
 import 'geo.dart';
 import 'lta_config.dart';
@@ -810,6 +812,11 @@ class DataStore extends ChangeNotifier {
           prefetchNearbyArrivals();
         }
         notifyListeners();
+        // Reference data (stop names + coords) just resolved — re-publish the
+        // home-screen widgets so names fill in, and (re)sync bus-coming
+        // geofences now that favourited stops' lat/lon are available.
+        WidgetBridge.instance.pushAll();
+        GeofenceService.instance.sync();
         return;
       } on LtaException catch (e) {
         lastErr = e;
@@ -848,6 +855,8 @@ class DataStore extends ChangeNotifier {
     // nearby cards perpetually empty until a stop was opened.)
     prefetchNearbyArrivals();
     notifyListeners();
+    // Nearest stop changed after this location fix — refresh the Nearest widget.
+    WidgetBridge.instance.pushNearby();
   }
 
   void _recomputeNearby() {
@@ -1017,6 +1026,11 @@ class DataStore extends ChangeNotifier {
       // needless main-thread hit that dropped frames while scrolling. The
       // ranking only changes when the user moves — see updateNearby().
       if (_lastLoc != null) _refreshNearbyServices();
+
+      // Mirror this stop's fresh arrivals to any home-screen widget showing it.
+      // Gated upstream by the 25s arrival-refresh window, so this is ~once/25s
+      // per active stop, not per tick.
+      WidgetBridge.instance.pushArrivals(code, servicesFor(code));
 
       // ── Value-equality guard (mirrors the trainAlerts diff pattern) ─────
       // With 12 nearby prefetches + the 1 s pin ticker, _fetchArrivals fires

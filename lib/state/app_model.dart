@@ -24,8 +24,10 @@ import '../data/models.dart';
 import '../data/mrt_geo.dart';
 import '../data/weather_store.dart';
 import '../services/analytics_service.dart';
+import '../services/geofence_service.dart';
 import '../services/location_service.dart';
 import '../services/notifications.dart';
+import '../services/widget_bridge.dart';
 import 'bus_alert.dart';
 
 /// Global ScaffoldMessenger key — lets AppModel surface in-app arrival
@@ -52,6 +54,7 @@ const _kAlertsKey = 'lyne.alerts'; // JSON list of BusAlert (notifs redesign)
 const _kHiddenNearbyKey = 'lyne.hiddenNearby'; // stop codes hidden from Nearby
 const _kSavedMrtKey = 'lyne.savedMrt'; // JSON list of MrtGeoStation
 const _kSeenAlertIdsKey = 'lyne.seenAlertIds'; // alert-badge seen tracking
+const _kBusComingKey = 'lyne.busComingAlerts'; // Android geofence alerts (opt-in)
 
 /// The currently-armed on-bus alert: which bus, where to alight, when
 /// the heads-up notification fires. Single ride at a time — see
@@ -367,6 +370,22 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Bus-coming alerts (Android geofence, opt-in) ───────
+  // OFF by default — turning it on requires ACCESS_BACKGROUND_LOCATION, which
+  // the UI gates behind a prominent-disclosure primer before calling the
+  // setter. Toggling drives GeofenceService.sync(), which (re)registers or
+  // clears the geofences around the user's favourited stops.
+  bool _busComingAlertsEnabled = false;
+  bool get busComingAlertsEnabled => _busComingAlertsEnabled;
+
+  void setBusComingAlertsEnabled(bool v) {
+    if (_busComingAlertsEnabled == v) return;
+    _busComingAlertsEnabled = v;
+    _prefs?.setBool(_kBusComingKey, v);
+    notifyListeners();
+    GeofenceService.instance.sync();
+  }
+
   // ─── Active alight ride (persisted) ─────────────────────
   ActiveAlight? _activeAlight;
   ActiveAlight? get activeAlight => _activeAlight;
@@ -461,6 +480,10 @@ class AppModel extends ChangeNotifier {
       _kFavServicesKey,
       jsonEncode(_favServices.map((f) => f.toJson()).toList()),
     );
+    WidgetBridge.instance.pushFavs();
+    // Favourited stops define the geofence set — re-sync (no-op when the
+    // feature is off).
+    GeofenceService.instance.sync();
   }
 
   /// True if this (no, stop) pair is already saved.
@@ -698,6 +721,7 @@ class AppModel extends ChangeNotifier {
     // the flag down on an explicit OS denial so the toggle never lies.
     _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? true;
     _hapticsEnabled = _prefs!.getBool(_kHapticsKey) ?? true;
+    _busComingAlertsEnabled = _prefs!.getBool(_kBusComingKey) ?? false;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
     _lastSeenVersion = _prefs!.getString(_kLastSeenVersionKey);
 
@@ -790,6 +814,13 @@ class AppModel extends ChangeNotifier {
     };
 
     notifyListeners();
+    // Seed the Android home-screen widgets from persisted state on cold start.
+    // Names may still be stop codes until reference data loads; DataStore's
+    // bootstrap re-publishes via pushAll() once stop names resolve.
+    WidgetBridge.instance.pushAll();
+    // (Re)register bus-coming geofences if enabled. Coordinates may not be ready
+    // until reference data loads; DataStore bootstrap re-syncs once it is.
+    GeofenceService.instance.sync();
   }
 
   void _persistPins() {
