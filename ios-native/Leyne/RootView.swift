@@ -124,13 +124,13 @@ struct RootView: View {
                    feedback: false)
         }
         // Widget + Live Activity deep links (lyne:// scheme, registered in
-        // LeyneInfo.plist). The Home Screen widget opens lyne://stop/<code>;
-        // the Live Activity (lock screen / Dynamic Island) opens
-        // lyne://bus/<stopCode>/<busNo>. Both route through the same
-        // AppModel.open(...) plumbing as a notification tap, so SoftRoot pushes
-        // Stop or Bus accordingly. Without this handler the registered scheme
-        // had no receiver — a widget / Live Activity tap only foregrounded the
-        // app instead of opening the stop or bus.
+        // LeyneInfo.plist). URL formats:
+        //   lyne://stop/<stopCode>           — Pinned Stop widget
+        //   lyne://bus/<stopCode>/<busNo>    — Live Activity (lock screen / Dynamic Island)
+        //   lyne://service/<busNo>?stop=<stopCode> — Favourite Service widget
+        // All route through AppModel.open(...) so SoftRoot pushes Stop or Bus
+        // the same way a notification tap does. Without this handler the registered
+        // scheme had no receiver — a widget tap only foregrounded the app.
         .onOpenURL { url in
             // Widget / Live Activity tap → opening a stop/bus; skip App Open.
             AppOpenAdManager.shared.suppressNextPresentation()
@@ -152,6 +152,18 @@ struct RootView: View {
                 m.open(stopCode: parts[0],
                        label: ds.stopName(parts[0]),
                        busNo: nil,
+                       feedback: false)
+            case "service" where !parts.isEmpty:
+                // lyne://service/<busNo>?stop=<stopCode>
+                // parts[0] is the service number; stop code is a query item.
+                let busNo = parts[0]
+                let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                let stopCode = comps?.queryItems?.first(where: { $0.name == "stop" })?.value ?? ""
+                let serviceStop = ds.stopByCode.isEmpty || ds.stopByCode[stopCode] != nil
+                guard !stopCode.isEmpty && serviceStop else { break }
+                m.open(stopCode: stopCode,
+                       label: ds.stopName(stopCode),
+                       busNo: busNo,
                        feedback: false)
             default:
                 break

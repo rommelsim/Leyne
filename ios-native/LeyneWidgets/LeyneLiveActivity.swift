@@ -380,6 +380,7 @@ struct LeyneWidgetBundle: WidgetBundle {
         // Home Screen widgets are live again — the app already publishes their
         // data to the App Group every refresh (mirrorNearbyToWidget /
         // mirrorFavServicesToWidget / pinned-stop publish in AppModel+DataStore).
+        LeyneStopWidget()          // Home Screen — pinned stop (Small)
         LeyneNearbyWidget()        // Home Screen — nearest stop name + code
         LeyneFavServiceWidget()    // Home Screen — favourited service
         LeyneLiveActivity()        // Lock Screen / Dynamic Island

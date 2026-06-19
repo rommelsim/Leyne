@@ -1,7 +1,6 @@
-// Home Screen widgets: live next-bus arrivals for one (Small/Medium) or two
-// (Large) pinned stops. The widget reads as a snippet of the app — same
-// monochrome ink surface, monospacedDigit ETAs, ink badge for arriving
-// rows — so muscle memory transfers from in-app PinnedCardView.
+// Home Screen widget: live next-bus arrivals for a pinned stop (Small only).
+// Reads as a snippet of the app — same monochrome ink surface, monospacedDigit
+// ETAs — so muscle memory transfers from in-app PinnedCardView.
 //
 // Self-contained: the widget extension can't import the app module. It
 // reads pinned stops from the shared App Group and calls LTA DataMall
@@ -16,8 +15,7 @@ import UIKit
 // atoms (WServiceBadge, WEtaColumns) all live in WidgetShared.swift.
 
 // ─── Widget configuration intent ─────────────────────────
-// Lets the user pick which pinned stop powers the widget. The Large
-// family supports a second stop for the AM/PM commute layout.
+// Lets the user pick which pinned stop powers the widget.
 struct StopChoice: AppEntity {
     let id: String
     let name: String
@@ -47,14 +45,11 @@ struct StopChoiceQuery: EntityQuery {
 struct SelectStopIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Pick stop"
     static var description = IntentDescription(
-        "Choose which pinned stop this widget shows. The Large size can show a second stop too."
+        "Choose which pinned stop this widget shows."
     )
 
     @Parameter(title: "Stop")
     var stop: StopChoice?
-
-    @Parameter(title: "Second stop (Large only)")
-    var stop2: StopChoice?
 }
 
 // ─── Timeline entry ──────────────────────────────────────
@@ -67,7 +62,6 @@ struct StopBlock: Hashable {
 struct StopEntry: TimelineEntry {
     let date: Date
     let primary: StopBlock?
-    let secondary: StopBlock?     // populated only for Large
 }
 
 struct StopProvider: AppIntentTimelineProvider {
@@ -77,56 +71,32 @@ struct StopProvider: AppIntentTimelineProvider {
             primary: StopBlock(name: "Bef Bishan Stn", code: "53061",
                                rows: [.init(id: "88", eta1: 2, eta2: 9),
                                       .init(id: "156", eta1: 9, eta2: 19),
-                                      .init(id: "410", eta1: 4, eta2: 16)]),
-            secondary: StopBlock(name: "Opp Blk 211", code: "53241",
-                                 rows: [.init(id: "174", eta1: 9, eta2: 21),
-                                        .init(id: "88", eta1: 17, eta2: 28)])
+                                      .init(id: "410", eta1: 4, eta2: 16)])
         )
     }
 
     func snapshot(for configuration: SelectStopIntent, in context: Context) async -> StopEntry {
-        await entry(for: configuration, family: context.family)
+        await entry(for: configuration)
     }
 
     func timeline(for configuration: SelectStopIntent, in context: Context)
         async -> Timeline<StopEntry> {
-        let e = await entry(for: configuration, family: context.family)
+        let e = await entry(for: configuration)
         // Refresh roughly every minute (system may throttle further).
         let next = Date().addingTimeInterval(60)
         return Timeline(entries: [e], policy: .after(next))
     }
 
-    private func fetchRows(for pick: StopChoice?) async -> [WLTA.Row] {
-        guard let pick else { return [] }
-        return await WLTA.arrivals(stop: pick.id)
-    }
-
-    private func entry(for configuration: SelectStopIntent,
-                       family: WidgetFamily) async -> StopEntry {
+    private func entry(for configuration: SelectStopIntent) async -> StopEntry {
         let pins = loadPinnedStops()
         // Primary: the configured stop, falling back to the first pin.
         let primaryPick = configuration.stop
             ?? pins.first.map { StopChoice(id: $0.id, name: $0.name) }
-        // Secondary: only the Large family uses it. Falls back to the next
-        // distinct pin so the widget is useful without configuration.
-        let secondaryPick: StopChoice? = (family == .systemLarge)
-            ? (configuration.stop2
-               ?? pins.first(where: { $0.id != primaryPick?.id })
-                   .map { StopChoice(id: $0.id, name: $0.name) })
-            : nil
-
-        async let pRows = fetchRows(for: primaryPick)
-        async let sRows = fetchRows(for: secondaryPick)
-        let primaryRows = await pRows
-        let secondaryRows = await sRows
-
-        let p = primaryPick.map {
-            StopBlock(name: $0.name, code: $0.id, rows: primaryRows)
-        }
-        let s = secondaryPick.map {
-            StopBlock(name: $0.name, code: $0.id, rows: secondaryRows)
-        }
-        return StopEntry(date: .now, primary: p, secondary: s)
+        let rows = primaryPick != nil
+            ? await WLTA.arrivals(stop: primaryPick!.id)
+            : []
+        let p = primaryPick.map { StopBlock(name: $0.name, code: $0.id, rows: rows) }
+        return StopEntry(date: .now, primary: p)
     }
 }
 
@@ -197,133 +167,6 @@ private struct SmallStopView: View {
     }
 }
 
-// ─── Service row — matches in-app PinnedCardView ServiceRow ─
-private struct WServiceRow: View {
-    let row: WLTA.Row
-    // Arriving = imminent AND live. A scheduled (non-GPS) guess never gets
-    // the confident ink-arriving treatment, even at <=1 min.
-    private var arriving: Bool { row.mon1 && (row.eta1 ?? 99) <= 1 }
-
-    var body: some View {
-        HStack(spacing: 9) {
-            // Ink-filled service badge — quotes the in-app ServiceBadge so
-            // a glance at the widget reads as a glance at the app.
-            WServiceBadge(no: row.id, compact: true)
-
-            Spacer(minLength: 0)
-
-            // Hero ETA + up to two follow-up columns ("2  18  35"), matching
-            // the Stop Arrivals mockup.
-            WEtaColumns(row: row, heroSize: 22)
-        }
-        .padding(.vertical, 4).padding(.horizontal, 6)
-        .background(arriving ? wLiveBg : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
-// ─── Medium widget — full stop card ──────────────────────
-// A direct visual quote of in-app PinnedCardView: stop name header,
-// thin divider, up to 3 ServiceRows. Tapping any row could be routed
-// to the bus's detail via deep link in a later pass.
-private struct MediumStopView: View {
-    let block: StopBlock?
-
-    var body: some View {
-        if let block {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 5) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(wDim)
-                        .widgetAccentable()
-                    Text(block.name)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(wFg)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(wFaint)
-                }
-                Rectangle().fill(wLine).frame(height: 1).padding(.top, 6)
-
-                if block.rows.isEmpty {
-                    Spacer()
-                    Text("No live arrivals")
-                        .font(.system(size: 12)).foregroundStyle(wDim)
-                        .frame(maxWidth: .infinity)
-                    Spacer()
-                } else {
-                    VStack(spacing: 2) {
-                        ForEach(Array(block.rows.prefix(3))) { r in
-                            WServiceRow(row: r)
-                        }
-                    }
-                    .padding(.top, 4)
-                    Spacer(minLength: 0)
-                }
-            }
-            .widgetURL(stopURL(block.code))
-        } else {
-            EmptyStopView()
-        }
-    }
-}
-
-// ─── Large widget — AM/PM commute layout ─────────────────
-// Two stop blocks stacked. The user picks both via the widget's edit
-// sheet (or the widget auto-fills from the first two pins).
-private struct LargeCommuteView: View {
-    let primary: StopBlock?
-    let secondary: StopBlock?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let p = primary {
-                StopChunk(block: p, maxRows: secondary == nil ? 5 : 3)
-            }
-            if primary != nil && secondary != nil {
-                Rectangle().fill(wLine).frame(height: 1)
-            }
-            if let s = secondary {
-                StopChunk(block: s, maxRows: 3)
-            }
-            if primary == nil && secondary == nil { EmptyStopView() }
-            Spacer(minLength: 0)
-        }
-        .widgetURL(stopURL(primary?.code ?? ""))
-    }
-
-    private struct StopChunk: View {
-        let block: StopBlock
-        let maxRows: Int
-        var body: some View {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 10)).foregroundStyle(wDim)
-                        .widgetAccentable()
-                    Text(block.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(wFg).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                if block.rows.isEmpty {
-                    Text("No live arrivals")
-                        .font(.system(size: 11)).foregroundStyle(wDim)
-                } else {
-                    VStack(spacing: 2) {
-                        ForEach(Array(block.rows.prefix(maxRows))) { r in
-                            WServiceRow(row: r)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 // ─── Empty state ─────────────────────────────────────────
 private struct EmptyStopView: View {
     var body: some View {
@@ -346,23 +189,11 @@ private struct EmptyStopView: View {
 // ─── Top-level widget view ───────────────────────────────
 private struct StopWidgetView: View {
     let entry: StopEntry
-    @Environment(\.widgetFamily) private var family
 
     var body: some View {
-        Group {
-            switch family {
-            case .systemSmall:
-                SmallStopView(block: entry.primary)
-            case .systemMedium:
-                MediumStopView(block: entry.primary)
-            case .systemLarge:
-                LargeCommuteView(primary: entry.primary, secondary: entry.secondary)
-            default:
-                MediumStopView(block: entry.primary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .containerBackground(wBg, for: .widget)
+        SmallStopView(block: entry.primary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .containerBackground(wBg, for: .widget)
     }
 }
 
@@ -375,7 +206,7 @@ struct LeyneStopWidget: Widget {
             StopWidgetView(entry: entry)
         }
         .configurationDisplayName("Pinned Stop")
-        .description("Live arrivals for a stop you pinned in Leyne. Large size shows two stops.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .description("Live arrivals for a stop you pinned in Leyne.")
+        .supportedFamilies([.systemSmall])
     }
 }

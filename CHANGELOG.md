@@ -18,7 +18,8 @@ Two Jetpack Glance widgets mirror the iOS WidgetKit set:
   never reads GPS itself).
 - **Favourite Service** (4×2) — next arrival for a favourited bus.
 
-(A Pinned Stop widget was built then removed before release on both platforms.)
+(A Pinned Stop widget was built then removed on Android — it stays on iOS as a
+small-only widget; see the iOS entry.)
 
 Architecture: a Dart `WidgetBridge` (`lib/services/widget_bridge.dart`) mirrors
 pin/fav/nearby/arrival snapshots into the `home_widget` SharedPreferences store on
@@ -44,12 +45,22 @@ the Play background-location declaration + Data-Safety update — see
 
 ## iOS — unreleased (pending next Archive) · 2026-06-19
 
-- **Home Screen widgets are back.** Re-enabled the **Nearest Stop** and
-  **Favourite Service** home-screen widgets in `LeyneWidgetBundle` (only the Live
-  Activity had been shipping). The app already publishes their data to the App
-  Group on every refresh, so no data wiring was needed. (Pinned Stop was
-  re-enabled then removed — left parked.)
-  (`ios-native/LeyneWidgets/LeyneLiveActivity.swift`)
+- **Home Screen widgets are back.** Re-enabled the **Pinned Stop** (small only —
+  the medium/large layouts were dropped), **Nearest Stop**, and **Favourite
+  Service** home-screen widgets in `LeyneWidgetBundle` (only the Live Activity
+  had been shipping). The app already publishes their data to the App Group on
+  every refresh. (`LeyneLiveActivity.swift`, `LeyneStopWidget.swift`)
+- **Fixed: tapping the Favourite Service widget did nothing.** `RootView.onOpenURL`
+  handled the `bus`/`stop` URL hosts but not `service` (`lyne://service/<no>?stop=`)
+  — added a `service` case so the tap opens the bus at its stop. Also ensured the
+  small Pinned Stop widget's `widgetURL` always carries a valid stop code.
+  (`RootView.swift`)
+- **Pinned-stop → widget propagation audited.** `pins.didSet → persistPins() →
+  mirrorPinsToWidget()` fires on every pin mutation; App Group keys/suite
+  (`leyne.pins.shared` / `group.com.leyne`) and entitlements match. If a newly
+  pinned stop still doesn't appear on-device, verify the App Group capability in
+  Xcode Signing & Capabilities (both targets) and that the widget instance is
+  configured to that stop — see notes below.
 
 ## iOS — unreleased (pending next Archive) · 2026-06-17
 
