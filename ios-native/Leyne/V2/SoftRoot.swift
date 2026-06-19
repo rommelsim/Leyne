@@ -85,7 +85,14 @@ struct SoftRoot: View {
                     SoftHomeView(
                         onTab: { tab = $0 },
                         onOpenStop: { homeStack.append(.stop($0)) },
-                        onOpenSearch: { tab = .search }
+                        onOpenSearch: { tab = .search },
+                        // DepartureCard taps push directly to the bus detail.
+                        // The stop isn't pushed first — the back chevron on the
+                        // bus view returns to Home, which is the right mental model
+                        // when launching from the board.
+                        onOpenBus: { stopCode, svc in
+                            homeStack.append(.bus(stopCode: stopCode, svc: svc))
+                        }
                     )
                 }
             }

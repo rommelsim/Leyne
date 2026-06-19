@@ -105,6 +105,56 @@ struct Theme: Equatable {
                 weight: weight, design: .default).monospacedDigit()
     }
 
+    // ── Glance design-system additions (Phase 0) ─────────────────────────────
+    // The prototype's `--round` typeface mapped to SF Pro Rounded. Used for
+    // ETA countdowns, stop-section headers, and the context LIVE chip. Dynamic
+    // Type scaling matches `sans`/`mono`. `.monospacedDigit()` is NOT chained —
+    // SF Pro Rounded already uses tabular figures on Apple platforms; apply
+    // `.monospacedDigit()` at the call site if you need fixed-width digits in a
+    // mixed-weight label.
+    func rounded(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: UIFontMetrics.default.scaledValue(for: size),
+                weight: weight, design: .rounded)
+    }
+
+    // ── Glance Palette (additive — does NOT change existing token values) ────
+    // Mapped from the prototype `:root` / `:root[data-theme=dark]` tokens.
+    // Existing screens that don't opt into these tokens are unaffected;
+    // Phase-2+ screens can adopt them incrementally.
+
+    /// Glance brand indigo. Actions, pinned markers, focus rings.
+    /// #5B5BD6 light / #8A8AF5 dark — distinct from DT blue and MRT pill colours.
+    var brand: Color {
+        isDark ? Color(hex: "8A8AF5") : Color(hex: "5B5BD6")
+    }
+
+    /// Arriving / "on time" green. AA on white at 4.84:1.
+    /// #0A8048 light / #34D17A dark.
+    var go: Color {
+        isDark ? Color(hex: "34D17A") : Color(hex: "0A8048")
+    }
+
+    /// Disruption *text* — AA on white. Fill disruptions still use existing `warn`.
+    /// #A06B00 light / #F0B355 dark.
+    var warnText: Color {
+        isDark ? Color(hex: "F0B355") : Color(hex: "A06B00")
+    }
+
+    /// Tertiary text — AA-corrected. #767683 light / 48%-white dark.
+    /// This is stricter than the existing `faint` (35%) and is required
+    /// wherever body text needs to meet WCAG AA on a white/near-white card.
+    var ink3: Color {
+        isDark ? Color.white.opacity(0.48) : Color(hex: "767683")
+    }
+
+    // ── Glance shape constants ───────────────────────────────────────────────
+    /// Departure card corner radius — matches prototype `--r-card: 24px`.
+    static let cardRadius: CGFloat = 22
+    /// Service-number chip corner radius — matches `--r-badge: 14px`.
+    static let badgeRadius: CGFloat = 14
+    /// Pill corner radius — matches `--r-chip: 13px`.
+    static let chipRadius: CGFloat = 13
+
     // Monochrome dark — clean black-and-white, no brand green. Accent (LIVE /
     // arriving / pin) is pure white ink, mirroring the light mode's black-ink
     // accent; confidence reads from opacity/shape, not hue. Amber + red are
@@ -259,5 +309,34 @@ enum MRTLine: String, CaseIterable {
     static func shortLabel(forLta raw: String) -> String {
         if let line = from(ltaCode: raw) { return "\(line.rawValue) Line" }
         return raw
+    }
+}
+
+// MARK: - Glance card modifier (Phase 0)
+
+/// Soft-elevation card surface: card fill + 22-pt continuous corner radius +
+/// two-layer shadow. Depth replaces hairline borders for the Glance design
+/// system. Matches the prototype's `--elev` shadow pair:
+///   0 1px 2px rgba(10,10,12,.05), 0 6px 20px rgba(10,10,12,.06)
+/// In dark mode iOS composites the same shadow opacities over the near-black
+/// background — they still lift the card visually without needing mode variants.
+struct GlanceCardModifier: ViewModifier {
+    let fill: Color
+
+    func body(content: Content) -> some View {
+        content
+            .background(fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius,
+                                                   style: .continuous))
+            .shadow(color: Color(white: 0.04, opacity: 0.05), radius: 1, x: 0, y: 1)
+            .shadow(color: Color(white: 0.04, opacity: 0.06), radius: 10, x: 0, y: 6)
+    }
+}
+
+extension View {
+    /// Applies the Glance card surface: soft fill + two-layer depth shadow.
+    /// Use in place of a `background` + `overlay(stroke)` pair for departure
+    /// cards and stop-section panels.
+    func glanceCard(fill: Color) -> some View {
+        modifier(GlanceCardModifier(fill: fill))
     }
 }

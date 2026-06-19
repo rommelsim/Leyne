@@ -8,6 +8,38 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 1
+
+**Departures board** — Home redesigned around the "Glance" identity. Every bus at
+every stop with a live countdown, visible with zero taps.
+
+### Design tokens (Phase 0 — additive)
+- `Theme.rounded()` font helper — SF Pro Rounded with Dynamic Type scaling; used for
+  countdowns and section headers.
+- New Glance palette: `brand` (#5B5BD6 / #8A8AF5), `go` (#0A8048 / #34D17A),
+  `warnText` (#A06B00 / #F0B355), `ink3` (#767683 / 48%-white) — all AA-verified.
+- `Theme.cardRadius` (22), `badgeRadius` (14), `chipRadius` (13) shape constants.
+- `.glanceCard(fill:)` view modifier — two-layer soft shadow replaces hairline borders.
+- Existing tokens and all other screens unchanged.
+
+### DepartureCard (Phase 1 — new component)
+New `V2/DepartureCard.swift`: bus-number chip · destination + crowd glyph +
+"then X · Y min" sub-row · big rounded tabular live countdown. States: live (ink +
+wave mark), arriving ≤60 s (go green + pulse), scheduled (ink3 + "~"). Drives from
+`m.tick` (existing 1 s pulse) and `Service.followingDate`/`thirdDate`. Tap → stop
+detail via existing NavigationStack.
+
+### Home departures board (Phase 1 — SoftHomeView rewrite)
+- "Where to?" search button at top → switches to Search tab (existing cross-tab nav).
+- Compact context line: greeting + pulsing LIVE dot (green when GPS active).
+- Pinned/saved stops float to top; nearby stops follow. Each stop: section header
+  (name · walk · "Stop {code}" · save star) + DepartureCards.
+- Skeleton cards while first fetch is in-flight; "updated Xs ago" freshness stamp.
+- Contextual MRT alert banner (amber left-bar, dismissible) only when alerts present.
+- All existing behaviour preserved: live tick, saved-stop GPS fallback, save/pin
+  toggle, swipe actions, context menus, NativeAdCard, refreshable, empty state,
+  location nudge.
+
 ## Android — unreleased (pending next AAB) · 2026-06-19
 
 **Home Screen widgets land on Android** — closing the biggest iOS parity gap and
