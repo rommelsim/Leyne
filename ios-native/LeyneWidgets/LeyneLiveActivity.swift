@@ -377,12 +377,12 @@ private struct LockScreenView: View {
 @main
 struct LeyneWidgetBundle: WidgetBundle {
     var body: some Widget {
-        // Home Screen widgets are all PARKED — focus is the Live Activity.
-        // The source (nearest-stop / pinned-stop / fav-service) stays in the
-        // target; re-register here when we return to Home Screen widgets.
-        // LeyneNearbyWidget()     // Home Screen — nearest stop name + code (parked)
-        // LeyneStopWidget()       // Home Screen — pinned stop arrivals (parked)
-        // LeyneFavServiceWidget() // Home Screen — favourited service (parked)
+        // Home Screen widgets are live again — the app already publishes their
+        // data to the App Group every refresh (mirrorNearbyToWidget /
+        // mirrorFavServicesToWidget / pinned-stop publish in AppModel+DataStore).
+        LeyneNearbyWidget()        // Home Screen — nearest stop name + code
+        LeyneStopWidget()          // Home Screen — pinned stop arrivals
+        LeyneFavServiceWidget()    // Home Screen — favourited service
         LeyneLiveActivity()        // Lock Screen / Dynamic Island
     }
 }
