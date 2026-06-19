@@ -49,6 +49,7 @@ struct SoftBusView: View {
     @State private var alertToast: ArrivalAlertToastState?
     @State private var showMap = false
     @State private var showRouteCard = false
+    @State private var showGO = false
     @State private var serviceRouteData: ServiceRoute?
     @State private var selectedDirIndex: Int = 0
     @State private var camera: MapCameraPosition = .automatic
@@ -126,45 +127,62 @@ struct SoftBusView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            VStack(alignment: .leading, spacing: 12) {
-                topBar
-                titleBlock
-                actionBar
-                heroCard
-                liveModule
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack(alignment: .topLeading) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    // Space for the floating back button (44 pt) + breathing gap
+                    Color.clear.frame(height: 52)
+
+                    // Hero block: service badge + destination + LIVE pill + big ETA
+                    glanceHero
+                    actionBar
+                    firstLastFooter.padding(.top, -4)
+
+                    // Live map (existing MapKit, tap-to-expand)
+                    liveMapCard
+                        .frame(height: 220)
+
+                    // "Start trip" — primary CTA
+                    startTripButton
+
+                    // Route-progress timeline card
+                    routeTimelineCard
+
+                    // Service info card (first/last/frequency/crowd)
+                    serviceInfoCard
+
+                    // Bottom breathing room
+                    Color.clear.frame(height: 24)
+                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
-            // Pushed full-screen (not a sheet) — the safe-area inset already
-            // clears the status bar, so only a small breathing gap is needed
-            // above the top bar. Matches SoftStopView's top inset.
-            .padding(.top, 8)
-            .padding(.bottom, 10)
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+
+            // Floating glass back button — overlays the scroll content.
+            // Positioned at the standard 60 pt top-of-page offset so it
+            // doesn't fight the status-bar dynamic island.
+            floatingBackButton
+                .padding(.leading, 16)
+                .padding(.top, 60)
         }
         .overlay(alignment: .top) { toastView }
         .arrivalAlertToastOverlay(state: $alertToast, t: t)
         .background(t.bg.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        // No pull-to-refresh — the dashboard doesn't scroll. The ticker below
-        // keeps this stop's arrivals fresh automatically while the view is open.
-        // Map opens as a tall card (consistent with the route card); the inline
-        // preview is a button, not a live map.
         .sheet(isPresented: $showMap) {
             mapFullScreen
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        // Full-route glass card, raised from the route strip.
         .sheet(isPresented: $showRouteCard) { routeCard }
-        // Manage all alerts.
         .sheet(isPresented: $showManage) {
             NavigationStack { ManageAlertsView() }
                 .environmentObject(m)
                 .environmentObject(fb)
                 .environmentObject(ds)
+        }
+        .fullScreenCover(isPresented: $showGO) {
+            goCompanion
         }
         .onAppear {
             ds.ensureArrivals(stop: stopCode)
@@ -173,10 +191,6 @@ struct SoftBusView: View {
             recomputePlot()
         }
         .onReceive(ticker) { _ in
-            // Keep this stop's arrivals fresh while the view is open. The global
-            // app tick only refreshes pinned + open-card stops, so a bus opened
-            // at an un-pinned stop would otherwise freeze at its last fetch.
-            // `ensureArrivals` self-throttles to the 25 s freshness window.
             ds.ensureArrivals(stop: stopCode)
             recomputePlot()
             buzzIfApproaching()
@@ -184,6 +198,344 @@ struct SoftBusView: View {
         .onChange(of: serviceRouteData) { _, _ in recomputePlot() }
         .onChange(of: selectedDirIndex) { _, _ in recomputePlot() }
         .onChange(of: ds.arrivals[stopCode]) { _, _ in recomputePlot() }
+    }
+
+    // MARK: Floating glass back button (replaces topBar — no dead top row)
+
+    /// A single glass circle with a chevron, floating over the scroll content.
+    /// Follows the prototype's `.floatback` treatment: backdrop-blur glass
+    /// pill pinned top-left. The top bar row is removed; every pixel below
+    /// the button is content.
+    private var floatingBackButton: some View {
+        Button {
+            fb.select(); onBack()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .frame(width: 44, height: 44)
+                .background(
+                    Group {
+                        if #available(iOS 26.0, *) {
+                            Circle().fill(.regularMaterial)
+                        } else {
+                            Circle().fill(t.surface.opacity(0.92))
+                        }
+                    }
+                )
+                .shadow(color: .black.opacity(t.isDark ? 0.4 : 0.14), radius: 8, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back to \(ds.stopName(stopCode))")
+    }
+
+    // MARK: Glance hero (Phase 3 — replaces titleBlock + heroCard)
+
+    /// Answer-first layout: ink service badge + destination + LIVE/SCHEDULED
+    /// status pill (top row) then the big rounded tabular live-ETA countdown
+    /// (middle) then stops-away context (bottom). All in one card so the
+    /// commuter sees "what bus, going where, arriving when" without scrolling.
+    private var glanceHero: some View {
+        let s = liveService()
+        return VStack(alignment: .leading, spacing: 14) {
+            // Row 1: badge + destination + status pill
+            HStack(alignment: .center, spacing: 12) {
+                // Ink square badge (bus number)
+                Text(svc)
+                    .font(t.rounded(22, .bold))
+                    .foregroundStyle(t.contrastFg)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(width: 56, height: 56)
+                    .background(t.contrast,
+                                in: RoundedRectangle(cornerRadius: Theme.badgeRadius + 3,
+                                                     style: .continuous))
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    // Destination
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(s?.dest.isEmpty == false ? (s!.dest) : "Loading route…")
+                            .font(t.sans(17, weight: .bold))
+                            .foregroundStyle(t.fg)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        if showWhisper {
+                            Text("~")
+                                .font(t.mono(13))
+                                .foregroundStyle(t.faint)
+                                .opacity(0.7)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    // Status pill: LIVE or SCHEDULED
+                    statusPill
+                }
+
+                Spacer(minLength: 0)
+
+                // Crowd meter on the right
+                if let s {
+                    CrowdMeter(load: s.load, t: t)
+                }
+            }
+
+            // Row 2: big ETA countdown
+            heroETARow(s)
+                .padding(.top, 2)
+
+            // Row 3: approach context (clock + stops away)
+            Text(approachContext(s))
+                .font(t.sans(13))
+                .foregroundStyle(t.dim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            // Divider + "then X · Y min" next buses
+            if let s {
+                Rectangle().fill(t.line).frame(height: 1)
+                heroFooter(s)
+            }
+        }
+        .padding(16)
+        .glanceCard(fill: t.surface)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(approachA11y(s))
+    }
+
+    /// LIVE / SCHEDULED status pill — matches prototype `.statuspill` / `.statuspill.live`.
+    private var statusPill: some View {
+        let isLive = pillConfidence == .live
+        return HStack(spacing: 5) {
+            if isLive {
+                liveWaveMark.frame(width: 12, height: 12).foregroundStyle(t.go)
+            }
+            Text(isLive ? "LIVE" : "SCHEDULED")
+                .font(t.rounded(10, .bold))
+                .tracking(0.8)
+                .foregroundStyle(isLive ? t.go : t.ink3)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            Capsule().fill(isLive
+                ? t.go.opacity(t.isDark ? 0.22 : 0.12)
+                : t.surfaceHi)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isLive ? "Live tracking" : "Scheduled estimate")
+    }
+
+    /// Animated wave mark for the LIVE status pill (matches DepartureCard's wave).
+    private var liveWaveMark: some View {
+        TimelineView(.animation(minimumInterval: 0.05)) { tl in
+            let p = tl.date.timeIntervalSinceReferenceDate
+            let opacity = 0.35 + 0.65 * (0.5 + 0.5 * sin(p * .pi * 2 / 1.8))
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 10, weight: .semibold))
+                .opacity(opacity)
+        }
+    }
+
+    // MARK: Live map card (Glance Phase 3 — replaces liveModule)
+
+    /// The live MapKit map in a standalone card. The route strip was moved to
+    /// `routeTimelineCard` below for clearer progressive disclosure. Tap opens
+    /// the full-screen map sheet.
+    private var liveMapCard: some View {
+        Button {
+            fb.select(); frameMapForCard(); showMap = true
+        } label: {
+            ZStack(alignment: .bottom) {
+                Map(position: .constant(.automatic), interactionModes: []) {
+                    mapAnnotations
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+
+                // "Open map" affordance
+                HStack(spacing: 5) {
+                    Image(systemName: "map.fill")
+                    Text("Open map")
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .font(t.mono(10, weight: .bold))
+                .foregroundStyle(t.fg)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(t.line, lineWidth: 1))
+                .padding(.bottom, 10)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            .stroke(t.line, lineWidth: 1))
+        .accessibilityLabel(liveTrackingA11y)
+    }
+
+    // MARK: Start trip button
+
+    /// Primary CTA — opens the GO full-screen companion.
+    /// Shown when a live service is trackable (monitored) so the user has
+    /// real data behind the trip. Falls back gracefully (button still shows;
+    /// GO will display "—" for data it can't compute).
+    private var startTripButton: some View {
+        Button {
+            fb.success()
+            showGO = true
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Start trip")
+                    .font(t.rounded(16, .bold))
+            }
+            .foregroundStyle(t.contrastFg)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .background(t.contrast,
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel("Start trip companion for bus \(svc)")
+    }
+
+    // MARK: Route timeline card (progressive disclosure)
+
+    /// The full route-progress timeline in a `.glanceCard`, matching the
+    /// prototype's `.tl` / `.tl-*` structure. Tap opens the full-route glass
+    /// sheet (same as before). Shows only when route data is loaded and the
+    /// bus can be positioned.
+    @ViewBuilder
+    private var routeTimelineCard: some View {
+        if !timelineStops.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                // Section header
+                sectionHeader("On the way")
+
+                // The compact inline timeline (reuses existing RouteTimeline)
+                // Embed=true → no own padding; we control that here.
+                VStack(spacing: 0) {
+                    RouteTimeline(t: t, svc: svc, stops: timelineStops,
+                                  alightId: .constant(nil), selectable: false, embedded: true)
+                }
+                .padding(14)
+                .glanceCard(fill: t.surface)
+
+                // "Full route" affordance
+                Button {
+                    fb.select(); showRouteCard = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("FULL ROUTE")
+                            .font(t.mono(10, weight: .semibold))
+                            .tracking(0.8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundStyle(t.faint)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View full route for bus \(svc)")
+            }
+        }
+    }
+
+    // MARK: Service info card
+
+    /// First/last bus · frequency hint · crowd — below the timeline.
+    @ViewBuilder
+    private var serviceInfoCard: some View {
+        if let s = liveService() {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Service")
+
+                VStack(spacing: 0) {
+                    serviceInfoRow(
+                        label: "First / last bus",
+                        value: firstLastText
+                    )
+                    Divider().padding(.horizontal, 14)
+                    serviceInfoRow(
+                        label: "Crowd",
+                        value: s.load.label
+                    )
+                    Divider().padding(.horizontal, 14)
+                    serviceInfoRow(
+                        label: "Deck",
+                        value: s.deck == .DD ? "Double-deck" : "Single-deck"
+                    )
+                    if s.wab {
+                        Divider().padding(.horizontal, 14)
+                        serviceInfoRow(label: "Accessibility", value: "Wheelchair accessible")
+                    }
+                }
+                .glanceCard(fill: t.surface)
+            }
+        }
+    }
+
+    private func serviceInfoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(t.sans(14))
+                .foregroundStyle(t.dim)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(t.sans(14, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+    }
+
+    private var firstLastText: String {
+        guard let w = currentDirection?.firstLast,
+              let pair = todaysWindow(w) else { return "—" }
+        return firstLastLabel(pair)
+    }
+
+    /// Uppercase section label — matches the prototype `.hdr` style.
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(t.rounded(12, .heavy))
+            .tracking(0.7)
+            .foregroundStyle(t.ink3)
+            .padding(.horizontal, 4)
+    }
+
+    // MARK: GO trip companion (full-screen cover)
+
+    private var goCompanion: some View {
+        let walkSec: Int = {
+            // If DataStore has a stop with walk time, use it; else 0.
+            // Currently walk time isn't persisted in the stop model — use 0
+            // so we drop straight to Wait. Callers can pass it later.
+            return 0
+        }()
+        return LiveTripView(
+            stopCode: stopCode,
+            svc: svc,
+            stopName: ds.stopName(stopCode),
+            dest: liveService()?.dest ?? "",
+            walkSec: walkSec,
+            direction: currentDirection,
+            estimatedBusIndex: estimatedBusIndex,
+            onClose: { showGO = false }
+        )
+        .environmentObject(m)
+        .environmentObject(fb)
+        .environmentObject(ds)
     }
 
     /// Toggle whether this bus is saved. Filled = saved (here or anywhere);
@@ -248,24 +600,7 @@ struct SoftBusView: View {
         }
     }
 
-    // MARK: Top bar
-
-    private var topBar: some View {
-        HStack(spacing: 10) {
-            // Back
-            Button {
-                fb.select(); onBack()
-            } label: {
-                circleButton("chevron.left", size: 17)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back to \(ds.stopName(stopCode))")
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: Action bar — labeled segments below the title
+    // MARK: Action bar — labeled segments below the title (kept for alert / save / more)
 
     /// Three equal-width labeled action segments placed between the title block
     /// and the hero ETA card. Replaces the cryptic icon-only top-bar toggles
@@ -360,100 +695,13 @@ struct SoftBusView: View {
         }
     }
 
-    /// Uniform circular button label.
-    private func circleButton(_ symbol: String, size: CGFloat) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(t.fg)
-            .frame(width: 44, height: 44)
-            .background(t.surface, in: Circle())
-            .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
-    }
-
-    // MARK: Title block
-
-    private var titleBlock: some View {
-        let service = liveService()
-        let dest = service?.dest ?? ""
-        return VStack(alignment: .leading, spacing: 5) {
-            // "Bus 186" — large bold
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("Bus \(svc)")
-                    .font(t.sans(28, weight: .bold))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if showWhisper {
-                    Text("~")
-                        .font(t.mono(14))
-                        .foregroundStyle(t.faint)
-                        .opacity(0.7)
-                        .accessibilityHidden(true)
-                }
-            }
-            // "Towards …" + LIVE pill
-            HStack(spacing: 6) {
-                Text(dest.isEmpty ? "Loading route…" : "Towards \(dest)")
-                    .font(t.sans(15))
-                    .foregroundStyle(t.dim)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if pillConfidence == .live {
-                    HStack(spacing: 4) {
-                        Circle().fill(t.soon).frame(width: 6, height: 6)
-                        Text("LIVE")
-                            .font(t.mono(10, weight: .bold))
-                            .tracking(0.8)
-                            .foregroundStyle(t.soon)
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Live tracking")
-                }
-            }
-            // First/last bus rides directly under the route line — top of the
-            // screen for at-a-glance "have I missed the last bus?" visibility.
-            firstLastFooter
-                .padding(.top, 1)
-        }
-    }
-
     // MARK: Hero — ETA · stops-away · deck · crowd · next two (one glance card)
-
-    /// The headline card: the arrival number a commuter actually decides on,
-    /// the stops-away context, the deck type + crowd on the right, and the next
-    /// two arrivals folded into a thin footer — every number in one place.
-    private var heroCard: some View {
-        let s = liveService()
-        return VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    heroETARow(s)
-                    Text(approachContext(s))
-                        .font(t.sans(13))
-                        .foregroundStyle(t.dim)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                Spacer(minLength: 8)
-                if s != nil {
-                    CrowdMeter(load: s?.load, t: t)
-                }
-            }
-            if let s {
-                Rectangle().fill(t.line).frame(height: 1)
-                heroFooter(s)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(t.line, lineWidth: 1))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(approachA11y(s))
-    }
+    // Note: titleBlock is superseded by glanceHero (Phase 3). The
+    // actionBar, firstLastFooter, heroETARow, heroFooter, approachContext,
+    // arrivalClock, approachA11y helpers below remain shared.
 
     /// Big arrival readout — minutes (mono) + unit, or "Arriving" / "No live arrival".
+    /// Shared between glanceHero and GO companion ETA display.
     @ViewBuilder
     private func heroETARow(_ s: Service?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -565,62 +813,9 @@ struct SoftBusView: View {
         return "Bus \(svc) \(time), \(ctx). \(s.load.label)."
     }
 
-    // MARK: Live module — route strip + map, side by side (fills the screen)
-
-    /// The glanceable "where is it / what's the route" block: a compact vertical
-    /// route strip (origin → bus → your stop → destination) beside the live map.
-    /// It expands to fill the space left under the hero so the route is always
-    /// on-screen — no scrolling. Tapping anywhere opens the full-screen map.
-    /// Falls back to the map alone when there's no usable bus position (opened
-    /// from a bus search, or before the route loads).
-    private var liveModule: some View {
-        HStack(spacing: 0) {
-            if let dir = currentDirection, !dir.stops.isEmpty,
-               estimatedBusIndex != nil {
-                // Left — the route strip taps up the full-route glass card.
-                Button {
-                    fb.select(); showRouteCard = true
-                } label: {
-                    VStack(spacing: 8) {
-                        Spacer(minLength: 0)
-                        liveRouteStrip(dir)
-                        Spacer(minLength: 0)
-                        HStack(spacing: 3) {
-                            Text("FULL ROUTE")
-                                .font(t.mono(9, weight: .semibold))
-                                .tracking(0.8)
-                            Image(systemName: "chevron.up")
-                                .font(.system(size: 8, weight: .bold))
-                        }
-                        .foregroundStyle(t.faint)
-                    }
-                    .frame(width: 138)
-                    .frame(maxHeight: .infinity)
-                    .padding(.leading, 14)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PressScaleButtonStyle())
-                .accessibilityLabel("Full route for bus \(svc), with the bus's current position. Opens a card.")
-
-                Rectangle().fill(t.line).frame(width: 1)
-            }
-
-            // Right — the map preview taps up the full map card.
-            Button {
-                fb.select(); frameMapForCard(); showMap = true
-            } label: {
-                mapPanel.contentShape(Rectangle())
-            }
-            .buttonStyle(PressScaleButtonStyle())
-            .accessibilityLabel(liveTrackingA11y)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(t.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(t.line, lineWidth: 1))
-    }
+    // liveModule removed in Phase 3 — replaced by liveMapCard + routeTimelineCard
+    // (separate scrollable cards). The compact route-strip is folded into
+    // routeTimelineCard; the map preview is liveMapCard.
 
     private var liveTrackingA11y: String {
         var parts = ["Bus \(svc) on the map"]
@@ -836,38 +1031,7 @@ struct SoftBusView: View {
         return String(format: "%d:%02d %@", h12, mm, h24 < 12 ? "AM" : "PM")
     }
 
-    // MARK: Live map panel (right side of the live module)
-
-    /// The live map — fills the live module's right side. Non-interactive; a tap
-    /// on the module opens the full-screen map. Renders the stop pin, journey
-    /// dots, the bus, and the user.
-    private var mapPanel: some View {
-        ZStack(alignment: .bottom) {
-            // `.automatic` frames to fit the markers (stop, bus, journey dots,
-            // you) with padding — so nothing clips at the edges of the narrow
-            // preview. The full map card uses the interactive `camera` instead.
-            Map(position: .constant(.automatic), interactionModes: []) {
-                mapAnnotations
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .allowsHitTesting(false)
-            // A clear "this opens a map" affordance so the static preview never
-            // reads as a pannable live map (it isn't — the tap opens a card).
-            HStack(spacing: 5) {
-                Image(systemName: "map.fill")
-                Text("Open map")
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            .font(t.mono(10, weight: .bold))
-            .foregroundStyle(t.fg)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().stroke(t.line, lineWidth: 1))
-            .padding(.bottom, 10)
-        }
-    }
+    // mapPanel removed in Phase 3 — replaced by liveMapCard (owns its own ZStack).
 
     // MARK: Map (presented full-screen from "View on map")
 

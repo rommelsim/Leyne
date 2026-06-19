@@ -8,6 +8,42 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 3 (Bus detail + GO companion)
+
+### Bus detail (Phase 3 — SoftBusView refactor)
+- **Glance hero card** — service badge (56×56 ink square) + destination +
+  LIVE/SCHEDULED animated status pill + crowd meter in one answer-first card,
+  above the big tabular ETA countdown.
+- **Floating glass back button** — `floatingBackButton` overlays the scroll
+  content (no dead top-bar row); backdrop-blur glass circle on iOS 26, opaque
+  fallback on older.
+- **Live map card** — MapKit map in a standalone card (220 pt tall), tap opens
+  the full-screen map sheet. No layout breaking; all existing annotations
+  (stop pin, bus marker, journey dots, user pin) preserved.
+- **"Start trip" button** — prominent ink CTA below the map card; presents
+  `LiveTripView` as a `.fullScreenCover`.
+- **Route-progress timeline card** — `RouteTimeline` moved into its own
+  `.glanceCard` below "Start trip"; "Full route" affordance taps the
+  existing glass sheet. Shown only once route data loads.
+- **Service info card** — first/last bus, crowd, deck type, wheelchair in a
+  grouped card at the bottom (replaces the old in-hero footer).
+- All existing live-tracking, route-loading, BusProgress, map, Live Activity,
+  and arrival-alert behaviour preserved; no logic was changed, only layout.
+
+### LiveTripView (Phase 3 — new file)
+- Full-screen GO trip companion: Walk → Wait → Ride → Arrived phases.
+- Hero countdown driven by real data: wait = live `etaSec` tick; ride =
+  `stopsRemaining` from `BusProgress` + GPS; arrived auto-triggers when
+  `stopsRemaining == 0`.
+- Escalating "Get off at the next stop" alert (`warnText` banner) fires when
+  `stopsRemaining == 1`; `.approachingSoon()` haptic on the same trigger.
+- Progress strip (4 segments: walk / wait / ride / arrived).
+- Steps list with strikethrough for completed phases.
+- Live Activity: wired to `m.startLiveActivity` — if one is already running
+  (arrival alert) it is not replaced; if none, starts one on GO open.
+- Walk phase is approximated (no CoreMotion); timer counts down from zero by
+  default (no walk-time in current stop model).
+
 ## iOS — 2.9.0 (build TBD) · unreleased · Glance Phase 2 (Rail)
 
 **Visual MRT line diagram** — Rail tab and per-line/station views rebuilt around the

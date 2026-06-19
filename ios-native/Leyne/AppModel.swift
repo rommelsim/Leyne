@@ -85,16 +85,29 @@ struct WhatsNewEntry {
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
     "2.9.0": WhatsNewEntry(
-        headline: "MRT reimagined — plus a departures board.",
+        headline: "Smarter bus tracking — plus a trip companion.",
         items: [
+            WhatsNewItem(
+                icon: "play.fill",
+                title: "Start trip",
+                body: "Tap \"Start trip\" on any bus to open the GO companion — "
+                    + "a full-screen guide that walks you through every phase: "
+                    + "walk to the stop, board, ride, and arrive. It counts down "
+                    + "in real time and alerts you when your stop is next."
+            ),
+            WhatsNewItem(
+                icon: "exclamationmark.triangle.fill",
+                title: "Get-off alert",
+                body: "When you're one stop away, GO flashes an alert and gives "
+                    + "a gentle haptic so you never miss your stop — even with "
+                    + "your phone in your pocket."
+            ),
             WhatsNewItem(
                 icon: "tram.fill",
                 title: "Visual MRT line diagram",
                 body: "Tap any MRT line to see a visual spine diagram — "
                     + "interchange nodes, your nearest station highlighted with "
-                    + "a pulse, crowd bars at every stop, and a direction toggle. "
-                    + "Station detail shows next trains (scheduled), crowd, lifts, "
-                    + "and exits."
+                    + "a pulse, crowd bars at every stop, and a direction toggle."
             ),
             WhatsNewItem(
                 icon: "bus.fill",
@@ -102,19 +115,6 @@ let kChangelog: [String: WhatsNewEntry] = [
                 body: "Home now shows every bus at every stop with a live "
                     + "countdown — no tapping into a stop first. Saved stops "
                     + "float to the top, nearby stops follow below."
-            ),
-            WhatsNewItem(
-                icon: "magnifyingglass",
-                title: "\"Where to?\" quick search",
-                body: "A persistent search bar at the top of Home gets you "
-                    + "to any bus, stop, or station in one tap."
-            ),
-            WhatsNewItem(
-                icon: "clock.fill",
-                title: "Live countdowns",
-                body: "The next bus counts down in real time on the Home "
-                    + "screen — green when it's arriving, with a quiet "
-                    + "\"~\" when the time is a schedule estimate."
             ),
         ]
     ),
