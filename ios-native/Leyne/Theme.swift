@@ -136,8 +136,9 @@ struct Theme: Equatable {
         isDark ? Color(hex: "8A8AF5") : Color(hex: "5B5BD6")
     }
 
-    /// Arriving / "on time" green. AA on white at 4.84:1.
-    /// #0A8048 light / #34D17A dark.
+    /// Arriving / "on time" green. #0A8048 light / #34D17A dark.
+    /// AA on white (`surface`) at 5.01:1 — always render `go` text on a white
+    /// card, NOT directly on `bg` (#F2F2F2), where it drops to 4.47:1 and fails.
     var go: Color {
         isDark ? Color(hex: "34D17A") : Color(hex: "0A8048")
     }
@@ -148,11 +149,13 @@ struct Theme: Equatable {
         isDark ? Color(hex: "F0B355") : Color(hex: "A06B00")
     }
 
-    /// Tertiary text — AA-corrected. #767683 light / 48%-white dark.
+    /// Tertiary text — AA-corrected. #6E6E7B light / 48%-white dark.
     /// This is stricter than the existing `faint` (35%) and is required
     /// wherever body text needs to meet WCAG AA on a white/near-white card.
+    /// #6E6E7B on white = 5.02:1 (the prior #767683 measured 4.48:1 — a hair
+    /// under the 4.5:1 floor; the ~7-point darkening is imperceptible).
     var ink3: Color {
-        isDark ? Color.white.opacity(0.48) : Color(hex: "767683")
+        isDark ? Color.white.opacity(0.48) : Color(hex: "6E6E7B")
     }
 
     // ── Glance shape constants ───────────────────────────────────────────────

@@ -437,7 +437,7 @@ struct SoftBusView: View {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .bold))
                     }
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                     .contentShape(Rectangle())

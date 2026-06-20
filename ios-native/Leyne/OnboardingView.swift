@@ -21,7 +21,7 @@ struct OnboardingView: View {
 
     @EnvironmentObject private var m: AppModel
 
-    // 0 welcome · 1 live · 2 location · 3 notifications · 4 ATT · 5 done
+    // 0 welcome · 1 location · 2 notifications · 3 ATT · 4 done
     @State private var step = 0
     // Drives the push direction so a "Back" tap slides the opposite way to
     // an "advance" — keeps the slide reading as a coherent stack, not a
@@ -86,12 +86,14 @@ struct OnboardingView: View {
 
     @ViewBuilder
     private var stepContent: some View {
+        // 0 welcome · 1 location · 2 notifications · 3 ATT · 4 done.
+        // (The old "Why Leyne" feature-list step was removed — it duplicated the
+        // welcome subtitle without adding information, delaying first value.)
         switch step {
         case 0: welcome
-        case 1: live
-        case 2: locationPrimer
-        case 3: notifPrimer
-        case 4: attPrimer
+        case 1: locationPrimer
+        case 2: notifPrimer
+        case 3: attPrimer
         default: done
         }
     }
@@ -104,9 +106,9 @@ struct OnboardingView: View {
                     Text("Back")
                 }
                 .font(t.sans(15))
-                .foregroundStyle(step > 0 && step != 5 ? t.accent : .clear)
+                .foregroundStyle(step > 0 && step != 4 ? t.accent : .clear)
             }
-            .disabled(step == 0 || step == 5)
+            .disabled(step == 0 || step == 4)
             Spacer()
         }
         .padding(.horizontal, 20).padding(.top, 10)
@@ -153,29 +155,7 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: 1 · Live (the timeliness wedge)
-
-    private var live: some View {
-        stepScaffold(dotsIndex: -1) {
-            VStack(alignment: .leading, spacing: 0) {
-                kicker("Why Leyne")
-                Text("Always up to the minute.")
-                    .font(t.sans(27, weight: .bold))
-                    .foregroundStyle(t.fg)
-                    .padding(.top, 8)
-                Text("Real-time arrivals, refreshed continuously — so you always know when to leave and exactly where your bus is.")
-                    .font(t.sans(15))
-                    .foregroundStyle(t.dim)
-                    .lineSpacing(3)
-                    .padding(.top, 12)
-                OnbVisualLive(t: t).padding(.top, 22)
-            }
-        } cta: {
-            primaryButton("Continue") { advance() }
-        }
-    }
-
-    // MARK: 2–4 · Permission primers
+    // MARK: 1–3 · Permission primers
 
     private var locationPrimer: some View {
         primer(dotsIndex: 0, icon: "location.fill", kicker: "Permission 1 of 3",
@@ -316,9 +296,12 @@ struct OnboardingView: View {
         @ViewBuilder content: () -> Body,
         @ViewBuilder cta: () -> CTA) -> some View {
         VStack(spacing: 0) {
-            dots(dotsIndex).padding(.top, 6)
             VStack { content() }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            // Page indicator sits WITH the primary action (a standard iOS
+            // onboarding grouping) instead of floating alone under the header
+            // with a large gap above the content.
+            dots(dotsIndex).padding(.bottom, 16)
             cta()
         }
         .padding(.horizontal, 28)

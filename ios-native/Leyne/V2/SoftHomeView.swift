@@ -190,13 +190,16 @@ struct SoftHomeView: View {
                     .foregroundStyle(t.fg)
             }
             Spacer(minLength: 0)
-            if loc.location != nil {
-                liveBadge
-            } else {
+            if loc.location == nil {
                 Text("Location off")
                     .font(t.rounded(11, .bold))
                     .foregroundStyle(t.ink3)
                     .tracking(0.5)
+            } else if !nearbyStops.isEmpty || !m.pins.isEmpty {
+                // Only claim "LIVE" when there are actually stops whose arrivals
+                // are flowing — not while the board is still empty/resolving
+                // (location on but nothing to be live about yet).
+                liveBadge
             }
         }
         .padding(.vertical, 2)

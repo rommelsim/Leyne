@@ -234,7 +234,16 @@ struct DepartureCard: View {
             return "in \(eta.big) minutes"
         }()
         let conf = confidence == .unconfirmed ? ", scheduled estimate" : ""
-        return "\(busLine)\(dest), \(etaStr)\(conf)"
+        // The crowd person-glyph is silent to VoiceOver on its own; fold its
+        // meaning into the card label so non-visual users get the load too.
+        let crowd: String = {
+            switch service.load {
+            case .sea: return ", seats available"
+            case .sda: return ", standing room"
+            case .lsd: return ", crowded"
+            }
+        }()
+        return "\(busLine)\(dest), \(etaStr)\(conf)\(crowd)"
     }
 }
 

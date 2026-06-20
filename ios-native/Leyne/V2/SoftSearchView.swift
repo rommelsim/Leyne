@@ -96,6 +96,16 @@ struct SoftSearchView: View {
         }
         .onAppear {
             ds.ensureRoutes()
+            // Warm the nearby board so the idle state isn't a big empty void when
+            // Search is opened before Home has populated `ds.nearby` (e.g. first
+            // launch). If a fix isn't ready yet, the board fills in as soon as
+            // `ds.nearby` updates (it's observed).
+            let loc = LocationManager.shared
+            loc.startIfAuthorized()
+            if let l = loc.location {
+                ds.updateNearby(l)
+                ds.prefetchNearbyArrivals()
+            }
         }
         .onChange(of: query) { _, newVal in
             maybeGeocode()
@@ -335,7 +345,7 @@ struct SoftSearchView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -605,7 +615,7 @@ struct SoftSearchView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .padding(12)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -651,7 +661,7 @@ struct SoftSearchView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .padding(12)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -698,7 +708,7 @@ struct SoftSearchView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .padding(12)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))

@@ -220,50 +220,65 @@ struct SoftMrtStationView: View {
                 eyebrow("Frequency · scheduled")
 
                 ForEach(relevantLines, id: \.self) { line in
-                    let dirs = trainDirections(for: line)
-                    VStack(spacing: 8) {
-                        ForEach(dirs, id: \.destination) { dir in
-                            trainDirectionCard(dir, line: line)
-                        }
-                    }
+                    lineFrequencyCard(line)
                 }
             }
         }
     }
 
-    /// One direction card: header row + honest scheduled frequency.
-    private func trainDirectionCard(_ dir: TrainDirection, line: MRTLine) -> some View {
-        let crowd = ds.crowdByLine[line]?.first { station.codes.contains($0.code) }
+    /// One card PER LINE (not per direction). Shows the line chip, both terminus
+    /// directions side-by-side as a mini departure board, and the scheduled
+    /// headway once. A 3-line interchange now renders 3 cards instead of 6
+    /// near-identical "every N min" cards, so the disclosure rows below aren't
+    /// buried under repetition.
+    private func lineFrequencyCard(_ line: MRTLine) -> some View {
+        let dirs = trainDirections(for: line)        // [toward termB · Plat B, toward termA · Plat A]
         let headway = lineScheduleInfo(line).2
+        let crowd = ds.crowdByLine[line]?.first { station.codes.contains($0.code) }
+        let needsDark = line == .CC || line == .EW
 
-        return VStack(alignment: .leading, spacing: 10) {
-            // Header: direction · platform chip · crowd glyph
-            HStack(spacing: 8) {
-                Text("Towards \(dir.destination)")
-                    .font(t.sans(13.5, weight: .semibold))
-                    .foregroundStyle(t.dim)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Platform badge
-                Text("Platform \(dir.platform)")
-                    .font(t.mono(11, weight: .bold))
-                    .foregroundStyle(t.faint)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-
-                // Crowd glyph
+        return VStack(alignment: .leading, spacing: 12) {
+            // Line identity + live crowd (once per line, not per direction).
+            HStack(spacing: 10) {
+                Text(line.rawValue)
+                    .font(t.mono(12, weight: .bold))
+                    .foregroundStyle(needsDark ? Color(hex: "161616") : .white)
+                    .frame(width: 34, height: 26)
+                    .background(line.color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text(line.displayName + " Line")
+                    .font(t.sans(14, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                Spacer(minLength: 0)
                 if let crowd = crowd {
                     crowdBarsInline(crowd.level)
+                }
+            }
+
+            // Both directions as a board — terminus left / terminus right.
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(dirs, id: \.destination) { dir in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Towards")
+                            .font(t.mono(9.5, weight: .semibold))
+                            .tracking(0.5)
+                            .foregroundStyle(t.ink3)
+                        Text(dir.destination)
+                            .font(t.sans(13.5, weight: .semibold))
+                            .foregroundStyle(t.fg)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        // "Platform X" — was t.faint (1.89:1, WCAG fail) → t.dim.
+                        Text("Platform \(dir.platform)")
+                            .font(t.mono(10.5, weight: .bold))
+                            .foregroundStyle(t.dim)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
             // Honest scheduled frequency. LTA publishes no live train-arrival
             // feed, so we never invent a per-train countdown (it would be the
             // same fabricated numbers at every station and never tick down).
-            // We state the typical interval instead — true and still useful.
             HStack(spacing: 7) {
                 Image(systemName: "clock")
                     .font(.system(size: 12, weight: .semibold))
@@ -281,8 +296,8 @@ struct SoftMrtStationView: View {
         .glanceCard(fill: t.surface)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "Towards \(dir.destination), platform \(dir.platform), "
-            + "scheduled service about every \(headway) minutes"
+            "\(line.displayName) Line, scheduled service about every \(headway) minutes, "
+            + "towards \(dirs.first?.destination ?? "") and \(dirs.last?.destination ?? "")"
         )
     }
 
@@ -517,7 +532,7 @@ struct SoftMrtStationView: View {
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(t.faint)
+                .foregroundStyle(t.dim)
         }
         .padding(.vertical, 14)
         .padding(.horizontal, 15)

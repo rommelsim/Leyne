@@ -263,7 +263,7 @@ struct SoftMrtView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)

@@ -183,7 +183,7 @@ struct SoftStopCard: View {
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             if let trailing {
                 HStack(spacing: 4) {

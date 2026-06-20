@@ -341,7 +341,7 @@ struct SoftFavouritesView: View {
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 12)
@@ -401,7 +401,7 @@ struct SoftFavouritesView: View {
                     .layoutPriority(1)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -648,7 +648,7 @@ private struct FavStopCard: View {
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(t.dim)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -17,8 +17,6 @@ struct SoftAlertsView: View {
     @EnvironmentObject var fb: Feedback
     @ObservedObject private var ds = DataStore.shared
 
-    @State private var showSettings = false
-
     private var t: Theme { m.t }
 
     var body: some View {
@@ -42,14 +40,9 @@ struct SoftAlertsView: View {
             ds.refreshTrainAlertsIfStale(force: false)
             ds.refreshLiftMaintenanceIfStale(force: false)
         }
-        // Trimmed Settings lives behind the gear now that there's no Settings
-        // tab. Presented with its own navigation bar (title + Done) so the
-        // title sits with correct top spacing in the sheet.
-        .sheet(isPresented: $showSettings) {
-            NavigationStack {
-                SoftSettingsView(onTab: { _ in })
-            }
-        }
+        // Settings is NOT presented from here: it's already one tap away from the
+        // Now/Rail header gear. Nesting it as a sheet over this (itself a sheet)
+        // stacked two modals — removed to avoid the nested-presentation pitfall.
     }
 
     // MARK: - Header
@@ -64,19 +57,7 @@ struct SoftAlertsView: View {
                     .font(t.sans(14, weight: .medium))
                     .foregroundStyle(t.dim)
             }
-            Spacer(minLength: 8)
-            Button {
-                fb.tap()
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
+            Spacer(minLength: 0)
         }
         .padding(.top, 4)
     }
@@ -210,7 +191,7 @@ struct SoftAlertsView: View {
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(t.faint)
+                        .foregroundStyle(t.dim)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)

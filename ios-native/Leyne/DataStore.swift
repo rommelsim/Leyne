@@ -295,10 +295,25 @@ final class DataStore: ObservableObject {
         let mapped = items.map {
             LiftMaintenance(line: $0.Line,
                             stationName: $0.StationName,
-                            detail: $0.LiftDesc?.trimmingCharacters(in: .whitespaces)
-                                ?? "Lift under maintenance")
+                            detail: Self.cleanLiftDesc($0.LiftDesc))
         }
         if mapped != liftMaintenance { liftMaintenance = mapped }
+    }
+
+    /// Tidies an LTA `LiftDesc`. Some entries are ALL-CAPS, " - "-separated lift
+    /// locations ("CONCOURSE - PLATFORM A - PLATFORM C") which read as shouting;
+    /// others are already sentence-case prose ("Temp Lift for Cross Island Line
+    /// construction"). Re-case ONLY the shouting ones (so prose isn't forced into
+    /// Title Case), swap the " - " separators for a middot, and drop any trailing
+    /// separator the feed leaves behind.
+    private static func cleanLiftDesc(_ raw: String?) -> String {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Lift under maintenance" }
+        let letters = trimmed.filter(\.isLetter)
+        let isShouting = !letters.isEmpty && letters.allSatisfy(\.isUppercase)
+        var s = isShouting ? trimmed.capitalized : trimmed
+        s = s.replacingOccurrences(of: " - ", with: " · ")
+        return s.trimmingCharacters(in: CharacterSet(charactersIn: " -·"))
     }
 
     // ─── Station crowd density (PCDRealTime) ──────────────
