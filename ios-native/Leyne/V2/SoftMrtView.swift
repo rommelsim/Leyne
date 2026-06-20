@@ -40,6 +40,11 @@ struct SoftMrtView: View {
 
     let onOpenLine: (MRTLine) -> Void
     let onOpenNews: () -> Void
+    // Phase 5 IA: the Rail header owns its own trailing controls (map · alerts ·
+    // settings) instead of a separately-overlaid cluster that collided with the
+    // map button. Defaulted so any legacy caller still compiles.
+    var onOpenAlerts: () -> Void = {}
+    var onOpenSettings: () -> Void = {}
 
     private var t: Theme { m.t }
 
@@ -116,20 +121,55 @@ struct SoftMrtView: View {
                     .foregroundStyle(t.dim)
             }
             Spacer(minLength: 8)
-            Button {
-                Feedback.shared.tap()
-                showMap = true
-            } label: {
-                Image(systemName: "map.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+
+            // Trailing controls: map · alerts · settings — all in one row so
+            // nothing overlaps the map button anymore.
+            HStack(spacing: 8) {
+                headerCircleButton(icon: "map.fill", label: "System map") {
+                    Feedback.shared.tap()
+                    showMap = true
+                }
+                ZStack(alignment: .topTrailing) {
+                    headerCircleButton(
+                        icon: "bell.fill",
+                        label: m.unseenAlertCount > 0
+                            ? "Alerts, \(m.unseenAlertCount) unseen" : "Alerts"
+                    ) {
+                        Feedback.shared.tap()
+                        onOpenAlerts()
+                    }
+                    if m.unseenAlertCount > 0 {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 9, height: 9)
+                            .offset(x: 1, y: -1)
+                    }
+                }
+                headerCircleButton(icon: "gearshape.fill", label: "Settings") {
+                    Feedback.shared.tap()
+                    onOpenSettings()
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("System map")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A consistent glass-circle header button (map / bell / gear).
+    private func headerCircleButton(
+        icon: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .frame(width: 38, height: 38)
+                .background(t.surface, in: Circle())
+                .overlay(Circle().stroke(t.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     // MARK: - Disruption banner

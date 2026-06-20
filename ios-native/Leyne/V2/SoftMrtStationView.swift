@@ -2,18 +2,16 @@
 //
 // Spec (screenStation + .st-* CSS):
 //   • Hero header: large station name (27pt bold rounded), line chips, walk meta.
-//   • "Next trains · scheduled" section — two direction cards, each with:
+//   • "Frequency · scheduled" section — two direction cards, each with:
 //       - Towards [terminus] · Platform [A/B] · crowd glyph
-//       - Big scheduled ETA (34pt, muted ink3 when scheduled) with "~" whisper prefix.
-//       - Two more following ETAs (smaller, muted).
-//     LTA has NO live train arrivals API. All times are derived from published
-//     schedules embedded in a static table. They render as SCHEDULED only:
-//       - Muted colour (t.ink3 / t.dim), NOT green.
-//       - "~" whisper prefix (matching the bus app's ConfidenceETA.unconfirmed).
-//       - No live wave icon.
-//       - Section header explicitly labels "Next trains · scheduled".
-//     This is honest — the spec demands it: "be honest, LTA has no real-time
-//     train arrivals". The screen-reader label says "scheduled estimate".
+//       - "A train about every N min" (the published off-peak headway).
+//     LTA has NO live train-arrivals API. We deliberately do NOT fake a
+//     per-train countdown — fabricated minutes would be identical at every
+//     station and never tick down, which reads as broken the moment it's
+//     noticed. Stating the interval is the honest, still-useful alternative:
+//       - Muted "scheduled" eyebrow over the cards.
+//       - The screen-reader label says "scheduled service about every N min".
+//     This follows the spec: "be honest, LTA has no real-time train arrivals".
 //   • Progressive disclosure rows (matches prototype .disclose):
 //       - Lifts (from ds.liftMaintenance, real data) — shows actual status.
 //       - Exits (static "A–F" placeholder; real exit data not in LTA feeds).
@@ -22,11 +20,10 @@
 //   • Live crowd (per-line, from ds.crowdByLine) — kept from Phase 1.
 //   • Disruption alerts — kept from Phase 1.
 //
-// Scheduled train times:
-//   A static table (`scheduledArrivals`) provides the next-3-interval wall-clock
-//   offsets for each line/direction. These are approximate (based on published LTA
-//   headway), not real LTA data. Displayed muted + "~" so the user is never misled.
-//   The section header says "scheduled" in both the visual and the VoiceOver label.
+// Scheduled frequency:
+//   `lineScheduleInfo` holds an approximate per-line headway (published LTA
+//   off-peak average), surfaced as "A train about every N min". It is not real
+//   LTA data and is always presented under a "scheduled" label.
 //
 // Navigation:
 //   Nearby buses tap → onOpenNearbyStop. The host (SoftMrtLineView) handles
@@ -203,22 +200,24 @@ struct SoftMrtStationView: View {
         }
     }
 
-    // MARK: - Next trains section (SCHEDULED)
+    // MARK: - Frequency section (SCHEDULED)
     //
-    // LTA has no live train arrival API. We surface approximate scheduled
-    // departures from a static headway table, rendered in muted colour + "~"
-    // so the user is never given false confidence.
+    // LTA has no live train-arrival API. Rather than fake a per-train countdown
+    // (which would show identical, never-ticking numbers at every station), we
+    // surface the honest thing we do know: the typical service interval from a
+    // static headway table.
     //
     // For each relevant line on this station, two direction cards are shown:
-    //   Towards [terminus A] · Platform A
-    //   Towards [terminus B] · Platform B
-    // Times are approximate offsets derived from typical LTA train headways.
+    //   Towards [terminus A] · Platform A · "A train about every N min"
+    //   Towards [terminus B] · Platform B · "A train about every N min"
+    // The interval is approximate (published off-peak headway) and labelled
+    // "scheduled" in both the visual eyebrow and the VoiceOver string.
 
     @ViewBuilder
     private var nextTrainsSection: some View {
         if !relevantLines.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                eyebrow("Next trains · scheduled")
+                eyebrow("Frequency · scheduled")
 
                 ForEach(relevantLines, id: \.self) { line in
                     let dirs = trainDirections(for: line)
@@ -232,9 +231,10 @@ struct SoftMrtStationView: View {
         }
     }
 
-    /// One direction card: header row + big scheduled ETA.
+    /// One direction card: header row + honest scheduled frequency.
     private func trainDirectionCard(_ dir: TrainDirection, line: MRTLine) -> some View {
         let crowd = ds.crowdByLine[line]?.first { station.codes.contains($0.code) }
+        let headway = lineScheduleInfo(line).2
 
         return VStack(alignment: .leading, spacing: 10) {
             // Header: direction · platform chip · crowd glyph
@@ -260,31 +260,20 @@ struct SoftMrtStationView: View {
                 }
             }
 
-            // Big ETA + following
-            HStack(alignment: .lastTextBaseline, spacing: 18) {
-                // Primary ETA — muted, whisper "~", no wave
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    // The "~" whisper prefix — small and faint, matches ConfidenceETA
-                    Text("~")
-                        .font(t.eta(22, .semibold))
-                        .foregroundStyle(t.ink3.opacity(0.7))
-                        .accessibilityHidden(true)
-                    Text(dir.etaMinutes[0] <= 0 ? "Arr" : "\(dir.etaMinutes[0])")
-                        .font(t.eta(34, .bold))
-                        .foregroundStyle(t.ink3)
-                    Text(dir.etaMinutes[0] <= 0 ? "now" : "min")
-                        .font(t.rounded(11, .semibold))
-                        .foregroundStyle(t.ink3)
-                }
-
-                // Following ETAs (smaller)
-                HStack(spacing: 12) {
-                    ForEach(Array(dir.etaMinutes.dropFirst().enumerated()), id: \.offset) { _, min in
-                        Text("\(min) min")
-                            .font(t.mono(16, weight: .semibold).monospacedDigit())
-                            .foregroundStyle(t.faint)
-                    }
-                }
+            // Honest scheduled frequency. LTA publishes no live train-arrival
+            // feed, so we never invent a per-train countdown (it would be the
+            // same fabricated numbers at every station and never tick down).
+            // We state the typical interval instead — true and still useful.
+            HStack(spacing: 7) {
+                Image(systemName: "clock")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(t.ink3)
+                Text("A train about every ")
+                    .font(t.sans(14, weight: .medium))
+                    .foregroundStyle(t.dim)
+                + Text("\(headway) min")
+                    .font(t.sans(14, weight: .bold))
+                    .foregroundStyle(t.fg)
             }
         }
         .padding(15)
@@ -292,8 +281,8 @@ struct SoftMrtStationView: View {
         .glanceCard(fill: t.surface)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "Towards \(dir.destination), platform \(dir.platform), scheduled estimate, "
-            + "next train in approximately \(dir.etaMinutes.first ?? 5) minutes"
+            "Towards \(dir.destination), platform \(dir.platform), "
+            + "scheduled service about every \(headway) minutes"
         )
     }
 
@@ -534,32 +523,26 @@ struct SoftMrtStationView: View {
         .padding(.horizontal, 15)
     }
 
-    // MARK: - Static scheduled train times
+    // MARK: - Static scheduled headways
     //
-    // Approximate headways (minutes between trains) published by LTA.
-    // Source: LTA's Train Headway publication (peak/off-peak average used).
-    // We show 3 approximate arrival times for each direction.
+    // Approximate headway (minutes between trains) per line.
+    // Source: LTA's Train Headway publication (off-peak average used).
     //
-    // IMPORTANT: These are NOT real-time. They are derived from the published
-    // schedule. The UI renders them muted + "~" so the user knows they are
-    // estimates. The screen-reader label explicitly says "scheduled estimate".
+    // IMPORTANT: This is NOT real-time. We display it as "A train about every
+    // N min" under a "scheduled" eyebrow, and the screen-reader label says
+    // "scheduled service about every N minutes" — so the figure is never
+    // mistaken for a live arrival countdown.
 
     private struct TrainDirection {
         let destination: String  // terminus name
         let platform: String     // "A" or "B"
-        let etaMinutes: [Int]    // [next, next+1, next+2] minutes from now
     }
 
     private func trainDirections(for line: MRTLine) -> [TrainDirection] {
-        let (termA, termB, headway) = lineScheduleInfo(line)
-        // Offset the two directions by half a headway so they interleave.
-        let h = headway
-        let half = h / 2
+        let (termA, termB, _) = lineScheduleInfo(line)
         return [
-            TrainDirection(destination: termB, platform: "B",
-                           etaMinutes: [max(1, half - 1), half + h - 1, half + 2 * h - 1]),
-            TrainDirection(destination: termA, platform: "A",
-                           etaMinutes: [max(1, 3), 3 + h, 3 + 2 * h]),
+            TrainDirection(destination: termB, platform: "B"),
+            TrainDirection(destination: termA, platform: "A"),
         ]
     }
 

@@ -181,8 +181,11 @@ struct SoftRoot: View {
     /// The native 2-tab bar (Now · Rail). Each tab owns its own NavigationStack.
     private var tabView: some View {
         TabView(selection: $tab) {
-            // 1. Now — bus departures board
-            Tab("Now", systemImage: "bus.fill", value: SoftTab.home) {
+            // 1. Buses — bus departures board (+ pushed bus/stop detail).
+            // Labelled "Buses" (not "Now") so the tab's purpose reads clearly
+            // against the "Rail" tab, and a pushed bus detail no longer sits
+            // under a vague "Now" label.
+            Tab("Buses", systemImage: "bus.fill", value: SoftTab.home) {
                 navStack($homeStack) {
                     SoftHomeView(
                         onTab: { tab = $0 },
@@ -223,50 +226,6 @@ struct SoftRoot: View {
                 .navigationDestination(for: SoftRoute.self) { route in
                     routeDestination(route, path: path)
                 }
-        }
-    }
-
-    /// Floating glass header controls for the Rail tab — bell + gear.
-    /// Overlaid on SoftMrtView which doesn't have a search bar with spare
-    /// trailing space. Positioned below the status bar / Dynamic Island.
-    private var mrtHeaderControls: some View {
-        HStack(spacing: 8) {
-            // Bell — alerts sheet with unseen badge
-            Button {
-                fb.tap()
-                showAlerts = true
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "bell.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial, in: Circle())
-                    if m.unseenAlertCount > 0 {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 9, height: 9)
-                            .offset(x: 2, y: -2)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(m.unseenAlertCount > 0
-                ? "Alerts, \(m.unseenAlertCount) unseen" : "Alerts")
-
-            // Gear — settings sheet
-            Button {
-                fb.tap()
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .frame(width: 36, height: 36)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
         }
     }
 
@@ -320,16 +279,13 @@ struct SoftRoot: View {
         NavigationStack(path: path) {
             SoftMrtView(
                 onOpenLine: { line in path.wrappedValue.append(.line(line)) },
-                onOpenNews: { path.wrappedValue.append(.news) }
+                onOpenNews: { path.wrappedValue.append(.news) },
+                onOpenAlerts: { showAlerts = true },
+                onOpenSettings: { showSettings = true }
             )
             .adBannerGutter()
             .softTopEdgeBlur()
             .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .topTrailing) {
-                mrtHeaderControls
-                    .padding(.top, 14)
-                    .padding(.trailing, 18)
-            }
             .navigationDestination(for: SoftMrtRoute.self) { route in
                 switch route {
                 case .station(let station, let distM, let walkM):

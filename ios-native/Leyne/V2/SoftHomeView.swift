@@ -84,6 +84,10 @@ struct SoftHomeView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            // Plain List reserves a chunk of default top content margin, which
+            // read as dead space above the search bar. Zero it — the safe-area
+            // inset still keeps the first row clear of the status bar / island.
+            .contentMargins(.top, 0, for: .scrollContent)
             .background(t.bg)
             .refreshable { await refreshAll() }
         }

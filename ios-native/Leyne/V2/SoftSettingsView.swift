@@ -333,8 +333,10 @@ struct SoftSettingsView: View {
     }
 
     private func openBuyMeCoffee() {
-        // Leyne's Stripe "Buy me a coffee" link (from the legacy settings screen).
-        if let url = URL(string: "https://rommelsim.github.io/Leyne/support.html") {
+        // Leyne's live Stripe "Buy me a coffee" payment link — shared verbatim
+        // with the Android build (lib/screens/v2/soft_settings_screen.dart
+        // `_kCoffeeUrl`). The old GitHub support.html page was a dead placeholder.
+        if let url = URL(string: "https://buy.stripe.com/6oU3cv5689oB3PI6R68so00") {
             UIApplication.shared.open(url)
         }
     }

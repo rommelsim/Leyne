@@ -127,42 +127,41 @@ struct SoftBusView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 14) {
-                    // Space for the floating back button (44 pt) + breathing gap
-                    Color.clear.frame(height: 52)
-
-                    // Hero block: service badge + destination + LIVE pill + big ETA
-                    glanceHero
-                    actionBar
-                    firstLastFooter.padding(.top, -4)
-
-                    // Live map (existing MapKit, tap-to-expand)
-                    liveMapCard
-                        .frame(height: 220)
-
-                    // "Start trip" — primary CTA
-                    startTripButton
-
-                    // Route-progress timeline card
-                    routeTimelineCard
-
-                    // Service info card (first/last/frequency/crowd)
-                    serviceInfoCard
-
-                    // Bottom breathing room
-                    Color.clear.frame(height: 24)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Back button as the first inline row. Previously a floating
+                // overlay sized against a 52pt spacer + a magic top:60 offset,
+                // which left dead space above the hero and pushed the button out
+                // of alignment with the card. Inline keeps it pinned to the
+                // content's top-left with no gap.
+                HStack(spacing: 0) {
+                    floatingBackButton
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 16)
-            }
+                .padding(.top, 4)
 
-            // Floating glass back button — overlays the scroll content.
-            // Positioned at the standard 60 pt top-of-page offset so it
-            // doesn't fight the status-bar dynamic island.
-            floatingBackButton
-                .padding(.leading, 16)
-                .padding(.top, 60)
+                // Hero block: service badge + destination + LIVE pill + big ETA
+                glanceHero
+                actionBar
+                firstLastFooter.padding(.top, -4)
+
+                // Live map (existing MapKit, tap-to-expand)
+                liveMapCard
+                    .frame(height: 220)
+
+                // "Start trip" — primary CTA
+                startTripButton
+
+                // Route-progress timeline card
+                routeTimelineCard
+
+                // Service info card (first/last/frequency/crowd)
+                serviceInfoCard
+
+                // Bottom breathing room
+                Color.clear.frame(height: 24)
+            }
+            .padding(.horizontal, 16)
         }
         .overlay(alignment: .top) { toastView }
         .arrivalAlertToastOverlay(state: $alertToast, t: t)
@@ -200,12 +199,12 @@ struct SoftBusView: View {
         .onChange(of: ds.arrivals[stopCode]) { _, _ in recomputePlot() }
     }
 
-    // MARK: Floating glass back button (replaces topBar — no dead top row)
+    // MARK: Glass back button (inline top-left — no dead top row)
 
-    /// A single glass circle with a chevron, floating over the scroll content.
-    /// Follows the prototype's `.floatback` treatment: backdrop-blur glass
-    /// pill pinned top-left. The top bar row is removed; every pixel below
-    /// the button is content.
+    /// A single glass circle with a chevron. Sits as the first inline row of the
+    /// scroll content (no overlay, no spacer) so it stays aligned with the hero
+    /// card's left edge and leaves no dead space above it. Keeps the prototype's
+    /// `.floatback` glass treatment: backdrop-blur pill.
     private var floatingBackButton: some View {
         Button {
             fb.select(); onBack()

@@ -195,16 +195,18 @@ struct SoftMrtLineView: View {
 
             Spacer(minLength: 0)
 
-            // Back / close button
+            // Back button — this diagram is a pushed navigation page (not a
+            // bottom sheet), so it uses a back chevron, not a downward "dismiss"
+            // chevron. Popping returns to the MRT network board.
             Button { onBack() } label: {
-                Image(systemName: "chevron.down")
+                Image(systemName: "chevron.backward")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(t.fg)
                     .frame(width: 36, height: 36)
                     .background(t.surfaceHi, in: Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Close")
+            .accessibilityLabel("Back")
         }
     }
 
@@ -364,7 +366,11 @@ struct SoftMrtLineView: View {
                 .padding(.top, 26)         // half of first-row height → centres on terminus node
                 .padding(.bottom, 26)      // symmetric at last row
                 .frame(maxHeight: .infinity)
-                .offset(x: 16 + spineX - spineWidth / 2)  // 16 = horizontal padding
+                // The `.padding(.horizontal, 16)` below is applied AFTER this
+                // overlay, so it already shifts the spine right by 16 — adding
+                // 16 here again double-counted it and pushed the spine off the
+                // station nodes. Offset is measured within the padded frame.
+                .offset(x: spineX - spineWidth / 2)
                 .allowsHitTesting(false)
         }
         .padding(.horizontal, 16)
