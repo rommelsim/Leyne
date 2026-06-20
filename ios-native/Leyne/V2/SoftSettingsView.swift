@@ -196,7 +196,7 @@ struct SoftSettingsView: View {
             .environmentObject(m)
         }
         .sheet(isPresented: $showAbout) {
-            AboutView()
+            GlanceAboutView()
                 .environmentObject(m)
                 .environmentObject(fb)
         }
@@ -340,11 +340,13 @@ struct SoftSettingsView: View {
     }
 }
 
-// MARK: - AboutView (prototype screenAbout)
+// MARK: - GlanceAboutView (prototype screenAbout)
+// Named GlanceAboutView to avoid colliding with the legacy AboutView in
+// SettingsView.swift (the old settings screen still references that one).
 
 /// Standalone About screen — icon hero + version + links.
 /// Presented as a sheet from the "About Leyne" Settings row.
-struct AboutView: View {
+struct GlanceAboutView: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
     @Environment(\.dismiss) private var dismiss

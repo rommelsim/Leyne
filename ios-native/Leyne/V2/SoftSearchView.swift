@@ -472,54 +472,55 @@ struct SoftSearchView: View {
     // MARK: Nearby Now board (live departures from closest stop)
 
     @ViewBuilder private var nearbyNowBoard: some View {
-        // Only show when GPS has resolved at least one stop.
-        guard let closest = ds.nearby.first else { return }
+        // Only show when GPS has resolved at least one stop. (A @ViewBuilder
+        // property can't early-return, so this is an `if let`, not a `guard`.)
+        if let closest = ds.nearby.first {
+            let arrivals = ds.arrivals[closest.stopCode]
+            let feed = Freshness.from(ds.lastRefresh(closest.stopCode))
 
-        let arrivals = ds.arrivals[closest.stopCode]
-        let feed = Freshness.from(ds.lastRefresh(closest.stopCode))
-
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Eyebrow(text: "Nearby now", t: t)
-                Spacer(minLength: 0)
-                // Walk time chip
-                Text("\(closest.walkMin) min walk")
-                    .font(t.sans(12, weight: .semibold))
-                    .foregroundStyle(t.brand)
-            }
-            .padding(.leading, 2)
-
-            // Show up to 3 live departure cards from the nearest stop.
-            switch arrivals {
-            case .loaded(let services):
-                let shown = services.prefix(3)
-                ForEach(Array(shown), id: \.id) { svc in
-                    DepartureCard(
-                        t: t,
-                        service: svc,
-                        stopCode: closest.stopCode,
-                        feed: feed,
-                        tick: m.tick,
-                        followingEtas: followingEtas(for: svc),
-                        onTap: {
-                            fb.select()
-                            onOpenBus?(closest.stopCode, svc.no)
-                        }
-                    )
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Eyebrow(text: "Nearby now", t: t)
+                    Spacer(minLength: 0)
+                    // Walk time chip
+                    Text("\(closest.walkMin) min walk")
+                        .font(t.sans(12, weight: .semibold))
+                        .foregroundStyle(t.brand)
                 }
-                if services.isEmpty {
+                .padding(.leading, 2)
+
+                // Show up to 3 live departure cards from the nearest stop.
+                switch arrivals {
+                case .loaded(let services):
+                    let shown = services.prefix(3)
+                    ForEach(Array(shown), id: \.id) { svc in
+                        DepartureCard(
+                            t: t,
+                            service: svc,
+                            stopCode: closest.stopCode,
+                            feed: feed,
+                            tick: m.tick,
+                            followingEtas: followingEtas(for: svc),
+                            onTap: {
+                                fb.select()
+                                onOpenBus?(closest.stopCode, svc.no)
+                            }
+                        )
+                    }
+                    if services.isEmpty {
+                        nearbyEmptyHint
+                    }
+
+                case .loading, nil:
+                    ForEach(0..<2, id: \.self) { _ in DepartureCardSkeleton(t: t) }
+
+                case .empty, .error:
                     nearbyEmptyHint
                 }
-
-            case .loading, nil:
-                ForEach(0..<2, id: \.self) { _ in DepartureCardSkeleton(t: t) }
-
-            case .empty, .error:
-                nearbyEmptyHint
             }
-        }
-        .onAppear {
-            ds.ensureArrivals(stop: closest.stopCode)
+            .onAppear {
+                ds.ensureArrivals(stop: closest.stopCode)
+            }
         }
     }
 
