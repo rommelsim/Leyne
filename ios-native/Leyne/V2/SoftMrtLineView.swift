@@ -169,6 +169,20 @@ struct SoftMrtLineView: View {
 
     private var lineHeader: some View {
         HStack(alignment: .center, spacing: 14) {
+            // Back button — top-LEFT, the conventional spot for a pushed page
+            // (this diagram is pushed onto the MRT stack, not a bottom sheet).
+            // Matches the station detail's back control; a back chevron on the
+            // right read as out of place. Popping returns to the network board.
+            Button { onBack() } label: {
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(t.fg)
+                    .frame(width: 36, height: 36)
+                    .background(t.surfaceHi, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back")
+
             // Line badge
             let needsDark = line == .CC || line == .EW
             Text(line.rawValue)
@@ -194,19 +208,6 @@ struct SoftMrtLineView: View {
             }
 
             Spacer(minLength: 0)
-
-            // Back button — this diagram is a pushed navigation page (not a
-            // bottom sheet), so it uses a back chevron, not a downward "dismiss"
-            // chevron. Popping returns to the MRT network board.
-            Button { onBack() } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .frame(width: 36, height: 36)
-                    .background(t.surfaceHi, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back")
         }
     }
 

@@ -142,11 +142,14 @@ struct DepartureCard: View {
             // The number
             countdownNumeral
 
-            // Unit label ("min" / "now")
-            Text(eta.big == "Arr" ? "now" : "min")
-                .font(t.rounded(11, .semibold))
-                .foregroundStyle(t.ink3)
-                .monospacedDigit()
+            // Unit label — only "min". The arriving state shows the word "Now"
+            // as its hero numeral, so a second "now" beneath would be redundant.
+            if eta.big != "Arr" {
+                Text("min")
+                    .font(t.rounded(11, .semibold))
+                    .foregroundStyle(t.ink3)
+                    .monospacedDigit()
+            }
         }
         .frame(minWidth: 56, alignment: .trailing)
         .accessibilityHidden(true)
@@ -167,14 +170,24 @@ struct DepartureCard: View {
             // "is-go" state: green + subtle 2-second opacity breathe via TimelineView.
             // TimelineView drives its own repaint without a retained timer, which is
             // safe here since DepartureCard only lives while the Home view is on screen.
+            let isArr = eta.big == "Arr"
             TimelineView(.animation(minimumInterval: 0.05)) { timeline in
                 let phase = timeline.date.timeIntervalSinceReferenceDate
                 let opacity = 0.6 + 0.4 * (0.5 + 0.5 * sin(phase * .pi * 2 / 2.0))
-                Text(numeral)
-                    .font(t.eta(40, .heavy))
-                    .foregroundStyle(color)
-                    .opacity(opacity)
-                    .contentTransition(.numericText(countsDown: true))
+                Group {
+                    if isArr {
+                        // Arriving now — show the word, not a giant departure-board
+                        // "0" (which read as a stray green pill glyph).
+                        Text("Now")
+                            .font(t.rounded(26, .heavy))
+                    } else {
+                        Text(numeral)
+                            .font(t.eta(40, .heavy))
+                            .contentTransition(.numericText(countsDown: true))
+                    }
+                }
+                .foregroundStyle(color)
+                .opacity(opacity)
             }
         } else if countdown == .scheduled {
             // Scheduled — small "~" whisper prefix + muted numeral.
