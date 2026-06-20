@@ -117,6 +117,14 @@ struct Theme: Equatable {
                 weight: weight, design: .rounded)
     }
 
+    /// ETA numerals — monospaced "departure-board" look (SF Mono), tabular by
+    /// design. Same Dynamic Type scaling as `rounded`/`sans`. Used for the big
+    /// countdown numbers (departure cards, bus hero, station times, GO).
+    func eta(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: UIFontMetrics.default.scaledValue(for: size),
+                weight: weight, design: .monospaced)
+    }
+
     // ── Glance Palette (additive — does NOT change existing token values) ────
     // Mapped from the prototype `:root` / `:root[data-theme=dark]` tokens.
     // Existing screens that don't opt into these tokens are unaffected;

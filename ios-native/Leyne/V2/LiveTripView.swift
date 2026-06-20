@@ -264,7 +264,7 @@ struct LiveTripView: View {
                 countdownNumeral(text: eta.big, unit: eta.small, color: t.fg)
             } else {
                 Text("—")
-                    .font(t.rounded(86, .heavy).monospacedDigit())
+                    .font(t.eta(86, .heavy).monospacedDigit())
                     .foregroundStyle(t.dim)
             }
 
@@ -272,7 +272,7 @@ struct LiveTripView: View {
             let rem = stopsRemaining
             if let rem, rem <= 1 {
                 Text(rem == 0 ? "Off!" : "next")
-                    .font(t.rounded(86, .heavy).monospacedDigit())
+                    .font(t.eta(86, .heavy).monospacedDigit())
                     .foregroundStyle(t.go)
             } else if let rem {
                 countdownNumeral(text: "\(rem)", unit: "stop\(rem == 1 ? "" : "s")", color: t.fg)
@@ -283,14 +283,14 @@ struct LiveTripView: View {
                     countdownNumeral(text: "~\(approxStops)", unit: "stops", color: t.fg)
                 } else {
                     Text("—")
-                        .font(t.rounded(86, .heavy).monospacedDigit())
+                        .font(t.eta(86, .heavy).monospacedDigit())
                         .foregroundStyle(t.dim)
                 }
             }
 
         case .arrived:
             Text("✓")
-                .font(t.rounded(86, .heavy))
+                .font(t.eta(86, .heavy))
                 .foregroundStyle(t.go)
         }
     }
@@ -298,7 +298,7 @@ struct LiveTripView: View {
     private func countdownNumeral(text: String, unit: String, color: Color) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(text)
-                .font(t.rounded(86, .heavy).monospacedDigit())
+                .font(t.eta(86, .heavy).monospacedDigit())
                 .foregroundStyle(color)
                 .contentTransition(.numericText(countsDown: true))
             Text(unit)

@@ -713,7 +713,7 @@ struct SoftBusView: View {
                         .foregroundStyle(t.soon)
                 } else {
                     Text(eta.big)
-                        .font(t.mono(40, weight: .bold))
+                        .font(t.eta(40, .bold))
                         .foregroundStyle(t.fg)
                     Text(eta.small)
                         .font(t.sans(16, weight: .semibold))

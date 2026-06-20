@@ -266,11 +266,11 @@ struct SoftMrtStationView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     // The "~" whisper prefix — small and faint, matches ConfidenceETA
                     Text("~")
-                        .font(t.rounded(22, .semibold).monospacedDigit())
+                        .font(t.eta(22, .semibold))
                         .foregroundStyle(t.ink3.opacity(0.7))
                         .accessibilityHidden(true)
                     Text(dir.etaMinutes[0] <= 0 ? "Arr" : "\(dir.etaMinutes[0])")
-                        .font(t.rounded(34, .bold).monospacedDigit())
+                        .font(t.eta(34, .bold))
                         .foregroundStyle(t.ink3)
                     Text(dir.etaMinutes[0] <= 0 ? "now" : "min")
                         .font(t.rounded(11, .semibold))

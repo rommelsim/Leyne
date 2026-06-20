@@ -171,7 +171,7 @@ struct DepartureCard: View {
                 let phase = timeline.date.timeIntervalSinceReferenceDate
                 let opacity = 0.6 + 0.4 * (0.5 + 0.5 * sin(phase * .pi * 2 / 2.0))
                 Text(numeral)
-                    .font(t.rounded(40, .heavy).monospacedDigit())
+                    .font(t.eta(40, .heavy))
                     .foregroundStyle(color)
                     .opacity(opacity)
                     .contentTransition(.numericText(countsDown: true))
@@ -181,17 +181,17 @@ struct DepartureCard: View {
             // Both Text views carry their own font so the tilde can be smaller.
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text("~")
-                    .font(t.rounded(22, .semibold).monospacedDigit())
+                    .font(t.eta(22, .semibold))
                     .foregroundStyle(t.ink3.opacity(0.7))
                     .accessibilityHidden(true)
                 Text(numeral)
-                    .font(t.rounded(40, .heavy).monospacedDigit())
+                    .font(t.eta(40, .heavy))
                     .foregroundStyle(color)
             }
         } else {
             // Live, non-arriving — ink numeral with numeric roll on minute change.
             Text(numeral)
-                .font(t.rounded(40, .heavy).monospacedDigit())
+                .font(t.eta(40, .heavy))
                 .foregroundStyle(color)
                 .contentTransition(.numericText(countsDown: true))
         }

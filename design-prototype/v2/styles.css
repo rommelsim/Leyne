@@ -30,6 +30,8 @@
   /* ---- Type ---- */
   --round: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
   --sans:  -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  /* ETA numerals — monospaced "departure-board" look (SF Mono on Apple). */
+  --eta-font: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, monospace;
 
   /* ---- Shape + elevation ---- */
   --r-card: 24px;  --r-chip: 13px;  --r-badge: 14px;
@@ -120,7 +122,7 @@ body { font-family: var(--sans); background: #c9c9ce; color: var(--ink); display
 .dep__mid { flex: 1; min-width: 0; }
 .dep__dest { font: 600 15px var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dep__sub { display: flex; align-items: center; gap: 8px; margin-top: 5px; color: var(--ink-2); font: 500 12px var(--sans); }
-.dep__then { font-family: var(--round); font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.dep__then { font-family: var(--eta-font); font-variant-numeric: tabular-nums; color: var(--ink-3); }
 
 /* badge — bus number (neutral ink chip) or MRT line (line colour) */
 .badge { flex: none; display: grid; place-items: center; border-radius: var(--r-badge); font-family: var(--round); font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -131,7 +133,7 @@ body { font-family: var(--sans); background: #c9c9ce; color: var(--ink); display
 
 /* the countdown — the largest thing on screen */
 .count { flex: none; min-width: 64px; text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
-.count__n { font: 800 40px/0.95 var(--round); font-variant-numeric: tabular-nums; letter-spacing: -1px; color: var(--ink); transition: color .3s; }
+.count__n { font: 800 40px/0.95 var(--eta-font); font-variant-numeric: tabular-nums; letter-spacing: -1.5px; color: var(--ink); transition: color .3s; }
 .count__u { font: 600 11px var(--round); color: var(--ink-3); margin-top: 2px; letter-spacing: .3px; }
 .count.is-go .count__n { color: var(--go); animation: tick 2s ease-in-out infinite; } /* 2s to phase-match the live dot's breathe */
 .count.is-sched .count__n { color: var(--ink-3); }
@@ -353,10 +355,10 @@ body { font-family: var(--sans); background: #c9c9ce; color: var(--ink); display
 .st-dir__h { display: flex; align-items: center; gap: 8px; font: 600 13.5px var(--sans); color: var(--ink-2); margin-bottom: 12px; }
 .st-dir__plat { margin-left: auto; font: 700 11px var(--round); color: var(--ink-3); background: var(--card-2); padding: 3px 8px; border-radius: 7px; }
 .st-times { display: flex; align-items: baseline; gap: 18px; }
-.st-times .big { font: 800 34px var(--round); font-variant-numeric: tabular-nums; letter-spacing: -1px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+.st-times .big { font: 800 34px var(--eta-font); font-variant-numeric: tabular-nums; letter-spacing: -1.5px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
 .st-times .big.is-sched { color: var(--ink-3); }
 .st-times .big .wave { color: var(--go); margin-bottom: 4px; }
-.st-times .more { font: 600 16px var(--round); font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.st-times .more { font: 600 16px var(--eta-font); font-variant-numeric: tabular-nums; color: var(--ink-3); }
 .st-times .u { font: 600 11px var(--round); color: var(--ink-3); }
 .disclose { display: flex; align-items: center; gap: 13px; background: var(--card); border-radius: 16px; padding: 14px 15px; margin-bottom: 8px; box-shadow: var(--elev); cursor: pointer; }
 .disclose__g { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #fff; flex: none; }
@@ -393,7 +395,7 @@ body { font-family: var(--sans); background: #c9c9ce; color: var(--ink); display
 .go__status .x { margin-left: auto; color: var(--ink-3); cursor: pointer; font-size: 20px; }
 .go__hero { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 6px; }
 .go__verb { font: 700 19px var(--round); color: var(--ink-2); }
-.go__count { font: 800 86px/0.9 var(--round); font-variant-numeric: tabular-nums; letter-spacing: -3px; }
+.go__count { font: 800 86px/0.9 var(--eta-font); font-variant-numeric: tabular-nums; letter-spacing: -4px; }
 .go__count.arr { color: var(--go); }  /* renamed from .go — class "go" collided with the .go screen container */
 .go__sub { font: 600 15px var(--sans); color: var(--ink-2); }
 .go__prog { display: flex; align-items: center; gap: 6px; margin: 14px 0; }
