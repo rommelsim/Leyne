@@ -135,21 +135,19 @@ struct SoftSearchView: View {
                 .font(t.sans(30, weight: .bold))
                 .foregroundStyle(t.fg)
             Spacer(minLength: 8)
-            if focused {
-                Button {
-                    fb.select()
-                    focused = false
-                    query = ""
-                } label: {
-                    Text("Cancel")
-                        .font(t.sans(14, weight: .medium))
-                        .foregroundStyle(t.accent)
-                }
-                .buttonStyle(.plain)
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            // Always-present Cancel — this view is now a full-screen cover with
+            // no swipe-down dismiss, so Cancel must always be reachable AND must
+            // actually close it via onClose() (not just clear focus).
+            Button {
+                fb.select()
+                onClose()
+            } label: {
+                Text("Cancel")
+                    .font(t.sans(15, weight: .medium))
+                    .foregroundStyle(t.accent)
             }
+            .buttonStyle(.plain)
         }
-        .animation(.easeInOut(duration: 0.18), value: focused)
     }
 
     // MARK: Search field
