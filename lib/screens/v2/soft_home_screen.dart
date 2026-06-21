@@ -515,7 +515,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         Eyebrow(_greeting()),
         const SizedBox(height: 2),
         Text(
-          'Stops near you',
+          'Nearby',
           style: t.sans(30, weight: FontWeight.w700, color: t.fg),
         ),
       ],
@@ -533,31 +533,29 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
           color: located ? LyneSignal.meBlue : t.dim,
         ),
         const SizedBox(width: 5),
-        Text(
-          located ? 'NEAR YOU' : 'LOCATION OFF',
-          style: t
-              .mono(
-                10,
-                weight: FontWeight.w700,
-                color: located ? LyneSignal.meBlue : t.dim,
-              )
-              .copyWith(letterSpacing: 0.8),
-        ),
+        // Match iOS SoftHomeView.liveRow exactly: blue location glyph, then
+        // a green dot + dim "LIVE" when located, or dim "LOCATION OFF" when not.
+        // (No redundant "NEAR YOU" string — the section title already says it.)
         if (located) ...[
-          const SizedBox(width: 6),
           Container(
             width: 6,
             height: 6,
             decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 5),
           Text(
             'LIVE',
             style: t
                 .mono(10, weight: FontWeight.w700, color: t.dim)
                 .copyWith(letterSpacing: 0.8),
           ),
-        ],
+        ] else
+          Text(
+            'LOCATION OFF',
+            style: t
+                .mono(10, weight: FontWeight.w700, color: t.dim)
+                .copyWith(letterSpacing: 0.8),
+          ),
       ],
     );
   }

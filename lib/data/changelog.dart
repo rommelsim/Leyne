@@ -30,6 +30,26 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '2.9.0': WhatsNewEntry(
+    headline: 'Leyne, right on your Home Screen.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.widgets_rounded,
+        title: 'Home screen widgets',
+        body:
+            'Add a Nearest Stop or Favourite Service widget to your Home '
+            'screen and see the next arrival at a glance — no need to open '
+            'the app.',
+      ),
+      WhatsNewItem(
+        icon: Icons.auto_awesome_rounded,
+        title: 'Cleaner & tidier',
+        body:
+            'A more compact route view, a simpler live-crowd readout, and '
+            'small refinements across the app.',
+      ),
+    ],
+  ),
   '2.8.5': WhatsNewEntry(
     headline: 'A little more polish.',
     items: [

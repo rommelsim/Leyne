@@ -8,7 +8,28 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Android — unreleased (pending next AAB) · 2026-06-19
+## Leyne 2.9.0 · Android (47) · 2026-06-21
+
+**2026-06-21 — Android AAB (2.9.0, build 47):** Feature release. versionName
+`2.9.0`, versionCode `47`. Artifact: `build/app/outputs/bundle/release/app-release.aab`.
+User-facing What's New entry added under `2.9.0` in `lib/data/changelog.dart`.
+No special Play permission declarations required — the app uses only foreground
+location (`ACCESS_FINE/COARSE_LOCATION`) for Nearby.
+
+**Bus-coming alerts (geofence) REMOVED before release.** The opt-in geofence
+"bus-coming alerts" feature (and its `ACCESS_BACKGROUND_LOCATION` permission) was
+pulled prior to shipping to avoid the Play Console background-location declaration.
+Deleted: `lib/services/geofence_service.dart`, the
+`android/.../geofence/` Kotlin package, the manifest permission + receivers, the
+`MainActivity` geofence MethodChannel, the Notifications-settings toggle/primer, and
+all `AppModel`/`DataStore` sync calls. Foreground location (Nearby) and the
+home-screen widgets are unaffected. `play-services-location` stays (geolocator needs
+it for Nearby).
+
+**QOL polish (this build):** more compact bus-view stop rows (tighter text
+leading); the MRT live-crowd 30-min forecast no longer shows a trend arrow; Home
+title "Stops near you" → "Nearby"; the Home LIVE row now matches iOS (dropped the
+redundant "NEAR YOU" string).
 
 **Home Screen widgets land on Android** — closing the biggest iOS parity gap and
 adding a passive daily re-entry surface (the #1 DAU lever from the growth review).
@@ -30,17 +51,6 @@ when the app is closed. Taps open the relevant stop via the existing `lyne://` d
 links. Scheduled-only ETAs keep the quiet "~" prefix (timely-over-honest rule).
 Builds clean (`flutter build apk --debug`). Preview images in the widget gallery are
 placeholders — replace with real screenshots before the store release.
-
-**Bus-coming alerts (opt-in geofence).** When you're near a stop you've favourited a
-bus at, Leyne pings you if that bus is within ~6 min — even with the app closed.
-~250m geofences (`GeofencingClient`) around favourited stops; on entry, a native
-receiver fetches arrivals (reusing the widget `LtaApiClient`) and posts to the
-existing `leyne.arrivals` channel, with a per-(stop,service) cooldown. OFF by
-default, behind a prominent-disclosure primer; uses `ACCESS_BACKGROUND_LOCATION`.
-Toggle in Notifications settings. Files: `lib/services/geofence_service.dart`,
-`android/app/src/main/kotlin/com/leyne/leyne/geofence/`. **Before release:** complete
-the Play background-location declaration + Data-Safety update — see
-`docs/android-bus-coming-alerts.md`.
 
 ## iOS — unreleased (pending next Archive) · 2026-06-19
 

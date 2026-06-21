@@ -142,8 +142,8 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     // StopPicker / FavPicker widget-configuration activities use AppCompat.
     implementation("androidx.appcompat:appcompat:1.7.0")
-    // GeofencingClient for the opt-in "Bus-coming alerts" feature. (geolocator
-    // pulls a play-services-location transitively, but we declare it explicitly
-    // so the GeofencingClient API version is pinned and not left to resolution.)
+    // Location services for Nearby. geolocator pulls play-services-location
+    // transitively, but we declare it explicitly so the API version is pinned
+    // and not left to dependency resolution.
     implementation("com.google.android.gms:play-services-location:21.3.0")
 }

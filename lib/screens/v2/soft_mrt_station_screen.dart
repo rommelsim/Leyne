@@ -596,30 +596,6 @@ class _LineCrowdCard extends StatelessWidget {
     return null;
   }
 
-  int _levelRank(CrowdLevel l) {
-    switch (l) {
-      case CrowdLevel.low:
-        return 1;
-      case CrowdLevel.moderate:
-        return 2;
-      case CrowdLevel.high:
-        return 3;
-      case CrowdLevel.unknown:
-        return 0;
-    }
-  }
-
-  /// Trend arrow comparing now vs the 30-min forecast.
-  /// Mirrors SoftMrtStationView.swift trendIcon(now:next:).
-  IconData _trendIcon(CrowdLevel now, CrowdLevel next) {
-    final a = _levelRank(now);
-    final b = _levelRank(next);
-    if (a == 0 || b == 0) return Icons.arrow_forward_rounded;
-    if (b > a) return Icons.arrow_upward_rounded;
-    if (b < a) return Icons.arrow_downward_rounded;
-    return Icons.arrow_forward_rounded;
-  }
-
   @override
   Widget build(BuildContext context) {
     final matched = _matchFrom(crowdList);
@@ -723,26 +699,15 @@ class _LineCrowdCard extends StatelessWidget {
                       forecastMatch != null &&
                       forecastMatch.level != CrowdLevel.unknown) ...[
                     const SizedBox(height: 3),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _trendIcon(matched.level, forecastMatch.level),
-                          size: 10,
-                          color: t.dim,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          'In 30 min · ${_crowdLabel(forecastMatch.level)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: t.dim,
-                            fontFeatures: const [
-                              FontFeature.tabularFigures(),
-                            ],
-                          ),
-                        ),
-                      ],
+                    Text(
+                      'In 30 min · ${_crowdLabel(forecastMatch.level)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: t.dim,
+                        fontFeatures: const [
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
                     ),
                   ],
                 ],

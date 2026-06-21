@@ -17,7 +17,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
-import '../services/geofence_service.dart';
 import '../services/widget_bridge.dart';
 import '../theme.dart' show MRTLine;
 import 'geo.dart';
@@ -813,10 +812,8 @@ class DataStore extends ChangeNotifier {
         }
         notifyListeners();
         // Reference data (stop names + coords) just resolved — re-publish the
-        // home-screen widgets so names fill in, and (re)sync bus-coming
-        // geofences now that favourited stops' lat/lon are available.
+        // home-screen widgets so names fill in.
         WidgetBridge.instance.pushAll();
-        GeofenceService.instance.sync();
         return;
       } on LtaException catch (e) {
         lastErr = e;

@@ -120,7 +120,7 @@ struct SoftHomeView: View {
             // context stays since it needs no entitlement or attribution.
             greetingClock
 
-            Text("Stops near you")
+            Text("Nearby")
                 .font(t.sans(33, weight: .bold))
                 .foregroundStyle(t.fg)
                 .fixedSize(horizontal: false, vertical: true)

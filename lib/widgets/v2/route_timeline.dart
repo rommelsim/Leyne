@@ -399,7 +399,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
             const SizedBox(width: 12),
             Expanded(
               child: Padding(
-                padding: EdgeInsets.only(bottom: last ? 0 : 14, top: 2),
+                padding: EdgeInsets.only(bottom: last ? 0 : 10, top: 2),
                 child: Builder(
                   builder: (context) {
                     final isBoard = resolved == SoftRouteStopState.board;
@@ -413,7 +413,9 @@ class _RouteTimelineState extends State<RouteTimeline> {
                         color: resolved == SoftRouteStopState.past
                             ? t.dim
                             : (isBoard ? t.soon : t.fg),
-                      ),
+                        // Tight leading so each stop row is as compact as iOS,
+                        // where SwiftUI lays text out with less default leading.
+                      ).copyWith(height: 1.1),
                     );
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
