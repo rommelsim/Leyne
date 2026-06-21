@@ -52,6 +52,10 @@ struct SoftHomeView: View {
 
     private var t: Theme { m.t }
 
+    /// Max nearby stops shown on the board — bounded so the list stays a quick
+    /// glance, not an endless scroll.
+    private static let maxNearbyStops = 6
+
     var body: some View {
         ZStack(alignment: .bottom) {
             t.bg.ignoresSafeArea()
@@ -60,13 +64,13 @@ struct SoftHomeView: View {
             // handles row insets cleanly across all content. Header rows and
             // MRT alert cards ride as plain rows so they scroll with the content.
             List {
-                searchField
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
+                headerRow
+                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 2, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
-                contextLine
-                    .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 4, trailing: 16))
+                searchField
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 4, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
@@ -102,107 +106,123 @@ struct SoftHomeView: View {
         }
     }
 
-    // MARK: - Search field
+    // MARK: - Header (greeting + actions)
 
-    /// "Where to?" — a tappable search bar.
-    /// Phase 5: Saved (star) + alerts bell + gear are embedded at the trailing
-    /// edge inside the card, matching the prototype's searchbar__me avatar.
-    /// When the Phase 5 callbacks are nil (legacy callers) the icons are hidden.
-    private var searchField: some View {
-        HStack(spacing: 0) {
-            // Tappable search portion
-            Button(action: { fb.select(); onOpenSearch() }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(t.ink3)
-                    Text("Where to?")
-                        .font(t.sans(15, weight: .medium))
-                        .foregroundStyle(t.ink3)
-                    Spacer(minLength: 0)
+    /// Top header row: time-of-day greeting + live/location status on the left,
+    /// Alerts + Settings glass-circle buttons on the right. Mirrors the Rail
+    /// tab's header so the two tabs feel consistent and the previously-empty
+    /// greeting row now carries the actions. The old trailing icon cluster
+    /// crammed into the search bar is gone — Saved moved to its section header,
+    /// which also removes the duplicate-star confusion (search-bar star vs.
+    /// per-stop save star).
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                TimelineView(.everyMinute) { ctx in
+                    Text(greeting(for: ctx.date))
+                        .font(t.sans(27, weight: .bold))
+                        .foregroundStyle(t.fg)
                 }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 13)
-                .contentShape(Rectangle())
+                statusLine
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Search for buses, stops, or stations")
+            Spacer(minLength: 8)
 
-            // Trailing action cluster (Phase 5 — only shown when callbacks are set)
-            if onOpenSaved != nil || onOpenAlerts != nil || onOpenSettings != nil {
-                HStack(spacing: 6) {
-                    if let openSaved = onOpenSaved {
-                        searchBarAction(icon: "star.fill", tint: t.brand) {
-                            fb.select(); openSaved()
+            HStack(spacing: 8) {
+                if let openAlerts = onOpenAlerts {
+                    ZStack(alignment: .topTrailing) {
+                        headerCircleButton(
+                            icon: "bell.fill",
+                            label: m.unseenAlertCount > 0
+                                ? "Alerts, \(m.unseenAlertCount) unseen" : "Alerts"
+                        ) { fb.select(); openAlerts() }
+                        if m.unseenAlertCount > 0 {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 9, height: 9)
+                                .offset(x: 1, y: -1)
                         }
-                        .accessibilityLabel("Saved stops and services")
-                    }
-                    if let openAlerts = onOpenAlerts {
-                        ZStack(alignment: .topTrailing) {
-                            searchBarAction(icon: "bell.fill", tint: t.fg) {
-                                fb.select(); openAlerts()
-                            }
-                            if m.unseenAlertCount > 0 {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .offset(x: 2, y: -2)
-                            }
-                        }
-                        .accessibilityLabel(m.unseenAlertCount > 0
-                            ? "Alerts, \(m.unseenAlertCount) unseen" : "Alerts")
-                    }
-                    if let openSettings = onOpenSettings {
-                        searchBarAction(icon: "gearshape.fill", tint: t.fg) {
-                            fb.select(); openSettings()
-                        }
-                        .accessibilityLabel("Settings")
                     }
                 }
-                .padding(.trailing, 10)
+                if let openSettings = onOpenSettings {
+                    headerCircleButton(icon: "gearshape.fill", label: "Settings") {
+                        fb.select(); openSettings()
+                    }
+                }
             }
         }
-        .glanceCard(fill: t.surface)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func searchBarAction(icon: String,
-                                  tint: Color,
-                                  action: @escaping () -> Void) -> some View {
+    /// A glass-circle header button — matches the Rail tab's headerCircleButton.
+    private func headerCircleButton(icon: String,
+                                    label: String,
+                                    action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 32, height: 32)
-                .background(t.surfaceHi, in: Circle())
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(t.fg)
+                .frame(width: 38, height: 38)
+                .background(t.surface, in: Circle())
+                .overlay(Circle().stroke(t.line, lineWidth: 1))
         }
-        .buttonStyle(PressScaleButtonStyle())
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
-    // MARK: - Context line
+    // MARK: - Search field
 
-    /// Compact "Good morning · LIVE" line. No duplicate clock — the old
-    /// greetingClock is replaced by the simpler greeting + live badge.
-    private var contextLine: some View {
-        HStack(spacing: 8) {
-            TimelineView(.everyMinute) { ctx in
-                Text(greeting(for: ctx.date))
-                    .font(t.sans(13, weight: .semibold))
-                    .foregroundStyle(t.fg)
-            }
-            Spacer(minLength: 0)
-            if loc.location == nil {
-                Text("Location off")
-                    .font(t.rounded(11, .bold))
+    /// "Where to?" — a tappable search affordance styled like the native iOS
+    /// search field: a filled capsule that lifts to Liquid Glass on iOS 26.
+    /// Tapping opens the full Search screen (matching the existing cross-tab
+    /// navigation). No embedded action icons — those moved to the header.
+    private var searchField: some View {
+        Button(action: { fb.select(); onOpenSearch() }) {
+            HStack(spacing: 9) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(t.ink3)
-                    .tracking(0.5)
-            } else if !nearbyStops.isEmpty || !m.pins.isEmpty {
-                // Only claim "LIVE" when there are actually stops whose arrivals
-                // are flowing — not while the board is still empty/resolving
-                // (location on but nothing to be live about yet).
-                liveBadge
+                Text("Where to?")
+                    .font(t.sans(16))
+                    .foregroundStyle(t.ink3)
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            .contentShape(Capsule())
         }
-        .padding(.vertical, 2)
+        .buttonStyle(.plain)
+        .background(searchFieldBackground)
+        .accessibilityLabel("Search for buses, stops, or stations")
+    }
+
+    /// Native-search-field backdrop: Liquid Glass on iOS 26, tinted fill before.
+    @ViewBuilder
+    private var searchFieldBackground: some View {
+        if #available(iOS 26.0, *) {
+            Capsule().fill(.regularMaterial)
+        } else {
+            Capsule().fill(t.surfaceHi)
+        }
+    }
+
+    // MARK: - Status line (greeting subtitle)
+
+    /// The greeting's subtitle: a live badge when arrivals are flowing, a
+    /// "Location off" hint when GPS is unavailable, else a neutral subtitle so
+    /// the header's left column stays balanced (no empty space).
+    @ViewBuilder
+    private var statusLine: some View {
+        if loc.location == nil {
+            Text("Location off — showing saved stops")
+                .font(t.sans(13, weight: .medium))
+                .foregroundStyle(t.ink3)
+        } else if !nearbyStops.isEmpty || !m.pins.isEmpty {
+            liveBadge
+        } else {
+            Text("Finding stops near you…")
+                .font(t.sans(13, weight: .medium))
+                .foregroundStyle(t.ink3)
+        }
     }
 
     /// Pulsing green "LIVE" dot + text.
@@ -214,13 +234,13 @@ struct SoftHomeView: View {
                 let phase = timeline.date.timeIntervalSinceReferenceDate
                 let opacity = 0.45 + 0.55 * (0.5 + 0.5 * sin(phase * .pi * 2 / 2.0))
                 Circle()
-                    .fill(t.go)
+                    .fill(t.brand)
                     .frame(width: 7, height: 7)
                     .opacity(opacity)
             }
             Text("LIVE")
                 .font(t.rounded(11, .bold))
-                .foregroundStyle(t.go)
+                .foregroundStyle(t.brand)
                 .tracking(0.5)
         }
         .accessibilityLabel("Live arrivals active")
@@ -230,19 +250,24 @@ struct SoftHomeView: View {
 
     @ViewBuilder
     private var stopContent: some View {
-        let nearby = nearbyStops
+        // Cap the nearby list so the board stays scannable — without a limit a
+        // dense area can render a dozen+ stops, each with its own cards, and the
+        // user has to scroll forever. Saved stops are user-chosen, so they're
+        // never capped.
+        let nearby = Array(nearbyStops.prefix(Self.maxNearbyStops))
         let pinnedCodes = m.pins.map(\.code)
 
         if !pinnedCodes.isEmpty || !nearby.isEmpty {
             // Pinned stops float to the top — shown regardless of location.
             if !pinnedCodes.isEmpty {
-                sectionHeader(title: "Saved", freshestCode: pinnedCodes.first)
+                sectionHeader(title: "Saved", systemImage: "star.fill",
+                              tint: t.brand, freshestCode: pinnedCodes.first,
+                              onTap: onOpenSaved)
                 ForEach(pinnedCodes, id: \.self) { code in
                     stopSection(
                         code: code,
                         name: savedStopName(code),
                         walkMin: walkMin(code),
-                        arrivals: rankedArrivals(code),
                         isPinned: true
                     )
                 }
@@ -250,13 +275,13 @@ struct SoftHomeView: View {
 
             // Nearby stops (sorted by distance; excludes hidden).
             if !nearby.isEmpty {
-                sectionHeader(title: "Nearby", freshestCode: nearby.first?.stopCode)
+                sectionHeader(title: "Nearby", systemImage: "location.fill",
+                              tint: t.ink3, freshestCode: nearby.first?.stopCode)
                 ForEach(Array(nearby.enumerated()), id: \.element.id) { index, stop in
                     stopSection(
                         code: stop.stopCode,
                         name: stop.stopName.isEmpty ? stop.stopCode : stop.stopName,
                         walkMin: stop.walkMin,
-                        arrivals: rankedArrivals(stop.stopCode),
                         isPinned: m.isPinned(stop.stopCode)
                     )
                     if index == 2 {
@@ -274,15 +299,15 @@ struct SoftHomeView: View {
         } else if !m.pins.isEmpty {
             // No nearby stops (location off) but has saved stops.
             let pins = m.pins
-            sectionHeader(title: "Your stops", freshestCode: pins.first?.code)
+            sectionHeader(title: "Your stops", systemImage: "star.fill",
+                          tint: t.brand, freshestCode: pins.first?.code,
+                          onTap: onOpenSaved)
             ForEach(Array(pins.enumerated()), id: \.element.code) { index, pin in
                 stopSection(
                     code: pin.code,
                     name: savedStopName(pin.code),
                     walkMin: walkMin(pin.code),
-                    arrivals: rankedArrivals(pin.code),
-                    isPinned: true,
-                    badgeLabel: index == 0 ? "Your stop" : nil
+                    isPinned: true
                 )
                 if index == 2 {
                     NativeAdCard()
@@ -305,132 +330,92 @@ struct SoftHomeView: View {
 
     // MARK: - Section headers
 
-    /// A section label row ("Saved", "Nearby") with an "updated Xs ago" stamp.
-    /// The stamp reads from the freshest stop in that section.
-    private func sectionHeader(title: String, freshestCode: String?) -> some View {
-        HStack {
-            Text(title.uppercased())
-                .font(t.rounded(12, .bold))
-                .foregroundStyle(t.ink3)
-                .tracking(0.6)
-            Spacer(minLength: 0)
-            if let code = freshestCode, let stamp = updatedStamp(code) {
-                Text(stamp)
-                    .font(t.rounded(11, .semibold))
-                    .foregroundStyle(t.ink3)
-                    .monospacedDigit()
+    /// A prominent section header ("Saved" / "Nearby"): leading icon + title in
+    /// full ink (was a faint 12-pt uppercase label that didn't read as a
+    /// divider) + an "updated Xs ago" stamp. When `onTap` is set the header is a
+    /// button with a chevron — the Saved header opens the Saved manager, which
+    /// is where the old search-bar star's job now lives.
+    @ViewBuilder
+    private func sectionHeader(title: String,
+                              systemImage: String,
+                              tint: Color,
+                              freshestCode: String?,
+                              onTap: (() -> Void)? = nil) -> some View {
+        let stamp = freshestCode.flatMap(updatedStamp)
+        Group {
+            if let onTap {
+                Button { fb.select(); onTap() } label: {
+                    sectionHeaderLabel(title: title, systemImage: systemImage,
+                                       tint: tint, stamp: stamp, tappable: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                sectionHeaderLabel(title: title, systemImage: systemImage,
+                                   tint: tint, stamp: stamp, tappable: false)
             }
         }
-        .padding(.top, 16)
+        .padding(.top, 18)
         .padding(.bottom, 4)
         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
 
-    // MARK: - Stop section
+    private func sectionHeaderLabel(title: String,
+                                    systemImage: String,
+                                    tint: Color,
+                                    stamp: String?,
+                                    tappable: Bool) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(t.rounded(17, .bold))
+                .foregroundStyle(t.fg)
+            if tappable {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(t.ink3)
+            }
+            Spacer(minLength: 0)
+            if let stamp {
+                Text(stamp)
+                    .font(t.rounded(11, .semibold))
+                    .foregroundStyle(t.ink3)
+                    .monospacedDigit()
+            }
+        }
+    }
 
-    /// One stop: a header row (name · walk · code · save star · alert dot)
-    /// followed by its DepartureCards — ETAs visible with zero taps.
+    // MARK: - Stop row (compact)
+
+    /// One stop as a single compact, tappable row: name · walk · code, with a
+    /// save star + chevron. Buses are intentionally hidden here — tapping the
+    /// row opens the stop detail (SoftStopView) where every service and live ETA
+    /// is shown. Collapsing each stop from a header + up to 3 cards down to one
+    /// ~58-pt row is what makes nearby stops findable without endless scrolling.
     @ViewBuilder
     private func stopSection(
         code: String,
         name: String,
         walkMin: Int,
-        arrivals: [RankedArrival],
-        isPinned: Bool,
-        badgeLabel: String? = nil
+        isPinned: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            // Stop header
-            stopHeader(code: code, name: name, walkMin: walkMin, isPinned: isPinned)
-
-            // Departure cards or skeleton
-            let feed = feed(code)
-            if arrivals.isEmpty && feed == .offline {
-                // First load skeleton — 2 placeholder cards
-                DepartureCardSkeleton(t: t)
-                DepartureCardSkeleton(t: t)
-            } else if arrivals.isEmpty {
-                Text("No services right now")
-                    .font(t.sans(13))
-                    .foregroundStyle(t.ink3)
-                    .padding(.horizontal, 4)
-                    .padding(.bottom, 4)
-            } else {
-                ForEach(arrivals.prefix(4)) { ranked in
-                    let svc = ranked.service
-                    let following = followingEtas(svc)
-                    DepartureCard(
-                        t: t,
-                        service: svc,
-                        stopCode: code,
-                        feed: feed,
-                        tick: m.tick,
-                        followingEtas: following,
-                        onTap: {
-                            fb.select()
-                            m.addRecent(name)
-                            // Direct push to the bus detail (SoftRoute.bus) —
-                            // matches the prototype's card tap behaviour.
-                            onOpenBus(code, svc.no)
-                        }
-                    )
-                }
-            }
-        }
-        .padding(.bottom, 8)
-        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-        // Trailing swipe to Save/Remove — same as the old card.
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button {
-                fb.success(); m.togglePin(code: code)
-            } label: {
-                Label(isPinned ? "Remove" : "Save",
-                      systemImage: isPinned ? "star.slash.fill" : "star.fill")
-            }
-            .tint(isPinned ? .red : .green)
-        }
-        .contextMenu(menuItems: {
-            Button {
-                fb.success(); m.togglePin(code: code)
-            } label: {
-                Label(isPinned ? "Remove from Saved" : "Save stop",
-                      systemImage: isPinned ? "star.slash" : "star")
-            }
-            Button {
-                fb.select(); openOnMap(code: code, name: name)
-            } label: {
-                Label("Open on Map", systemImage: "map")
-            }
-            Button {
-                fb.success(); UIPasteboard.general.string = code
-            } label: {
-                Label("Copy Stop Code", systemImage: "doc.on.doc")
-            }
-        })
-    }
-
-    // MARK: - Stop header
-
-    private func stopHeader(code: String, name: String, walkMin: Int, isPinned: Bool) -> some View {
-        HStack(alignment: .center, spacing: 9) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(name)
-                    .font(t.rounded(19, .bold))
+                    .font(t.rounded(17, .bold))
                     .foregroundStyle(t.fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 HStack(spacing: 6) {
                     if walkMin > 0 {
-                        Text("\(walkMin) min walk")
+                        Label("\(walkMin) min walk", systemImage: "figure.walk")
+                            .labelStyle(.titleAndIcon)
                             .font(t.sans(12.5, weight: .semibold))
                             .foregroundStyle(t.brand)
-                    }
-                    if walkMin > 0 {
                         Text("·")
                             .font(t.sans(12.5))
                             .foregroundStyle(t.ink3)
@@ -451,19 +436,67 @@ struct SoftHomeView: View {
                     .accessibilityLabel("Service alert")
             }
 
-            // Save / pin star — matches the prototype's `.stophead .pin`.
+            // Save / pin star — tap to toggle (the only star on the board).
             Button {
                 fb.success(); m.togglePin(code: code)
             } label: {
                 Image(systemName: isPinned ? "star.fill" : "star")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isPinned ? t.brand : t.ink3)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
                     .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isPinned)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isPinned ? "Remove from saved" : "Save stop")
+
+            // Drill-in affordance.
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(t.ink3.opacity(0.7))
         }
-        .padding(.top, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .glanceCard(fill: t.surface)
+        // Whole row taps through to the stop detail. onTapGesture (not a Button
+        // wrapper) so the inner save-star Button keeps its own hit area.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            fb.select(); m.addRecent(name); onOpenStop(code)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens stop detail with all buses")
+        .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        // Trailing swipe to Save/Remove.
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                fb.success(); m.togglePin(code: code)
+            } label: {
+                Label(isPinned ? "Remove" : "Save",
+                      systemImage: isPinned ? "star.slash.fill" : "star.fill")
+            }
+            .tint(isPinned ? .red : t.brand)
+        }
+        .contextMenu(menuItems: {
+            Button {
+                fb.success(); m.togglePin(code: code)
+            } label: {
+                Label(isPinned ? "Remove from Saved" : "Save stop",
+                      systemImage: isPinned ? "star.slash" : "star")
+            }
+            Button {
+                fb.select(); openOnMap(code: code, name: name)
+            } label: {
+                Label("Open on Map", systemImage: "map")
+            }
+            Button {
+                fb.success(); UIPasteboard.general.string = code
+            } label: {
+                Label("Copy Stop Code", systemImage: "doc.on.doc")
+            }
+        })
     }
 
     // MARK: - MRT alert banner
@@ -556,9 +589,6 @@ struct SoftHomeView: View {
             .sorted { $0.distanceM < $1.distanceM }
     }
 
-    /// Stop-level feed freshness. Exposed via DataStore.
-    private func feed(_ code: String) -> Freshness { Freshness.from(ds.lastRefresh(code)) }
-
     /// "Updated 8s ago" stamp — nil when the stop has never been fetched.
     private func updatedStamp(_ code: String) -> String? {
         guard let last = ds.lastRefresh(code) else { return nil }
@@ -572,33 +602,6 @@ struct SoftHomeView: View {
     /// not stop-specific, and matches the prototype's `stop.alert` flag behaviour.
     private func stopHasAlert(code: String) -> Bool {
         !ds.trainAlerts.filter { !dismissedAlerts.contains($0.id) }.isEmpty
-    }
-
-    /// Top-4 services at a stop, ranked: favourites first, then earliest ETA.
-    private func rankedArrivals(_ code: String) -> [RankedArrival] {
-        let services = m.liveServices(code: code, tracked: [])
-        func isFav(_ s: Service) -> Bool {
-            m.isFavService(no: s.no, stop: code) || m.isFavService(no: s.no, stop: nil)
-        }
-        let favs = services.filter(isFav)
-        let rest = services.filter { !isFav($0) }
-        // Show up to 4 cards per stop to keep the board scannable.
-        return (favs + rest).prefix(4).map { RankedArrival(service: $0, fav: isFav($0)) }
-    }
-
-    /// Following-bus ETAs for the "then X · Y min" sub-row. The Service model
-    /// stores the next bus's `followingDate` and `thirdDate`; we convert those
-    /// to seconds from now so DepartureCard can format them.
-    private func followingEtas(_ svc: Service) -> [Int] {
-        let now = Date()
-        var result: [Int] = []
-        if let d = svc.followingDate {
-            result.append(max(0, Int(d.timeIntervalSince(now))))
-        }
-        if let d = svc.thirdDate {
-            result.append(max(0, Int(d.timeIntervalSince(now))))
-        }
-        return result
     }
 
     private func savedStopName(_ code: String) -> String {
@@ -645,16 +648,6 @@ struct SoftHomeView: View {
         default:      return "Good night"
         }
     }
-}
-
-// MARK: - RankedArrival (unchanged)
-
-/// One ranked arrival on the Home board: a service plus whether the user has
-/// favourited it (drives the favourite-first ordering).
-struct RankedArrival: Identifiable {
-    let service: Service
-    let fav: Bool
-    var id: String { service.no }
 }
 
 // MARK: - EmptyState (unchanged)

@@ -59,13 +59,13 @@ struct DepartureCard: View {
     var body: some View {
         let _ = tick   // subscribe to the 1 s pulse so SwiftUI re-evaluates
         Button(action: onTap) {
-            HStack(alignment: .center, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
                 busBadge
                 midSection
                 countdownSection
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 15)
+            .padding(.vertical, 11)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleButtonStyle())
@@ -85,7 +85,7 @@ struct DepartureCard: View {
             .foregroundStyle(t.bg)          // paper colour on ink fill
             .lineLimit(1)
             .minimumScaleFactor(0.6)
-            .frame(width: 48, height: 48)
+            .frame(width: 44, height: 44)
             .background(t.fg,
                         in: RoundedRectangle(cornerRadius: Theme.badgeRadius,
                                              style: .continuous))
@@ -136,7 +136,7 @@ struct DepartureCard: View {
             if countdown == .live {
                 liveWave
                     .frame(width: 13, height: 13)
-                    .foregroundStyle(t.go)
+                    .foregroundStyle(t.brand)
             }
 
             // The number
@@ -146,9 +146,8 @@ struct DepartureCard: View {
             // as its hero numeral, so a second "now" beneath would be redundant.
             if eta.big != "Arr" {
                 Text("min")
-                    .font(t.rounded(11, .semibold))
+                    .font(t.sans(11, weight: .semibold))
                     .foregroundStyle(t.ink3)
-                    .monospacedDigit()
             }
         }
         .frame(minWidth: 56, alignment: .trailing)
@@ -160,7 +159,7 @@ struct DepartureCard: View {
         let numeral = eta.big == "Arr" ? "0" : eta.big
         let color: Color = {
             switch countdown {
-            case .arriving:  return t.go
+            case .arriving:  return t.brand
             case .scheduled: return t.ink3
             case .live:      return t.fg
             }
@@ -177,12 +176,12 @@ struct DepartureCard: View {
                 Group {
                     if isArr {
                         // Arriving now — show the word, not a giant departure-board
-                        // "0" (which read as a stray green pill glyph).
+                        // "0" (which read as a stray pill glyph).
                         Text("Now")
-                            .font(t.rounded(26, .heavy))
+                            .font(t.mono(25, weight: .semibold))
                     } else {
                         Text(numeral)
-                            .font(t.eta(40, .heavy))
+                            .font(t.mono(34, weight: .semibold))
                             .contentTransition(.numericText(countsDown: true))
                     }
                 }
@@ -194,17 +193,17 @@ struct DepartureCard: View {
             // Both Text views carry their own font so the tilde can be smaller.
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text("~")
-                    .font(t.eta(22, .semibold))
+                    .font(t.mono(20, weight: .semibold))
                     .foregroundStyle(t.ink3.opacity(0.7))
                     .accessibilityHidden(true)
                 Text(numeral)
-                    .font(t.eta(40, .heavy))
+                    .font(t.mono(34, weight: .semibold))
                     .foregroundStyle(color)
             }
         } else {
             // Live, non-arriving — ink numeral with numeric roll on minute change.
             Text(numeral)
-                .font(t.eta(40, .heavy))
+                .font(t.mono(34, weight: .semibold))
                 .foregroundStyle(color)
                 .contentTransition(.numericText(countsDown: true))
         }
@@ -255,11 +254,11 @@ struct DepartureCardSkeleton: View {
     let t: Theme
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: 12) {
             // Badge placeholder
             RoundedRectangle(cornerRadius: Theme.badgeRadius, style: .continuous)
                 .fill(t.surfaceHi)
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 8) {
                 // Destination line
@@ -272,7 +271,7 @@ struct DepartureCardSkeleton: View {
             Capsule().fill(t.surfaceHi).frame(width: 44, height: 30)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 15)
+        .padding(.vertical, 11)
         .glanceCard(fill: t.surface)
         // Shimmer sweep via phase animation on the fill opacity.
         .redacted(reason: .placeholder)
