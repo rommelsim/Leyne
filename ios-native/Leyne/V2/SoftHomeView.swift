@@ -596,8 +596,8 @@ struct SoftNearbyStopCard: View {
     }
 
     /// Single meta line: walk time + the soonest arrival, merged to save a
-    /// whole row. The whisper "~" precedes an unconfirmed estimate, matching
-    /// the app-wide honesty cue.
+    /// whole row. Full-ink numerals always — confidence reads from dot shape
+    /// and freshness microcopy, not from prefixes or dimming.
     @ViewBuilder
     private var compactMeta: some View {
         let soonest = arrivals.min(by: { $0.service.etaSec < $1.service.etaSec })
@@ -616,14 +616,10 @@ struct SoftNearbyStopCard: View {
                     .foregroundStyle(t.soon)
                 if soonest != nil { Text("·").foregroundStyle(t.faint) }
             }
-            if let soonest, let summary {
-                let conf = ArrivalConfidence.of(monitored: soonest.service.monitored, feed: feed)
+            if soonest != nil, let summary {
                 Image(systemName: "bus.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(t.dim)
-                if conf == .unconfirmed {
-                    Text("~").foregroundStyle(t.faint).accessibilityHidden(true)
-                }
                 Text(summary.whenText)
                     .foregroundStyle(t.fg)
             }

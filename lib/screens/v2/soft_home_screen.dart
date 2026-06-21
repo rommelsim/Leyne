@@ -793,7 +793,6 @@ class _NearbyCard extends StatelessWidget {
   /// Mirrors iOS SoftNearbyStopCard compactMeta — no per-service list.
   Widget _compactMeta(LyneTheme t, String code, int walkMin) {
     final now = DateTime.now();
-    final feed = Freshness.from(DataStore.shared.lastRefresh(code));
     final services = DataStore.shared.servicesFor(code);
     final sorted = [...services]
       ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
@@ -801,10 +800,8 @@ class _NearbyCard extends StatelessWidget {
     final hasMeta = walkMin > 0 || soonest != null;
     if (!hasMeta) return const SizedBox.shrink();
 
-    ArrivalConfidence? conf;
     String? whenText;
     if (soonest != null) {
-      conf = ArrivalConfidence.of(monitored: soonest.monitored, feed: feed);
       final sec = _liveSec(soonest, now);
       final eta = fmtEta(sec);
       whenText = eta.big == 'Arr'
@@ -831,13 +828,6 @@ class _NearbyCard extends StatelessWidget {
         if (soonest != null && whenText != null) ...[
           Icon(Icons.directions_bus_outlined, size: 11, color: t.dim),
           const SizedBox(width: 3),
-          if (conf == ArrivalConfidence.unconfirmed)
-            ExcludeSemantics(
-              child: Text(
-                '~',
-                style: t.mono(11, weight: FontWeight.w400, color: t.faint),
-              ),
-            ),
           Text(
             whenText,
             style: t.mono(12, weight: FontWeight.w500, color: t.fg),

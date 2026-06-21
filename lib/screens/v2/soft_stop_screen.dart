@@ -23,7 +23,6 @@ import '../../theme.dart';
 import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
-import '../../widgets/v2/proximity.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
 class SoftStopScreen extends StatefulWidget {
@@ -752,8 +751,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
       {required bool lead, required ArrivalConfidence conf}) {
     final eta = fmtEta(sec);
     final arriving = eta.big == 'Arr';
-    final color = etaColor(etaSec: sec, confidence: conf, t: t);
-    final isGhost = conf == ArrivalConfidence.unconfirmed;
+    final color = (arriving && conf == ArrivalConfidence.live) ? t.accent : t.fg;
 
     return ConstrainedBox(
       constraints: const BoxConstraints(minWidth: 30),
@@ -765,12 +763,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              if (isGhost)
-                ExcludeSemantics(
-                  child: Text('~',
-                      style: t.mono(11,
-                          weight: FontWeight.w400, color: t.faint)),
-                ),
               Text(
                 arriving ? 'Arr' : eta.big,
                 style: t.mono(20, weight: FontWeight.w600, color: color),

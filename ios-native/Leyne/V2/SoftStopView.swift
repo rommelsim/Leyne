@@ -571,22 +571,16 @@ struct SoftStopView: View {
     private func etaColumn(_ sec: Int, lead: Bool, confidence: ArrivalConfidence) -> some View {
         let eta = fmtETA(sec)
         let arriving = eta.big == "Arr"
-        // ETA ink is uniform — soon-ness is not colour-coded. Scheduled/ghost
-        // times read faint (the honesty whisper), everything else standard ink.
-        let color = confidence == .unconfirmed ? t.dim : t.fg
-        let ghost = confidence == .unconfirmed
+        // Full-ink numerals always — confidence reads from dot shape + microcopy.
+        let imminent = lead && arriving && confidence == .live
         return VStack(spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 1) {
-                if ghost {
-                    Text("~").font(t.mono(11, weight: .regular))
-                        .foregroundStyle(t.faint).accessibilityHidden(true)
-                }
                 Text(arriving ? "Arr" : eta.big)
                     .font(t.mono(20, weight: .semibold))
-                    .foregroundStyle(color)
+                    .foregroundStyle(imminent ? t.accent : t.fg)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
-                if lead && arriving && confidence == .live {
+                if imminent {
                     Image(systemName: "dot.radiowaves.up.forward")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(t.soon)

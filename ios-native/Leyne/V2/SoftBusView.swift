@@ -113,18 +113,6 @@ struct SoftBusView: View {
         confidence == .none ? .none : .live
     }
 
-    /// Whether to show the "~" whisper cue.
-    ///
-    /// Reflects ARRIVAL-time confidence only — a quiet "~" when the ETA is a
-    /// schedule guess rather than a live (GPS-monitored) estimate. It must NOT
-    /// depend on `plot.tier`: a bus can have a confident live ETA yet no GPS
-    /// coordinate to plot on the map this poll, and tying the title "~" to the
-    /// map position made it appear "random" on live buses (e.g. Bus 165).
-    /// Map-position confidence is already conveyed by the bus marker's tier.
-    private var showWhisper: Bool {
-        confidence != .none && confidence != .live
-    }
-
     var body: some View {
         GeometryReader { geo in
             VStack(alignment: .leading, spacing: 12) {
@@ -383,13 +371,6 @@ struct SoftBusView: View {
                     .foregroundStyle(t.fg)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                if showWhisper {
-                    Text("~")
-                        .font(t.mono(14))
-                        .foregroundStyle(t.faint)
-                        .opacity(0.7)
-                        .accessibilityHidden(true)
-                }
             }
             // "Towards …" + LIVE pill
             HStack(spacing: 6) {

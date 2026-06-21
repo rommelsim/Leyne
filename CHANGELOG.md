@@ -8,10 +8,11 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Leyne 2.9.0 · Android (47) · 2026-06-21
+## Leyne 2.9.0 · Android (50) · 2026-06-21
 
-**2026-06-21 — Android AAB (2.9.0, build 47):** Feature release. versionName
-`2.9.0`, versionCode `47`. Artifact: `build/app/outputs/bundle/release/app-release.aab`.
+**2026-06-21 — Android AAB (2.9.0, build 50):** Feature release. versionName
+`2.9.0`, versionCode `50` (codes 47–49 skipped — 47 was already burned on the
+Play Console). Artifact: `build/app/outputs/bundle/release/app-release.aab`.
 User-facing What's New entry added under `2.9.0` in `lib/data/changelog.dart`.
 No special Play permission declarations required — the app uses only foreground
 location (`ACCESS_FINE/COARSE_LOCATION`) for Nearby.
@@ -30,6 +31,15 @@ it for Nearby).
 leading); the MRT live-crowd 30-min forecast no longer shows a trend arrow; Home
 title "Stops near you" → "Nearby"; the Home LIVE row now matches iOS (dropped the
 redundant "NEAR YOU" string).
+
+**ETA numerals always render confident (owner call).** Removed the `~` prefix and
+the dim/greyed treatment on scheduled-only (non-`Monitored`) arrival times — every
+ETA number now shows as solid ink so the board never looks "unstable". The small
+confidence dot + freshness microcopy ("scheduled / live") stay as honest small
+print; only the numeral changed. Applied across stop / bus / home / saved / stop-card
+views (`proximity.dart`, `confidence.dart`, `soft_stop_screen.dart`,
+`soft_bus_screen.dart`, `soft_favourites_screen.dart`, `soft_home_screen.dart`,
+`service_row.dart`, `detail_screen.dart`). Mirrored on iOS for the next Archive.
 
 **Home Screen widgets land on Android** — closing the biggest iOS parity gap and
 adding a passive daily re-entry surface (the #1 DAU lever from the growth review).

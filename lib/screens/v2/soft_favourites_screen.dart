@@ -1285,10 +1285,8 @@ class _FavStopCard extends StatelessWidget {
     final hasLocation = walkMin > 0 || distanceM > 0;
     if (!hasLocation && soonest == null) return const SizedBox.shrink();
 
-    ArrivalConfidence? conf;
     String? whenText;
     if (soonest != null) {
-      conf = ArrivalConfidence.of(monitored: soonest.monitored, feed: feed);
       final sec = soonest.arrivalDate != null
           ? soonest.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
           : soonest.etaSec;
@@ -1317,13 +1315,6 @@ class _FavStopCard extends StatelessWidget {
         if (soonest != null && whenText != null) ...[
           Icon(Icons.directions_bus_outlined, size: 11, color: t.dim),
           const SizedBox(width: 3),
-          if (conf == ArrivalConfidence.unconfirmed)
-            ExcludeSemantics(
-              child: Text(
-                '~',
-                style: t.mono(11, weight: FontWeight.w400, color: t.faint),
-              ),
-            ),
           Text(
             whenText,
             style: t.mono(12, weight: FontWeight.w500, color: t.fg),

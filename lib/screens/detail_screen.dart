@@ -452,8 +452,7 @@ class _DetailScreenState extends State<DetailScreen> {
     final arriving = s.etaSec <= 60;
     final etaMin = (s.etaSec / 60).floor();
     final estimate = !s.monitored;
-    final etaPrefix = estimate && etaMin > 0 ? '~' : '';
-    final big = etaMin <= 0 ? 'Arr' : '$etaPrefix$etaMin';
+    final big = etaMin <= 0 ? 'Arr' : '$etaMin';
     final unit = etaMin <= 0 ? 'now' : 'min';
     final etaColor = arriving ? t.accent : t.fg;
     final loadColor = switch (s.load) {
@@ -775,9 +774,7 @@ class _DetailScreenState extends State<DetailScreen> {
   Widget _heroCapacityCard(LyneTheme t, Service s) {
     final etaMin = (s.etaSec / 60).floor();
     final estimate = !s.monitored;
-    final big = etaMin <= 0
-        ? 'Arr'
-        : '${estimate ? '~' : ''}$etaMin';
+    final big = etaMin <= 0 ? 'Arr' : '$etaMin';
     final unit = etaMin <= 0 ? 'now' : 'min';
     // LTA's Load field has exactly 3 levels — SEA (seats), SDA (standing
     // only), LSD (limited standing / packed). The meter has 3 segments and

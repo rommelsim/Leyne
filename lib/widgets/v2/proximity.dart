@@ -18,14 +18,15 @@ import 'confidence.dart';
 
 // ─── ETA proximity ─────────────────────────────────────────────────────────
 
-/// Ink for an arrival's ETA. Soon-ness is not colour-coded — times read as
-/// uniform foreground ink; only a scheduled/ghost (unconfirmed) arrival dims
-/// to faint, the whisper-quiet honesty cue used app-wide.
+/// Ink for an arrival's ETA. ETA numerals always render at full foreground ink
+/// regardless of confidence — the app sells timeliness, not uncertainty.
+/// The one exception preserved: an imminent live arrival uses t.accent (handled
+/// at each call site via `arriving && conf == ArrivalConfidence.live`).
 Color etaColor({
   required int etaSec,
   required ArrivalConfidence confidence,
   required LyneTheme t,
-}) => confidence == ArrivalConfidence.unconfirmed ? t.dim : t.fg;
+}) => t.fg;
 
 // ─── Occupancy ─────────────────────────────────────────────────────────────
 

@@ -644,38 +644,16 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
         ? ArrivalConfidence.of(monitored: live.monitored, feed: feed)
         : ArrivalConfidence.none;
     final isLive = conf != ArrivalConfidence.none;
-    // Show a faint "~" whisper when we have a service but the position /
-    // arrival isn't a fresh live fix — mirrors iOS SoftBusView.showWhisper:
-    //   confidence != .none && (confidence != .live)
-    // Android has no `plot.tier` concept so the condition simplifies to
-    // "any confidence that isn't fully live".
-    final showWhisper =
-        conf != ArrivalConfidence.none && conf != ArrivalConfidence.live;
     final dest = live?.dest ?? '';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              'Bus ${widget.svc}',
-              style: t.sans(28, weight: FontWeight.w700, color: t.fg),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (showWhisper) ...[
-              const SizedBox(width: 6),
-              ExcludeSemantics(
-                child: Opacity(
-                  opacity: 0.7,
-                  child: Text('~', style: t.mono(14, color: t.faint)),
-                ),
-              ),
-            ],
-          ],
+        Text(
+          'Bus ${widget.svc}',
+          style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 4),
         Row(

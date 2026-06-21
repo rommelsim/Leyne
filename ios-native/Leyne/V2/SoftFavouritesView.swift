@@ -417,10 +417,9 @@ struct SoftFavouritesView: View {
     private func serviceETAs(_ svc: Service?, conf: ArrivalConfidence) -> some View {
         if let svc {
             let e1 = fmtETA(svc.etaSec)
-            // Uniform ink — soon-ness isn't colour-coded; ghosts read faint.
-            let color = conf == .unconfirmed ? t.dim : t.fg
+            // Full-ink numerals always — confidence reads from dot shape + microcopy.
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                etaText(e1, color: color, big: true)
+                etaText(e1, color: t.fg, big: true)
                 if let nextLabel = followingLabel(svc) {
                     Rectangle().fill(t.line).frame(width: 1, height: 16)
                     Text(nextLabel)
@@ -711,13 +710,9 @@ private struct FavStopCard: View {
                 if soonest != nil { Text("·").foregroundStyle(t.faint) }
             }
             if let soonest, let summary {
-                let conf = ArrivalConfidence.of(monitored: soonest.monitored, feed: feed)
                 Image(systemName: "bus.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(t.dim)
-                if conf == .unconfirmed {
-                    Text("~").foregroundStyle(t.faint).accessibilityHidden(true)
-                }
                 Text(summary.whenText)
                     .foregroundStyle(t.fg)
             }

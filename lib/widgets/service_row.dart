@@ -16,11 +16,8 @@ class ServiceRow extends StatelessWidget {
     final t = context.t;
     final etaMin = (service.etaSec / 60).floor();
     final followingMin = (service.followingSec / 60).floor();
-    // A schedule-derived ETA (LTA Monitored=0) gets a leading "~" so a
-    // glance reads it as approximate — not a live, GPS-tracked time.
     final estimate = !service.monitored;
-    final prefix = estimate && etaMin > 0 ? '~' : '';
-    final big = etaMin <= 0 ? 'Arr' : '$prefix$etaMin';
+    final big = etaMin <= 0 ? 'Arr' : '$etaMin';
     final unit = etaMin <= 0 ? 'now' : 'min';
     final arriving = service.etaSec <= 60;
     final etaColor = arriving ? t.accent : t.fg;

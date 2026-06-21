@@ -35,28 +35,18 @@ enum ArrivalConfidence: Equatable {
         }
     }
 
-    /// "~" prefixes ghost ETAs so a scheduled-only number never reads as a
-    /// confident live one. Stale keeps the bare number (it *was* live).
-    var etaPrefix: String { self == .unconfirmed ? "~" : "" }
+    /// Always returns empty string — ETA numerals never show a "~" prefix.
+    /// Confidence is conveyed by the dot shape and freshness microcopy only.
+    var etaPrefix: String { "" }
 
-    /// Opacity applied to the ETA numeral. Stale softens to signal aging;
-    /// ghost fades further (and carries the "~" + dashed dot to stay
-    /// unmistakable even though both are dimmed).
-    func numeralOpacity(stale: Double = 0.5) -> Double {
-        switch self {
-        case .live:        return 1
-        case .stale:       return stale
-        case .unconfirmed: return 0.42
-        case .none:        return 1
-        }
-    }
+    /// Opacity applied to the ETA numeral. Always 1.0 — full-ink numerals
+    /// signal timeliness; uncertainty is expressed by dot shape and microcopy.
+    func numeralOpacity(stale: Double = 1.0) -> Double { 1.0 }
 
     /// Numeral colour. The reserved accent appears only for a *live*
-    /// imminent arrival; everything else is monochrome ink so confidence
-    /// reads from opacity/shape, not colour.
+    /// imminent arrival; everything else is solid ink (t.fg).
     func numeralColor(imminent: Bool, t: Theme) -> Color {
-        if self == .none { return t.faint }
-        return (imminent && self == .live) ? t.accent : t.fg
+        (imminent && self == .live) ? t.accent : t.fg
     }
 
     /// Short status word for the provenance pill / chip.
@@ -106,11 +96,11 @@ struct ConfidenceDot: View {
 }
 
 // ─── Confidence-aware ETA numeral (inline use) ─────────────────────────
-/// The arrival number, rendered WHISPER-QUIET: always a confident, full-ink
-/// figure (no dimming, no "~" prefix) so the app never undersells its
-/// timeliness — that's the selling point. The only tell that an arrival is
-/// estimated/aged is a faint, trailing "~" a careful eye catches. Used in the
-/// Stop list rows and anywhere a compact ETA appears. The screen-reader label
+/// The arrival number, rendered as a solid, full-opacity, full-ink figure
+/// regardless of confidence level. The selling point is timely, confident
+/// information — uncertainty is communicated only by the dot shape and
+/// freshness microcopy, never by dimming or a "~" prefix. Used in the Stop
+/// list rows and anywhere a compact ETA appears. The screen-reader label
 /// at the call site stays fully honest. See memory `feedback_timely_over_honest`.
 struct ConfidenceETA: View {
     let eta: ETA                 // from fmtETA(seconds)
@@ -120,8 +110,6 @@ struct ConfidenceETA: View {
     var weight: Font.Weight = .semibold
 
     private var imminent: Bool { confidence == .live && eta.live }
-    /// Show the faint estimate tell when the arrival isn't a fresh live fix.
-    private var whisper: Bool { confidence == .stale || confidence == .unconfirmed }
 
     var body: some View {
         if confidence == .none {
@@ -130,12 +118,9 @@ struct ConfidenceETA: View {
                 .foregroundStyle(t.faint)
         } else if eta.big == "Arr" {
             // Arriving now — render the small word as the figure.
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(eta.small)
-                    .font(t.mono(size, weight: weight))
-                    .foregroundStyle(imminent ? t.accent : t.fg)
-                if whisper { whisperTilde }
-            }
+            Text(eta.small)
+                .font(t.mono(size, weight: weight))
+                .foregroundStyle(imminent ? t.accent : t.fg)
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(eta.big)
@@ -144,18 +129,8 @@ struct ConfidenceETA: View {
                 Text(eta.small)
                     .font(t.mono(size * 0.72, weight: .medium))
                     .foregroundStyle(imminent ? t.accent : t.dim)
-                if whisper { whisperTilde }
             }
         }
-    }
-
-    /// Near-invisible estimate marker — small, faint, screen-reader-hidden.
-    private var whisperTilde: some View {
-        Text("~")
-            .font(t.mono(size * 0.6, weight: .regular))
-            .foregroundStyle(t.faint)
-            .opacity(0.7)
-            .accessibilityHidden(true)
     }
 }
 

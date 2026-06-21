@@ -189,11 +189,6 @@ class ConfidenceEta extends StatelessWidget {
     return confidence == ArrivalConfidence.live && eta.live;
   }
 
-  /// Show the faint estimate tell when the arrival isn't a fresh live fix.
-  bool get _whisper =>
-      confidence == ArrivalConfidence.stale ||
-      confidence == ArrivalConfidence.unconfirmed;
-
   @override
   Widget build(BuildContext context) {
     final t = context.t;
@@ -233,10 +228,6 @@ class ConfidenceEta extends StatelessWidget {
         ),
       );
     }
-    if (_whisper) {
-      children.add(const SizedBox(width: 2));
-      children.add(_whisperTilde(t));
-    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -244,17 +235,6 @@ class ConfidenceEta extends StatelessWidget {
       children: children,
     );
   }
-
-  /// Near-invisible estimate marker — small, faint, screen-reader-hidden.
-  Widget _whisperTilde(LyneTheme t) => ExcludeSemantics(
-    child: Opacity(
-      opacity: 0.7,
-      child: Text(
-        '~',
-        style: t.mono(size * 0.6, weight: FontWeight.w400, color: t.faint),
-      ),
-    ),
-  );
 }
 
 // ─── Status pill (Bus view) ────────────────────────────────────────────

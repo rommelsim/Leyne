@@ -41,9 +41,7 @@ struct MiniBusChip: View {
     var body: some View {
         let eta = fmtETA(etaSec)
         let arriving = eta.big == "Arr"
-        // Uniform ink — soon-ness isn't colour-coded; ghosts read faint.
-        let color = confidence == .unconfirmed ? t.dim : t.fg
-        let whisper = confidence == .stale || confidence == .unconfirmed
+        // Full-ink numerals always — confidence reads from dot shape + microcopy.
 
         VStack(alignment: .leading, spacing: 3) {
             Text(svc)
@@ -54,16 +52,9 @@ struct MiniBusChip: View {
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(arriving ? eta.small : "\(eta.big) \(eta.small)")
                     .font(t.mono(11, weight: .semibold))
-                    .foregroundStyle(color)
+                    .foregroundStyle(t.fg)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                if whisper {
-                    Text("~")
-                        .font(t.mono(8, weight: .regular))
-                        .foregroundStyle(t.faint)
-                        .opacity(0.7)
-                        .accessibilityHidden(true)
-                }
             }
             if highlight {
                 // Timely text cue only — no colour highlight (kept consistent
