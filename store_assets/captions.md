@@ -36,3 +36,27 @@ App Store shows ~3 before the user scrolls — lead with the strongest.
 - Keep titles short so they stay legible as search-result thumbnails.
 - Soft timeliness language ("real time", not "to the second") — matches how the
   app presents arrivals.
+
+---
+
+## Android (Google Play) — regenerated 2026-06-22
+
+Dark-mode, ads-free captures (`--dart-define=LYNE_SCREENSHOT_MODE=true`) framed in
+a **Samsung S24 Ultra** body on a light pale-blue gradient (matches the iOS App
+Store set: dark navy headline, gray subcaption). Output: 1080×2100 (under
+Play's 2:1 cap). Framed PNGs in `store_assets/screenshots/android/`; raws in
+`screenshots/android/`. Renderer: `scripts/android_store_frames.py` (re-run to tweak).
+
+Play shows ~3 before scroll — strongest first.
+
+| # | Screen | Headline | Subcaption |
+|---|--------|----------|------------|
+| 1 | Nearby | Your stops. Right now. | Live arrivals at every stop near you |
+| 2 | Stop arrivals board | Every bus, live to the minute | All arrivals at your stop, one tap away |
+| 3 | Bus arriving + seats | Know before it arrives | Live timing, seats and crowd as it nears |
+| 4 | Bus full-route timeline | Follow it, stop by stop | See exactly where your bus is on the route |
+| 5 | MRT | Trains too — every line, live | MRT status across the whole network |
+| 6 | Alerts | Always know what's running | Disruptions, advisories and lift maintenance |
+
+Voice matches the iOS set + `aso.md`: benefit-first, sentence case, soft
+timeliness ("live", not "to the second"), no hype words.
