@@ -930,6 +930,14 @@ final class AppModel: ObservableObject {
                     notificationsEnabled = true
                 }
                 rearmAlertNotifications()
+                // Auth was still unresolved when this alert was armed, so the
+                // eager Live Activity start in `toggleArrivalAlert` was gated out
+                // by `autoTrackSoonestAlert`'s auth guard. Now that the status is
+                // known, re-attempt it — otherwise the LA only appeared after the
+                // user toggled the alert off and on (fresh-launch race).
+                if alert.kind == .arrival {
+                    autoTrackSoonestAlert()
+                }
             }
         } else {
             rearmAlertNotifications()
