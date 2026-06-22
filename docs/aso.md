@@ -42,27 +42,31 @@ FINAL — paste-ready (char counts verified):
 FINAL — paste-ready:
 
 - **Title (27/30):** `Leyne: SG Bus Arrival Times`
-- **Short description (73/80, IS keyword-indexed — front-loaded):**
-  `Live bus & MRT arrival times for Singapore — LTA data, alerts, no sign-up.`
-- **Long description (keyword-indexed; natural density, no stuffing):**
+- **Short description (74/80, keyword-indexed, plain text):**
+  `Live bus and MRT arrival times for Singapore. LTA data, alerts, no sign up.`
+  - Leads with the two exact-match queries ("bus ... arrival times",
+    "Singapore"). Keep "Singapore" in full; the title only carries "SG".
+- **Long description (keyword-indexed, plain text, refreshed 2026-06-22 to match
+  the live feature set; no dashes or bullet symbols per owner request):**
 
-  > Leyne shows live bus arrival times for every bus stop in Singapore, straight from LTA DataMall — plus MRT and LRT lines, all in one clean, fast app. No account, no clutter, no sign-up.
+  > Leyne shows live bus arrival times for every bus stop in Singapore, straight from LTA DataMall, plus MRT and LRT lines, all in one clean and fast app. No account, no clutter, no sign up.
   >
-  > Pin the stops you use, see the next buses at a glance, and get a heads-up before your bus pulls in so you never run for it again.
+  > Pin the stops you use, see the next buses at a glance, and get a heads up before your bus pulls in so you never run for it again.
   >
-  > • Live bus arrival times (ETA) for every Singapore bus stop
-  > • MRT & LRT lines with service status and crowding
-  > • Nearby stops, sorted by walking distance
-  > • Pin your favourite stops and bus services
-  > • Arrival & "time to leave" alerts before your bus comes
-  > • Route progress — see where your bus is on the map
-  > • Seat availability / crowd levels for each bus
-  > • Dark mode, loads in seconds
-  > • 100% free — no account needed
+  > Live bus arrival times for every Singapore bus stop.
+  > MRT and LRT lines with live service status and station crowd levels.
+  > Nearby stops, sorted by walking distance.
+  > Pin your favourite stops, services and stations.
+  > Arrival alerts before your bus pulls in.
+  > Follow your bus stop by stop along its route.
+  > Seat availability and crowd levels for each bus.
+  > Lift maintenance and service advisories at a glance.
+  > Dark mode, loads in seconds.
+  > Free to use, no account needed.
   >
-  > Whether you're catching a feeder bus, changing at an interchange, or timing the next train, Leyne keeps Singapore's buses and MRT one glance away.
+  > Whether you are catching a feeder bus, changing at an interchange, or timing the next train, Leyne keeps Singapore buses and MRT one glance away.
   >
-  > Bus data from LTA DataMall.
+  > Bus and train data from LTA DataMall.
 - **Screenshots:** once Android widgets ship, make the **widget screenshot the
   first asset** (Play surfaces these prominently for utility apps). Use a device
   frame + real data.
