@@ -12,6 +12,16 @@ struct SoftSearchView: View {
     @EnvironmentObject var ds: DataStore
 
     @State private var query = ""
+    /// When true the view is presented as a bottom card (sheet) raised from the
+    /// Home search bar rather than as a full surface: the big "Search" title is
+    /// dropped (so there's a single search field, not two), the field autofocuses,
+    /// and Cancel dismisses the card via `onClose`.
+    var compact: Bool = false
+    /// When set, the view renders ONLY its results (no title, no field, no
+    /// NavigationStack) and mirrors this host-owned text into its internal query.
+    /// Used by Home / MRT to drop the results under their native `.searchable`
+    /// bar — one search field (the system bar), all the same results logic.
+    var externalText: Binding<String>? = nil
     let onClose: () -> Void
     let onOpenStop: (String) -> Void
     /// Called when the user taps a service result. Receives (originStopCode, serviceNo)
@@ -22,6 +32,10 @@ struct SoftSearchView: View {
     var onOpenMrtStation: ((MrtGeoStation) -> Void)?
 
     @FocusState private var focused: Bool
+
+    /// Drives the native `.searchable` bar in card (compact) mode — set true on
+    /// appear so the system search field presents already focused.
+    @State private var searchPresented = false
 
     // Search category filter — only active during normal text-search results.
     enum SearchFilter: String, CaseIterable {
@@ -48,6 +62,98 @@ struct SoftSearchView: View {
     private var isPostal: Bool { detectQueryKind(trimmed).kind == "postal" }
 
     var body: some View {
+        Group {
+            if externalText != nil {
+                embeddedResults
+            } else if compact {
+                nativeSearchBody
+            } else {
+                customBody
+            }
+        }
+        .onAppear {
+            // Warm the large, lazy BusRoutes dataset while the user browses so
+            // tapping a bus result opens the route view immediately instead of
+            // blocking on a cold fetch (originStop + serviceRoute both need it).
+            ds.ensureRoutes()
+            if let ext = externalText { query = ext.wrappedValue }
+        }
+        .onChange(of: query) { _, newVal in
+            maybeGeocode()
+            // Reset filter to All when the query changes so a stale filter
+            // doesn't hide results from a completely different search term.
+            if searchFilter != .all { searchFilter = .all }
+            // Log one search_performed per search session: fire on the keystroke
+            // that first makes the query non-empty, then re-arm once it's cleared.
+            // Avoids one analytics event per character while still counting each
+            // distinct search.
+            let hasQuery = !newVal.trimmingCharacters(in: .whitespaces).isEmpty
+            if hasQuery, !loggedSearchSession {
+                loggedSearchSession = true
+                AnalyticsService.log(.searchPerformed)
+            } else if !hasQuery {
+                loggedSearchSession = false
+            }
+        }
+    }
+
+    // MARK: Body variants
+
+    /// Embedded presentation: results only, no chrome. The host owns the native
+    /// `.searchable` bar; its text is mirrored into the internal `query` that all
+    /// the results logic already reads, so there's a single search field.
+    private var embeddedResults: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                resultsContent.padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+        .scrollDismissesKeyboard(.immediately)
+        .background(t.bg)
+        .onChange(of: externalText?.wrappedValue ?? "") { _, new in query = new }
+    }
+
+    /// Card presentation (iOS 26): the system search bar via `.searchable`
+    /// (Liquid Glass material, native focus / Cancel / clear) above the results.
+    /// No custom field — that's what made the card read as a non-native, second
+    /// search bar.
+    private var nativeSearchBody: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    resultsContent.padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.immediately)
+            .background(t.bg)
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { fb.select(); onClose() } label: {
+                        Text("Done").font(t.sans(15, weight: .semibold))
+                    }
+                }
+            }
+            .searchable(text: $query,
+                        isPresented: $searchPresented,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search stops, buses, stations")
+        }
+        // Present the system search field already focused — the user tapped the
+        // Home search bar to get here.
+        .onAppear { searchPresented = true }
+    }
+
+    /// Full-surface presentation (legacy `.search` route): the custom title +
+    /// field. Retained for any caller that pushes Search as a full screen.
+    private var customBody: some View {
         ZStack {
             // Tapping empty space dismisses the keyboard (there's no Done bar
             // on a plain TextField, so this + scroll-to-dismiss are the ways out).
@@ -78,31 +184,6 @@ struct SoftSearchView: View {
                 Spacer(minLength: 0)
             }
         }
-        .onAppear {
-            // Don't auto-focus: the keyboard should appear only when the user
-            // taps the field, not the moment the Search tab opens (user-reported).
-            // Warm the large, lazy BusRoutes dataset while the user browses, so
-            // tapping a bus result opens the route view immediately instead of
-            // blocking on a cold fetch (originStop + serviceRoute both need it).
-            ds.ensureRoutes()
-        }
-        .onChange(of: query) { _, newVal in
-            maybeGeocode()
-            // Reset filter to All when the query changes so a stale filter
-            // doesn't hide results from a completely different search term.
-            if searchFilter != .all { searchFilter = .all }
-            // Log one search_performed per search session: fire on the keystroke
-            // that first makes the query non-empty, then re-arm once it's cleared.
-            // Avoids one analytics event per character while still counting each
-            // distinct search.
-            let hasQuery = !newVal.trimmingCharacters(in: .whitespaces).isEmpty
-            if hasQuery, !loggedSearchSession {
-                loggedSearchSession = true
-                AnalyticsService.log(.searchPerformed)
-            } else if !hasQuery {
-                loggedSearchSession = false
-            }
-        }
     }
 
     // MARK: Header
@@ -119,10 +200,6 @@ struct SoftSearchView: View {
             if focused {
                 Button {
                     fb.select()
-                    // Search is a first-class tab now — Cancel only dismisses
-                    // the keyboard and clears the field. It must NOT call
-                    // onClose (that switched to the Bus tab). onClose is kept
-                    // for the legacy modal route's caller.
                     focused = false
                     query = ""
                 } label: {

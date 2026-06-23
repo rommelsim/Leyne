@@ -34,6 +34,20 @@ struct SoftAlertsView: View {
             .padding(.bottom, 20)
         }
         .background(t.bg.ignoresSafeArea())
+        // Native title + a system gear toolbar button (iOS 26 glass), now that
+        // Alerts is a navigation-hosted card.
+        .navigationTitle("Alerts")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    fb.tap(); showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
+            }
+        }
         .refreshable {
             ds.refreshTrainAlertsIfStale(force: true)
             ds.refreshLiftMaintenanceIfStale(force: true)
@@ -55,30 +69,12 @@ struct SoftAlertsView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Alerts")
-                    .font(t.sans(32, weight: .bold))
-                    .foregroundStyle(t.fg)
-                Text("Service status & your notifications")
-                    .font(t.sans(14, weight: .medium))
-                    .foregroundStyle(t.dim)
-            }
-            Spacer(minLength: 8)
-            Button {
-                fb.tap()
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
-        }
-        .padding(.top, 4)
+        // Title + gear now live in the nav bar; this stays as the subtitle.
+        Text("Service status & your notifications")
+            .font(t.sans(14, weight: .medium))
+            .foregroundStyle(t.dim)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
     }
 
     // MARK: - Advisories (disruptions / news)

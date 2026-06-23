@@ -45,8 +45,6 @@ struct SoftBusView: View {
 
     let onBack: () -> Void
 
-    @State private var showManage = false
-    @State private var alertToast: ArrivalAlertToastState?
     @State private var showMap = false
     @State private var showRouteCard = false
     @State private var serviceRouteData: ServiceRoute?
@@ -60,14 +58,6 @@ struct SoftBusView: View {
     @State private var displayCoord: CLLocationCoordinate2D?  // where the pin is drawn
     @State private var lastFix: (coord: CLLocationCoordinate2D, at: Date)?
     @State private var didAutoFrame = false
-
-    // Transient confirmation toast — says what a tapped top-bar button just did,
-    // then clears itself. Resolves "what does this button even do?".
-    private struct Toast: Equatable {
-        let icon: String
-        let text: String
-    }
-    @State private var toast: Toast?
 
     /// One-shot guard for the "~1 min away" gentle haptic. Re-arms once the ETA
     /// climbs back past ~75 s (the feed rolled to the next bus), so each
@@ -118,10 +108,10 @@ struct SoftBusView: View {
             VStack(alignment: .leading, spacing: 12) {
                 topBar
                 titleBlock
-                actionBar
                 heroCard
                 liveModule
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                trackButton
             }
             .padding(.horizontal, 16)
             // Pushed full-screen (not a sheet) — the safe-area inset already
@@ -131,8 +121,6 @@ struct SoftBusView: View {
             .padding(.bottom, 10)
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
-        .overlay(alignment: .top) { toastView }
-        .arrivalAlertToastOverlay(state: $alertToast, t: t)
         .background(t.bg.ignoresSafeArea())
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -147,13 +135,6 @@ struct SoftBusView: View {
         }
         // Full-route glass card, raised from the route strip.
         .sheet(isPresented: $showRouteCard) { routeCard }
-        // Manage all alerts.
-        .sheet(isPresented: $showManage) {
-            NavigationStack { ManageAlertsView() }
-                .environmentObject(m)
-                .environmentObject(fb)
-                .environmentObject(ds)
-        }
         .onAppear {
             ds.ensureArrivals(stop: stopCode)
             loadRoute()
@@ -176,63 +157,17 @@ struct SoftBusView: View {
 
     /// Toggle whether this bus is saved. Filled = saved (here or anywhere);
     /// tapping clears every save of this service, or saves it at this stop when
-    /// none exists. Mirrors the stop view's single-tap pin toggle.
+    /// none exists. Mirrors the stop view's single-tap pin toggle. No
+    /// confirmation overlay — the star icon's filled/accent state plus the tap
+    /// haptic are the feedback.
     private func toggleServiceSaved() {
         let here = m.isFavService(no: svc, stop: stopCode)
         let anywhere = m.isFavService(no: svc, stop: nil)
         if here || anywhere {
             if here { m.toggleFavService(no: svc, stop: stopCode) }
             if anywhere { m.toggleFavService(no: svc, stop: nil) }
-            showToast("bus", "Bus \(svc) removed from saved")
         } else {
             m.toggleFavService(no: svc, stop: stopCode)
-            showToast("bus.fill", "Bus \(svc) saved — find it under Saved")
-        }
-    }
-
-    /// Flash a confirmation pill so a tapped top-bar toggle says what it did.
-    private func showToast(_ icon: String, _ text: String) {
-        withAnimation(.easeInOut(duration: 0.25)) {
-            toast = Toast(icon: icon, text: text)
-        }
-    }
-
-    /// The transient confirmation pill — glass, top of screen, auto-dismissing.
-    @ViewBuilder
-    private var toastView: some View {
-        if let toast {
-            HStack(spacing: 9) {
-                Image(systemName: toast.icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(t.soon)
-                Text(toast.text)
-                    .font(t.sans(13, weight: .medium))
-                    .foregroundStyle(t.fg)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 15)
-            .padding(.vertical, 11)
-            .background(
-                Group {
-                    if #available(iOS 26.0, *) {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.regularMaterial)
-                    } else {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(t.surface.opacity(0.96))
-                    }
-                }
-            )
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(t.line, lineWidth: 1))
-            .shadow(color: .black.opacity(t.isDark ? 0.34 : 0.10), radius: 16, x: 0, y: 5)
-            .padding(.horizontal, 20)
-            .padding(.top, 52)
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .task(id: toast) {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                withAnimation(.easeInOut(duration: 0.3)) { self.toast = nil }
-            }
         }
     }
 
@@ -250,92 +185,73 @@ struct SoftBusView: View {
             .accessibilityLabel("Back to \(ds.stopName(stopCode))")
 
             Spacer(minLength: 0)
-        }
-    }
 
-    // MARK: Action bar — labeled segments below the title
-
-    /// Three equal-width labeled action segments placed between the title block
-    /// and the hero ETA card. Replaces the cryptic icon-only top-bar toggles
-    /// with self-describing affordances that have larger tap targets.
-    private var actionBar: some View {
-        HStack(spacing: 8) {
-            // Track arrival
-            Button {
-                toggleBoardingAlert()
-            } label: {
-                actionSegment(
-                    icon: boardingAlertOn ? "bell.fill" : "bell",
-                    label: boardingAlertOn ? "Tracking" : "Track arrival",
-                    active: boardingAlertOn
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(boardingAlertOn
-                ? "Boarding alert on for bus \(svc). Tap to cancel."
-                : "Notify me before bus \(svc) reaches this stop")
-
-            // Save service
+            // Save — a set-once convenience, demoted from a labelled segment to a
+            // quiet star icon. The emphasised action (Track) owns the bottom bar.
             Button {
                 fb.select(); toggleServiceSaved()
             } label: {
-                actionSegment(
-                    icon: serviceSaved ? "star.fill" : "star",
-                    label: serviceSaved ? "Saved" : "Save service",
-                    active: serviceSaved
-                )
-                .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.bounce, value: serviceSaved)
+                circleButton(serviceSaved ? "star.fill" : "star", size: 16,
+                             tint: serviceSaved ? t.accent : t.fg)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: serviceSaved)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(serviceSaved
                 ? "Bus \(svc) saved. Tap to remove."
                 : "Save Bus \(svc)")
 
-            // More (overflow menu)
+            // Overflow — Share only. Alert management lives in the Alerts tab.
             Menu {
-                Button {
-                    fb.select(); showManage = true
-                } label: {
-                    Label("Manage alerts", systemImage: "bell.badge")
-                }
                 Button {
                     fb.select(); shareSheet()
                 } label: {
                     Label("Share Bus \(svc)", systemImage: "square.and.arrow.up")
                 }
             } label: {
-                actionSegment(icon: "ellipsis", label: "More", active: false)
+                circleButton("ellipsis", size: 16)
             }
             .accessibilityLabel("More options")
         }
     }
 
-    /// A single labeled segment in the action bar.
-    /// Active = accent fill + onAccent text. Inactive = surface fill + fg text + line stroke.
-    @ViewBuilder
-    private func actionSegment(icon: String, label: String, active: Bool) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-            Text(label)
-                .font(t.sans(14, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+    // MARK: Primary action — pinned Track CTA
+
+    /// The single emphasised action on the bus view: arm or cancel the arrival
+    /// track (lock-screen Live Activity + a nudge before the bus arrives).
+    /// Pinned full-width at the bottom for thumb reach. Accent-filled as a call
+    /// to action; tonal with an accent stroke once tracking (tap to stop).
+    private var trackButton: some View {
+        Button {
+            toggleBoardingAlert()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: boardingAlertOn ? "bell.fill" : "bell")
+                    .font(.system(size: 16, weight: .semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                Text(boardingAlertOn ? "Tracking — tap to stop" : "Track arrival")
+                    .font(t.sans(16, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(boardingAlertOn ? t.accent : t.onAccent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 15)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(boardingAlertOn ? t.accent.opacity(0.15) : t.accent)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(boardingAlertOn ? t.accent.opacity(0.5) : Color.clear,
+                            lineWidth: 1)
+            )
+            .animation(.easeInOut(duration: 0.18), value: boardingAlertOn)
         }
-        .foregroundStyle(active ? t.onAccent : t.fg)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 11)
-        .padding(.horizontal, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(active ? t.accent : t.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(active ? Color.clear : t.line, lineWidth: 1)
-        )
-        .animation(.easeInOut(duration: 0.18), value: active)
+        .buttonStyle(PressScaleButtonStyle())
+        .accessibilityLabel(boardingAlertOn
+            ? "Tracking bus \(svc). Tap to stop."
+            : "Track bus \(svc) — get a Live Activity and a nudge before it arrives")
     }
 
     /// Share the bus service as a deep link / plain text.
@@ -348,11 +264,13 @@ struct SoftBusView: View {
         }
     }
 
-    /// Uniform circular button label.
-    private func circleButton(_ symbol: String, size: CGFloat) -> some View {
+    /// Uniform circular button label. `tint` overrides the glyph colour (e.g.
+    /// accent for the active saved-star state).
+    private func circleButton(_ symbol: String, size: CGFloat,
+                              tint: Color? = nil) -> some View {
         Image(systemName: symbol)
             .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(t.fg)
+            .foregroundStyle(tint ?? t.fg)
             .frame(width: 44, height: 44)
             .background(t.surface, in: Circle())
             .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
@@ -1030,18 +948,17 @@ struct SoftBusView: View {
         m.alert(kind: .arrival, busNo: svc, stopCode: stopCode) != nil
     }
 
-    /// Toggle the boarding alert from the top-bar bell: arm or cancel an arrival
-    /// alert at this stop via the shared one-tap helper. Shows an Undo toast so
-    /// the user can immediately reverse an accidental tap. The lock-screen Live
-    /// Activity follows automatically via AppModel.autoTrackSoonestAlert.
+    /// Toggle the boarding alert from the pinned Track button: arm or cancel an
+    /// arrival alert at this stop. No confirmation overlay — the button's
+    /// "Track arrival" → "Tracking — tap to stop" state and the tap haptic are
+    /// the feedback, and re-tapping is the undo. The lock-screen Live Activity
+    /// follows automatically via AppModel.autoTrackSoonestAlert.
     private func toggleBoardingAlert() {
         fb.select()
-        withAnimation(.easeInOut(duration: 0.25)) {
-            alertToast = m.toggleArrivalAlertWithToast(
-                busNo: svc, stopCode: stopCode,
-                stopName: ds.stopName(stopCode),
-                dest: liveService()?.dest ?? "")
-        }
+        m.toggleArrivalAlert(
+            busNo: svc, stopCode: stopCode,
+            stopName: ds.stopName(stopCode),
+            dest: liveService()?.dest ?? "")
     }
 
     // MARK: Bus-position resolution (live → recent → estimated) + glide
