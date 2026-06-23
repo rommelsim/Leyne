@@ -84,6 +84,32 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.9.0": WhatsNewEntry(
+        headline: "A simpler app — your bus and search, faster.",
+        items: [
+            WhatsNewItem(
+                icon: "rectangle.3.group.fill",
+                title: "Simpler navigation",
+                body: "Three tabs now — Bus, MRT and Saved. Search sits right at "
+                    + "the top of each screen, and service alerts moved to a bell, "
+                    + "so the bar is far less cluttered."
+            ),
+            WhatsNewItem(
+                icon: "magnifyingglass",
+                title: "Search, right where you are",
+                body: "Tap the search bar and the nearby list smoothly makes way "
+                    + "for results — find any stop, bus or station without leaving "
+                    + "the screen."
+            ),
+            WhatsNewItem(
+                icon: "bell.fill",
+                title: "One-tap tracking",
+                body: "The bus view leads with a single Track button, and it now "
+                    + "starts your Lock Screen Live Activity the moment you tap — "
+                    + "even on a fresh launch."
+            ),
+        ]
+    ),
     "2.8.0": WhatsNewEntry(
         headline: "MRT, reimagined — plus a smarter Live Activity.",
         items: [

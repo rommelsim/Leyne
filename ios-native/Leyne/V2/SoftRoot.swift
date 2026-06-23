@@ -37,6 +37,20 @@ extension View {
     func enableSwipeBack() -> some View { modifier(EnableSwipeBack()) }
 }
 
+/// Toolbar chrome for a tab's root: either hidden (custom in-content header) or
+/// left visible so the root can host a native `.searchable` bar (which must live
+/// in a navigation bar). When visible, the screen sets its own navigation title.
+private struct RootBarChrome: ViewModifier {
+    let hidden: Bool
+    func body(content: Content) -> some View {
+        if hidden {
+            content.toolbar(.hidden, for: .navigationBar)
+        } else {
+            content
+        }
+    }
+}
+
 enum SoftRoute: Hashable {
     case stop(String)
     /// `fullRoute` is true when opened from a bus search (no anchor stop
@@ -59,33 +73,43 @@ enum SoftMrtRoute: Hashable {
 struct SoftRoot: View {
     @EnvironmentObject var m: AppModel
     @EnvironmentObject var fb: Feedback
-    @ObservedObject private var ds = DataStore.shared
 
     @State private var tab: SoftTab = .home
     // One navigation stack per tab so a drill-down in Home doesn't follow
-    // the user over to Nearby or Search. The native TabView preserves each
+    // the user over to MRT or Saved. The native TabView preserves each
     // path across tab switches, matching iOS's standard tab behaviour.
+    // Search is no longer a tab — the Home/Saved search bar raises it as a
+    // card (the `showSearch` sheet). Alerts is no longer a tab either — it's
+    // presented as a sheet from the Home bell.
     @State private var homeStack: [SoftRoute] = []
     @State private var mrtStack: [SoftMrtRoute] = []
     @State private var favouritesStack: [SoftRoute] = []
-    @State private var alertsStack: [SoftRoute] = []
-    @State private var searchStack: [SoftRoute] = []
+    @State private var showAlerts = false
+    @State private var showSearch = false
     @State private var mapHandoff: MapHandoffKind = .none
 
     private var t: Theme { m.t }
 
-    /// The native 5-tab bar (Bus · MRT · Saved · Search · Alerts). Each tab owns
-    /// its own NavigationStack so child pushes keep the native slide + swipe-back.
-    /// Extracted from `body` to keep the view-builder type-check tractable.
+    /// The native 3-tab bar (Bus · MRT · Saved) — only true places/modes. Search
+    /// is a field at the top of Home that raises a search card; Alerts is a bell
+    /// on Home that raises a sheet. Each tab owns its own NavigationStack so
+    /// child pushes keep the native slide + swipe-back.
     private var tabView: some View {
         TabView(selection: $tab) {
-            // 1. Bus — nearby bus stops home screen
+            // 1. Bus — nearby bus stops home screen + native search bar + bell
             Tab("Bus", systemImage: "bus.fill", value: SoftTab.home) {
-                navStack($homeStack) {
+                // Home hosts the native `.searchable` bar, which lives in the
+                // navigation bar — so unlike the other tabs it must NOT hide it.
+                navStack($homeStack, hidesNavBar: false) {
                     SoftHomeView(
                         onTab: { tab = $0 },
                         onOpenStop: { homeStack.append(.stop($0)) },
-                        onOpenSearch: { tab = .search }
+                        onOpenBus: { code, svc in
+                            homeStack.append(.bus(stopCode: code, svc: svc,
+                                                  fullRoute: true))
+                        },
+                        onOpenMrtStation: { station in navigateToStation(station) },
+                        onOpenAlerts: { showAlerts = true }
                     )
                 }
             }
@@ -101,7 +125,7 @@ struct SoftRoot: View {
                         onOpenBus: { code, svc in
                             favouritesStack.append(.bus(stopCode: code, svc: svc))
                         },
-                        onOpenSearch: { tab = .search },
+                        onOpenSearch: { showSearch = true },
                         onOpenMrtStation: { station in
                             // Switch to the MRT tab and push the station detail.
                             tab = .mrt
@@ -110,31 +134,6 @@ struct SoftRoot: View {
                     )
                 }
             }
-            // 4. Search
-            Tab("Search", systemImage: "magnifyingglass", value: SoftTab.search) {
-                navStack($searchStack) {
-                    SoftSearchView(
-                        onClose: { tab = .home },
-                        onOpenStop: { searchStack.append(.stop($0)) },
-                        onOpenBus: { stopCode, svcNo in
-                            searchStack.append(.bus(stopCode: stopCode,
-                                                    svc: svcNo,
-                                                    fullRoute: true))
-                        },
-                        onOpenMrtStation: { station in
-                            navigateToStation(station)
-                        }
-                    )
-                }
-            }
-            // 5. Alerts — service status (disruptions / maintenance / advisories)
-            //    + personal bus alerts; gear → Settings sheet.
-            Tab("Alerts", systemImage: "bell.fill", value: SoftTab.alerts) {
-                navStack($alertsStack) {
-                    SoftAlertsView()
-                }
-            }
-            .badge(m.unseenAlertCount)
         }
         .tint(t.meBlue)
     }
@@ -144,17 +143,50 @@ struct SoftRoot: View {
             t.bg.ignoresSafeArea()
 
             tabView
-                // Alerts-tab badge: mark seen when the user is on (or switches
-                // to) the Alerts tab, including when fresh disruptions/maintenance
-                // land while it's open. Otherwise the badge counts the unseen.
-                .onChange(of: tab) { _, newTab in
-                    if newTab == .alerts { m.markAllAlertsSeen() }
+                // Alerts is now a sheet raised from the Home bell. Opening it
+                // clears the unseen badge (the red dot on the bell).
+                .sheet(isPresented: $showAlerts) {
+                    NavigationStack {
+                        SoftAlertsView()
+                    }
+                    // Opens as a half card; drag up for the rest.
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .environmentObject(m)
+                    .environmentObject(fb)
                 }
-                .onChange(of: ds.trainAlerts) { _, _ in
-                    if tab == .alerts { m.markAllAlertsSeen() }
+                .onChange(of: showAlerts) { _, open in
+                    if open { m.markAllAlertsSeen() }
                 }
-                .onChange(of: ds.liftMaintenance) { _, _ in
-                    if tab == .alerts { m.markAllAlertsSeen() }
+                // Search raised as a card from the Home/Saved search bar. The
+                // bar is just the launcher, so only one search field is ever
+                // visible. Result taps dismiss the card and route into the Bus
+                // tab (or MRT for a station).
+                .sheet(isPresented: $showSearch) {
+                    SoftSearchView(
+                        compact: true,
+                        onClose: { showSearch = false },
+                        onOpenStop: { code in
+                            tab = .home
+                            homeStack.append(.stop(code))
+                            showSearch = false
+                        },
+                        onOpenBus: { stopCode, svcNo in
+                            tab = .home
+                            homeStack.append(.bus(stopCode: stopCode,
+                                                  svc: svcNo, fullRoute: true))
+                            showSearch = false
+                        },
+                        onOpenMrtStation: { station in
+                            showSearch = false
+                            navigateToStation(station)
+                        }
+                    )
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                    .environmentObject(m)
+                    .environmentObject(fb)
+                    .environmentObject(DataStore.shared)
                 }
 
             // Map handoff toast overlays the whole stack.
@@ -173,8 +205,6 @@ struct SoftRoot: View {
         // all pop the bound path. The manager's guards decide whether one shows.
         .onChange(of: homeStack) { old, new in handleStackPop(old, new) }
         .onChange(of: favouritesStack) { old, new in handleStackPop(old, new) }
-        .onChange(of: searchStack) { old, new in handleStackPop(old, new) }
-        .onChange(of: alertsStack) { old, new in handleStackPop(old, new) }
         // Notification / Spotlight / Live Activity deep links arrive via
         // AppModel.openCard. Route them into the Home tab's stack, then clear so
         // the same trigger fires the next tap. `initial: true` is essential for
@@ -221,12 +251,16 @@ struct SoftRoot: View {
     /// gutters stay AdMob-policy-clean.
     @ViewBuilder
     private func navStack<Root: View>(_ path: Binding<[SoftRoute]>,
+                                      hidesNavBar: Bool = true,
                                       @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: path) {
             root()
                 .adBannerGutter()
                 .softTopEdgeBlur()
-                .toolbar(.hidden, for: .navigationBar)
+                // Most roots hide the nav bar (custom in-content headers). Home
+                // keeps it so it can host the native `.searchable` field; an
+                // empty inline title keeps that bar a thin strip above the bar.
+                .modifier(RootBarChrome(hidden: hidesNavBar))
                 .navigationDestination(for: SoftRoute.self) { route in
                     routeDestination(route, path: path)
                 }
@@ -243,6 +277,10 @@ struct SoftRoot: View {
         let content = routeView(route, path: path)
             .softTopEdgeBlur()
             .toolbar(.hidden, for: .navigationBar)
+            // Each detail draws its own back chevron. Now that the Home root
+            // shows a nav bar (to host the search field), SwiftUI would also
+            // inject a system back button on push — hide it so there's only one.
+            .navigationBarBackButtonHidden(true)
             // Tab bar stays visible on pushed Stop / Bus detail pages so the
             // user can switch tabs without backing out.
             .enableSwipeBack()
@@ -301,30 +339,48 @@ struct SoftRoot: View {
         NavigationStack(path: path) {
             SoftMrtView(
                 onOpenLine: { line in path.wrappedValue.append(.line(line)) },
-                onOpenNews: { path.wrappedValue.append(.news) }
+                onOpenNews: { path.wrappedValue.append(.news) },
+                // Stop / bus results from MRT's search bar route to the Bus tab.
+                onOpenStop: { code in
+                    tab = .home
+                    homeStack.append(.stop(code))
+                },
+                onOpenBus: { code, svc in
+                    tab = .home
+                    homeStack.append(.bus(stopCode: code, svc: svc, fullRoute: true))
+                }
             )
             .adBannerGutter()
             .softTopEdgeBlur()
+            // MRT's nav bar stays visible (not hidden) so it can host the native
+            // `.searchable` field; SoftMrtView sets its own "MRT" title.
             .navigationDestination(for: SoftMrtRoute.self) { route in
-                switch route {
-                case .station(let station, let distM, let walkM):
-                    SoftMrtStationView(
-                        station: station,
-                        distanceM: distM,
-                        walkMin: walkM,
-                        onBack: pop
-                    )
-                    .adBannerGutter()
-                    .softTopEdgeBlur()
-                case .line(let line):
-                    SoftMrtLineView(line: line, onBack: pop)
+                Group {
+                    switch route {
+                    case .station(let station, let distM, let walkM):
+                        SoftMrtStationView(
+                            station: station,
+                            distanceM: distM,
+                            walkMin: walkM,
+                            onBack: pop
+                        )
                         .adBannerGutter()
                         .softTopEdgeBlur()
-                case .news:
-                    SoftMrtNewsView(onBack: pop)
-                        .adBannerGutter()
-                        .softTopEdgeBlur()
+                    case .line(let line):
+                        SoftMrtLineView(line: line, onBack: pop)
+                            .adBannerGutter()
+                            .softTopEdgeBlur()
+                    case .news:
+                        SoftMrtNewsView(onBack: pop)
+                            .adBannerGutter()
+                            .softTopEdgeBlur()
+                    }
                 }
+                // Each detail draws its own back button; the MRT root now shows
+                // a nav bar (for search), so suppress the injected system one.
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationBarBackButtonHidden(true)
+                .enableSwipeBack()
             }
         }
     }

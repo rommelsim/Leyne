@@ -8,6 +8,26 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Leyne 2.9.0 · iOS (build 30) · 2026-06-23
+
+**2026-06-23 — iOS Archive (2.9.0, build 30):** Feature release. `MARKETING_VERSION`
+bumped `2.8.0 → 2.9.0` and `CURRENT_PROJECT_VERSION` `29 → 30` across all targets
+(the 2.8.0 train was closed for new builds — App Store Connect rejected a re-upload
+at 2.8.0 with errors 90062 / 90186). Brings iOS to version parity with Android 2.9.0.
+User-facing What's New added under `2.9.0` in `kChangelog` (`AppModel.swift`).
+
+Highlights (the `bus-view-improvements` work):
+- **3-tab bar** — Bus · MRT · Saved. Search promoted to a native iOS 26 search
+  bar at the top of Home and MRT (the nearby list cross-fades to results on
+  focus, and the bar hides on scroll); Alerts demoted to a bell that opens a
+  half-height card.
+- **Redesigned bus view** — a single pinned **Track arrival** CTA (replacing the
+  3-segment Track / Save / More bar); Save is a star icon, Share lives in an
+  overflow; confirmation toasts removed in favour of control state + haptics.
+- **Live Activity fix** — arming an arrival alert on a cold launch now starts the
+  Lock Screen Live Activity on the first tap (previously needed an off/on toggle;
+  a notification-authorization race in `AppModel.upsertAlert`).
+
 ## Leyne 2.9.0 · Android (50) · 2026-06-21
 
 **2026-06-21 — Android AAB (2.9.0, build 50):** Feature release. versionName

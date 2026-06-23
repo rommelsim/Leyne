@@ -20,7 +20,17 @@ struct SoftHomeView: View {
 
     let onTab: (SoftTab) -> Void
     let onOpenStop: (String) -> Void
-    let onOpenSearch: () -> Void
+    /// Result taps from the inline search bar.
+    let onOpenBus: (String, String) -> Void
+    let onOpenMrtStation: (MrtGeoStation) -> Void
+    /// Presents the Alerts sheet (service status / lift maintenance / your
+    /// alerts) — Alerts is no longer a tab.
+    let onOpenAlerts: () -> Void
+
+    /// Drives the native iOS 26 `.searchable` bar. `searchActive` is bound to the
+    /// bar's presented state, so focusing it swaps the nearby list for results.
+    @State private var searchText = ""
+    @State private var searchActive = false
 
     private var t: Theme { m.t }
 
@@ -28,18 +38,61 @@ struct SoftHomeView: View {
         ZStack(alignment: .bottom) {
             t.bg.ignoresSafeArea()
 
-            // A List (not a ScrollView) so each stop gets a native trailing
-            // swipe action to Save/Remove — the same swipe affordance as the
-            // Saved tab. Header + live row + MRT alerts ride as plain rows so
-            // they scroll normally (no sticky section headers).
+            // Focusing the native search bar swaps the nearby list for live
+            // results; both cross-fade so the "nearby disappears" transition
+            // reads smoothly. The results reuse SoftSearchView's full engine in
+            // embedded mode (no second field — the system bar is the field).
+            if searchActive {
+                SoftSearchView(
+                    externalText: $searchText,
+                    onClose: { searchActive = false },
+                    onOpenStop: onOpenStop,
+                    onOpenBus: onOpenBus,
+                    onOpenMrtStation: onOpenMrtStation
+                )
+                .transition(.opacity)
+            } else {
+                nearbyList
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: searchActive)
+        // `.automatic` lets the search bar ride in the scroll view's header so
+        // it slides away as the list scrolls down and returns on scroll up
+        // (`.always` would pin it). isPresented still focuses it on tap.
+        .searchable(text: $searchText, isPresented: $searchActive,
+                    placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: "Search stops, buses, stations")
+        // Greeting is the nav title (not a toolbar item — iOS 26 would wrap
+        // text in a glass button); the bell stays a trailing icon button. This
+        // fills the bar that hosts the search field so it isn't empty space.
+        .navigationTitle(greeting(for: Date()))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { alertsBell }
+        }
+        .onAppear {
+            warmArrivals()
+            loc.startIfAuthorized()
+            if let l = loc.location { ds.updateNearby(l) }
+            ds.prefetchNearbyArrivals()
+        }
+        .onChange(of: m.pins) { _, _ in warmArrivals() }
+        .onChange(of: loc.location) { _, new in
+            if let l = new { ds.updateNearby(l); ds.prefetchNearbyArrivals() }
+        }
+    }
+
+    /// The nearby-stops list (shown when search is not active). A List (not a
+    /// ScrollView) so each stop gets a native trailing swipe to Save/Remove —
+    /// the same affordance as the Saved tab.
+    private var nearbyList: some View {
+        ZStack(alignment: .bottom) {
             List {
-                VStack(alignment: .leading, spacing: 16) {
-                    header
-                    liveRow
-                }
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                liveRow
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
 
                 mrtAlertCards
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16))
@@ -83,7 +136,7 @@ struct SoftHomeView: View {
                 } else {
                     SoftEmptyState(t: t,
                                    onNearby: { loc.requestAndStart() },
-                                   onSearch: { onOpenSearch() })
+                                   onSearch: { searchActive = true })
                         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 5, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -99,57 +152,23 @@ struct SoftHomeView: View {
             .background(t.bg)
             .refreshable { await refreshAll() }
         }
-        .onAppear {
-            warmArrivals()
-            loc.startIfAuthorized()
-            if let l = loc.location { ds.updateNearby(l) }
-            ds.prefetchNearbyArrivals()
-        }
-        .onChange(of: m.pins) { _, _ in warmArrivals() }
-        .onChange(of: loc.location) { _, new in
-            if let l = new { ds.updateNearby(l); ds.prefetchNearbyArrivals() }
-        }
     }
 
     // MARK: Header / live row
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Greeting + clock context line. WeatherKit was removed in 2.8.0
-            // build 29 (App Store 5.2.5 attribution overhead); the time-of-day
-            // context stays since it needs no entitlement or attribution.
-            greetingClock
-
-            Text("Nearby")
-                .font(t.sans(33, weight: .bold))
-                .foregroundStyle(t.fg)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    /// Alerts demoted out of the tab bar: a bell with a red dot when there are
+    /// unseen disruptions / lift maintenance. Tapping presents the Alerts sheet.
+    private var alertsBell: some View {
+        // A plain toolbar button — iOS 26 sizes and glass-styles it. The unseen
+        // state uses the system `bell.badge.fill` dot rather than a custom overlay.
+        Button {
+            fb.select(); onOpenAlerts()
+        } label: {
+            Image(systemName: m.unseenAlertCount > 0 ? "bell.badge.fill" : "bell.fill")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 4)
-    }
-
-    /// A compact "Good morning · 8:41 PM" context line. The clock refreshes each
-    /// minute via TimelineView; the format follows the device's 12/24-hour
-    /// setting (.short style).
-    private var greetingClock: some View {
-        TimelineView(.everyMinute) { ctx in
-            HStack(spacing: 6) {
-                Text(greeting(for: ctx.date))
-                    .font(t.sans(13, weight: .medium))
-                    .foregroundStyle(t.dim)
-                Text("·")
-                    .font(t.sans(13))
-                    .foregroundStyle(t.faint)
-                Text(timeString(ctx.date))
-                    .font(t.mono(13, weight: .semibold))
-                    .foregroundStyle(t.fg)
-                Spacer(minLength: 0)
-            }
-            .lineLimit(1)
-            .accessibilityElement(children: .combine)
-        }
+        .accessibilityLabel(m.unseenAlertCount > 0
+            ? "Alerts, \(m.unseenAlertCount) new"
+            : "Alerts")
     }
 
     private func greeting(for date: Date) -> String {
@@ -161,19 +180,20 @@ struct SoftHomeView: View {
         }
     }
 
-    private func timeString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.timeStyle = .short
-        f.dateStyle = .none
-        return f.string(from: date)
-    }
-
+    /// Labels the list as nearby stops AND carries the location / live state,
+    /// replacing the old "Nearby" title: "📍 Stops near you · ● LIVE".
     private var liveRow: some View {
         let located = loc.location != nil
         return HStack(spacing: 6) {
             Image(systemName: located ? "location.fill" : "location.slash.fill")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(located ? t.meBlue : t.dim)
+            Text("Stops near you")
+                .font(t.sans(15, weight: .semibold))
+                .foregroundStyle(t.fg)
+            Text("·")
+                .font(t.sans(13))
+                .foregroundStyle(t.faint)
             if located {
                 Circle().fill(t.soon).frame(width: 6, height: 6)
                 Text("LIVE")
@@ -189,6 +209,8 @@ struct SoftHomeView: View {
             Spacer(minLength: 0)
         }
         .padding(.leading, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(located ? "Stops near you, live" : "Stops near you, location off")
     }
 
     private func stopCard(_ stop: NearbyStop, highlight: Bool) -> some View {

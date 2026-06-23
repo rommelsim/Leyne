@@ -37,6 +37,14 @@ struct SoftMrtView: View {
 
     let onOpenLine: (MRTLine) -> Void
     let onOpenNews: () -> Void
+    /// Search-result taps that aren't MRT stations route back to the Bus tab.
+    let onOpenStop: (String) -> Void
+    let onOpenBus: (String, String) -> Void
+
+    /// Drives the native iOS 26 `.searchable` bar; focusing it swaps the network
+    /// view for live results.
+    @State private var searchText = ""
+    @State private var searchActive = false
 
     private var t: Theme { m.t }
 
@@ -50,19 +58,39 @@ struct SoftMrtView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                titleBlock
-                topDisruptionBanner
-                // One native ad per screen. NativeAdCard renders EmptyView when
-                // no ad is loaded or ads are suppressed; no gap otherwise.
-                NativeAdCard()
-                networkSection
+        Group {
+            if searchActive {
+                // Same engine + results as Home, embedded under MRT's native
+                // search bar. Station results open the existing station card;
+                // stop / bus results route back to the Bus tab.
+                SoftSearchView(
+                    externalText: $searchText,
+                    onClose: { searchActive = false },
+                    onOpenStop: onOpenStop,
+                    onOpenBus: onOpenBus,
+                    onOpenMrtStation: { sheetStation = $0 }
+                )
+                .transition(.opacity)
+            } else {
+                networkScroll
+                    .transition(.opacity)
             }
-            .padding(20)
+        }
+        .animation(.easeInOut(duration: 0.25), value: searchActive)
+        // `.automatic` lets the search bar ride in the scroll view's header so
+        // it slides away as the page scrolls down and returns on scroll up.
+        .searchable(text: $searchText, isPresented: $searchActive,
+                    placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: "Search stops, buses, stations")
+        // "MRT" is the nav title (not a toolbar item — iOS 26 would wrap text in
+        // a glass button); the map stays a trailing icon button. Fills the bar
+        // that hosts the search field so it isn't empty space.
+        .navigationTitle("MRT")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { mapButton }
         }
         .background(t.bg.ignoresSafeArea())
-        .refreshable { refresh(force: true) }
         .onAppear {
             loc.startIfAuthorized()
             if let l = loc.location { rebuildNearest(l) }
@@ -94,6 +122,22 @@ struct SoftMrtView: View {
         }
     }
 
+    /// The network / nearest-stations view, shown when search is not active.
+    private var networkScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                titleBlock
+                topDisruptionBanner
+                // One native ad per screen. NativeAdCard renders EmptyView when
+                // no ad is loaded or ads are suppressed; no gap otherwise.
+                NativeAdCard()
+                networkSection
+            }
+            .padding(20)
+        }
+        .refreshable { refresh(force: true) }
+    }
+
     // MARK: - Nearest list builder
 
     private func rebuildNearest(_ loc: CLLocation) {
@@ -114,36 +158,25 @@ struct SoftMrtView: View {
     // MARK: - Title block
 
     private var titleBlock: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("MRT")
-                    .font(t.sans(32, weight: .bold))
-                    .foregroundStyle(t.fg)
-                Text("Stations near you")
-                    .font(t.sans(14, weight: .medium))
-                    .foregroundStyle(t.dim)
-            }
-            Spacer(minLength: 8)
-            mapButton
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // "MRT" + map button now live in the nav bar; this stays as the section
+        // subtitle under the search field.
+        Text("Stations near you")
+            .font(t.sans(15, weight: .semibold))
+            .foregroundStyle(t.dim)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Top-right button — opens the zoomable system map. (Previously a ••• menu
     /// that also held "News & advisories"; that content now lives in the
     /// Alerts tab, so this collapses to a direct map button.)
     private var mapButton: some View {
+        // Plain toolbar button — iOS 26 sizes and glass-styles it.
         Button {
             Feedback.shared.tap()
             showMap = true
         } label: {
             Image(systemName: "map.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(t.fg)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityLabel("System map")
     }
 
