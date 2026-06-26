@@ -33,6 +33,8 @@ struct SoftHomeView: View {
     @State private var searchActive = false
 
     private var t: Theme { m.t }
+    /// LIVE / arriving green, tuned per appearance for contrast.
+    private var meGreen: Color { t.isDark ? Color(hex: "22C55E") : Color(hex: "16A34A") }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -206,11 +208,11 @@ struct SoftHomeView: View {
                 .font(t.sans(13))
                 .foregroundStyle(t.faint)
             if located {
-                Circle().fill(Color(hex: "22C55E")).frame(width: 6, height: 6)
+                Circle().fill(meGreen).frame(width: 6, height: 6)
                 Text("LIVE")
                     .font(t.mono(10, weight: .bold))
                     .tracking(0.8)
-                    .foregroundStyle(Color(hex: "22C55E"))
+                    .foregroundStyle(meGreen)
             } else {
                 Text("LOCATION OFF")
                     .font(t.mono(10, weight: .bold))
@@ -552,8 +554,9 @@ struct SoftNearbyStopCard: View {
     // ── Vibrant prototype palette (Home only — pending wider roll-out) ────
     // Tuned for dark mode (the primary appearance); light-mode tuning is a
     // follow-up once the direction is approved.
-    private var meGreen: Color { Color(hex: "22C55E") }   // arriving / go
-    private var meAmber: Color { Color(hex: "F59E0B") }   // soon / saved star
+    // Tuned per appearance: brighter on dark, deeper on light for contrast.
+    private var meGreen: Color { t.isDark ? Color(hex: "22C55E") : Color(hex: "16A34A") }  // arriving / go
+    private var meAmber: Color { t.isDark ? Color(hex: "F59E0B") : Color(hex: "D97706") }  // soon / saved star
     private var brandGradient: LinearGradient {
         LinearGradient(colors: [Color(hex: "2563EB"), Color(hex: "06B6D4")],
                        startPoint: .topLeading, endPoint: .bottomTrailing)

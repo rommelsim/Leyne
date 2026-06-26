@@ -43,6 +43,10 @@ struct SoftMapHomeView: View {
     @State private var selectedStation: MrtGeoStation? = nil
 
     private var t: Theme { m.t }
+    /// LIVE / arriving green, tuned per appearance for contrast.
+    private var meGreen: Color { t.isDark ? Color(hex: "22C55E") : Color(hex: "16A34A") }
+    /// Saved-stop gold, tuned per appearance.
+    private var meAmber: Color { t.isDark ? Color(hex: "F59E0B") : Color(hex: "D97706") }
 
     // MARK: Data
 
@@ -119,7 +123,8 @@ struct SoftMapHomeView: View {
     }
 
     private func stopMarker(_ stop: NearbyStop) -> some View {
-        Button {
+        let isSel = selectedStop == stop.stopCode
+        return Button {
             selectStop(stop)
         } label: {
             Image(systemName: "bus.fill")
@@ -130,14 +135,30 @@ struct SoftMapHomeView: View {
                     LinearGradient(colors: [Color(hex: "2563EB"), Color(hex: "06B6D4")],
                                    startPoint: .top, endPoint: .bottom),
                     in: Circle())
-                .overlay(Circle().stroke(.white, lineWidth: 2))
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
+                // Gold star badge marks a saved/pinned stop so regulars spot
+                // their stops at a glance.
+                .overlay(alignment: .topTrailing) {
+                    if m.isPinned(stop.stopCode) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 8, weight: .black))
+                            .foregroundStyle(.white)
+                            .frame(width: 14, height: 14)
+                            .background(meAmber, in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                            .offset(x: 5, y: -5)
+                    }
+                }
+                .scaleEffect(isSel ? 1.3 : 1)
+                .shadow(color: .black.opacity(0.3), radius: isSel ? 5 : 2, y: 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSel)
         }
         .buttonStyle(.plain)
     }
 
     private func mrtMarker(_ st: MrtGeoStation) -> some View {
-        Button {
+        let isSel = selectedStation?.id == st.id
+        return Button {
             selectStation(st)
         } label: {
             Image(systemName: "tram.fill")
@@ -145,8 +166,10 @@ struct SoftMapHomeView: View {
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(stationColor(st), in: Circle())
-                .overlay(Circle().stroke(.white, lineWidth: 2))
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
+                .scaleEffect(isSel ? 1.3 : 1)
+                .shadow(color: .black.opacity(0.3), radius: isSel ? 5 : 2, y: 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSel)
         }
         .buttonStyle(.plain)
     }
@@ -275,10 +298,10 @@ struct SoftMapHomeView: View {
                     .foregroundStyle(t.fg)
                 if located {
                     Text("·").font(t.sans(13)).foregroundStyle(t.faint)
-                    Circle().fill(Color(hex: "22C55E")).frame(width: 6, height: 6)
+                    Circle().fill(meGreen).frame(width: 6, height: 6)
                     Text("LIVE")
                         .font(t.mono(10, weight: .bold)).tracking(0.8)
-                        .foregroundStyle(Color(hex: "22C55E"))
+                        .foregroundStyle(meGreen)
                 }
                 Spacer(minLength: 0)
             }
