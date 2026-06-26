@@ -1,17 +1,14 @@
 // SoftMapHomeView — map-first Home (redesign, branch `redesign-main-view`).
 //
-// Layout (Apple-Maps idiom):
-//   • Full-screen map: you + nearby bus stops (indigo markers) + MRT stations
-//     (per-line colours). Tap a marker → preview in the sheet; tap the empty map
-//     → collapse the sheet.
-//   • Draggable bottom sheet: search field, "Leaving near you" header, then rich
-//     stop rows (name · walk · the next few buses as urgency-coloured chips). One
-//     native ad lives inside the sheet.
-//   • Top bar carries only the bell; recenter is the lone floating map control.
+// What makes this OURS, not "a worse Google Maps": the map shows LIVE in-service
+// buses (from each Service's LTA GPS position), colour-coded by how soon they
+// arrive, crawling toward your stops. Arrivals are the hero; the map is context.
 //
-// Sheet smoothness: the sheet is rendered at a FIXED height and positioned with
-// `.offset` (cheap, no per-frame re-layout / blur recompute) on a solid surface —
-// so dragging stays smooth.
+// Smoothness: the nearby data (stops / stations / live buses) is cached in @State
+// and refreshed only when the underlying data changes — NOT on every drag frame —
+// so dragging the sheet (which only changes an `.offset`) never recomputes
+// distances or re-renders heavy work. The sheet itself is a fixed-height solid
+// surface positioned by offset (no per-frame re-layout / blur).
 
 import SwiftUI
 import MapKit
@@ -29,41 +26,78 @@ struct SoftMapHomeView: View {
     let onOpenSearch: () -> Void
 
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
-    /// Sheet height, dragged between snap detents (peek / half / full).
     @State private var panelHeight: CGFloat = 290
     @State private var dragStartHeight: CGFloat? = nil
-    /// One-shot: centre on the user the first time we get a fix, without yanking
-    /// the map afterwards if they've panned.
     @State private var didInitialCenter = false
-    /// A tapped marker shows a preview in the sheet (at most one non-nil).
     @State private var selectedStop: String? = nil
     @State private var selectedStation: MrtGeoStation? = nil
 
+    // Cached nearby data — recomputed only on data/location changes, never during
+    // a drag, so the sheet stays smooth.
+    @State private var stops: [NearbyStop] = []
+    @State private var stations: [MrtGeoStation] = []
+    @State private var buses: [LiveBus] = []
+
     private var t: Theme { m.t }
 
-    // Eye-friendly map accent — a calm indigo, gentler than the bright blue and
-    // distinct from the green/amber/red status palette. Per appearance.
+    // Eye-friendly map accent — a calm indigo, distinct from green/amber/red status.
     private var mapAccent: Color { t.isDark ? Color(hex: "7E7BFF") : Color(hex: "5856D6") }
     private var meGreen: Color { t.isDark ? Color(hex: "22C55E") : Color(hex: "16A34A") }
     private var meAmber: Color { t.isDark ? Color(hex: "F59E0B") : Color(hex: "D97706") }
 
     private var hasSelection: Bool { selectedStop != nil || selectedStation != nil }
 
-    // MARK: Data
+    struct LiveBus: Identifiable, Equatable {
+        let id: String
+        let lat: Double
+        let lon: Double
+        let no: String
+        let etaSec: Int
+        var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+    }
 
-    private var nearbyStops: [NearbyStop] {
+    // MARK: - Data refresh (off the drag path)
+
+    private func computeStops() -> [NearbyStop] {
         let hidden = m.hiddenNearby
         return ds.nearby
             .filter { !hidden.contains($0.stopCode) }
             .sorted { $0.distanceM < $1.distanceM }
     }
 
-    private var nearbyStations: [MrtGeoStation] {
+    private func computeStations() -> [MrtGeoStation] {
         guard let here = loc.location else { return [] }
         return MrtGeo.nearestStations(to: here.coordinate, limit: 6,
                                       withinMeters: max(m.searchRadiusM, 1200))
             .map { $0.station }
     }
+
+    private func computeBuses() -> [LiveBus] {
+        var seen = Set<String>()
+        var out: [LiveBus] = []
+        for stop in stops.prefix(10) {
+            for s in m.liveServices(code: stop.stopCode, tracked: []) {
+                guard let lat = s.busLat, let lon = s.busLon,
+                      abs(lat) > 0.0001, abs(lon) > 0.0001 else { continue }
+                let posKey = "\(s.no)@\(Int(lat * 10000)),\(Int(lon * 10000))"
+                if seen.contains(posKey) { continue }
+                seen.insert(posKey)
+                out.append(LiveBus(id: "\(stop.stopCode)-\(s.no)", lat: lat, lon: lon,
+                                   no: s.no, etaSec: s.etaSec))
+                if out.count >= 14 { return out }
+            }
+        }
+        return out
+    }
+
+    private func refreshStopsAndStations() {
+        stops = computeStops()
+        stations = computeStations()
+        buses = computeBuses()
+        for stop in stops.prefix(12) { ds.ensureArrivals(stop: stop.stopCode) }
+    }
+
+    private func refreshBuses() { buses = computeBuses() }
 
     // MARK: Body
 
@@ -87,16 +121,20 @@ struct SoftMapHomeView: View {
             loc.startIfAuthorized()
             if let l = loc.location { ds.updateNearby(l); centerOnUser() }
             ds.prefetchNearbyArrivals()
-            warmArrivals()
+            refreshStopsAndStations()
         }
         .onChange(of: loc.location) { _, new in
             if let l = new {
                 ds.updateNearby(l)
                 ds.prefetchNearbyArrivals()
+                refreshStopsAndStations()
                 if !didInitialCenter { centerOnUser() }
             }
         }
-        .onChange(of: ds.nearby) { _, _ in warmArrivals() }
+        .onChange(of: ds.nearby) { _, _ in refreshStopsAndStations() }
+        // Live buses + ETAs tick forward without touching the (heavier) station
+        // query; once/sec, never per drag frame.
+        .onChange(of: m.tick) { _, _ in refreshBuses() }
     }
 
     // MARK: Map
@@ -104,7 +142,7 @@ struct SoftMapHomeView: View {
     private var mapLayer: some View {
         Map(position: $camera) {
             UserAnnotation()
-            ForEach(nearbyStops) { stop in
+            ForEach(stops) { stop in
                 if let c = coord(stop.stopCode) {
                     Annotation(stop.stopName.isEmpty ? stop.stopCode : stop.stopName,
                                coordinate: c, anchor: .center) {
@@ -112,18 +150,21 @@ struct SoftMapHomeView: View {
                     }
                 }
             }
-            ForEach(nearbyStations) { st in
+            ForEach(stations) { st in
                 Annotation(st.name,
-                           coordinate: CLLocationCoordinate2D(latitude: st.lat,
-                                                              longitude: st.lon),
+                           coordinate: CLLocationCoordinate2D(latitude: st.lat, longitude: st.lon),
                            anchor: .center) {
                     mrtMarker(st)
                 }
             }
+            // The differentiator — live buses on your map.
+            ForEach(buses) { bus in
+                Annotation("Bus \(bus.no)", coordinate: bus.coord, anchor: .center) {
+                    liveBusMarker(bus)
+                }
+            }
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
-        // Tap the empty map → collapse the sheet / clear a preview. (Marker
-        // buttons consume their own taps, so this only fires off-marker.)
         .onTapGesture { collapseSheet() }
     }
 
@@ -132,23 +173,26 @@ struct SoftMapHomeView: View {
         return CLLocationCoordinate2D(latitude: s.Latitude, longitude: s.Longitude)
     }
 
-    /// Centre the camera on the user at a comfortable zoom (≈900 m view) — not
-    /// the wide auto-frame. Used on first fix and from the recenter button.
+    /// Centre the camera tightly on the user. Nudges location updates first so we
+    /// use a fresh fix (not a stale one that lands away from the blue dot).
     private func centerOnUser() {
+        loc.startIfAuthorized()
         guard let c = loc.location?.coordinate else { return }
         didInitialCenter = true
-        withAnimation(.easeInOut(duration: 0.4)) {
+        withAnimation(.easeInOut(duration: 0.35)) {
             camera = .region(MKCoordinateRegion(
                 center: c,
-                span: MKCoordinateSpan(latitudeDelta: 0.009, longitudeDelta: 0.009)))
+                span: MKCoordinateSpan(latitudeDelta: 0.007, longitudeDelta: 0.007)))
         }
     }
 
+    // Stops are PINS; live buses are small urgency-coloured bus icons — so the two
+    // never read as the same thing on the map.
     private func stopMarker(_ stop: NearbyStop) -> some View {
         let isSel = selectedStop == stop.stopCode
         return Button { selectStop(stop) } label: {
-            Image(systemName: "bus.fill")
-                .font(.system(size: 12, weight: .bold))
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
                 .background(mapAccent, in: Circle())
@@ -156,12 +200,9 @@ struct SoftMapHomeView: View {
                 .overlay(alignment: .topTrailing) {
                     if m.isPinned(stop.stopCode) {
                         Image(systemName: "star.fill")
-                            .font(.system(size: 8, weight: .black))
-                            .foregroundStyle(.white)
-                            .frame(width: 14, height: 14)
-                            .background(meAmber, in: Circle())
-                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                            .offset(x: 5, y: -5)
+                            .font(.system(size: 8, weight: .black)).foregroundStyle(.white)
+                            .frame(width: 14, height: 14).background(meAmber, in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5)).offset(x: 5, y: -5)
                     }
                 }
                 .scaleEffect(isSel ? 1.3 : 1)
@@ -175,8 +216,7 @@ struct SoftMapHomeView: View {
         let isSel = selectedStation?.id == st.id
         return Button { selectStation(st) } label: {
             Image(systemName: "tram.fill")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(stationColor(st), in: Circle())
                 .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
@@ -185,6 +225,16 @@ struct SoftMapHomeView: View {
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSel)
         }
         .buttonStyle(.plain)
+    }
+
+    private func liveBusMarker(_ bus: LiveBus) -> some View {
+        let col = bus.etaSec <= 120 ? meGreen : (bus.etaSec <= 420 ? meAmber : mapAccent)
+        return Image(systemName: "bus.fill")
+            .font(.system(size: 9, weight: .black)).foregroundStyle(.white)
+            .frame(width: 21, height: 21)
+            .background(col, in: Circle())
+            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.25), radius: 1.5, y: 0.5)
     }
 
     private func stationColor(_ st: MrtGeoStation) -> Color {
@@ -196,9 +246,7 @@ struct SoftMapHomeView: View {
     }
 
     private var recenterButton: some View {
-        Button {
-            fb.select(); centerOnUser()
-        } label: {
+        Button { fb.select(); centerOnUser() } label: {
             Image(systemName: "location.fill")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(mapAccent)
@@ -221,8 +269,7 @@ struct SoftMapHomeView: View {
                 .contentShape(Rectangle())
                 .gesture(panelDrag(maxHeight: maxHeight))
 
-            searchField
-                .padding(.horizontal, 16).padding(.bottom, 10)
+            searchField.padding(.horizontal, 16).padding(.bottom, 10)
 
             sheetHeader
                 .padding(.horizontal, 16).padding(.bottom, 8)
@@ -235,14 +282,14 @@ struct SoftMapHomeView: View {
                         stopPreview(code)
                     } else if let st = selectedStation {
                         stationPreview(st)
-                    } else if nearbyStops.isEmpty {
+                    } else if stops.isEmpty {
                         Text(loc.location == nil
                              ? "Turn on location to see stops near you."
                              : "No stops in range right now.")
                             .font(t.sans(13)).foregroundStyle(t.dim)
                             .frame(maxWidth: .infinity).padding(.vertical, 28)
                     } else {
-                        ForEach(Array(nearbyStops.prefix(12).enumerated()),
+                        ForEach(Array(stops.prefix(12).enumerated()),
                                 id: \.element.id) { idx, stop in
                             stopRow(stop)
                             if idx == 2 { NativeAdCard() }
@@ -252,8 +299,6 @@ struct SoftMapHomeView: View {
                 .padding(.horizontal, 16).padding(.bottom, 24)
             }
         }
-        // Fixed height → only the OFFSET moves while dragging, so the content
-        // and the (solid) background never re-lay-out per frame = smooth.
         .frame(height: maxDetent)
         .frame(maxWidth: .infinity)
         .background(t.surface,
@@ -275,10 +320,8 @@ struct SoftMapHomeView: View {
         Button { fb.select(); onOpenSearch() } label: {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(t.dim)
-                Text("Search stops, buses, stations")
-                    .font(t.sans(15)).foregroundStyle(t.dim)
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(t.dim)
+                Text("Search stops, buses, stations").font(t.sans(15)).foregroundStyle(t.dim)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12).padding(.vertical, 11)
@@ -360,7 +403,6 @@ struct SoftMapHomeView: View {
         .buttonStyle(PressScaleButtonStyle())
     }
 
-    /// One upcoming bus: number + ETA (ETA tinted by urgency).
     private func busChip(_ a: RankedArrival) -> some View {
         let eta = fmtETA(a.service.etaSec)
         let col: Color = a.service.etaSec <= 120 ? meGreen
@@ -393,7 +435,7 @@ struct SoftMapHomeView: View {
         }
     }
 
-    // MARK: Selection (marker → preview)
+    // MARK: Selection
 
     private func selectStop(_ stop: NearbyStop) {
         fb.select()
@@ -412,33 +454,23 @@ struct SoftMapHomeView: View {
     }
 
     private func clearSelection() {
-        fb.select()
-        selectedStop = nil
-        selectedStation = nil
-        setSheet(290)
+        fb.select(); selectedStop = nil; selectedStation = nil; setSheet(290)
     }
 
-    /// Tap on the empty map → collapse to peek and drop any preview.
     private func collapseSheet() {
         if !hasSelection && panelHeight <= 320 { return }
-        fb.select()
-        selectedStop = nil
-        selectedStation = nil
-        setSheet(290)
+        fb.select(); selectedStop = nil; selectedStation = nil; setSheet(290)
     }
 
     private func setSheet(_ height: CGFloat) {
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-            panelHeight = height
-        }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { panelHeight = height }
     }
 
     private func recenter(_ c: CLLocationCoordinate2D?) {
         guard let c else { return }
         withAnimation {
             camera = .region(MKCoordinateRegion(
-                center: c,
-                span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)))
+                center: c, span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)))
         }
     }
 
@@ -446,7 +478,7 @@ struct SoftMapHomeView: View {
 
     @ViewBuilder
     private func stopPreview(_ code: String) -> some View {
-        let stop = nearbyStops.first { $0.stopCode == code }
+        let stop = stops.first { $0.stopCode == code }
         let name = (stop?.stopName).flatMap { $0.isEmpty ? nil : $0 } ?? code
         let arrivals = Array(m.liveServices(code: code, tracked: []).prefix(6))
         VStack(alignment: .leading, spacing: 12) {
@@ -490,8 +522,7 @@ struct SoftMapHomeView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 ForEach(st.codes, id: \.self) { code in
-                    Text(code)
-                        .font(t.mono(11, weight: .bold)).foregroundStyle(.white)
+                    Text(code).font(t.mono(11, weight: .bold)).foregroundStyle(.white)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(codeColor(code), in: Capsule())
                 }
@@ -513,8 +544,7 @@ struct SoftMapHomeView: View {
 
     private func openButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button { fb.select(); action() } label: {
-            Text(title)
-                .font(t.sans(15, weight: .semibold)).foregroundStyle(.white)
+            Text(title).font(t.sans(15, weight: .semibold)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 12)
                 .background(mapAccent, in: Capsule())
         }
@@ -564,7 +594,7 @@ struct SoftMapHomeView: View {
             ? "Alerts, \(m.unseenAlertCount) new" : "Alerts")
     }
 
-    // MARK: Arrivals (mirrors SoftHomeView's helpers)
+    // MARK: Arrivals
 
     private func rankedArrivals(_ code: String) -> [RankedArrival] {
         let services = m.liveServices(code: code, tracked: [])
@@ -574,9 +604,5 @@ struct SoftMapHomeView: View {
         let favs = services.filter(isFav)
         let rest = services.filter { !isFav($0) }
         return (favs + rest).prefix(3).map { RankedArrival(service: $0, fav: isFav($0)) }
-    }
-
-    private func warmArrivals() {
-        for stop in nearbyStops.prefix(12) { ds.ensureArrivals(stop: stop.stopCode) }
     }
 }
