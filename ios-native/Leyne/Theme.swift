@@ -123,18 +123,18 @@ struct Theme: Equatable {
         line: Color(hex: "FFFFFF").opacity(0.1),
         lineHi: Color(hex: "FFFFFF").opacity(0.16),
         accent: Color(hex: "FFFFFF"),
-        live: Color(hex: "FFFFFF"),
-        liveBg: Color(hex: "242424"),
-        // Fully monochrome — colour is reserved for MRT line pills. Severity /
-        // proximity read from a white lightness scale + icons, not hue:
-        // soon (arriving) = brightest, mid/warn = grey, crit = bright + ⚠ icon.
-        warn: Color(hex: "FFFFFF").opacity(0.72),
-        warnBg: Color(hex: "FFFFFF").opacity(0.10),
-        crit: Color(hex: "FFFFFF"),
-        critBg: Color(hex: "FFFFFF").opacity(0.14),
+        live: Color(hex: "22C55E"),
+        liveBg: Color(hex: "22C55E").opacity(0.16),
+        // Vibrant semantic status (redesign): arriving / live = green, warning =
+        // amber, critical = red. Colour now carries meaning across EVERY view,
+        // not just the MRT line pills. accent stays neutral so CTAs stay clean.
+        warn: Color(hex: "F59E0B"),
+        warnBg: Color(hex: "F59E0B").opacity(0.16),
+        crit: Color(hex: "FF453A"),
+        critBg: Color(hex: "FF453A").opacity(0.16),
         onAccent: Color(hex: "111111"),
-        soon: Color(hex: "FFFFFF"),
-        soonBg: Color(hex: "FFFFFF").opacity(0.12),
+        soon: Color(hex: "22C55E"),
+        soonBg: Color(hex: "22C55E").opacity(0.16),
         mid: Color(hex: "FFFFFF").opacity(0.55),
         midBg: Color(hex: "FFFFFF").opacity(0.10)
     )
@@ -158,16 +158,17 @@ struct Theme: Equatable {
         line: Color(hex: "111111").opacity(0.10),
         lineHi: Color(hex: "111111").opacity(0.16),
         accent: Color(hex: "111111"),
-        live: Color(hex: "111111"),
-        liveBg: Color(hex: "EDEDED"),
-        // Fully monochrome (see dark mode) — colour reserved for MRT pills.
-        warn: Color(hex: "111111").opacity(0.72),
-        warnBg: Color(hex: "111111").opacity(0.08),
-        crit: Color(hex: "111111"),
-        critBg: Color(hex: "111111").opacity(0.10),
+        live: Color(hex: "16A34A"),
+        liveBg: Color(hex: "16A34A").opacity(0.12),
+        // Vibrant semantic status (see dark mode) — deeper hues for contrast on
+        // the light surface: arriving/live green, warning amber, critical red.
+        warn: Color(hex: "D97706"),
+        warnBg: Color(hex: "D97706").opacity(0.12),
+        crit: Color(hex: "DC2626"),
+        critBg: Color(hex: "DC2626").opacity(0.12),
         onAccent: Color(hex: "FFFFFF"),
-        soon: Color(hex: "111111"),
-        soonBg: Color(hex: "111111").opacity(0.08),
+        soon: Color(hex: "16A34A"),
+        soonBg: Color(hex: "16A34A").opacity(0.12),
         mid: Color(hex: "111111").opacity(0.55),
         midBg: Color(hex: "111111").opacity(0.08)
     )

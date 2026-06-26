@@ -72,6 +72,13 @@ struct SoftMapHomeView: View {
                 mapLayer.ignoresSafeArea()
                 departuresPanel(maxHeight: geo.size.height)
             }
+            // Recenter control lives in the safe area (below the nav bar) so it
+            // never bleeds under the top bar like the default map control did.
+            .overlay(alignment: .topTrailing) {
+                recenterButton
+                    .padding(.trailing, 16)
+                    .padding(.top, 10)
+            }
         }
         .navigationTitle("SG Transit")
         .navigationBarTitleDisplayMode(.inline)
@@ -114,7 +121,27 @@ struct SoftMapHomeView: View {
             }
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
-        .mapControls { MapUserLocationButton() }
+    }
+
+    /// Custom recenter control, positioned in the safe area. The default
+    /// MapUserLocationButton sat at the very top and bled under the nav bar.
+    private var recenterButton: some View {
+        Button {
+            fb.select()
+            withAnimation(.easeInOut(duration: 0.3)) {
+                camera = .userLocation(fallback: .automatic)
+            }
+        } label: {
+            Image(systemName: "location.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(t.meBlue)
+                .frame(width: 40, height: 40)
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().stroke(t.line, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Recenter on my location")
     }
 
     private func coord(_ code: String) -> CLLocationCoordinate2D? {
@@ -131,10 +158,7 @@ struct SoftMapHomeView: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
-                .background(
-                    LinearGradient(colors: [Color(hex: "2563EB"), Color(hex: "06B6D4")],
-                                   startPoint: .top, endPoint: .bottom),
-                    in: Circle())
+                .background(t.meBlue, in: Circle())
                 .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
                 // Gold star badge marks a saved/pinned stop so regulars spot
                 // their stops at a glance.
@@ -245,21 +269,31 @@ struct SoftMapHomeView: View {
     }
 
     private func panelDrag(maxHeight: CGFloat) -> some Gesture {
-        DragGesture()
+        let maxH = maxHeight * 0.86
+        let minH: CGFloat = 200
+        return DragGesture(minimumDistance: 1)
             .onChanged { v in
                 if dragStartHeight == nil { dragStartHeight = panelHeight }
-                let raw = (dragStartHeight ?? panelHeight) - v.translation.height
-                panelHeight = min(max(raw, 200), maxHeight * 0.86)
+                let proposed = (dragStartHeight ?? panelHeight) - v.translation.height
+                // Rubber-band past the bounds so the edges feel elastic, not
+                // walled — the physical cue you expect when dragging a sheet.
+                if proposed > maxH {
+                    panelHeight = maxH + (proposed - maxH) * 0.2
+                } else if proposed < minH {
+                    panelHeight = minH - (minH - proposed) * 0.2
+                } else {
+                    panelHeight = proposed
+                }
             }
             .onEnded { v in
                 dragStartHeight = nil
-                // Project a little past the finger so a flick carries to the next
-                // detent, then snap to whichever detent is closest.
-                let flick = v.predictedEndTranslation.height - v.translation.height
-                let projected = panelHeight - flick
+                // Carry the flick's momentum into the snap target, then settle on
+                // an interpolating spring (momentum + bounce, not a flat ease).
+                let velocity = v.predictedEndTranslation.height - v.translation.height
+                let projected = panelHeight - velocity * 0.4
                 let target = detents(maxHeight)
-                    .min(by: { abs($0 - projected) < abs($1 - projected) }) ?? 248
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                    .min(by: { abs($0 - projected) < abs($1 - projected) }) ?? minH
+                withAnimation(.interpolatingSpring(stiffness: 240, damping: 26)) {
                     panelHeight = target
                 }
             }
