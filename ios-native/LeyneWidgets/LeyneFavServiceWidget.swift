@@ -47,7 +47,7 @@ struct FavChoiceQuery: EntityQuery {
 struct SelectFavIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Pick favourite service"
     static var description = IntentDescription(
-        "Choose which favourited service this widget shows. Favourite a service in Leyne to add it here."
+        "Choose which favourited service this widget shows. Favourite a service in SG Transit to add it here."
     )
 
     @Parameter(title: "Service")
@@ -184,7 +184,7 @@ private struct EmptyFavView: View {
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: "star.slash").font(.system(size: 18)).foregroundStyle(wDim)
-            Text("Favourite a service in Leyne")
+            Text("Favourite a service in SG Transit")
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(wFg)
             Text("Tap the star on a bus to add it here")
                 .font(.system(size: 10)).foregroundStyle(wDim)
@@ -203,7 +203,7 @@ struct LeyneFavServiceWidget: Widget {
             FavWidgetView(entry: entry)
         }
         .configurationDisplayName("Favourite Service")
-        .description("Live arrivals for a service you favourited in Leyne.")
+        .description("Live arrivals for a service you favourited in SG Transit.")
         .supportedFamilies([.systemMedium])
     }
 }

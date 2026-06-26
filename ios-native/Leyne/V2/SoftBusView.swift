@@ -256,7 +256,7 @@ struct SoftBusView: View {
 
     /// Share the bus service as a deep link / plain text.
     private func shareSheet() {
-        let text = "Bus \(svc) from Stop \(stopCode) — tracked on Leyne"
+        let text = "Bus \(svc) from Stop \(stopCode) — tracked on SG Transit"
         let av = UIActivityViewController(activityItems: [text], applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let root = scene.windows.first?.rootViewController {

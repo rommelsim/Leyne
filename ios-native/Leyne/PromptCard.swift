@@ -86,11 +86,11 @@ struct PromptCard: View {
     private var iconTint: Color {
         Color(red: 1.0, green: 0.72, blue: 0.13)     // amber star
     }
-    private var title: String { "Enjoying Leyne?" }
+    private var title: String { "Enjoying SG Transit?" }
     private var message: String {
-        "A quick App Store rating helps other Singapore commuters find Leyne. It only takes a moment."
+        "A quick App Store rating helps other Singapore commuters find SG Transit. It only takes a moment."
     }
-    private var primaryTitle: String { "Rate Leyne" }
+    private var primaryTitle: String { "Rate SG Transit" }
     private var secondaryTitle: String { "Not now" }
 
     // MARK: - Actions

@@ -331,7 +331,7 @@ private struct EmptyStopView: View {
             Image(systemName: "bookmark.slash")
                 .font(.system(size: 18))
                 .foregroundStyle(wDim)
-            Text("Pin a stop in Leyne")
+            Text("Pin a stop in SG Transit")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(wFg)
             Text("Long-press the widget to choose one")
@@ -375,7 +375,7 @@ struct LeyneStopWidget: Widget {
             StopWidgetView(entry: entry)
         }
         .configurationDisplayName("Pinned Stop")
-        .description("Live arrivals for a stop you pinned in Leyne. Large size shows two stops.")
+        .description("Live arrivals for a stop you pinned in SG Transit. Large size shows two stops.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

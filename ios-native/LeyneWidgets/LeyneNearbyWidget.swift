@@ -113,7 +113,7 @@ private struct NearestWidgetView: View {
             Image(systemName: "mappin.slash")
                 .font(.system(size: 20))
                 .foregroundStyle(wDim)
-            Text("Open Leyne to find stops near you")
+            Text("Open SG Transit to find stops near you")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(wFg)
                 .multilineTextAlignment(.center)

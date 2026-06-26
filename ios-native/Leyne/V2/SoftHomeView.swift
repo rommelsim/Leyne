@@ -63,12 +63,16 @@ struct SoftHomeView: View {
         .searchable(text: $searchText, isPresented: $searchActive,
                     placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "Search stops, buses, stations")
-        // Greeting is the nav title (not a toolbar item — iOS 26 would wrap
-        // text in a glass button); the bell stays a trailing icon button. This
-        // fills the bar that hosts the search field so it isn't empty space.
-        .navigationTitle(greeting(for: Date()))
+        // Compact inline title fills the previously-empty nav bar (no more dead
+        // space); the search field rides in the drawer below it. The alerts bell
+        // keeps the top-right corner it has always occupied on Home, with the new
+        // map button to its left. (MRT mirrors the pairing but keeps its map in
+        // the corner — each tab's established primary action stays put.) Order
+        // matters: SwiftUI renders the LAST trailing item at the corner.
+        .navigationTitle("SG Transit")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { mapButton }
             ToolbarItem(placement: .topBarTrailing) { alertsBell }
         }
         .onAppear {
@@ -171,13 +175,20 @@ struct SoftHomeView: View {
             : "Alerts")
     }
 
-    private func greeting(for date: Date) -> String {
-        switch Calendar.current.component(.hour, from: date) {
-        case 5..<12:  return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default:      return "Good night"
+    /// Trailing map button — opens walking directions to the closest nearby stop
+    /// in Apple Maps (the same handoff as the card's "Open on Map"). Disabled
+    /// when there is no nearby stop yet (location off / still locating), so the
+    /// cluster matches the MRT tab's map button without ever dead-ending.
+    private var mapButton: some View {
+        Button {
+            guard let closest = nearbyStops.first else { return }
+            fb.select()
+            openOnMap(code: closest.stopCode, name: closest.stopName)
+        } label: {
+            Image(systemName: "map.fill")
         }
+        .disabled(nearbyStops.first == nil)
+        .accessibilityLabel("Nearest stop on map")
     }
 
     /// Labels the list as nearby stops AND carries the location / live state,

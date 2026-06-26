@@ -31,7 +31,7 @@ enum Spotlight {
             let displayName = pin.nickname.isEmpty ? resolvedName : pin.nickname
             attrs.displayName = displayName
             attrs.title = displayName
-            attrs.contentDescription = "Bus stop \(pin.code) · pinned in Leyne"
+            attrs.contentDescription = "Bus stop \(pin.code) · pinned in SG Transit"
             var keywords: [String] = [pin.code, resolvedName]
             if let tracked = pin.tracked, !tracked.isEmpty {
                 keywords.append(contentsOf: tracked)

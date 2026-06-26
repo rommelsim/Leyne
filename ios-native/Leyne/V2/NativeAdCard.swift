@@ -20,15 +20,26 @@
 // AdMob policy requirements satisfied:
 //   • "Ad" attribution label — always visible, inline before headline.
 //   • headlineView outlet wired — required.
-//   • bodyView, iconView, callToActionView, advertiserView wired when present.
+//   • mediaView outlet wired — required; shows the main image/video asset
+//     via GADMediaView (Swift "MediaView") so the native ad validator's
+//     "MediaView not used for main image or video asset" check passes.
+//   • bodyView, callToActionView, advertiserView wired when present.
 //   • NativeAdView is the root interaction target — taps route correctly.
 //   • No custom click-handling; interaction delegate left to SDK defaults.
 //
 // Layout (stack-based, robust to any creative subset):
 //
-//   ┌─────────────────────────────────────────────────────────┐
-//   │ 14pt │ [iconTile 42×42] 10pt │ [text VStack] │ [CTA] 14pt│
-//   └─────────────────────────────────────────────────────────┘
+//   ┌──────────────────────────────────────────────────────────┐
+//   │ 14pt │ [mediaTile 56×42] 10pt │ [text VStack] │ [CTA] 14pt│
+//   └──────────────────────────────────────────────────────────┘
+//
+//   The left tile is a MediaView (not an ImageView): it renders the main
+//   image or video asset (nativeAd.mediaContent), which AdMob policy
+//   requires be shown via MediaView. 56×42 (~4:3) crops landscape ad art
+//   (typically 1.91:1) less harshly than a 42-square while keeping the row
+//   at 86 pt. The icon asset is intentionally not shown — media is a
+//   reliably-present asset; the icon is optional and there is only room
+//   for one left visual in the compact row.
 //
 //   Text VStack (leading-aligned):
 //     Row 0: [Ad pill] [headline (1–2 lines)]
@@ -187,7 +198,7 @@ final class NativeAdLoader: NSObject, ObservableObject,
 ///
 /// Stack structure:
 ///   outerH (horizontal, 10pt spacing, 14pt insets):
-///     iconTile (42×42, fixed)
+///     mediaTile (56×42, fixed) — wraps a MediaView showing mediaContent
 ///     textV (vertical, 3pt spacing, compressionResistance low):
 ///       badgeRow (horizontal, 6pt spacing):
 ///         adBadge pill (fixed, hugs tightly)
@@ -209,7 +220,7 @@ struct NativeAdUIView: UIViewRepresentable {
     /// dark — black text on the now-dark surface, i.e. unreadable. `appliedIsDark`
     /// lets `updateUIView` detect the flip and re-tint.
     final class Coordinator {
-        weak var iconTile: UIView?
+        weak var mediaTile: UIView?
         weak var placeholderImageView: UIImageView?
         // Typed as UILabel (its public superclass) rather than the private
         // PaddedLabel — applyColors only touches UILabel/UIView colour props.
@@ -228,31 +239,38 @@ struct NativeAdUIView: UIViewRepresentable {
 
         // ── Create all subviews ───────────────────────────────────────────
 
-        // Icon tile (always shown — either the creative icon or a placeholder)
-        let iconTile = UIView()
-        iconTile.layer.cornerRadius = 12
-        iconTile.layer.cornerCurve = .continuous
-        iconTile.clipsToBounds = true
+        // Media tile (left visual) — a MediaView showing the main image/video
+        // asset. AdMob policy requires the media be displayed via MediaView
+        // (not a plain image view); registering adView.mediaView is exactly
+        // what the native ad validator checks. The placeholder glyph shows only
+        // in the rare case the creative ships no image and no video content.
+        let mediaTile = UIView()
+        mediaTile.layer.cornerRadius = 12
+        mediaTile.layer.cornerCurve = .continuous
+        mediaTile.clipsToBounds = true
 
-        let iconImageView = UIImageView()
-        iconImageView.translatesAutoresizingMaskIntoConstraints = false
-        iconImageView.contentMode = .scaleAspectFit
-        iconImageView.clipsToBounds = true
-        adView.iconView = iconImageView
+        let mediaView = MediaView()
+        mediaView.translatesAutoresizingMaskIntoConstraints = false
+        mediaView.contentMode = .scaleAspectFill
+        mediaView.clipsToBounds = true
+        mediaView.mediaContent = nativeAd.mediaContent
+        adView.mediaView = mediaView
 
         let placeholderImageView = UIImageView()
         placeholderImageView.translatesAutoresizingMaskIntoConstraints = false
         placeholderImageView.contentMode = .center
 
-        iconTile.addSubview(iconImageView)
-        iconTile.addSubview(placeholderImageView)
+        // mediaView fills the tile; placeholder sits on top and is hidden
+        // whenever real media exists (see applyContent).
+        mediaTile.addSubview(mediaView)
+        mediaTile.addSubview(placeholderImageView)
         NSLayoutConstraint.activate([
-            iconImageView.topAnchor.constraint(equalTo: iconTile.topAnchor),
-            iconImageView.leadingAnchor.constraint(equalTo: iconTile.leadingAnchor),
-            iconImageView.trailingAnchor.constraint(equalTo: iconTile.trailingAnchor),
-            iconImageView.bottomAnchor.constraint(equalTo: iconTile.bottomAnchor),
-            placeholderImageView.centerXAnchor.constraint(equalTo: iconTile.centerXAnchor),
-            placeholderImageView.centerYAnchor.constraint(equalTo: iconTile.centerYAnchor),
+            mediaView.topAnchor.constraint(equalTo: mediaTile.topAnchor),
+            mediaView.leadingAnchor.constraint(equalTo: mediaTile.leadingAnchor),
+            mediaView.trailingAnchor.constraint(equalTo: mediaTile.trailingAnchor),
+            mediaView.bottomAnchor.constraint(equalTo: mediaTile.bottomAnchor),
+            placeholderImageView.centerXAnchor.constraint(equalTo: mediaTile.centerXAnchor),
+            placeholderImageView.centerYAnchor.constraint(equalTo: mediaTile.centerYAnchor),
         ])
 
         // "Ad" attribution badge — inline pill, always visible (AdMob policy §3)
@@ -316,16 +334,18 @@ struct NativeAdUIView: UIViewRepresentable {
         adView.callToActionView = ctaButton
 
         // Outer horizontal stack — the whole card row
-        let outerH = UIStackView(arrangedSubviews: [iconTile, textV, ctaButton])
+        let outerH = UIStackView(arrangedSubviews: [mediaTile, textV, ctaButton])
         outerH.axis = .horizontal
         outerH.spacing = 10
         outerH.alignment = .center
         outerH.translatesAutoresizingMaskIntoConstraints = false
 
-        // Fix the icon tile size (stack doesn't know about fixed-size tiles)
+        // Fix the media tile size (stack doesn't know about fixed-size tiles).
+        // 56×42 (~4:3) crops landscape ad art (typically 1.91:1) less harshly
+        // than a square while keeping the row at kAdCardHeight (86 pt).
         NSLayoutConstraint.activate([
-            iconTile.widthAnchor.constraint(equalToConstant: 42),
-            iconTile.heightAnchor.constraint(equalToConstant: 42),
+            mediaTile.widthAnchor.constraint(equalToConstant: 56),
+            mediaTile.heightAnchor.constraint(equalToConstant: 42),
         ])
 
         // Add the "Ad" badge fixed height
@@ -344,8 +364,6 @@ struct NativeAdUIView: UIViewRepresentable {
         // ── Populate creative content (theme-independent) ───────────────
         applyContent(
             nativeAd: nativeAd,
-            iconTile: iconTile,
-            iconImageView: iconImageView,
             placeholderImageView: placeholderImageView,
             adBadge: adBadge,
             headlineLabel: headlineLabel,
@@ -355,7 +373,7 @@ struct NativeAdUIView: UIViewRepresentable {
 
         // Retain the themeable views so updateUIView can re-tint on a mode flip.
         let c = context.coordinator
-        c.iconTile = iconTile
+        c.mediaTile = mediaTile
         c.placeholderImageView = placeholderImageView
         c.adBadge = adBadge
         c.headlineLabel = headlineLabel
@@ -392,8 +410,6 @@ struct NativeAdUIView: UIViewRepresentable {
     /// Called once in makeUIView, before nativeAd is assigned to the outlet.
     private func applyContent(
         nativeAd: NativeAd,
-        iconTile: UIView,
-        iconImageView: UIImageView,
         placeholderImageView: UIImageView,
         adBadge: PaddedLabel,
         headlineLabel: UILabel,
@@ -404,12 +420,13 @@ struct NativeAdUIView: UIViewRepresentable {
         adBadge.font = UIFontMetrics.default.scaledFont(
             for: UIFont.systemFont(ofSize: 10, weight: .semibold))
 
-        // Icon tile — always present; fills with creative icon or placeholder
-        if let icon = nativeAd.icon?.image {
-            iconImageView.image = icon
+        // Media tile — the MediaView renders mediaContent itself; we only toggle
+        // the placeholder glyph, shown when the creative has neither a main image
+        // nor video (rare). hasMedia drives both this and the tile background tint
+        // in applyColors.
+        if hasMedia(nativeAd) {
             placeholderImageView.isHidden = true
         } else {
-            iconImageView.image = nil
             placeholderImageView.isHidden = false
             let cfg = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
             placeholderImageView.image = UIImage(systemName: "tag.fill", withConfiguration: cfg)
@@ -461,12 +478,12 @@ struct NativeAdUIView: UIViewRepresentable {
         c.adBadge?.textColor = dim
         c.adBadge?.backgroundColor = surfaceHi
 
-        // Icon tile fill is surfaceHi only behind the placeholder glyph; a real
-        // creative icon sits on a clear tile.
-        if nativeAd.icon?.image != nil {
-            c.iconTile?.backgroundColor = .clear
+        // Media tile fill is surfaceHi only behind the placeholder glyph; real
+        // media fills the MediaView, so the tile sits on a clear background.
+        if hasMedia(nativeAd) {
+            c.mediaTile?.backgroundColor = .clear
         } else {
-            c.iconTile?.backgroundColor = surfaceHi
+            c.mediaTile?.backgroundColor = surfaceHi
             c.placeholderImageView?.tintColor = dim
         }
 
@@ -479,6 +496,16 @@ struct NativeAdUIView: UIViewRepresentable {
             config.baseBackgroundColor = accent
             cta.configuration = config
         }
+    }
+
+    // MARK: - Media presence
+
+    /// True when the creative ships a main image or video. The MediaView renders
+    /// it; when false we fall back to the placeholder glyph + tinted tile. AdMob
+    /// native ads almost always include media, so the placeholder is a rare edge.
+    private func hasMedia(_ nativeAd: NativeAd) -> Bool {
+        let media = nativeAd.mediaContent
+        return media.hasVideoContent || media.mainImage != nil
     }
 
     // MARK: - Font helper (kept for internal clarity — identical to applyAssets calls)

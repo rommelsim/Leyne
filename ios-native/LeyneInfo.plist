@@ -13,7 +13,7 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDisplayName</key>
-	<string>Leyne</string>
+	<string>SG Transit</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -30,11 +30,11 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Leyne uses your location to show nearby bus stops and accurate arrival times.</string>
+	<string>SG Transit uses your location to show nearby bus stops and accurate arrival times.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Leyne uses your location to show nearby bus stops and accurate arrival times.</string>
+	<string>SG Transit uses your location to show nearby bus stops and accurate arrival times.</string>
 	<key>NSUserTrackingUsageDescription</key>
-	<string>Leyne uses your device identifier to show ads relevant to you and to keep the app free.</string>
+	<string>SG Transit uses your device identifier to show ads relevant to you and to keep the app free.</string>
 	<key>SKAdNetworkItems</key>
 	<array>
 		<dict>

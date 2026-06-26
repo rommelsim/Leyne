@@ -14,10 +14,7 @@ import SwiftUI
 
 struct SoftAlertsView: View {
     @EnvironmentObject var m: AppModel
-    @EnvironmentObject var fb: Feedback
     @ObservedObject private var ds = DataStore.shared
-
-    @State private var showSettings = false
 
     private var t: Theme { m.t }
 
@@ -34,20 +31,8 @@ struct SoftAlertsView: View {
             .padding(.bottom, 20)
         }
         .background(t.bg.ignoresSafeArea())
-        // Native title + a system gear toolbar button (iOS 26 glass), now that
-        // Alerts is a navigation-hosted card.
         .navigationTitle("Alerts")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    fb.tap(); showSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .accessibilityLabel("Settings")
-            }
-        }
         .refreshable {
             ds.refreshTrainAlertsIfStale(force: true)
             ds.refreshLiftMaintenanceIfStale(force: true)
@@ -55,14 +40,6 @@ struct SoftAlertsView: View {
         .onAppear {
             ds.refreshTrainAlertsIfStale(force: false)
             ds.refreshLiftMaintenanceIfStale(force: false)
-        }
-        // Trimmed Settings lives behind the gear now that there's no Settings
-        // tab. Presented with its own navigation bar (title + Done) so the
-        // title sits with correct top spacing in the sheet.
-        .sheet(isPresented: $showSettings) {
-            NavigationStack {
-                SoftSettingsView(onTab: { _ in })
-            }
         }
     }
 

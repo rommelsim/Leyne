@@ -85,6 +85,7 @@ struct SoftRoot: View {
     @State private var mrtStack: [SoftMrtRoute] = []
     @State private var favouritesStack: [SoftRoute] = []
     @State private var showAlerts = false
+    @State private var showMrtMap = false
     @State private var showSearch = false
     @State private var mapHandoff: MapHandoffKind = .none
 
@@ -117,9 +118,11 @@ struct SoftRoot: View {
             Tab("MRT", systemImage: "tram.fill", value: SoftTab.mrt) {
                 mrtNavStack($mrtStack)
             }
-            // 3. Saved — pinned stops and favourite services
+            // 3. Saved — pinned stops and favourite services. Nav bar stays
+            // visible so the "Saved" title + Settings/Edit render as native
+            // toolbar items (Liquid Glass), matching the Bus/MRT tabs.
             Tab("Saved", systemImage: "star.fill", value: SoftTab.favourites) {
-                navStack($favouritesStack) {
+                navStack($favouritesStack, hidesNavBar: false) {
                     SoftFavouritesView(
                         onOpenStop: { favouritesStack.append(.stop($0)) },
                         onOpenBus: { code, svc in
@@ -348,7 +351,12 @@ struct SoftRoot: View {
                 onOpenBus: { code, svc in
                     tab = .home
                     homeStack.append(.bus(stopCode: code, svc: svc, fullRoute: true))
-                }
+                },
+                // Same shared Alerts sheet as the Home bell.
+                onOpenAlerts: { showAlerts = true },
+                // Presented at this nav-stack level (below) — NOT inside
+                // SoftMrtView — so the toolbar map button reliably shows it.
+                onOpenSystemMap: { showMrtMap = true }
             )
             .adBannerGutter()
             .softTopEdgeBlur()
@@ -382,6 +390,13 @@ struct SoftRoot: View {
                 .navigationBarBackButtonHidden(true)
                 .enableSwipeBack()
             }
+        }
+        // MRT system map presented HERE, at the nav-stack level — outside
+        // SoftMrtView's `.searchable` scope — so the toolbar map button reliably
+        // shows it (an in-view toolbar-triggered sheet on a searchable view
+        // silently fails to present).
+        .sheet(isPresented: $showMrtMap) {
+            MrtMapView()
         }
     }
 

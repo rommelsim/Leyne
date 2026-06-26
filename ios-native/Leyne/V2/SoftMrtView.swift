@@ -17,15 +17,28 @@ struct SoftMrtView: View {
     @ObservedObject private var ds = DataStore.shared
     @StateObject private var loc = LocationManager.shared
 
-    /// Controls the full-screen system-map sheet.
-    @State private var showMap = false
+    /// Which card/sheet is presented (nil = none). SwiftUI reliably honours only
+    /// ONE `.sheet` modifier per view, so the previous three separate sheets made
+    /// the map (the first-declared) silently fail to present. Driving every sheet
+    /// from this single enum via one `.sheet(item:)` is the fix.
+    @State private var activeSheet: MrtSheet?
 
-    /// Line whose detail is shown as a sheet-card (nil = none). Tapping a line
-    /// tile presents SoftMrtLineView as a card instead of pushing a page.
-    @State private var sheetLine: MRTLine?
+    /// The card SoftMrtView can present from its own content: a line detail or a
+    /// station detail. Identifiable so it can drive a single `.sheet(item:)`.
+    /// (The system map is NOT here — it presents from the nav-stack level via
+    /// `onOpenSystemMap`, since a toolbar-triggered sheet on this `.searchable`
+    /// view won't appear.)
+    private enum MrtSheet: Identifiable {
+        case line(MRTLine)
+        case station(MrtGeoStation)
 
-    /// Station whose detail is shown as a sheet-card (nil = none).
-    @State private var sheetStation: MrtGeoStation?
+        var id: String {
+            switch self {
+            case .line(let line):   return "line-\(line.rawValue)"
+            case .station(let stn): return "station-\(stn.id)"
+            }
+        }
+    }
 
     /// Nearest stations within the user's search radius, rebuilt on location or
     /// radius changes. Capped at 3 per the redesign.
@@ -40,6 +53,15 @@ struct SoftMrtView: View {
     /// Search-result taps that aren't MRT stations route back to the Bus tab.
     let onOpenStop: (String) -> Void
     let onOpenBus: (String, String) -> Void
+    /// Presents the shared Alerts sheet (service status / your alerts) — mirrors
+    /// the Home bell so disruptions are reachable from the MRT tab too.
+    let onOpenAlerts: () -> Void
+    /// Presents the zoomable MRT system map. Routed up to the nav-stack level
+    /// (handled by SoftRoot) rather than an in-view `.sheet`: a sheet presented
+    /// from THIS `.searchable` view's toolbar button does not reliably appear,
+    /// which is why the map button looked dead. The alerts bell works for the
+    /// same reason — it presents from an ancestor, not from here.
+    let onOpenSystemMap: () -> Void
 
     /// Drives the native iOS 26 `.searchable` bar; focusing it swaps the network
     /// view for live results.
@@ -68,7 +90,7 @@ struct SoftMrtView: View {
                     onClose: { searchActive = false },
                     onOpenStop: onOpenStop,
                     onOpenBus: onOpenBus,
-                    onOpenMrtStation: { sheetStation = $0 }
+                    onOpenMrtStation: { activeSheet = .station($0) }
                 )
                 .transition(.opacity)
             } else {
@@ -82,12 +104,15 @@ struct SoftMrtView: View {
         .searchable(text: $searchText, isPresented: $searchActive,
                     placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "Search stops, buses, stations")
-        // "MRT" is the nav title (not a toolbar item — iOS 26 would wrap text in
-        // a glass button); the map stays a trailing icon button. Fills the bar
-        // that hosts the search field so it isn't empty space.
+        // Compact inline title fills the previously-empty nav bar (no more dead
+        // space); the search field rides in the drawer below it. The map button
+        // keeps the top-right corner it has always occupied on MRT, with the new
+        // alerts bell to its left. Order matters: SwiftUI renders the LAST
+        // trailing item at the corner, so mapButton is declared last.
         .navigationTitle("MRT")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { alertsBell }
             ToolbarItem(placement: .topBarTrailing) { mapButton }
         }
         .background(t.bg.ignoresSafeArea())
@@ -102,23 +127,23 @@ struct SoftMrtView: View {
         .onChange(of: m.searchRadiusM) { _, _ in
             if let l = loc.location { rebuildNearest(l) }
         }
-        .sheet(isPresented: $showMap) {
-            MrtMapView()
-        }
-        // Line tile → detail as a card (sheet) rather than a pushed page.
-        .sheet(item: $sheetLine) { line in
-            SoftMrtLineView(line: line, onBack: { sheetLine = nil })
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        // Nearest-station tap (in the Network section) → detail as a card.
-        .sheet(item: $sheetStation) { station in
-            SoftMrtStationView(station: station,
-                               distanceM: nil,
-                               walkMin: nil,
-                               onBack: { sheetStation = nil })
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+        // One `.sheet(item:)` drives the content-triggered cards — a line detail
+        // or a station detail. (The system map is presented from the nav-stack
+        // level; see onOpenSystemMap.)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .line(let line):
+                SoftMrtLineView(line: line, onBack: { activeSheet = nil })
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            case .station(let station):
+                SoftMrtStationView(station: station,
+                                   distanceM: nil,
+                                   walkMin: nil,
+                                   onBack: { activeSheet = nil })
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -173,11 +198,25 @@ struct SoftMrtView: View {
         // Plain toolbar button — iOS 26 sizes and glass-styles it.
         Button {
             Feedback.shared.tap()
-            showMap = true
+            onOpenSystemMap()
         } label: {
             Image(systemName: "map.fill")
         }
         .accessibilityLabel("System map")
+    }
+
+    /// Trailing alerts bell — mirrors the Home tab so service disruptions and the
+    /// user's alerts are reachable here too. Raises the same shared Alerts sheet;
+    /// the unseen badge uses the system `bell.badge.fill` dot.
+    private var alertsBell: some View {
+        Button {
+            Feedback.shared.select(); onOpenAlerts()
+        } label: {
+            Image(systemName: m.unseenAlertCount > 0 ? "bell.badge.fill" : "bell.fill")
+        }
+        .accessibilityLabel(m.unseenAlertCount > 0
+            ? "Alerts, \(m.unseenAlertCount) new"
+            : "Alerts")
     }
 
     // MARK: - Top disruption banner
@@ -242,7 +281,7 @@ struct SoftMrtView: View {
         let station = entry.station
         return Button {
             Feedback.shared.tap()
-            sheetStation = station
+            activeSheet = .station(station)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 // Eyebrow — walk glyph + "Nearest MRT"
@@ -329,7 +368,7 @@ struct SoftMrtView: View {
         let disrupted = alert != nil
         return Button {
             Feedback.shared.tap()
-            sheetLine = line
+            activeSheet = .line(line)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {

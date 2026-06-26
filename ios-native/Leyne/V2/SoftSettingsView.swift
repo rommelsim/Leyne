@@ -83,7 +83,7 @@ struct SoftSettingsView: View {
             } header: {
                 sectionLabel("Feedback")
             } footer: {
-                Text("Leyne v\(appVersion) · Data from LTA DataMall.")
+                Text("SG Transit v\(appVersion) · Data from LTA DataMall.")
                     .font(t.mono(10))
                     .foregroundStyle(t.faint)
                     .padding(.top, 8)
@@ -209,3 +209,4 @@ struct SoftSettingsView: View {
         }
     }
 }
+

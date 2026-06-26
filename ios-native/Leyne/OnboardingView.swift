@@ -158,7 +158,7 @@ struct OnboardingView: View {
     private var live: some View {
         stepScaffold(dotsIndex: -1) {
             VStack(alignment: .leading, spacing: 0) {
-                kicker("Why Leyne")
+                kicker("Why SG Transit")
                 Text("Always up to the minute.")
                     .font(t.sans(27, weight: .bold))
                     .foregroundStyle(t.fg)
@@ -180,7 +180,7 @@ struct OnboardingView: View {
     private var locationPrimer: some View {
         primer(dotsIndex: 0, icon: "location.fill", kicker: "Permission 1 of 3",
                title: "Find stops around you",
-               body: "Leyne uses your location to surface the nearest stops and place your bus, you and your stop on the map.",
+               body: "SG Transit uses your location to surface the nearest stops and place your bus, you and your stop on the map.",
                points: [("mappin.and.ellipse", "Nearest stops, sorted by distance"),
                         ("bus.fill", "See exactly where your stop is")],
                // Guideline 5.1.1(iv): neutral button wording ("Continue", not
@@ -201,8 +201,8 @@ struct OnboardingView: View {
 
     private var attPrimer: some View {
         primer(dotsIndex: 2, icon: "hand.raised.fill", kicker: "Permission 3 of 3",
-               title: "Keep Leyne free",
-               body: "Leyne runs a few ads to stay free. Allowing tracking makes them more relevant — but it’s entirely your call, and Leyne works fully either way.",
+               title: "Keep SG Transit free",
+               body: "SG Transit runs a few ads to stay free. Allowing tracking makes them more relevant — but it’s entirely your call, and SG Transit works fully either way.",
                points: [("xmark", "Decline and nothing changes for you")],
                primary: "Continue", onPrimary: {
                    guard !trackingTapped else { return }
@@ -226,7 +226,7 @@ struct OnboardingView: View {
                 .font(t.sans(27, weight: .bold))
                 .foregroundStyle(t.fg)
                 .padding(.top, 26)
-            Text("Leyne is ready. Your nearest stops are already loading.")
+            Text("SG Transit is ready. Your nearest stops are already loading.")
                 .font(t.sans(14))
                 .foregroundStyle(t.dim)
                 .multilineTextAlignment(.center)
@@ -240,7 +240,7 @@ struct OnboardingView: View {
             }
             .padding(.top, 24)
             Spacer()
-            primaryButton("Enter Leyne") { onFinish() }
+            primaryButton("Enter SG Transit") { onFinish() }
         }
         .padding(.horizontal, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -32,6 +32,9 @@ struct SoftFavouritesView: View {
 
     @State private var segment: FavSegment = .all
     @State private var editMode: EditMode = .inactive
+    /// Settings now lives here (the "your stuff" tab) rather than buried in the
+    /// Alerts card.
+    @State private var showSettings = false
 
     private var t: Theme { m.t }
 
@@ -55,21 +58,16 @@ struct SoftFavouritesView: View {
                 Section {
                     // empty — content is in the header
                 } header: {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Saved")
-                                .font(t.sans(31, weight: .bold))
-                                .foregroundStyle(t.fg)
-                            Spacer()
-                            if !isEmpty { editButton }
-                        }
-                        .padding(.top, 8)
-                        segmentedControl
-                    }
-                    .textCase(nil)
-                    .listRowInsets(EdgeInsets())
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 4)
+                    // The "Saved" title and the Settings / Edit buttons now live
+                    // in the native navigation bar (see .navigationTitle / .toolbar
+                    // below) so they get the system Liquid-Glass treatment that the
+                    // Bus/MRT tabs already have; only the filter stays in-content.
+                    segmentedControl
+                        .textCase(nil)
+                        .listRowInsets(EdgeInsets())
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .padding(.bottom, 4)
                 }
 
                 if isEmpty {
@@ -221,6 +219,20 @@ struct SoftFavouritesView: View {
         .onAppear { warmArrivals() }
         .onChange(of: m.pins) { _, _ in warmArrivals() }
         .onChange(of: m.favServices) { _, _ in warmArrivals() }
+        .navigationTitle("Saved")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            if !isEmpty {
+                ToolbarItem(placement: .topBarTrailing) { editButton }
+            }
+            ToolbarItem(placement: .topBarTrailing) { settingsButton }
+        }
+        .tint(t.meBlue)
+        // Settings opens from the toolbar gear. Presented at the body level (not
+        // on the button) so it reliably appears.
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SoftSettingsView(onTab: { _ in }) }
+        }
     }
 
     // MARK: Segmented control
@@ -250,10 +262,21 @@ struct SoftFavouritesView: View {
             }
         } label: {
             Text(editMode.isEditing ? "Done" : "Edit")
-                .font(t.sans(15, weight: editMode.isEditing ? .semibold : .medium))
-                .foregroundStyle(t.meBlue)
         }
-        .buttonStyle(.plain)
+    }
+
+    /// Settings entry point — a gear in the Saved header. Opens the trimmed
+    /// Settings (Appearance, Notifications, About) as a sheet.
+    private var settingsButton: some View {
+        // A native toolbar button — iOS 26 sizes and Liquid-Glass-styles it,
+        // matching the Bus/MRT bell + map. The presenting sheet lives on the body
+        // (see .sheet there), not on this button.
+        Button {
+            fb.tap(); showSettings = true
+        } label: {
+            Image(systemName: "gearshape")
+        }
+        .accessibilityLabel("Settings")
     }
 
     // MARK: Stop row
