@@ -2,15 +2,16 @@
 //
 // Layout (Apple-Maps idiom):
 //   • Full-screen map: you + nearby bus stops (indigo markers) + MRT stations
-//     (per-line colours). Tap a marker → preview in the sheet.
-//   • Draggable bottom sheet: a search field, a "Leaving near you" header, then
-//     compact, information-dense stop rows (name · soonest ETA w/ urgency colour
-//     · walk). One native ad lives inside the sheet.
-//   • Top bar carries only the alerts bell; recenter is the lone floating map
-//     control; search moved into the sheet — so the top-right isn't cluttered.
+//     (per-line colours). Tap a marker → preview in the sheet; tap the empty map
+//     → collapse the sheet.
+//   • Draggable bottom sheet: search field, "Leaving near you" header, then rich
+//     stop rows (name · walk · the next few buses as urgency-coloured chips). One
+//     native ad lives inside the sheet.
+//   • Top bar carries only the bell; recenter is the lone floating map control.
 //
-// The gutter banner is suppressed on this screen (SoftRoot passes banner: false)
-// so the in-sheet native ad is the single ad — no banner/sheet collision.
+// Sheet smoothness: the sheet is rendered at a FIXED height and positioned with
+// `.offset` (cheap, no per-frame re-layout / blur recompute) on a solid surface —
+// so dragging stays smooth.
 
 import SwiftUI
 import MapKit
@@ -29,16 +30,19 @@ struct SoftMapHomeView: View {
 
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     /// Sheet height, dragged between snap detents (peek / half / full).
-    @State private var panelHeight: CGFloat = 280
+    @State private var panelHeight: CGFloat = 290
     @State private var dragStartHeight: CGFloat? = nil
+    /// One-shot: centre on the user the first time we get a fix, without yanking
+    /// the map afterwards if they've panned.
+    @State private var didInitialCenter = false
     /// A tapped marker shows a preview in the sheet (at most one non-nil).
     @State private var selectedStop: String? = nil
     @State private var selectedStation: MrtGeoStation? = nil
 
     private var t: Theme { m.t }
 
-    // Eye-friendly map accent — a calm indigo, gentler on the eye than the bright
-    // blue and distinct from the green/amber/red status palette. Per appearance.
+    // Eye-friendly map accent — a calm indigo, gentler than the bright blue and
+    // distinct from the green/amber/red status palette. Per appearance.
     private var mapAccent: Color { t.isDark ? Color(hex: "7E7BFF") : Color(hex: "5856D6") }
     private var meGreen: Color { t.isDark ? Color(hex: "22C55E") : Color(hex: "16A34A") }
     private var meAmber: Color { t.isDark ? Color(hex: "F59E0B") : Color(hex: "D97706") }
@@ -67,7 +71,6 @@ struct SoftMapHomeView: View {
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
                 mapLayer.ignoresSafeArea()
-                // Lone floating map control, top-right within the safe area.
                 recenterButton
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.trailing, 16)
@@ -82,12 +85,16 @@ struct SoftMapHomeView: View {
         }
         .onAppear {
             loc.startIfAuthorized()
-            if let l = loc.location { ds.updateNearby(l) }
+            if let l = loc.location { ds.updateNearby(l); centerOnUser() }
             ds.prefetchNearbyArrivals()
             warmArrivals()
         }
         .onChange(of: loc.location) { _, new in
-            if let l = new { ds.updateNearby(l); ds.prefetchNearbyArrivals() }
+            if let l = new {
+                ds.updateNearby(l)
+                ds.prefetchNearbyArrivals()
+                if !didInitialCenter { centerOnUser() }
+            }
         }
         .onChange(of: ds.nearby) { _, _ in warmArrivals() }
     }
@@ -115,11 +122,26 @@ struct SoftMapHomeView: View {
             }
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
+        // Tap the empty map → collapse the sheet / clear a preview. (Marker
+        // buttons consume their own taps, so this only fires off-marker.)
+        .onTapGesture { collapseSheet() }
     }
 
     private func coord(_ code: String) -> CLLocationCoordinate2D? {
         guard let s = ds.stopByCode[code] else { return nil }
         return CLLocationCoordinate2D(latitude: s.Latitude, longitude: s.Longitude)
+    }
+
+    /// Centre the camera on the user at a comfortable zoom (≈900 m view) — not
+    /// the wide auto-frame. Used on first fix and from the recenter button.
+    private func centerOnUser() {
+        guard let c = loc.location?.coordinate else { return }
+        didInitialCenter = true
+        withAnimation(.easeInOut(duration: 0.4)) {
+            camera = .region(MKCoordinateRegion(
+                center: c,
+                span: MKCoordinateSpan(latitudeDelta: 0.009, longitudeDelta: 0.009)))
+        }
     }
 
     private func stopMarker(_ stop: NearbyStop) -> some View {
@@ -175,10 +197,7 @@ struct SoftMapHomeView: View {
 
     private var recenterButton: some View {
         Button {
-            fb.select()
-            withAnimation(.easeInOut(duration: 0.3)) {
-                camera = .userLocation(fallback: .automatic)
-            }
+            fb.select(); centerOnUser()
         } label: {
             Image(systemName: "location.fill")
                 .font(.system(size: 15, weight: .semibold))
@@ -195,9 +214,8 @@ struct SoftMapHomeView: View {
     // MARK: Bottom sheet
 
     private func departuresPanel(maxHeight: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            // Generous drag zone (grabber + header) so swiping the sheet feels
-            // smooth, not a 5-pt target. The list scrolls independently.
+        let maxDetent = maxHeight * 0.88
+        return VStack(spacing: 0) {
             grabber
                 .frame(maxWidth: .infinity).frame(height: 22).padding(.top, 8)
                 .contentShape(Rectangle())
@@ -212,7 +230,7 @@ struct SoftMapHomeView: View {
                 .gesture(panelDrag(maxHeight: maxHeight))
 
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 9) {
                     if let code = selectedStop {
                         stopPreview(code)
                     } else if let st = selectedStation {
@@ -226,23 +244,27 @@ struct SoftMapHomeView: View {
                     } else {
                         ForEach(Array(nearbyStops.prefix(12).enumerated()),
                                 id: \.element.id) { idx, stop in
-                            compactRow(stop)
+                            stopRow(stop)
                             if idx == 2 { NativeAdCard() }
                         }
                     }
                 }
-                .padding(.horizontal, 16).padding(.bottom, 20)
+                .padding(.horizontal, 16).padding(.bottom, 24)
             }
         }
-        .frame(height: panelHeight)
+        // Fixed height → only the OFFSET moves while dragging, so the content
+        // and the (solid) background never re-lay-out per frame = smooth.
+        .frame(height: maxDetent)
         .frame(maxWidth: .infinity)
-        .background(.regularMaterial,
+        .background(t.surface,
                     in: UnevenRoundedRectangle(cornerRadii:
                         .init(topLeading: 22, topTrailing: 22), style: .continuous))
         .overlay(
             UnevenRoundedRectangle(cornerRadii:
                 .init(topLeading: 22, topTrailing: 22), style: .continuous)
                 .stroke(t.line, lineWidth: 1))
+        .shadow(color: .black.opacity(0.12), radius: 10, y: -2)
+        .offset(y: maxDetent - panelHeight)
     }
 
     private var grabber: some View {
@@ -259,7 +281,7 @@ struct SoftMapHomeView: View {
                     .font(t.sans(15)).foregroundStyle(t.dim)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12).padding(.vertical, 10)
+            .padding(.horizontal, 12).padding(.vertical, 11)
             .background(t.surfaceHi, in: Capsule())
         }
         .buttonStyle(.plain)
@@ -293,66 +315,79 @@ struct SoftMapHomeView: View {
         }
     }
 
-    // MARK: Compact stop row
+    // MARK: Stop row (taller, with next-bus chips)
 
-    private func compactRow(_ stop: NearbyStop) -> some View {
+    private func stopRow(_ stop: NearbyStop) -> some View {
         let code = stop.stopCode
         let name = stop.stopName.isEmpty ? code : stop.stopName
-        let soonest = rankedArrivals(code).min(by: { $0.service.etaSec < $1.service.etaSec })
-        let eta = soonest.map { fmtETA($0.service.etaSec) }
-        let etaColor: Color = {
-            guard let s = soonest else { return t.dim }
-            if s.service.etaSec <= 120 { return meGreen }
-            if s.service.etaSec <= 420 { return meAmber }
-            return t.fg
-        }()
+        let arrivals = rankedArrivals(code)
         return Button { fb.select(); m.addRecent(name); onOpenStop(code) } label: {
-            HStack(spacing: 11) {
-                pinTile(saved: m.isPinned(code))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(name).font(t.sans(15, weight: .semibold)).foregroundStyle(t.fg).lineLimit(1)
-                    Text("\(code) · \(ds.roadName(code))")
-                        .font(t.mono(11)).foregroundStyle(t.dim).lineLimit(1)
-                }
-                Spacer(minLength: 6)
-                if stop.walkMin > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "figure.walk").font(.system(size: 10, weight: .semibold))
-                        Text("\(stop.walkMin)").font(t.mono(11, weight: .medium))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 11) {
+                    pinTile(saved: m.isPinned(code))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name).font(t.sans(16, weight: .semibold))
+                            .foregroundStyle(t.fg).lineLimit(1)
+                        Text("\(code) · \(ds.roadName(code))")
+                            .font(t.mono(11)).foregroundStyle(t.dim).lineLimit(1)
                     }
-                    .foregroundStyle(t.dim)
-                }
-                if let eta {
-                    HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        Text(eta.big).font(t.mono(15, weight: .bold)).foregroundStyle(etaColor)
-                        Text(eta.small).font(t.sans(10)).foregroundStyle(t.dim)
+                    Spacer(minLength: 6)
+                    if stop.walkMin > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "figure.walk").font(.system(size: 11, weight: .semibold))
+                            Text("\(stop.walkMin) min").font(t.sans(12, weight: .medium))
+                        }
+                        .foregroundStyle(t.dim)
                     }
-                    .frame(minWidth: 38, alignment: .trailing)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(t.faint)
+                if arrivals.isEmpty {
+                    Text("No live arrivals").font(t.sans(12)).foregroundStyle(t.faint)
+                } else {
+                    HStack(spacing: 7) {
+                        ForEach(arrivals) { a in busChip(a) }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(t.faint)
+                    }
+                }
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .padding(13)
+            .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(t.line, lineWidth: 0.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleButtonStyle())
     }
 
+    /// One upcoming bus: number + ETA (ETA tinted by urgency).
+    private func busChip(_ a: RankedArrival) -> some View {
+        let eta = fmtETA(a.service.etaSec)
+        let col: Color = a.service.etaSec <= 120 ? meGreen
+            : (a.service.etaSec <= 420 ? meAmber : t.fg)
+        return HStack(spacing: 5) {
+            Text(a.service.no).font(t.mono(13, weight: .bold)).foregroundStyle(t.fg)
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(eta.big).font(t.mono(13, weight: .bold)).foregroundStyle(col)
+                Text(eta.small).font(t.sans(9)).foregroundStyle(t.dim)
+            }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background(t.surfaceHi, in: Capsule())
+    }
+
     private func pinTile(saved: Bool) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(mapAccent)
+            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(mapAccent)
             Image(systemName: "mappin.and.ellipse")
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
         }
-        .frame(width: 34, height: 34)
+        .frame(width: 38, height: 38)
         .overlay(alignment: .topTrailing) {
             if saved {
                 Image(systemName: "star.fill")
                     .font(.system(size: 7, weight: .black)).foregroundStyle(.white)
-                    .frame(width: 13, height: 13).background(meAmber, in: Circle())
+                    .frame(width: 14, height: 14).background(meAmber, in: Circle())
                     .overlay(Circle().stroke(t.surface, lineWidth: 1.5)).offset(x: 4, y: -4)
             }
         }
@@ -365,9 +400,7 @@ struct SoftMapHomeView: View {
         selectedStation = nil
         selectedStop = stop.stopCode
         recenter(coord(stop.stopCode))
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
-            panelHeight = max(panelHeight, 440)
-        }
+        setSheet(max(panelHeight, 460))
     }
 
     private func selectStation(_ st: MrtGeoStation) {
@@ -375,16 +408,29 @@ struct SoftMapHomeView: View {
         selectedStop = nil
         selectedStation = st
         recenter(CLLocationCoordinate2D(latitude: st.lat, longitude: st.lon))
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
-            panelHeight = max(panelHeight, 360)
-        }
+        setSheet(max(panelHeight, 380))
     }
 
     private func clearSelection() {
         fb.select()
         selectedStop = nil
         selectedStation = nil
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) { panelHeight = 280 }
+        setSheet(290)
+    }
+
+    /// Tap on the empty map → collapse to peek and drop any preview.
+    private func collapseSheet() {
+        if !hasSelection && panelHeight <= 320 { return }
+        fb.select()
+        selectedStop = nil
+        selectedStation = nil
+        setSheet(290)
+    }
+
+    private func setSheet(_ height: CGFloat) {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+            panelHeight = height
+        }
     }
 
     private func recenter(_ c: CLLocationCoordinate2D?) {
@@ -402,7 +448,7 @@ struct SoftMapHomeView: View {
     private func stopPreview(_ code: String) -> some View {
         let stop = nearbyStops.first { $0.stopCode == code }
         let name = (stop?.stopName).flatMap { $0.isEmpty ? nil : $0 } ?? code
-        let arrivals = Array(m.liveServices(code: code, tracked: []).prefix(5))
+        let arrivals = Array(m.liveServices(code: code, tracked: []).prefix(6))
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 11) {
                 pinTile(saved: m.isPinned(code))
@@ -416,7 +462,7 @@ struct SoftMapHomeView: View {
             if arrivals.isEmpty {
                 Text("No live arrivals right now").font(t.sans(13)).foregroundStyle(t.dim)
             } else {
-                VStack(spacing: 8) {
+                VStack(spacing: 9) {
                     ForEach(arrivals, id: \.no) { s in
                         let eta = fmtETA(s.etaSec)
                         let col: Color = s.etaSec <= 120 ? meGreen
@@ -436,9 +482,7 @@ struct SoftMapHomeView: View {
             openButton("Open stop") { onOpenStop(code) }
         }
         .padding(14)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(t.line, lineWidth: 0.5))
+        .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     @ViewBuilder
@@ -459,9 +503,7 @@ struct SoftMapHomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(t.line, lineWidth: 0.5))
+        .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func codeColor(_ code: String) -> Color {
@@ -482,17 +524,16 @@ struct SoftMapHomeView: View {
     // MARK: Drag
 
     private func detents(_ maxHeight: CGFloat) -> [CGFloat] {
-        [280, maxHeight * 0.5, maxHeight * 0.86]
+        [290, maxHeight * 0.55, maxHeight * 0.88]
     }
 
     private func panelDrag(maxHeight: CGFloat) -> some Gesture {
-        let maxH = maxHeight * 0.86
-        let minH: CGFloat = 220
+        let maxH = maxHeight * 0.88
+        let minH: CGFloat = 230
         return DragGesture(minimumDistance: 2)
             .onChanged { v in
                 if dragStartHeight == nil { dragStartHeight = panelHeight }
                 let proposed = (dragStartHeight ?? panelHeight) - v.translation.height
-                // Rubber-band past the bounds so the edges feel elastic.
                 if proposed > maxH {
                     panelHeight = maxH + (proposed - maxH) * 0.22
                 } else if proposed < minH {
@@ -503,7 +544,6 @@ struct SoftMapHomeView: View {
             }
             .onEnded { v in
                 dragStartHeight = nil
-                // Carry the flick's momentum into the snap, then settle gently.
                 let velocity = v.predictedEndTranslation.height - v.translation.height
                 let projected = panelHeight - velocity * 0.5
                 let target = detents(maxHeight)
