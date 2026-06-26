@@ -79,7 +79,9 @@ struct Theme: Equatable {
     /// MRT NE-line purple — used for MRT alert cards / dots.
     let mrtNE: Color = Color(hex: "9B26B6")
     /// Live "ME" location dot on maps.
-    let meBlue: Color = Color(hex: "3B82F6")
+    // App accent — a calm indigo (eye-friendly, distinct from the green/amber/red
+    // status palette). One token, used everywhere for cohesion.
+    let meBlue: Color = Color(hex: "5E5CE6")
 
     // ── Fonts ────────────────────────────────────────────────────────
     // Leyne 2.0 typography target is Inter; for now we use the system

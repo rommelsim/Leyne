@@ -40,8 +40,10 @@ struct ServiceBadge: View {
     var inverted: Bool = false
 
     var body: some View {
-        let fill = inverted ? t.surface : t.accent
-        let fg = inverted ? t.accent : t.onAccent
+        // Indigo accent badge (was stark black/white) — softer and cohesive with
+        // the indigo map pins + app accent.
+        let fill = inverted ? t.surface : t.meBlue
+        let fg = inverted ? t.meBlue : Color.white
         Text(svc)
             .font(t.sans(size.font, weight: .semibold))
             .foregroundStyle(fg)

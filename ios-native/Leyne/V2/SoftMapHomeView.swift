@@ -53,7 +53,7 @@ struct SoftMapHomeView: View {
     @State private var arrivalsByStop: [String: [RankedArrival]] = [:]
 
     private var t: Theme { m.t }
-    private var mapAccent: Color { t.isDark ? Color(hex: "7E7BFF") : Color(hex: "5856D6") }
+    private var mapAccent: Color { t.meBlue }   // one shared accent (indigo)
     private var meGreen: Color { t.isDark ? Color(hex: "22C55E") : Color(hex: "16A34A") }
     private var meAmber: Color { t.isDark ? Color(hex: "F59E0B") : Color(hex: "D97706") }
     private var hasSelection: Bool { selectedStop != nil || selectedStation != nil }
