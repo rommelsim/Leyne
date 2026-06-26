@@ -37,8 +37,8 @@ extension View {
     /// tabbed screen and never occludes scroll content. Self-suppresses
     /// when ads are disabled or screenshot mode is on.
     @ViewBuilder
-    func adBannerGutter() -> some View {
-        if !AdConfig.adsSuppressed {
+    func adBannerGutter(_ enabled: Bool = true) -> some View {
+        if enabled && !AdConfig.adsSuppressed {
             // AdBanner self-sizes: it collapses to zero height until a creative
             // loads (so a no-fill shows nothing), then expands to the banner card.
             self.safeAreaInset(edge: .bottom) { AdBanner() }

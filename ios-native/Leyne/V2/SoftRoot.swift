@@ -101,7 +101,9 @@ struct SoftRoot: View {
             // visible for the title + search + alerts toolbar. The legacy
             // list-based SoftHomeView is kept in the project for easy revert.
             Tab("Bus", systemImage: "bus.fill", value: SoftTab.home) {
-                navStack($homeStack, hidesNavBar: false) {
+                // banner: false — the map home carries its own native ad inside
+                // the sheet, so the gutter banner is suppressed (no collision).
+                navStack($homeStack, hidesNavBar: false, banner: false) {
                     SoftMapHomeView(
                         onOpenStop: { homeStack.append(.stop($0)) },
                         onOpenBus: { code, svc in
@@ -255,10 +257,11 @@ struct SoftRoot: View {
     @ViewBuilder
     private func navStack<Root: View>(_ path: Binding<[SoftRoute]>,
                                       hidesNavBar: Bool = true,
+                                      banner: Bool = true,
                                       @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: path) {
             root()
-                .adBannerGutter()
+                .adBannerGutter(banner)
                 .softTopEdgeBlur()
                 // Most roots hide the nav bar (custom in-content headers). Home
                 // keeps it so it can host the native `.searchable` field; an
