@@ -97,20 +97,20 @@ struct SoftRoot: View {
     /// child pushes keep the native slide + swipe-back.
     private var tabView: some View {
         TabView(selection: $tab) {
-            // 1. Bus — nearby bus stops home screen + native search bar + bell
+            // 1. Bus — map-first home (redesign exploration). Nav bar stays
+            // visible for the title + search + alerts toolbar. The legacy
+            // list-based SoftHomeView is kept in the project for easy revert.
             Tab("Bus", systemImage: "bus.fill", value: SoftTab.home) {
-                // Home hosts the native `.searchable` bar, which lives in the
-                // navigation bar — so unlike the other tabs it must NOT hide it.
                 navStack($homeStack, hidesNavBar: false) {
-                    SoftHomeView(
-                        onTab: { tab = $0 },
+                    SoftMapHomeView(
                         onOpenStop: { homeStack.append(.stop($0)) },
                         onOpenBus: { code, svc in
                             homeStack.append(.bus(stopCode: code, svc: svc,
                                                   fullRoute: true))
                         },
                         onOpenMrtStation: { station in navigateToStation(station) },
-                        onOpenAlerts: { showAlerts = true }
+                        onOpenAlerts: { showAlerts = true },
+                        onOpenSearch: { showSearch = true }
                     )
                 }
             }

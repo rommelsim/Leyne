@@ -74,17 +74,15 @@ enum AdConfig {
     // 300×250 medium rectangle (MREC), used for the inline Stop-screen
     // placement. DEBUG / forced-test serve Google's test unit (it returns a
     // creative matching whatever AdSize is requested, including 300×250).
-    // RELEASE should ideally use a DEDICATED AdMob MREC unit; until one is
-    // created in the console this falls back to the production banner unit (an
-    // ad unit isn't bound to one size, so it still serves a 300×250), so the
-    // placement works out of the box. TODO: create a dedicated 300×250 unit and
-    // swap its ID in here for cleaner reporting + fill.
+    // RELEASE serves a DEDICATED leyne-account MREC unit (created as a Banner-
+    // format ad unit; the code requests AdSizeMediumRectangle against it), so
+    // the Stop-screen MREC now reports separately from the bottom banner.
     #if DEBUG
     static let mrecUnitID = "ca-app-pub-3940256099942544/2934735716"
     #else
     static let mrecUnitID = forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/2934735716"  // Google test unit
-        : "ca-app-pub-5864511655536507/9782205994"  // leyne-acct prod (shared)
+        : "ca-app-pub-5864511655536507/5658605065"  // leyne-acct prod MREC (dedicated)
     #endif
 
     // Native ad unit — used by the inline Home-screen placement (NativeAdCard).

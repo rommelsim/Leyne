@@ -206,11 +206,11 @@ struct SoftHomeView: View {
                 .font(t.sans(13))
                 .foregroundStyle(t.faint)
             if located {
-                Circle().fill(t.soon).frame(width: 6, height: 6)
+                Circle().fill(Color(hex: "22C55E")).frame(width: 6, height: 6)
                 Text("LIVE")
                     .font(t.mono(10, weight: .bold))
                     .tracking(0.8)
-                    .foregroundStyle(t.dim)
+                    .foregroundStyle(Color(hex: "22C55E"))
             } else {
                 Text("LOCATION OFF")
                     .font(t.mono(10, weight: .bold))
@@ -285,7 +285,7 @@ struct SoftHomeView: View {
     private func moreHeader(_ title: String) -> some View {
         Text(title)
             .font(t.sans(15, weight: .semibold))
-            .foregroundStyle(t.dim)
+            .foregroundStyle(t.meBlue)
             .listRowInsets(EdgeInsets(top: 10, leading: 18, bottom: 2, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -549,6 +549,26 @@ struct SoftNearbyStopCard: View {
     let onTap: () -> Void
     let isSaved: Bool
 
+    // ── Vibrant prototype palette (Home only — pending wider roll-out) ────
+    // Tuned for dark mode (the primary appearance); light-mode tuning is a
+    // follow-up once the direction is approved.
+    private var meGreen: Color { Color(hex: "22C55E") }   // arriving / go
+    private var meAmber: Color { Color(hex: "F59E0B") }   // soon / saved star
+    private var brandGradient: LinearGradient {
+        LinearGradient(colors: [Color(hex: "2563EB"), Color(hex: "06B6D4")],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    /// Card fill: a vibrant gradient on the hero (closest) card, neutral surface
+    /// otherwise. AnyShapeStyle lets the two types share one `.background`.
+    private var cardBackground: AnyShapeStyle {
+        highlight ? AnyShapeStyle(brandGradient) : AnyShapeStyle(t.surface)
+    }
+    /// Ink that stays readable on the hero's coloured fill (white) vs a normal
+    /// card's neutral surface (theme foreground / dim / faint).
+    private var ink: Color { highlight ? .white : t.fg }
+    private var inkDim: Color { highlight ? Color.white.opacity(0.85) : t.dim }
+    private var inkFaint: Color { highlight ? Color.white.opacity(0.6) : t.faint }
+
     var body: some View {
         let _ = tick
         return VStack(alignment: .leading, spacing: 0) {
@@ -557,9 +577,9 @@ struct SoftNearbyStopCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(highlight ? t.soon : t.line, lineWidth: highlight ? 1.5 : 1))
+            .stroke(highlight ? Color.white.opacity(0.25) : t.line, lineWidth: 1))
     }
 
     /// The whole row is one tap target → opens the full stop view. A trailing
@@ -572,7 +592,7 @@ struct SoftNearbyStopCard: View {
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(t.faint)
+                    .foregroundStyle(inkFaint)
             }
             .contentShape(Rectangle())
         }
@@ -582,20 +602,25 @@ struct SoftNearbyStopCard: View {
     }
 
     private var closestBadge: some View {
+        // On the gradient hero: a crisp white pill with brand-blue text.
         Text(badgeText)
             .font(t.sans(11, weight: .bold))
-            .foregroundStyle(t.contrastFg)
+            .foregroundStyle(Color(hex: "1D4ED8"))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(t.soon, in: Capsule())
+            .background(.white, in: Capsule())
     }
 
     private var pinTile: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(t.surfaceHi)
+            // Frosted on the hero (over the gradient); a vibrant gradient tile on
+            // every normal row so each card carries a pop of colour.
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(highlight ? AnyShapeStyle(Color.white.opacity(0.22))
+                                : AnyShapeStyle(brandGradient))
             Image(systemName: "mappin.and.ellipse")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(t.fg)
+                .foregroundStyle(.white)
         }
         .frame(width: 42, height: 42)
     }
@@ -605,15 +630,15 @@ struct SoftNearbyStopCard: View {
             HStack(spacing: 6) {
                 Text(name)
                     .font(t.sans(17, weight: .semibold))
-                    .foregroundStyle(t.fg)
+                    .foregroundStyle(ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 // Saved marker — pops in when the stop is saved (swipe / menu),
-                // giving the save a visible, on-brand result.
+                // giving the save a visible, on-brand result. Gold star.
                 if isSaved {
                     Image(systemName: "star.fill")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(t.soon)
+                        .foregroundStyle(highlight ? .white : meAmber)
                         .transition(.scale.combined(with: .opacity))
                         .accessibilityLabel("Saved")
                 }
@@ -621,7 +646,7 @@ struct SoftNearbyStopCard: View {
             .animation(.spring(response: 0.32, dampingFraction: 0.6), value: isSaved)
             Text(subtitle)
                 .font(t.mono(12.5))
-                .foregroundStyle(t.dim)
+                .foregroundStyle(inkDim)
                 .lineLimit(1)
             // One tight meta line: walk time + the soonest arrival.
             compactMeta
@@ -637,6 +662,16 @@ struct SoftNearbyStopCard: View {
         let summary = soonest.flatMap {
             stopTeaser(count: arrivals.count, soonestEtaSec: $0.service.etaSec)
         }
+        // Urgency colour for the soonest arrival — green when it's basically
+        // here, amber when it's soon, neutral when it's a while off. On the hero
+        // card everything goes white (the gradient already carries the colour).
+        let arrivalInk: Color = {
+            guard !highlight, let s = soonest else { return ink }
+            if s.service.etaSec <= 120 { return meGreen }   // arriving / ≤2 min
+            if s.service.etaSec <= 420 { return meAmber }   // ≤7 min
+            return t.fg
+        }()
+        let walkInk: Color = highlight ? .white : meGreen
         HStack(spacing: 5) {
             // Walk time only when we know the distance — saved stops shown with
             // location off carry walkMin == 0, so the walk chip is suppressed
@@ -644,17 +679,17 @@ struct SoftNearbyStopCard: View {
             if walkMin > 0 {
                 Image(systemName: "figure.walk")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(t.soon)
+                    .foregroundStyle(walkInk)
                 Text("\(walkMin) min")
-                    .foregroundStyle(t.soon)
-                if soonest != nil { Text("·").foregroundStyle(t.faint) }
+                    .foregroundStyle(walkInk)
+                if soonest != nil { Text("·").foregroundStyle(inkFaint) }
             }
             if soonest != nil, let summary {
                 Image(systemName: "bus.fill")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(t.dim)
+                    .foregroundStyle(inkDim)
                 Text(summary.whenText)
-                    .foregroundStyle(t.fg)
+                    .foregroundStyle(arrivalInk)
             }
         }
         .font(t.mono(12, weight: .medium))
