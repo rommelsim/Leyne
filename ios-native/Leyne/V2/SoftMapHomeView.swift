@@ -1,17 +1,28 @@
 // SoftMapHomeView — map-first Home (redesign, branch `redesign-main-view`).
 //
-// What makes this OURS, not "a worse Google Maps": the map shows LIVE in-service
-// buses (from each Service's LTA GPS position), colour-coded by how soon they
-// arrive, crawling toward your stops. Arrivals are the hero; the map is context.
+// Differentiator: LIVE buses on the map (each Service's LTA GPS position),
+// colour-coded by ETA. Arrivals are the hero; the map is live context.
 //
-// Smoothness: the nearby data (stops / stations / live buses) is cached in @State
-// and refreshed only when the underlying data changes — NOT on every drag frame —
-// so dragging the sheet (which only changes an `.offset`) never recomputes
-// distances or re-renders heavy work. The sheet itself is a fixed-height solid
-// surface positioned by offset (no per-frame re-layout / blur).
+// Smoothness is engineered in two layers:
+//   1. Nearby data (stops/stations/buses/arrivals) is cached in @State and
+//      refreshed only on data/location/tick — never per drag frame.
+//   2. The map is an Equatable subview (`MapContentView`) so SwiftUI SKIPS
+//      re-rendering it while the sheet is dragged (the heavy per-frame cost was
+//      the Map re-diffing ~30 annotations). A `cameraVersion` token lets real
+//      camera moves (recenter / select) still get through.
+// So a drag only slides the sheet's `.offset` — no Map work, no re-layout.
 
 import SwiftUI
 import MapKit
+
+private struct LiveBus: Identifiable, Equatable {
+    let id: String
+    let lat: Double
+    let lon: Double
+    let no: String
+    let etaSec: Int
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
 
 struct SoftMapHomeView: View {
     @EnvironmentObject var m: AppModel
@@ -26,55 +37,43 @@ struct SoftMapHomeView: View {
     let onOpenSearch: () -> Void
 
     @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
+    /// Bumped whenever we deliberately move the camera, so the Equatable map view
+    /// re-renders for real camera moves but is skipped during a drag.
+    @State private var cameraVersion = 0
     @State private var panelHeight: CGFloat = 290
     @State private var dragStartHeight: CGFloat? = nil
     @State private var didInitialCenter = false
     @State private var selectedStop: String? = nil
     @State private var selectedStation: MrtGeoStation? = nil
 
-    // Cached nearby data — recomputed only on data/location changes, never during
-    // a drag, so the sheet stays smooth.
+    // Cached nearby data — recomputed only on data/location/tick, never on a drag.
     @State private var stops: [NearbyStop] = []
     @State private var stations: [MrtGeoStation] = []
     @State private var buses: [LiveBus] = []
+    @State private var arrivalsByStop: [String: [RankedArrival]] = [:]
 
     private var t: Theme { m.t }
-
-    // Eye-friendly map accent — a calm indigo, distinct from green/amber/red status.
     private var mapAccent: Color { t.isDark ? Color(hex: "7E7BFF") : Color(hex: "5856D6") }
     private var meGreen: Color { t.isDark ? Color(hex: "22C55E") : Color(hex: "16A34A") }
     private var meAmber: Color { t.isDark ? Color(hex: "F59E0B") : Color(hex: "D97706") }
-
     private var hasSelection: Bool { selectedStop != nil || selectedStation != nil }
-
-    struct LiveBus: Identifiable, Equatable {
-        let id: String
-        let lat: Double
-        let lon: Double
-        let no: String
-        let etaSec: Int
-        var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
-    }
 
     // MARK: - Data refresh (off the drag path)
 
     private func computeStops() -> [NearbyStop] {
         let hidden = m.hiddenNearby
-        return ds.nearby
-            .filter { !hidden.contains($0.stopCode) }
+        return ds.nearby.filter { !hidden.contains($0.stopCode) }
             .sorted { $0.distanceM < $1.distanceM }
     }
 
     private func computeStations() -> [MrtGeoStation] {
         guard let here = loc.location else { return [] }
         return MrtGeo.nearestStations(to: here.coordinate, limit: 6,
-                                      withinMeters: max(m.searchRadiusM, 1200))
-            .map { $0.station }
+                                      withinMeters: max(m.searchRadiusM, 1200)).map { $0.station }
     }
 
     private func computeBuses() -> [LiveBus] {
-        var seen = Set<String>()
-        var out: [LiveBus] = []
+        var seen = Set<String>(); var out: [LiveBus] = []
         for stop in stops.prefix(10) {
             for s in m.liveServices(code: stop.stopCode, tracked: []) {
                 guard let lat = s.busLat, let lon = s.busLon,
@@ -90,151 +89,75 @@ struct SoftMapHomeView: View {
         return out
     }
 
-    private func refreshStopsAndStations() {
+    private func computeArrivals() -> [String: [RankedArrival]] {
+        var map: [String: [RankedArrival]] = [:]
+        for stop in stops.prefix(12) { map[stop.stopCode] = rankedArrivals(stop.stopCode) }
+        return map
+    }
+
+    private func refreshAll() {
         stops = computeStops()
         stations = computeStations()
         buses = computeBuses()
+        arrivalsByStop = computeArrivals()
         for stop in stops.prefix(12) { ds.ensureArrivals(stop: stop.stopCode) }
     }
 
-    private func refreshBuses() { buses = computeBuses() }
+    /// Lighter per-second refresh: buses + arrival ETAs, not the station query.
+    private func refreshLive() {
+        buses = computeBuses()
+        arrivalsByStop = computeArrivals()
+    }
 
     // MARK: Body
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .bottom) {
-                mapLayer.ignoresSafeArea()
+                MapContentView(
+                    camera: $camera,
+                    cameraVersion: cameraVersion,
+                    stops: stops, stations: stations, buses: buses,
+                    selectedStop: selectedStop, selectedStationID: selectedStation?.id,
+                    pinned: Set(m.pins.map { $0.code }),
+                    accent: mapAccent, green: meGreen, amber: meAmber,
+                    coordFor: { coord($0) },
+                    lineColorFor: { stationColor($0) },
+                    onSelectStop: { selectStop($0) },
+                    onSelectStation: { selectStation($0) },
+                    onTapMap: { collapseSheet() }
+                )
+                .equatable()
+                .ignoresSafeArea()
+
                 recenterButton
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.trailing, 16)
-                    .padding(.top, 10)
+                    .padding(.trailing, 16).padding(.top, 10)
                 departuresPanel(maxHeight: geo.size.height)
             }
         }
         .navigationTitle("SG Transit")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { alertsBell }
-        }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { alertsBell } }
         .onAppear {
             loc.startIfAuthorized()
             if let l = loc.location { ds.updateNearby(l); centerOnUser() }
             ds.prefetchNearbyArrivals()
-            refreshStopsAndStations()
+            refreshAll()
         }
         .onChange(of: loc.location) { _, new in
             if let l = new {
-                ds.updateNearby(l)
-                ds.prefetchNearbyArrivals()
-                refreshStopsAndStations()
+                ds.updateNearby(l); ds.prefetchNearbyArrivals(); refreshAll()
                 if !didInitialCenter { centerOnUser() }
             }
         }
-        .onChange(of: ds.nearby) { _, _ in refreshStopsAndStations() }
-        // Live buses + ETAs tick forward without touching the (heavier) station
-        // query; once/sec, never per drag frame.
-        .onChange(of: m.tick) { _, _ in refreshBuses() }
-    }
-
-    // MARK: Map
-
-    private var mapLayer: some View {
-        Map(position: $camera) {
-            UserAnnotation()
-            ForEach(stops) { stop in
-                if let c = coord(stop.stopCode) {
-                    Annotation(stop.stopName.isEmpty ? stop.stopCode : stop.stopName,
-                               coordinate: c, anchor: .center) {
-                        stopMarker(stop)
-                    }
-                }
-            }
-            ForEach(stations) { st in
-                Annotation(st.name,
-                           coordinate: CLLocationCoordinate2D(latitude: st.lat, longitude: st.lon),
-                           anchor: .center) {
-                    mrtMarker(st)
-                }
-            }
-            // The differentiator — live buses on your map.
-            ForEach(buses) { bus in
-                Annotation("Bus \(bus.no)", coordinate: bus.coord, anchor: .center) {
-                    liveBusMarker(bus)
-                }
-            }
-        }
-        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
-        .onTapGesture { collapseSheet() }
+        .onChange(of: ds.nearby) { _, _ in refreshAll() }
+        .onChange(of: m.tick) { _, _ in refreshLive() }
     }
 
     private func coord(_ code: String) -> CLLocationCoordinate2D? {
         guard let s = ds.stopByCode[code] else { return nil }
         return CLLocationCoordinate2D(latitude: s.Latitude, longitude: s.Longitude)
-    }
-
-    /// Centre the camera tightly on the user. Nudges location updates first so we
-    /// use a fresh fix (not a stale one that lands away from the blue dot).
-    private func centerOnUser() {
-        loc.startIfAuthorized()
-        guard let c = loc.location?.coordinate else { return }
-        didInitialCenter = true
-        withAnimation(.easeInOut(duration: 0.35)) {
-            camera = .region(MKCoordinateRegion(
-                center: c,
-                span: MKCoordinateSpan(latitudeDelta: 0.007, longitudeDelta: 0.007)))
-        }
-    }
-
-    // Stops are PINS; live buses are small urgency-coloured bus icons — so the two
-    // never read as the same thing on the map.
-    private func stopMarker(_ stop: NearbyStop) -> some View {
-        let isSel = selectedStop == stop.stopCode
-        return Button { selectStop(stop) } label: {
-            Image(systemName: "mappin.and.ellipse")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(mapAccent, in: Circle())
-                .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
-                .overlay(alignment: .topTrailing) {
-                    if m.isPinned(stop.stopCode) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 8, weight: .black)).foregroundStyle(.white)
-                            .frame(width: 14, height: 14).background(meAmber, in: Circle())
-                            .overlay(Circle().stroke(.white, lineWidth: 1.5)).offset(x: 5, y: -5)
-                    }
-                }
-                .scaleEffect(isSel ? 1.3 : 1)
-                .shadow(color: .black.opacity(0.3), radius: isSel ? 5 : 2, y: 1)
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSel)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func mrtMarker(_ st: MrtGeoStation) -> some View {
-        let isSel = selectedStation?.id == st.id
-        return Button { selectStation(st) } label: {
-            Image(systemName: "tram.fill")
-                .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(stationColor(st), in: Circle())
-                .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
-                .scaleEffect(isSel ? 1.3 : 1)
-                .shadow(color: .black.opacity(0.3), radius: isSel ? 5 : 2, y: 1)
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSel)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func liveBusMarker(_ bus: LiveBus) -> some View {
-        let col = bus.etaSec <= 120 ? meGreen : (bus.etaSec <= 420 ? meAmber : mapAccent)
-        return Image(systemName: "bus.fill")
-            .font(.system(size: 9, weight: .black)).foregroundStyle(.white)
-            .frame(width: 21, height: 21)
-            .background(col, in: Circle())
-            .overlay(Circle().stroke(.white, lineWidth: 1.5))
-            .shadow(color: .black.opacity(0.25), radius: 1.5, y: 0.5)
     }
 
     private func stationColor(_ st: MrtGeoStation) -> Color {
@@ -245,11 +168,30 @@ struct SoftMapHomeView: View {
         return Color(hex: "E22319")
     }
 
+    private func centerOnUser() {
+        loc.startIfAuthorized()
+        guard let c = loc.location?.coordinate else { return }
+        didInitialCenter = true
+        cameraVersion += 1
+        withAnimation(.easeInOut(duration: 0.35)) {
+            camera = .region(MKCoordinateRegion(
+                center: c, span: MKCoordinateSpan(latitudeDelta: 0.007, longitudeDelta: 0.007)))
+        }
+    }
+
+    private func recenter(_ c: CLLocationCoordinate2D?) {
+        guard let c else { return }
+        cameraVersion += 1
+        withAnimation {
+            camera = .region(MKCoordinateRegion(
+                center: c, span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)))
+        }
+    }
+
     private var recenterButton: some View {
         Button { fb.select(); centerOnUser() } label: {
             Image(systemName: "location.fill")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(mapAccent)
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(mapAccent)
                 .frame(width: 42, height: 42)
                 .background(.regularMaterial, in: Circle())
                 .overlay(Circle().stroke(t.line, lineWidth: 0.5))
@@ -268,14 +210,11 @@ struct SoftMapHomeView: View {
                 .frame(maxWidth: .infinity).frame(height: 22).padding(.top, 8)
                 .contentShape(Rectangle())
                 .gesture(panelDrag(maxHeight: maxHeight))
-
             searchField.padding(.horizontal, 16).padding(.bottom, 10)
-
             sheetHeader
                 .padding(.horizontal, 16).padding(.bottom, 8)
                 .contentShape(Rectangle())
                 .gesture(panelDrag(maxHeight: maxHeight))
-
             ScrollView {
                 LazyVStack(spacing: 9) {
                     if let code = selectedStop {
@@ -299,22 +238,17 @@ struct SoftMapHomeView: View {
                 .padding(.horizontal, 16).padding(.bottom, 24)
             }
         }
-        .frame(height: maxDetent)
-        .frame(maxWidth: .infinity)
+        .frame(height: maxDetent).frame(maxWidth: .infinity)
         .background(t.surface,
                     in: UnevenRoundedRectangle(cornerRadii:
                         .init(topLeading: 22, topTrailing: 22), style: .continuous))
-        .overlay(
-            UnevenRoundedRectangle(cornerRadii:
-                .init(topLeading: 22, topTrailing: 22), style: .continuous)
-                .stroke(t.line, lineWidth: 1))
+        .overlay(UnevenRoundedRectangle(cornerRadii:
+            .init(topLeading: 22, topTrailing: 22), style: .continuous).stroke(t.line, lineWidth: 1))
         .shadow(color: .black.opacity(0.12), radius: 10, y: -2)
         .offset(y: maxDetent - panelHeight)
     }
 
-    private var grabber: some View {
-        Capsule().fill(t.faint).frame(width: 40, height: 5)
-    }
+    private var grabber: some View { Capsule().fill(t.faint).frame(width: 40, height: 5) }
 
     private var searchField: some View {
         Button { fb.select(); onOpenSearch() } label: {
@@ -339,8 +273,7 @@ struct SoftMapHomeView: View {
                     HStack(spacing: 3) {
                         Image(systemName: "chevron.left").font(.system(size: 13, weight: .bold))
                         Text("Nearby").font(t.sans(14, weight: .semibold))
-                    }
-                    .foregroundStyle(mapAccent)
+                    }.foregroundStyle(mapAccent)
                 }
                 Spacer(minLength: 0)
             } else {
@@ -358,19 +291,18 @@ struct SoftMapHomeView: View {
         }
     }
 
-    // MARK: Stop row (taller, with next-bus chips)
+    // MARK: Stop row
 
     private func stopRow(_ stop: NearbyStop) -> some View {
         let code = stop.stopCode
         let name = stop.stopName.isEmpty ? code : stop.stopName
-        let arrivals = rankedArrivals(code)
+        let arrivals = arrivalsByStop[code] ?? []
         return Button { fb.select(); m.addRecent(name); onOpenStop(code) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 11) {
                     pinTile(saved: m.isPinned(code))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(name).font(t.sans(16, weight: .semibold))
-                            .foregroundStyle(t.fg).lineLimit(1)
+                        Text(name).font(t.sans(16, weight: .semibold)).foregroundStyle(t.fg).lineLimit(1)
                         Text("\(code) · \(ds.roadName(code))")
                             .font(t.mono(11)).foregroundStyle(t.dim).lineLimit(1)
                     }
@@ -379,8 +311,7 @@ struct SoftMapHomeView: View {
                         HStack(spacing: 3) {
                             Image(systemName: "figure.walk").font(.system(size: 11, weight: .semibold))
                             Text("\(stop.walkMin) min").font(t.sans(12, weight: .medium))
-                        }
-                        .foregroundStyle(t.dim)
+                        }.foregroundStyle(t.dim)
                     }
                 }
                 if arrivals.isEmpty {
@@ -396,8 +327,7 @@ struct SoftMapHomeView: View {
             }
             .padding(13)
             .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(t.line, lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(t.line, lineWidth: 0.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleButtonStyle())
@@ -427,8 +357,7 @@ struct SoftMapHomeView: View {
         .frame(width: 38, height: 38)
         .overlay(alignment: .topTrailing) {
             if saved {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 7, weight: .black)).foregroundStyle(.white)
+                Image(systemName: "star.fill").font(.system(size: 7, weight: .black)).foregroundStyle(.white)
                     .frame(width: 14, height: 14).background(meAmber, in: Circle())
                     .overlay(Circle().stroke(t.surface, lineWidth: 1.5)).offset(x: 4, y: -4)
             }
@@ -438,40 +367,23 @@ struct SoftMapHomeView: View {
     // MARK: Selection
 
     private func selectStop(_ stop: NearbyStop) {
-        fb.select()
-        selectedStation = nil
-        selectedStop = stop.stopCode
-        recenter(coord(stop.stopCode))
-        setSheet(max(panelHeight, 460))
+        fb.select(); selectedStation = nil; selectedStop = stop.stopCode
+        recenter(coord(stop.stopCode)); setSheet(max(panelHeight, 460))
     }
-
     private func selectStation(_ st: MrtGeoStation) {
-        fb.select()
-        selectedStop = nil
-        selectedStation = st
+        fb.select(); selectedStop = nil; selectedStation = st
         recenter(CLLocationCoordinate2D(latitude: st.lat, longitude: st.lon))
         setSheet(max(panelHeight, 380))
     }
-
     private func clearSelection() {
         fb.select(); selectedStop = nil; selectedStation = nil; setSheet(290)
     }
-
     private func collapseSheet() {
         if !hasSelection && panelHeight <= 320 { return }
         fb.select(); selectedStop = nil; selectedStation = nil; setSheet(290)
     }
-
     private func setSheet(_ height: CGFloat) {
         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { panelHeight = height }
-    }
-
-    private func recenter(_ c: CLLocationCoordinate2D?) {
-        guard let c else { return }
-        withAnimation {
-            camera = .region(MKCoordinateRegion(
-                center: c, span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)))
-        }
     }
 
     // MARK: Preview cards
@@ -497,8 +409,7 @@ struct SoftMapHomeView: View {
                 VStack(spacing: 9) {
                     ForEach(arrivals, id: \.no) { s in
                         let eta = fmtETA(s.etaSec)
-                        let col: Color = s.etaSec <= 120 ? meGreen
-                            : (s.etaSec <= 420 ? meAmber : t.fg)
+                        let col: Color = s.etaSec <= 120 ? meGreen : (s.etaSec <= 420 ? meAmber : t.fg)
                         HStack {
                             Text(s.no).font(t.mono(14, weight: .bold))
                                 .foregroundStyle(t.fg).frame(minWidth: 46, alignment: .leading)
@@ -532,8 +443,7 @@ struct SoftMapHomeView: View {
             Text("MRT station").font(t.sans(13)).foregroundStyle(t.dim)
             openButton("Open station") { onOpenMrtStation(st) }.padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
         .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
@@ -553,9 +463,7 @@ struct SoftMapHomeView: View {
 
     // MARK: Drag
 
-    private func detents(_ maxHeight: CGFloat) -> [CGFloat] {
-        [290, maxHeight * 0.55, maxHeight * 0.88]
-    }
+    private func detents(_ maxHeight: CGFloat) -> [CGFloat] { [290, maxHeight * 0.55, maxHeight * 0.88] }
 
     private func panelDrag(maxHeight: CGFloat) -> some Gesture {
         let maxH = maxHeight * 0.88
@@ -564,37 +472,25 @@ struct SoftMapHomeView: View {
             .onChanged { v in
                 if dragStartHeight == nil { dragStartHeight = panelHeight }
                 let proposed = (dragStartHeight ?? panelHeight) - v.translation.height
-                if proposed > maxH {
-                    panelHeight = maxH + (proposed - maxH) * 0.22
-                } else if proposed < minH {
-                    panelHeight = minH - (minH - proposed) * 0.22
-                } else {
-                    panelHeight = proposed
-                }
+                if proposed > maxH { panelHeight = maxH + (proposed - maxH) * 0.22 }
+                else if proposed < minH { panelHeight = minH - (minH - proposed) * 0.22 }
+                else { panelHeight = proposed }
             }
             .onEnded { v in
                 dragStartHeight = nil
                 let velocity = v.predictedEndTranslation.height - v.translation.height
                 let projected = panelHeight - velocity * 0.5
-                let target = detents(maxHeight)
-                    .min(by: { abs($0 - projected) < abs($1 - projected) }) ?? minH
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                    panelHeight = target
-                }
+                let target = detents(maxHeight).min(by: { abs($0 - projected) < abs($1 - projected) }) ?? minH
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { panelHeight = target }
             }
     }
-
-    // MARK: Toolbar
 
     private var alertsBell: some View {
         Button { fb.select(); onOpenAlerts() } label: {
             Image(systemName: m.unseenAlertCount > 0 ? "bell.badge.fill" : "bell.fill")
         }
-        .accessibilityLabel(m.unseenAlertCount > 0
-            ? "Alerts, \(m.unseenAlertCount) new" : "Alerts")
+        .accessibilityLabel(m.unseenAlertCount > 0 ? "Alerts, \(m.unseenAlertCount) new" : "Alerts")
     }
-
-    // MARK: Arrivals
 
     private func rankedArrivals(_ code: String) -> [RankedArrival] {
         let services = m.liveServices(code: code, tracked: [])
@@ -604,5 +500,102 @@ struct SoftMapHomeView: View {
         let favs = services.filter(isFav)
         let rest = services.filter { !isFav($0) }
         return (favs + rest).prefix(3).map { RankedArrival(service: $0, fav: isFav($0)) }
+    }
+}
+
+// MARK: - Map content (Equatable → skipped while the sheet is dragged)
+
+private struct MapContentView: View, Equatable {
+    @Binding var camera: MapCameraPosition
+    let cameraVersion: Int
+    let stops: [NearbyStop]
+    let stations: [MrtGeoStation]
+    let buses: [LiveBus]
+    let selectedStop: String?
+    let selectedStationID: String?
+    let pinned: Set<String>
+    let accent: Color
+    let green: Color
+    let amber: Color
+    let coordFor: (String) -> CLLocationCoordinate2D?
+    let lineColorFor: (MrtGeoStation) -> Color
+    let onSelectStop: (NearbyStop) -> Void
+    let onSelectStation: (MrtGeoStation) -> Void
+    let onTapMap: () -> Void
+
+    // Only the data + selection + camera token drive a re-render. Closures are
+    // intentionally excluded — they dispatch to live parent state.
+    static func == (a: MapContentView, b: MapContentView) -> Bool {
+        a.cameraVersion == b.cameraVersion
+            && a.selectedStop == b.selectedStop
+            && a.selectedStationID == b.selectedStationID
+            && a.pinned == b.pinned
+            && a.stops == b.stops
+            && a.stations == b.stations
+            && a.buses == b.buses
+    }
+
+    var body: some View {
+        Map(position: $camera) {
+            UserAnnotation()
+            ForEach(stops) { stop in
+                if let c = coordFor(stop.stopCode) {
+                    Annotation(stop.stopName.isEmpty ? stop.stopCode : stop.stopName,
+                               coordinate: c, anchor: .center) { stopMarker(stop) }
+                }
+            }
+            ForEach(stations) { st in
+                Annotation(st.name,
+                           coordinate: CLLocationCoordinate2D(latitude: st.lat, longitude: st.lon),
+                           anchor: .center) { mrtMarker(st) }
+            }
+            ForEach(buses) { bus in
+                Annotation("Bus \(bus.no)", coordinate: bus.coord, anchor: .center) { busMarker(bus) }
+            }
+        }
+        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
+        .onTapGesture { onTapMap() }
+    }
+
+    private func stopMarker(_ stop: NearbyStop) -> some View {
+        let isSel = selectedStop == stop.stopCode
+        return Button { onSelectStop(stop) } label: {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 30, height: 30).background(accent, in: Circle())
+                .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
+                .overlay(alignment: .topTrailing) {
+                    if pinned.contains(stop.stopCode) {
+                        Image(systemName: "star.fill").font(.system(size: 8, weight: .black)).foregroundStyle(.white)
+                            .frame(width: 14, height: 14).background(amber, in: Circle())
+                            .overlay(Circle().stroke(.white, lineWidth: 1.5)).offset(x: 5, y: -5)
+                    }
+                }
+                .scaleEffect(isSel ? 1.3 : 1)
+                .shadow(color: .black.opacity(0.3), radius: isSel ? 5 : 2, y: 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSel)
+        }.buttonStyle(.plain)
+    }
+
+    private func mrtMarker(_ st: MrtGeoStation) -> some View {
+        let isSel = selectedStationID == st.id
+        return Button { onSelectStation(st) } label: {
+            Image(systemName: "tram.fill")
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 28, height: 28).background(lineColorFor(st), in: Circle())
+                .overlay(Circle().stroke(.white, lineWidth: isSel ? 3 : 2))
+                .scaleEffect(isSel ? 1.3 : 1)
+                .shadow(color: .black.opacity(0.3), radius: isSel ? 5 : 2, y: 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSel)
+        }.buttonStyle(.plain)
+    }
+
+    private func busMarker(_ bus: LiveBus) -> some View {
+        let col = bus.etaSec <= 120 ? green : (bus.etaSec <= 420 ? amber : accent)
+        return Image(systemName: "bus.fill")
+            .font(.system(size: 9, weight: .black)).foregroundStyle(.white)
+            .frame(width: 21, height: 21).background(col, in: Circle())
+            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.25), radius: 1.5, y: 0.5)
     }
 }
