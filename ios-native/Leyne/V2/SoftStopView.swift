@@ -140,12 +140,12 @@ struct SoftStopView: View {
             } label: {
                 Image(systemName: isPinned ? "star.fill" : "star")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isPinned ? t.soon : t.fg)
+                    .foregroundStyle(isPinned ? t.warn : t.fg)
                     .contentTransition(.symbolEffect(.replace))
                     .symbolEffect(.bounce, value: isPinned)
                     .frame(width: 44, height: 44)
                     .background(t.surface, in: Circle())
-                    .overlay(Circle().stroke(t.line, lineWidth: 1))
+                    .overlay(Circle().stroke(isPinned ? t.warn.opacity(0.4) : t.line, lineWidth: 1))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isPinned ? "\(stopName) saved. Tap to remove."
@@ -190,10 +190,10 @@ struct SoftStopView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "figure.walk")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(t.soon)
+                            .foregroundStyle(t.meBlue)
                         Text(walkInfo.walk)
                             .font(t.mono(13, weight: .medium))
-                            .foregroundStyle(t.soon)
+                            .foregroundStyle(t.meBlue)
                         Text("·")
                             .font(t.mono(13))
                             .foregroundStyle(t.faint)
@@ -257,7 +257,7 @@ struct SoftStopView: View {
                             .foregroundStyle(t.soon)
                             .frame(width: 32, height: 32)
                             .background(t.soonBg,
-                                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         HStack(spacing: 6) {
                             Text("Bus \(a.busNo)")
                                 .font(t.sans(14, weight: .bold))
@@ -541,12 +541,18 @@ struct SoftStopView: View {
 
                 etaColumns(bus, confidence: conf)
                     .fixedSize(horizontal: true, vertical: false)
+
+                // Disclosure chevron — tells the user this row navigates (opens
+                // the bus). Without it the row read as pure info, not a control.
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(t.faint)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .background(t.surface,
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel("Bus \(bus.no) to \(bus.dest), \(arrivalA11y(bus, conf))")
@@ -571,16 +577,21 @@ struct SoftStopView: View {
     private func etaColumn(_ sec: Int, lead: Bool, confidence: ArrivalConfidence) -> some View {
         let eta = fmtETA(sec)
         let arriving = eta.big == "Arr"
-        // Full-ink numerals always — confidence reads from dot shape + microcopy.
-        let imminent = lead && arriving && confidence == .live
+        // Redesign language: the lead column carries vibrant proximity colour —
+        // green when arriving/imminent, amber for the near window — matching the
+        // map-home arrival chips. Following columns stay ink.
+        let near = sec <= 120
+        let soonish = sec <= 420
+        let col: Color = lead ? (near ? t.soon : (soonish ? t.warn : t.fg)) : t.fg
+        let showLive = lead && arriving && confidence == .live
         return VStack(spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(arriving ? "Arr" : eta.big)
                     .font(t.mono(20, weight: .semibold))
-                    .foregroundStyle(imminent ? t.accent : t.fg)
+                    .foregroundStyle(col)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
-                if imminent {
+                if showLive {
                     Image(systemName: "dot.radiowaves.up.forward")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(t.soon)
@@ -613,8 +624,8 @@ struct SoftStopView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .background(t.surface,
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(PressScaleButtonStyle())
         .accessibilityLabel(expanded ? "Show fewer buses" : "Show all \(total) buses")
@@ -716,7 +727,7 @@ struct SoftStopView: View {
 
     private func emptyArrivals(message: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: "tram.fill")
+            Image(systemName: "bus.fill")
                 .font(.system(size: 22))
                 .foregroundStyle(t.dim)
             Text(message)
@@ -725,6 +736,6 @@ struct SoftStopView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }

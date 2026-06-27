@@ -1,6 +1,0 @@
-- [MRT Phase 2 architecture](project_mrt_phase2.md) — nearest stations list, SoftMrtStationView, MrtMapView, SoftMrtRoute enum, search integration; MrtGeoStation now Hashable
-- [MRT station refinements (2.7.0)](project_mrt_station_refinements.md) — compact nearby card matching SoftNearbyStopCard, circleButton back, redesigned station detail
-- [SoftStopView 2.4.0 restyle](project_stop_view_restyle.md) — top bar + title block + card-per-service redesign; what changed vs what was preserved
-- [SoftBusView 2.4.0 restyle](project_bus_view_restyle.md) — approaching card + next buses card + title block; behavior preserved; share button omitted (no backing action)
-- [SoftSearchView 2.4.0 restyle](project_search_view_restyle.md) — large Search title, vertical recents list, 2x2 Browse grid; mic is decorative Image not Button; Browse tiles wiring
-- [SoftFavouritesView 2.4.0 restyle](project_favourites_view_restyle.md) — large title + Edit toggle, All/Pinned/Nearby segments, FavStopCard (private), service section preserved, + Add stop row

@@ -228,7 +228,7 @@ struct SoftMrtView: View {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.orange)
+                    .foregroundStyle(t.warn)
                 Text("\(count) line\(count == 1 ? "" : "s") disrupted")
                     .font(t.sans(14, weight: .semibold))
                     .foregroundStyle(t.fg)
@@ -247,12 +247,12 @@ struct SoftMrtView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(t.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         } else {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.green.opacity(0.8))
+                    .foregroundStyle(t.soon)
                 Text("All lines running normally")
                     .font(t.sans(13))
                     .foregroundStyle(t.dim)
@@ -380,7 +380,7 @@ struct SoftMrtView: View {
                     Spacer(minLength: 0)
                     Image(systemName: disrupted ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(disrupted ? .orange : Color.green.opacity(0.75))
+                        .foregroundStyle(disrupted ? t.warn : t.soon)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(line.displayName)
@@ -390,7 +390,7 @@ struct SoftMrtView: View {
                         .minimumScaleFactor(0.8)
                     Text(disrupted ? "Disrupted" : "Normal service")
                         .font(t.sans(11))
-                        .foregroundStyle(disrupted ? .orange : t.dim)
+                        .foregroundStyle(disrupted ? t.warn : t.dim)
                         .lineLimit(1)
                 }
             }
@@ -399,7 +399,7 @@ struct SoftMrtView: View {
             .background(t.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(disrupted ? Color.orange.opacity(0.4) : t.line, lineWidth: 1)
+                    .stroke(disrupted ? t.warn.opacity(0.4) : t.line, lineWidth: 1)
             )
         }
         .buttonStyle(PressScaleButtonStyle())

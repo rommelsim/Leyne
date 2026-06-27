@@ -83,10 +83,10 @@ struct SoftRoot: View {
     // presented as a sheet from the Home bell.
     @State private var homeStack: [SoftRoute] = []
     @State private var mrtStack: [SoftMrtRoute] = []
-    @State private var favouritesStack: [SoftRoute] = []
     @State private var showAlerts = false
     @State private var showMrtMap = false
     @State private var showSearch = false
+    @State private var showSettings = false
     @State private var mapHandoff: MapHandoffKind = .none
 
     private var t: Theme { m.t }
@@ -97,12 +97,12 @@ struct SoftRoot: View {
     /// child pushes keep the native slide + swipe-back.
     private var tabView: some View {
         TabView(selection: $tab) {
-            // 1. Bus — map-first home (redesign exploration). Nav bar stays
-            // visible for the title + search + alerts toolbar. The legacy
-            // list-based SoftHomeView is kept in the project for easy revert.
-            Tab("Bus", systemImage: "bus.fill", value: SoftTab.home) {
-                // banner: false — the map home carries its own native ad inside
-                // the sheet, so the gutter banner is suppressed (no collision).
+            // 1. Map — the map-first home. Holds BOTH nearby (bus + MRT) AND the
+            // user's Saved list, swapped via a Nearby|Saved toggle inside the
+            // sheet (Model B). Nav bar stays visible for the title + Settings +
+            // alerts toolbar; the map carries its own native ad in the sheet, so
+            // the gutter banner is suppressed (banner: false).
+            Tab("Map", systemImage: "map.fill", value: SoftTab.home) {
                 navStack($homeStack, hidesNavBar: false, banner: false) {
                     SoftMapHomeView(
                         onOpenStop: { homeStack.append(.stop($0)) },
@@ -112,32 +112,15 @@ struct SoftRoot: View {
                         },
                         onOpenMrtStation: { station in navigateToStation(station) },
                         onOpenAlerts: { showAlerts = true },
-                        onOpenSearch: { showSearch = true }
-                    )
-                }
-            }
-            // 2. MRT — station map + live crowd / service alerts
-            Tab("MRT", systemImage: "tram.fill", value: SoftTab.mrt) {
-                mrtNavStack($mrtStack)
-            }
-            // 3. Saved — pinned stops and favourite services. Nav bar stays
-            // visible so the "Saved" title + Settings/Edit render as native
-            // toolbar items (Liquid Glass), matching the Bus/MRT tabs.
-            Tab("Saved", systemImage: "star.fill", value: SoftTab.favourites) {
-                navStack($favouritesStack, hidesNavBar: false) {
-                    SoftFavouritesView(
-                        onOpenStop: { favouritesStack.append(.stop($0)) },
-                        onOpenBus: { code, svc in
-                            favouritesStack.append(.bus(stopCode: code, svc: svc))
-                        },
                         onOpenSearch: { showSearch = true },
-                        onOpenMrtStation: { station in
-                            // Switch to the MRT tab and push the station detail.
-                            tab = .mrt
-                            mrtStack = [.station(station)]
-                        }
+                        onOpenSettings: { showSettings = true }
                     )
                 }
+            }
+            // 2. Lines — the non-spatial MRT dashboard: line status, disruptions,
+            // crowd density, service news.
+            Tab("Lines", systemImage: "tram.fill", value: SoftTab.mrt) {
+                mrtNavStack($mrtStack)
             }
         }
         .tint(t.meBlue)
@@ -193,6 +176,14 @@ struct SoftRoot: View {
                     .environmentObject(fb)
                     .environmentObject(DataStore.shared)
                 }
+                // Settings used to live in the (now removed) Saved tab. It's
+                // reached from a gear in the Map home toolbar.
+                .sheet(isPresented: $showSettings) {
+                    NavigationStack { SoftSettingsView(onTab: { _ in }) }
+                        .environmentObject(m)
+                        .environmentObject(fb)
+                        .environmentObject(DataStore.shared)
+                }
 
             // Map handoff toast overlays the whole stack.
             VStack {
@@ -209,7 +200,6 @@ struct SoftRoot: View {
         // back, AND the edge-swipe-back gesture all trigger the attempt — they
         // all pop the bound path. The manager's guards decide whether one shows.
         .onChange(of: homeStack) { old, new in handleStackPop(old, new) }
-        .onChange(of: favouritesStack) { old, new in handleStackPop(old, new) }
         // Notification / Spotlight / Live Activity deep links arrive via
         // AppModel.openCard. Route them into the Home tab's stack, then clear so
         // the same trigger fires the next tap. `initial: true` is essential for

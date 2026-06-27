@@ -65,6 +65,9 @@ final class AppOpenAdManager: NSObject {
     private var loadTime: Date = .distantPast
     private var isLoading = false
     private var isShowing = false
+    /// Dedicated opaque window the ad is presented from, so its letterbox area
+    /// never shows the live app (map etc.) behind it. Torn down on dismiss.
+    private var adWindow: UIWindow?
     private var suppressUntil: Date = .distantPast
     private var wasBackgrounded = false
     private let lastShownKey = "leyne.appOpenAd.lastShown"
@@ -191,7 +194,7 @@ final class AppOpenAdManager: NSObject {
             preload()
             return
         }
-        guard let root = Self.rootVC() else { return }
+        guard let scene = Self.activeWindowScene() else { return }
 
         isShowing = true
         // Record BEFORE presenting so a present-failure still counts against the
@@ -200,31 +203,42 @@ final class AppOpenAdManager: NSObject {
         FullScreenAdGate.markShown()
         self.ad = nil   // hand ownership to the present() lifecycle
         aoaLog.notice("App Open present")
-        Self.ensureOpaquePresenter(root)
-        ad.present(from: root)
+        // Present from a dedicated, fully-opaque window. Presenting from the
+        // app's own root (a SwiftUI UIHostingController whose background is
+        // painted by a ZStack, not the host view) let the ad's letterbox area
+        // render see-through onto the live map. An opaque presenter window
+        // guarantees a solid backdrop regardless of the creative's size.
+        let presenter = Self.makePresenterWindow(scene)
+        adWindow = presenter
+        ad.present(from: presenter.rootViewController!)
     }
 
-    static func rootVC() -> UIViewController? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)?
-            .rootViewController
+    /// The foreground-active window scene (falls back to any window scene).
+    static func activeWindowScene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
     }
 
-    /// Full-screen ads composite over the presenting controller. SwiftUI's root
-    /// `UIHostingController` view is transparent (RootView paints its background
-    /// inside a ZStack rather than on the host view), so without an opaque
-    /// backdrop the ad renders see-through onto the live app. Force the
-    /// presenter view and its window opaque before presenting. Idempotent and
-    /// invisible in normal use — the app's own opaque background sits on top.
-    static func ensureOpaquePresenter(_ vc: UIViewController) {
-        vc.view.backgroundColor = .systemBackground
-        vc.view.isOpaque = true
-        if let window = vc.view.window {
-            window.backgroundColor = .systemBackground
-            window.isOpaque = true
-        }
+    /// A throwaway opaque window that sits above the app and hosts the ad's
+    /// presenting controller. Black backdrop — the conventional, neutral
+    /// full-screen-ad surround that never leaks the app behind it.
+    static func makePresenterWindow(_ scene: UIWindowScene) -> UIWindow {
+        let w = UIWindow(windowScene: scene)
+        w.windowLevel = .normal + 5
+        w.backgroundColor = .black
+        w.isOpaque = true
+        let vc = UIViewController()
+        vc.view.backgroundColor = .black
+        w.rootViewController = vc
+        w.makeKeyAndVisible()
+        return w
+    }
+
+    /// Dismiss + release the presenter window once the ad goes away.
+    func tearDownPresenterWindow() {
+        adWindow?.isHidden = true
+        adWindow?.rootViewController = nil
+        adWindow = nil
     }
 }
 
@@ -232,6 +246,7 @@ extension AppOpenAdManager: FullScreenContentDelegate {
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         isShowing = false
         self.ad = nil
+        tearDownPresenterWindow()
         preload()   // get the next one ready
     }
 
@@ -240,6 +255,7 @@ extension AppOpenAdManager: FullScreenContentDelegate {
         aoaLog.error("App Open present failed: \(error.localizedDescription)")
         isShowing = false
         self.ad = nil
+        tearDownPresenterWindow()
         preload()
     }
 }

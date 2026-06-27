@@ -32,6 +32,12 @@ struct OnboardingView: View {
 
     private var stepAnimation: Animation { .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.34) }
 
+    // Onboarding now wears the redesign's indigo identity (was the monochrome
+    // ink accent) so first-run matches the map-home, restyled stop view, and
+    // new app icon. White always reads on indigo, so onAccent is fixed white.
+    private var accent: Color { t.meBlue }
+    private var onAccent: Color { .white }
+
     // A short horizontal slide + fade — a crisp "push". `.move(edge:)` slid a
     // whole screen of content the full screen width each step, which read as
     // heavy and smeared during the cross-fade; a small fixed offset settles in
@@ -104,7 +110,7 @@ struct OnboardingView: View {
                     Text("Back")
                 }
                 .font(t.sans(15))
-                .foregroundStyle(step > 0 && step != 5 ? t.accent : .clear)
+                .foregroundStyle(step > 0 && step != 5 ? accent : .clear)
             }
             .disabled(step == 0 || step == 5)
             Spacer()
@@ -147,7 +153,7 @@ struct OnboardingView: View {
             Text("leyne")
                 .font(t.sans(size, weight: .bold))
                 .foregroundStyle(t.fg)
-            Circle().fill(t.accent)
+            Circle().fill(accent)
                 .frame(width: size * 0.16, height: size * 0.16)
                 .padding(.bottom, size * 0.18)
         }
@@ -219,9 +225,9 @@ struct OnboardingView: View {
             Spacer()
             Image(systemName: "checkmark")
                 .font(.system(size: 38, weight: .bold))
-                .foregroundStyle(t.onAccent)
+                .foregroundStyle(onAccent)
                 .frame(width: 84, height: 84)
-                .background(t.accent, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .background(accent, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
             Text("You’re all set")
                 .font(t.sans(27, weight: .bold))
                 .foregroundStyle(t.fg)
@@ -284,7 +290,7 @@ struct OnboardingView: View {
                 .foregroundStyle(state.granted ? t.fg : t.dim)
             Image(systemName: state.granted ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 16))
-                .foregroundStyle(state.granted ? t.accent : t.faint)
+                .foregroundStyle(state.granted ? accent : t.faint)
         }
         .padding(.horizontal, 15).padding(.vertical, 11)
         .background(t.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -295,14 +301,14 @@ struct OnboardingView: View {
     private func kicker(_ s: String) -> some View {
         Text(s.uppercased())
             .font(t.mono(11, weight: .bold)).tracking(1.2)
-            .foregroundStyle(t.accent)
+            .foregroundStyle(accent)
     }
 
     private func dots(_ index: Int) -> some View {
         HStack(spacing: 6) {
             ForEach(0..<3, id: \.self) { i in
                 Capsule()
-                    .fill(i == index ? t.accent : t.line)
+                    .fill(i == index ? accent : t.line)
                     .frame(width: i == index ? 18 : 6, height: 6)
             }
         }
@@ -338,7 +344,7 @@ struct OnboardingView: View {
                         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(t.line, lineWidth: 1))
                     Image(systemName: icon)
                         .font(.system(size: 34, weight: .regular))
-                        .foregroundStyle(t.accent)
+                        .foregroundStyle(accent)
                 }
                 .frame(width: 76, height: 76)
 
@@ -395,9 +401,9 @@ struct OnboardingView: View {
         Button(action: action) {
             Text(label)
                 .font(t.sans(16, weight: .semibold))
-                .foregroundStyle(t.onAccent)
+                .foregroundStyle(onAccent)
                 .frame(maxWidth: .infinity).padding(.vertical, 15)
-                .background(t.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -436,9 +442,9 @@ private struct OnbVisualLive: View {
                 HStack(spacing: 12) {
                     Image(systemName: r.icon)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(t.accent)
+                        .foregroundStyle(t.meBlue)
                         .frame(width: 40, height: 40)
-                        .background(t.liveBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .background(t.meBlue.opacity(0.14), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     VStack(alignment: .leading, spacing: 1) {
                         Text(r.title).font(t.sans(14, weight: .semibold)).foregroundStyle(t.fg)
                         Text(r.desc).font(t.mono(11)).foregroundStyle(t.dim)

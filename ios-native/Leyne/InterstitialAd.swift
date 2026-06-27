@@ -66,6 +66,9 @@ final class InterstitialAdManager: NSObject {
     private var ad: InterstitialAd?
     private var isLoading = false
     private var isShowing = false
+    /// Opaque presenter window (shared pattern with App Open) — keeps the ad's
+    /// surround solid so it never leaks the live app behind it.
+    private var adWindow: UIWindow?
     /// In-memory count of qualifying exits since the last shown interstitial.
     /// Not persisted — a fresh launch should let the user settle in before the
     /// first interstitial regardless of last session's count.
@@ -141,7 +144,7 @@ final class InterstitialAdManager: NSObject {
         guard FullScreenAdGate.gapElapsed() else { preload(); return }
 
         guard let ad else { preload(); return }
-        guard let root = AppOpenAdManager.rootVC() else { return }
+        guard let scene = AppOpenAdManager.activeWindowScene() else { return }
 
         isShowing = true
         // Record BEFORE presenting so a present-failure still counts against the
@@ -152,8 +155,15 @@ final class InterstitialAdManager: NSObject {
         FullScreenAdGate.markShown()
         self.ad = nil   // hand ownership to the present() lifecycle
         interLog.notice("Interstitial present")
-        AppOpenAdManager.ensureOpaquePresenter(root)
-        ad.present(from: root)
+        let presenter = AppOpenAdManager.makePresenterWindow(scene)
+        adWindow = presenter
+        ad.present(from: presenter.rootViewController!)
+    }
+
+    private func tearDownPresenterWindow() {
+        adWindow?.isHidden = true
+        adWindow?.rootViewController = nil
+        adWindow = nil
     }
 }
 
@@ -161,6 +171,7 @@ extension InterstitialAdManager: FullScreenContentDelegate {
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         isShowing = false
         self.ad = nil
+        tearDownPresenterWindow()
         preload()   // get the next one ready
     }
 
@@ -169,6 +180,7 @@ extension InterstitialAdManager: FullScreenContentDelegate {
         interLog.error("Interstitial present failed: \(error.localizedDescription)")
         isShowing = false
         self.ad = nil
+        tearDownPresenterWindow()
         preload()
     }
 }

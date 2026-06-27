@@ -124,7 +124,9 @@ struct Theme: Equatable {
         faint: Color(hex: "FFFFFF").opacity(0.35),
         line: Color(hex: "FFFFFF").opacity(0.1),
         lineHi: Color(hex: "FFFFFF").opacity(0.16),
-        accent: Color(hex: "FFFFFF"),
+        // Brand/interactive accent is the redesign indigo (was mono white). One
+        // token remap cascades indigo to every `t.accent` call site app-wide.
+        accent: Color(hex: "6E6CF0"),
         live: Color(hex: "22C55E"),
         liveBg: Color(hex: "22C55E").opacity(0.16),
         // Vibrant semantic status (redesign): arriving / live = green, warning =
@@ -134,7 +136,9 @@ struct Theme: Equatable {
         warnBg: Color(hex: "F59E0B").opacity(0.16),
         crit: Color(hex: "FF453A"),
         critBg: Color(hex: "FF453A").opacity(0.16),
-        onAccent: Color(hex: "111111"),
+        // White reads on the indigo accent in both modes (was near-black, which
+        // was correct only when the accent was white).
+        onAccent: Color(hex: "FFFFFF"),
         soon: Color(hex: "22C55E"),
         soonBg: Color(hex: "22C55E").opacity(0.16),
         mid: Color(hex: "FFFFFF").opacity(0.55),
@@ -159,7 +163,8 @@ struct Theme: Equatable {
         faint: Color(hex: "111111").opacity(0.35),
         line: Color(hex: "111111").opacity(0.10),
         lineHi: Color(hex: "111111").opacity(0.16),
-        accent: Color(hex: "111111"),
+        // Brand/interactive accent = redesign indigo (was mono black ink).
+        accent: Color(hex: "5E5CE6"),
         live: Color(hex: "16A34A"),
         liveBg: Color(hex: "16A34A").opacity(0.12),
         // Vibrant semantic status (see dark mode) — deeper hues for contrast on
