@@ -77,6 +77,7 @@ dependencies:
   home_widget: ^0.6.0
   firebase_core: ^4.10.0
   firebase_analytics: ^12.4.2
+  material_symbols_icons: ^4.2951.0
 
 dev_dependencies:
   flutter_test:
@@ -104,6 +105,13 @@ flutter:
     - assets/app_icon.png
     - assets/mrt_stations_geo.json
     - assets/mrt_system_map.png
+
+  fonts:
+    # Hanken Grotesk — the typeface of the SG Transit redesign (variable
+    # weight font; weights 400–900 are exercised across the redesign screens).
+    - family: HankenGrotesk
+      fonts:
+        - asset: assets/fonts/HankenGrotesk.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

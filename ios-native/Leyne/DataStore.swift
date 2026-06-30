@@ -438,6 +438,28 @@ final class DataStore: ObservableObject {
         return []
     }
 
+    /// Re-bake only the `services` snapshot on the already-ranked nearby stops,
+    /// leaving the haversine ranking untouched — so newly-loaded arrivals
+    /// propagate into `NearbyStop.services` without a full re-rank. Mirrors
+    /// Flutter's `_refreshNearbyServices` (`data_store.dart`).
+    ///
+    /// Why this is needed: `updateNearby` bakes each stop's `services` at the
+    /// moment it runs, but with `distanceFilter = 50 m` a stationary user fires
+    /// `updateNearby` exactly once — before any arrivals have loaded — so every
+    /// snapshot starts empty and never refreshes on its own. Production screens
+    /// dodge this by reading `AppModel.liveServices` fresh each render, but the
+    /// redesign's `rdStop(_:)` reads `NearbyStop.services` directly, so without
+    /// this re-bake it shows "no live arrivals" forever. Cheap (O(nearby), no
+    /// sort) — safe to run on every arrival poll.
+    private func refreshNearbyServices() {
+        guard !nearby.isEmpty else { return }
+        nearby = nearby.map { n in
+            var x = n
+            x.services = servicesFor(n.stopCode)
+            return x
+        }
+    }
+
     /// `silent` warms data without publishing a `.loading` state (used by
     /// prefetch so entering Nearby doesn't burst-republish the whole list).
     func ensureArrivals(stop code: String, force: Bool = false, silent: Bool = false) {
@@ -468,6 +490,9 @@ final class DataStore: ObservableObject {
                 }
             }
             self.inflight.remove(code)
+            // Propagate the freshly-loaded arrivals into the nearby rows'
+            // `services` snapshots (the redesign reads those directly).
+            if self.lastLoc != nil { self.refreshNearbyServices() }
         }
     }
 
@@ -494,6 +519,7 @@ final class DataStore: ObservableObject {
                     (error as? LTAError)?.errorDescription ?? "Couldn’t reach LTA")
             }
         }
+        if lastLoc != nil { refreshNearbyServices() }
     }
 
     /// Warm arrivals for ALL visible nearby stops so every card shows its live

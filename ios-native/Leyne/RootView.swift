@@ -15,6 +15,17 @@ struct RootView: View {
     private var t: Theme { m.t }
 
     var body: some View {
+        // SG Transit redesign (Material 3 Expressive) — self-contained flow with
+        // its own launch / onboarding / app phases and theming. Set
+        // `RedesignFlags.enabled = false` to restore the production Soft UI below.
+        if RedesignFlags.enabled {
+            RedesignRoot()
+        } else {
+            production
+        }
+    }
+
+    private var production: some View {
         ZStack {
             t.bg.ignoresSafeArea()
 

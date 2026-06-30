@@ -22,6 +22,7 @@ import 'data/lta_config.dart';
 import 'data/mrt_geo.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/onboarding_screen.dart';
+import 'screens/redesign/redesign_app.dart';
 import 'screens/v2/soft_bus_screen.dart';
 import 'screens/v2/soft_root.dart';
 import 'screens/v2/soft_stop_screen.dart';
@@ -217,7 +218,11 @@ void main() async {
 }
 
 class LyneApp extends StatelessWidget {
-  const LyneApp({super.key});
+  const LyneApp({super.key, this.home});
+
+  /// Overrides the root screen. Defaults to the SG Transit redesign
+  /// ([RedesignRoot]); tests pass [LegacyAppRoot] to exercise the prior shell.
+  final Widget? home;
 
   @override
   Widget build(BuildContext context) {
@@ -243,7 +248,11 @@ class LyneApp extends StatelessWidget {
           supportedLocales: AppLocalizations.supportedLocales,
           navigatorKey: _navigatorKey,
           scaffoldMessengerKey: lyneMessengerKey,
-          home: const _AppRoot(),
+          // SG Transit redesign (Material 3 Expressive) — self-contained flow
+          // with its own launch / onboarding / app phases and theming. To
+          // restore the previous production flow, pass `home: LegacyAppRoot()`
+          // (kept below for that purpose; it is the default for tests).
+          home: home ?? const RedesignRoot(),
         );
       },
     );
@@ -254,8 +263,12 @@ class LyneApp extends StatelessWidget {
 /// persisted state. Listens to AppModel so the "Show again" entry in
 /// Settings can re-enter onboarding mid-session, and so dismissing What's
 /// New drops straight through to Home.
-class _AppRoot extends StatelessWidget {
-  const _AppRoot();
+///
+/// Retained as the legacy/production shell: the redesign is the default `home:`
+/// on this branch, but `LyneApp(home: LegacyAppRoot())` restores this flow (and
+/// the shell regression tests use it).
+class LegacyAppRoot extends StatelessWidget {
+  const LegacyAppRoot({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -28,7 +28,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
-    await tester.pumpWidget(const LyneApp());
+    await tester.pumpWidget(const LyneApp(home: LegacyAppRoot()));
     await tester.pump(); // initial frame
 
     // All five destinations are present in the bottom navigation
@@ -72,7 +72,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
-    await tester.pumpWidget(const LyneApp());
+    await tester.pumpWidget(const LyneApp(home: LegacyAppRoot()));
     await tester.pump(); // initial frame
     expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
 
@@ -112,7 +112,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
-    await tester.pumpWidget(const LyneApp());
+    await tester.pumpWidget(const LyneApp(home: LegacyAppRoot()));
     await tester.pump(); // initial frame
     expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
 
@@ -153,7 +153,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
-    await tester.pumpWidget(const LyneApp());
+    await tester.pumpWidget(const LyneApp(home: LegacyAppRoot()));
     await tester.pump(); // initial frame
     expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
 
@@ -224,7 +224,7 @@ void main() {
       },
     );
 
-    await tester.pumpWidget(const LyneApp());
+    await tester.pumpWidget(const LyneApp(home: LegacyAppRoot()));
     await tester.pump(); // initial frame
     expect(find.text('No stops yet'), findsOneWidget); // Home (Bus) tab
 
