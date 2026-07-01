@@ -2,11 +2,26 @@
 // (variable fill/weight), occupancy → icon/label/colour resolution, and a few
 // small reused chip/circle-button builders.
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'redesign_data.dart';
 import 'redesign_theme.dart';
+
+/// Wraps a tappable child in a Material ink surface so it shows the M3 ripple /
+/// state layer. Use on the flat grouped-list rows (which sit on a transparent
+/// surface) — the redesign was built with bare GestureDetectors and had no
+/// ripple feedback anywhere, the most un-Material thing about it.
+Widget rdInk({
+  required VoidCallback? onTap,
+  required Widget child,
+  BorderRadius? borderRadius,
+}) {
+  return Material(
+    color: Colors.transparent,
+    child: InkWell(onTap: onTap, borderRadius: borderRadius, child: child),
+  );
+}
 
 /// Material Symbols Rounded icon with the variable-font axes the design uses.
 class RdIcon extends StatelessWidget {
@@ -79,6 +94,7 @@ class RdCircleButton extends StatelessWidget {
     super.key,
     required this.icon,
     required this.onTap,
+    this.label,
     this.bordered = true,
     this.iconColor,
     this.bg,
@@ -89,6 +105,7 @@ class RdCircleButton extends StatelessWidget {
 
   final IconData icon;
   final VoidCallback onTap;
+  final String? label; // TalkBack label for this icon-only control
   final bool bordered;
   final Color? iconColor;
   final Color? bg;
@@ -99,19 +116,26 @@ class RdCircleButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RdTheme.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: bg,
-          shape: BoxShape.circle,
-          border: bordered ? Border.all(color: t.outlineVariant) : null,
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: bg ?? Colors.transparent,
+        shape: bordered
+            ? CircleBorder(side: BorderSide(color: t.outlineVariant))
+            : const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkResponse(
+          onTap: onTap,
+          radius: size / 2 + 4,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Center(
+              child: RdIcon(icon, size: iconSize, color: iconColor ?? t.onSurface, fill: fill),
+            ),
+          ),
         ),
-        alignment: Alignment.center,
-        child: RdIcon(icon, size: iconSize, color: iconColor ?? t.onSurface, fill: fill),
       ),
     );
   }

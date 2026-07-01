@@ -4,7 +4,7 @@
 
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../data/data_store.dart';
@@ -487,84 +487,44 @@ class RdBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RdTheme.of(context);
-    final onMap = c.screen == 'map';
-    return Container(
-      decoration: BoxDecoration(
-        color: t.surface,
-        border: Border(top: BorderSide(color: t.outlineVariant)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(0, 7, 0, 5),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _NavItem(
-                label: 'Nearby',
-                icon: Symbols.near_me,
-                fill: 1,
-                active: onMap,
-                onTap: c.toMap,
-              ),
-              _NavItem(
-                label: 'Saved',
-                icon: Symbols.bookmark,
-                fill: 0,
-                active: false,
-                onTap: () => c.go('saved'),
-              ),
-            ],
+    final selected = c.screen == 'saved' ? 1 : 0;
+    // Real M3 NavigationBar — ripple, active-indicator pill and TalkBack for
+    // free — themed to the redesign tokens so it matches on light and dark
+    // (mirrors the production navigationBarTheme in theme.dart).
+    return SafeArea(
+      top: false,
+      child: NavigationBarTheme(
+        data: NavigationBarThemeData(
+          backgroundColor: t.surface,
+          surfaceTintColor: Colors.transparent,
+          indicatorColor: t.primaryContainer,
+          iconTheme: WidgetStateProperty.resolveWith(
+            (states) => IconThemeData(
+              size: 24,
+              color: states.contains(WidgetState.selected)
+                  ? t.onPrimaryContainer
+                  : t.onVariant,
+            ),
+          ),
+          labelTextStyle: WidgetStateProperty.resolveWith(
+            (states) => rdText(
+              size: 11,
+              weight: states.contains(WidgetState.selected)
+                  ? FontWeight.w700
+                  : FontWeight.w500,
+              color: states.contains(WidgetState.selected) ? t.onSurface : t.onVariant,
+            ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  const _NavItem({
-    required this.label,
-    required this.icon,
-    required this.fill,
-    required this.active,
-    required this.onTap,
-  });
-  final String label;
-  final IconData icon;
-  final double fill;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RdTheme.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 56,
-            height: 28,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: active ? t.primaryContainer : const Color(0x00000000),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: RdIcon(icon,
-                size: active ? 20 : 21,
-                color: active ? t.onPrimaryContainer : t.onVariant,
-                fill: fill),
-          ),
-          const SizedBox(height: 2),
-          Text(label,
-              style: rdText(
-                  size: 9.5,
-                  weight: active ? FontWeight.w700 : FontWeight.w500,
-                  color: active ? t.onSurface : t.onVariant)),
-        ],
+        child: NavigationBar(
+          height: 64,
+          selectedIndex: selected,
+          onDestinationSelected: (i) => i == 0 ? c.toMap() : c.go('saved'),
+          destinations: const [
+            NavigationDestination(icon: Icon(Symbols.near_me), label: 'Nearby'),
+            NavigationDestination(icon: Icon(Symbols.bookmark), label: 'Saved'),
+          ],
+        ),
       ),
     );
   }
