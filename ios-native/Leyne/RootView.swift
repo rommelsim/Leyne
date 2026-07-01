@@ -18,8 +18,10 @@ struct RootView: View {
         ZStack {
             t.bg.ignoresSafeArea()
 
-            // ── Main Soft UI ────────────────────────────────
-            SoftRoot()
+            // ── Main UI — WhereSia "departure board" design ──
+            // (design-remake branch: the WhereSia layer replaces the previous
+            // "Soft" UI as the app root; swap back to SoftRoot() to revert.)
+            WSRoot()
 
             // ── Onboarding ──────────────────────────────────
             if m.showOnboarding {
