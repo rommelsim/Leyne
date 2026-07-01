@@ -24,6 +24,7 @@ struct RDRouteTimeline: View {
     @ObservedObject var m: RedesignModel
     let t: RDTokens
     let route: RouteInfo
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
     var body: some View {
@@ -165,7 +166,10 @@ struct RDRouteTimeline: View {
                 }
             }
         }
-        .onAppear { withAnimation(.easeOut(duration: 0.9).repeatForever(autoreverses: false)) { pulse = true } }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 0.9).repeatForever(autoreverses: false)) { pulse = true }
+        }
     }
 
     /// True when the stop sits at an MRT/LRT interchange — the only normal stops

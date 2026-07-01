@@ -24,6 +24,7 @@ struct RDSearchOverlay: View {
             HStack(spacing: 11) {
                 Button(action: { m.closeSearch() }) { RDSym("arrow.left", size: 23, color: t.onSurface) }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close search")
                 TextField("Stops · buses · MRT · postal · places", text: $query)
                     .focused($focused)
                     .font(rdFont(16, .medium))

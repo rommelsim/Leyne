@@ -48,12 +48,14 @@ struct RDStopScreen: View {
     private func header(_ stop: RDStop) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                RDCircleButton(symbol: "arrow.left", bordered: false, iconSize: 23, t: t) { m.back() }
+                RDCircleButton(symbol: "arrow.left", label: "Back", bordered: false, iconSize: 23, t: t) { m.back() }
                 Spacer()
                 RDSym(m.stopSaved ? "bookmark.fill" : "bookmark", size: 22,
                       color: m.stopSaved ? t.primary : t.onVariant)
                     .frame(width: 42, height: 42).contentShape(Circle())
                     .onTapGesture { m.toggleSaveStop() }
+                    .accessibilityLabel(m.stopSaved ? "Saved" : "Save stop")
+                    .accessibilityAddTraits(.isButton)
             }
             .padding(.horizontal, 10).padding(.top, 8)
             VStack(alignment: .leading, spacing: 3) {
@@ -112,6 +114,7 @@ struct RDStationScreen: View {
 
     // Nearest bus stop to THIS station (for the transfer card) — resolved once
     // on appear so we don't haversine the full ~5k-stop index every render.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var nearStopCode: String? = nil
     @State private var nearStopName: String = ""
     @State private var nearStopWalk: Int = 0
@@ -159,7 +162,7 @@ struct RDStationScreen: View {
         let s = station
         return VStack(spacing: 0) {
             HStack {
-                RDCircleButton(symbol: "arrow.left", iconColor: t.onSurface, iconSize: 23, t: t) { m.back() }
+                RDCircleButton(symbol: "arrow.left", label: "Back", iconColor: t.onSurface, iconSize: 23, t: t) { m.back() }
                 Spacer()
             }
             .padding(.horizontal, 10).padding(.top, 8)
@@ -215,7 +218,9 @@ struct RDStationScreen: View {
             store.refreshLiftMaintenanceIfStale()
             for line in lines { store.refreshCrowd(line: line) }
             computeNearestStop()
-            withAnimation(.easeOut(duration: 1.5).repeatForever(autoreverses: false)) { stripPulse = true }
+            if !reduceMotion {
+                withAnimation(.easeOut(duration: 1.5).repeatForever(autoreverses: false)) { stripPulse = true }
+            }
         }
     }
 
@@ -565,9 +570,10 @@ struct RDRouteScreen: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                RDCircleButton(symbol: "arrow.left", iconSize: 23, t: t) { m.back() }
+                RDCircleButton(symbol: "arrow.left", label: "Back", iconSize: 23, t: t) { m.back() }
                 Spacer()
                 RDCircleButton(symbol: m.routeSaved ? "bookmark.fill" : "bookmark",
+                               label: m.routeSaved ? "Saved" : "Save route",
                                iconColor: m.routeSaved ? t.primary : t.onVariant, iconSize: 22, t: t) { m.saveRoute() }
             }
             HStack(spacing: 7) {

@@ -12,7 +12,7 @@ private struct RDBackHeader: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            RDCircleButton(symbol: "arrow.left", bordered: false, iconSize: 24, t: t, action: onBack)
+            RDCircleButton(symbol: "arrow.left", label: "Back", bordered: false, iconSize: 24, t: t, action: onBack)
             VStack(alignment: .leading, spacing: 0) {
                 Text(title).font(rdFont(subtitle == nil ? 24 : 22, .heavy)).foregroundStyle(t.onSurface)
                 if let subtitle {
@@ -337,7 +337,7 @@ struct RDSwitchScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                RDCircleButton(symbol: "arrow.left", bordered: false, iconSize: 24, t: t) { m.back() }
+                RDCircleButton(symbol: "arrow.left", label: "Back", bordered: false, iconSize: 24, t: t) { m.back() }
                 Text("Stops nearby").font(rdFont(21, .heavy)).foregroundStyle(t.onSurface)
                 Spacer()
             }
@@ -356,28 +356,33 @@ struct RDSwitchScreen: View {
             .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 8)
 
             ScrollView {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     nearbyLabel("bus.fill", "BUS STOPS NEARBY")
-                    ForEach(m.otherStops, id: \.index) { o in
+                    ForEach(Array(m.otherStops.enumerated()), id: \.element.index) { idx, o in
+                        if idx > 0 { rowDivider }
                         let next = o.stop.arrivals.first
-                        tile(iconBg: t.primaryContainer, iconColor: t.onPrimaryContainer, symbol: "bus.fill",
-                             title: o.stop.name, code: nil, codeBg: nil, codeFg: nil,
-                             subtitle: next != nil ? "\(o.stop.distShort) · next \(next!.route)" : o.stop.distShort,
-                             topMin: next?.min ?? "—", unit: "next bus") { m.selectStop(o.index) }
+                        row(iconBg: t.primaryContainer, iconColor: t.onPrimaryContainer, symbol: "bus.fill",
+                            title: o.stop.name, code: nil, codeColor: nil,
+                            subtitle: next != nil ? "\(o.stop.distShort) · next \(next!.route)" : o.stop.distShort,
+                            value: next?.min ?? "—", unit: "min") { m.selectStop(o.index) }
                     }
-                    nearbyLabel("tram.fill", "MRT STATIONS NEARBY")
                     if let here = loc.location {
-                        ForEach(MrtGeo.nearestStations(to: here.coordinate, limit: 4), id: \.station.id) { item in
-                            let s = item.station
-                            let code = s.codes.first ?? ""
-                            tile(iconBg: mrtLineColorFor(code), iconColor: rdMrtBadgeFg(code), symbol: "tram.fill",
-                                 title: s.name, code: code, codeBg: mrtLineColorFor(code), codeFg: rdMrtBadgeFg(code),
-                                 subtitle: s.codes.joined(separator: " · "),
-                                 topMin: "\(item.walkMin)", unit: "walk") { m.openStation(named: s.name) }
+                        let stations = MrtGeo.nearestStations(to: here.coordinate, limit: 4)
+                        if !stations.isEmpty {
+                            nearbyLabel("tram.fill", "MRT STATIONS NEARBY")
+                            ForEach(Array(stations.enumerated()), id: \.element.station.id) { idx, item in
+                                if idx > 0 { rowDivider }
+                                let s = item.station
+                                let code = s.codes.first ?? ""
+                                row(iconBg: mrtLineColorFor(code), iconColor: rdMrtBadgeFg(code), symbol: "tram.fill",
+                                    title: s.name, code: code, codeColor: mrtLineColorFor(code),
+                                    subtitle: s.codes.joined(separator: " · "),
+                                    value: "\(item.walkMin)", unit: "min walk") { m.openStation(named: s.name) }
+                            }
                         }
                     }
                 }
-                .padding(.top, 4).padding(.bottom, 16)
+                .padding(.bottom, 16)
             }
         }
         .background(t.surface)
@@ -392,38 +397,40 @@ struct RDSwitchScreen: View {
         .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 8)
     }
 
-    private func tile(iconBg: Color, iconColor: Color, symbol: String, title: String,
-                      code: String?, codeBg: Color?, codeFg: Color?, subtitle: String,
-                      topMin: String, unit: String, tap: @escaping () -> Void) -> some View {
+    private var rowDivider: some View {
+        Rectangle().fill(t.outlineVariant).frame(height: 1).padding(.leading, 72)
+    }
+
+    /// Flat grouped-list row (matches Home/Stop) — no filled card; the value on
+    /// the right is neutral (blue is reserved for interactive controls).
+    private func row(iconBg: Color, iconColor: Color, symbol: String, title: String,
+                     code: String?, codeColor: Color?, subtitle: String,
+                     value: String, unit: String, tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
-            HStack(spacing: 12) {
-                RDSym(symbol, size: 20, color: iconColor)
+            HStack(spacing: 14) {
+                RDSym(symbol, size: 18, color: iconColor)
                     .frame(width: 40, height: 40)
-                    .background(iconBg).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
+                    .background(iconBg).clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(title).font(rdFont(13.5, .bold)).foregroundStyle(t.onSurface).lineLimit(1)
-                        if let code, let codeBg, let codeFg {
-                            Text(code).font(rdFont(9, .heavy)).foregroundStyle(codeFg)
-                                .padding(.horizontal, 7).padding(.vertical, 1)
-                                .background(codeBg).clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        Text(title).font(rdFont(15.5, .semibold)).foregroundStyle(t.onSurface).lineLimit(1)
+                        if let code, let codeColor {
+                            Text(code).font(rdFont(9, .heavy)).foregroundStyle(rdMrtBadgeFg(code))
+                                .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                .background(codeColor).clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                         }
                     }
-                    Text(subtitle).font(rdFont(11.5, .medium)).foregroundStyle(t.onVariant)
+                    Text(subtitle).font(rdFont(12, .medium)).foregroundStyle(t.onVariant).lineLimit(1)
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text(topMin).font(rdFont(18, .heavy)).foregroundStyle(t.primary)
-                        Text(" min").font(rdFont(10, .semibold)).foregroundStyle(t.onVariant)
-                    }
-                    Text(unit).font(rdFont(9.5, .medium)).foregroundStyle(t.onVariant)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(value).font(rdFont(18, .heavy)).foregroundStyle(t.onSurface)
+                    Text(unit).font(rdFont(10, .medium)).foregroundStyle(t.onVariant)
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 13)
-            .background(t.scHigh).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 18).padding(.vertical, 14)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 16).padding(.bottom, 10)
     }
 }

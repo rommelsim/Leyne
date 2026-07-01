@@ -74,9 +74,9 @@ struct RDHomeScreen: View {
                 // Lighter, toolbar-style actions — plain SF Symbols, no circle
                 // chrome (the bordered circles read as heavy stacked together).
                 HStack(spacing: 6) {
-                    RDCircleButton(symbol: "magnifyingglass", bordered: false, iconColor: t.onVariant, t: t) { m.go("switch") }
+                    RDCircleButton(symbol: "magnifyingglass", label: "Search stops, buses and stations", bordered: false, iconColor: t.onVariant, t: t) { m.go("switch") }
                     saveButton
-                    RDCircleButton(symbol: "person.crop.circle", bordered: false, iconColor: t.onVariant, t: t) { m.go("settings") }
+                    RDCircleButton(symbol: "person.crop.circle", label: "Settings", bordered: false, iconColor: t.onVariant, t: t) { m.go("settings") }
                 }
                 .padding(.top, 4)
             }
@@ -112,6 +112,9 @@ struct RDHomeScreen: View {
             .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
                 m.notify("Opening saved stops"); m.go("saved")
             })
+            .accessibilityLabel(m.stopSaved ? "Saved" : "Save stop")
+            .accessibilityHint("Double-tap and hold to open saved")
+            .accessibilityAddTraits(.isButton)
     }
 
     // MARK: sheet

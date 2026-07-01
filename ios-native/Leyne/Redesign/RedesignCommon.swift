@@ -55,6 +55,7 @@ struct RDDot: View {
 /// Circular outline icon button used in detail-screen headers.
 struct RDCircleButton: View {
     let symbol: String
+    var label: String? = nil          // VoiceOver label for this icon-only control
     var bordered: Bool = true
     var iconColor: Color? = nil
     var bg: Color? = nil
@@ -76,6 +77,7 @@ struct RDCircleButton: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label ?? "")
     }
 }
 
