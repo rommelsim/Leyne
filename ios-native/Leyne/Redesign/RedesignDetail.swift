@@ -398,15 +398,48 @@ struct RDStationScreen: View {
                 }
                 .onAppear { if let curID { proxy.scrollTo(curID, anchor: .center) } }
             }
-            .padding(.bottom, 12)
+            .padding(.bottom, 8)
+            if store.crowdByLine[line] != nil {
+                HStack(spacing: 12) {
+                    Text("CROWD").font(rdFont(9, .heavy)).kerning(0.4).foregroundStyle(t.onVariant)
+                    stripLegend(t.amber, "Some")
+                    stripLegend(t.mrt, "Busy")
+                    Spacer()
+                }
+                .padding(.horizontal, 13).padding(.bottom, 11)
+            }
         }
         .background(t.scLow)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(t.outlineVariant, lineWidth: 1))
     }
 
+    private func stripLegend(_ c: Color, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(c).frame(width: 7, height: 7)
+            Text(label).font(rdFont(9.5, .medium)).foregroundStyle(t.onVariant)
+        }
+    }
+
+    /// Live crowd level for a station on this line (real, from PCDRealTime), so
+    /// the strip doubles as a per-station crowd heatmap.
+    private func stripCrowd(_ st: MrtGeoStation, line: MRTLine) -> CrowdLevel? {
+        guard let list = store.crowdByLine[line] else { return nil }
+        for c in st.codes { if let sc = list.first(where: { $0.code == c }) { return sc.level } }
+        return nil
+    }
+
     private func stripNode(_ st: MrtGeoStation, line: MRTLine, isCur: Bool, first: Bool, last: Bool) -> some View {
-        VStack(spacing: 6) {
+        let crowd = stripCrowd(st, line: line)
+        // Keep the line's identity colour for quiet stations; only busy ones
+        // stand out (amber/red) — that's the actionable signal.
+        let dotFill: Color = {
+            if isCur { return line.color }
+            if crowd == .moderate { return t.amber }
+            if crowd == .high { return t.mrt }
+            return line.color.opacity(0.6)
+        }()
+        return VStack(spacing: 6) {
             HStack(spacing: 0) {
                 Rectangle().fill(first ? Color.clear : line.color.opacity(0.5))
                     .frame(height: 3).frame(maxWidth: .infinity)
@@ -415,7 +448,7 @@ struct RDStationScreen: View {
                         Circle().fill(line.color.opacity(stripPulse ? 0 : 0.35))
                             .frame(width: stripPulse ? 30 : 15, height: stripPulse ? 30 : 15)
                     }
-                    Circle().fill(isCur ? line.color : line.color.opacity(0.6))
+                    Circle().fill(dotFill)
                         .frame(width: isCur ? 14 : 9, height: isCur ? 14 : 9)
                         .overlay(Circle().stroke(t.scLow, lineWidth: isCur ? 3 : 0))
                 }

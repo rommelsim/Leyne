@@ -2,6 +2,7 @@
 // Live Update glass tracking card, and the Toast snackbar.
 
 import SwiftUI
+import MapKit
 
 // =================================================================== SEARCH
 
@@ -10,6 +11,12 @@ struct RDSearchOverlay: View {
     let t: RDTokens
     @EnvironmentObject private var store: DataStore
     @State private var query = ""
+    // Building/place hits (MapKit) + a "focused location" (a tapped place or a
+    // geocoded postal code) whose nearby stops/stations we then list.
+    @State private var places: [MKMapItem] = []
+    @State private var focusTitle: String? = nil
+    @State private var focusLat: Double = 0
+    @State private var focusLon: Double = 0
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -17,7 +24,7 @@ struct RDSearchOverlay: View {
             HStack(spacing: 11) {
                 Button(action: { m.closeSearch() }) { RDSym("arrow.left", size: 23, color: t.onSurface) }
                     .buttonStyle(.plain)
-                TextField("Search stops, buses, MRT", text: $query)
+                TextField("Stops · buses · MRT · postal · places", text: $query)
                     .focused($focused)
                     .font(rdFont(16, .medium))
                     .foregroundStyle(t.onSurface)
@@ -25,8 +32,10 @@ struct RDSearchOverlay: View {
                     .textInputAutocapitalization(.never)
                     .submitLabel(.search)
                 if !query.isEmpty {
-                    Button(action: { query = "" }) { RDSym("xmark", size: 22, color: t.onVariant) }
-                        .buttonStyle(.plain)
+                    Button(action: { query = ""; places = []; focusTitle = nil }) {
+                        RDSym("xmark", size: 22, color: t.onVariant)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 14).frame(height: 54)
@@ -43,6 +52,41 @@ struct RDSearchOverlay: View {
         }
         .background(t.surface.ignoresSafeArea())
         .onAppear { focused = true }
+        .task(id: query) { await runSearch() }
+    }
+
+    /// A 6-digit postal code geocodes straight to a focused location; anything
+    /// else runs a MapKit place/building search (biased to Singapore). Cancels
+    /// automatically as the query changes (via `.task(id:)`), so it debounces.
+    private func runSearch() async {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        focusTitle = nil
+        guard q.count >= 3 else { places = []; return }
+        if q.count == 6, q.allSatisfy(\.isNumber) {
+            places = []
+            if let c = try? await CLGeocoder().geocodeAddressString("Singapore \(q)").first?.location?.coordinate {
+                focusTitle = "Postal \(q)"; focusLat = c.latitude; focusLon = c.longitude
+            }
+            return
+        }
+        let req = MKLocalSearch.Request()
+        req.naturalLanguageQuery = q
+        req.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 1.3521, longitude: 103.8198),
+                                        span: MKCoordinateSpan(latitudeDelta: 0.7, longitudeDelta: 0.7))
+        if let resp = try? await MKLocalSearch(request: req).start() {
+            places = Array(resp.mapItems.prefix(6))
+        } else {
+            places = []
+        }
+    }
+
+    /// Bus stops within ~700 m of a coordinate, nearest first.
+    private func stopsNear(_ lat: Double, _ lon: Double, limit: Int = 8) -> [LTABusStop] {
+        store.stopByCode.values
+            .map { ($0, haversine(lat, lon, $0.Latitude, $0.Longitude)) }
+            .filter { $0.1 <= 700 }
+            .sorted { $0.1 < $1.1 }
+            .prefix(limit).map { $0.0 }
     }
 
     private var hint: some View {
@@ -55,34 +99,91 @@ struct RDSearchOverlay: View {
     }
 
     @ViewBuilder private func results(_ q: String) -> some View {
-        let services = store.searchServices(q)
-        let stations = MrtGeo.stations(matching: q)
-        let stops = store.searchStops(q)
-        if services.isEmpty && stations.isEmpty && stops.isEmpty {
-            Text("No matches for “\(q)”")
-                .font(rdFont(13, .medium)).foregroundStyle(t.onVariant)
-                .frame(maxWidth: .infinity).padding(.top, 50)
+        if let title = focusTitle {
+            nearResults(title: title, lat: focusLat, lon: focusLon)
         } else {
-            if !services.isEmpty {
-                label("BUSES")
-                ForEach(services.prefix(6), id: \.ServiceNo) { svc in
-                    resultRow(t.primaryContainer, t.onPrimaryContainer, "bus.fill",
-                              "Bus ", svc.ServiceNo, "Tap to see the route") { openBus(svc.ServiceNo) }
+            let services = store.searchServices(q)
+            let stations = MrtGeo.stations(matching: q)
+            let stops = store.searchStops(q)
+            if services.isEmpty && stations.isEmpty && stops.isEmpty && places.isEmpty {
+                Text("No matches for “\(q)”")
+                    .font(rdFont(13, .medium)).foregroundStyle(t.onVariant)
+                    .frame(maxWidth: .infinity).padding(.top, 50)
+            } else {
+                if !services.isEmpty {
+                    label("BUSES")
+                    ForEach(services.prefix(6), id: \.ServiceNo) { svc in
+                        resultRow(t.primaryContainer, t.onPrimaryContainer, "bus.fill",
+                                  "Bus ", svc.ServiceNo, "Tap to see the route") { openBus(svc.ServiceNo) }
+                    }
+                }
+                if !stations.isEmpty {
+                    label("MRT / LRT")
+                    ForEach(Array(stations.prefix(6))) { st in
+                        let code = st.codes.first ?? ""
+                        resultRow(mrtLineColorFor(code), rdMrtBadgeFg(code), "tram.fill",
+                                  st.name, "", st.codes.joined(separator: " · ")) { m.openStation(named: st.name) }
+                    }
+                }
+                if !stops.isEmpty {
+                    label("STOPS")
+                    ForEach(stops.prefix(10), id: \.BusStopCode) { s in
+                        resultRow(t.busContainer, t.onBusContainer, "signpost.right.fill",
+                                  s.Description, "", "\(s.RoadName) · \(s.BusStopCode)") { m.openStop(code: s.BusStopCode) }
+                    }
+                }
+                if !places.isEmpty {
+                    label("PLACES")
+                    ForEach(places, id: \.self) { item in placeRow(item) }
+                }
+            }
+        }
+    }
+
+    /// A building / place hit — tapping it drills into the stops near it.
+    private func placeRow(_ item: MKMapItem) -> some View {
+        let name = item.name ?? "Place"
+        let c = item.placemark.coordinate
+        return resultRow(t.amberContainer, t.onAmberContainer, "building.2.fill",
+                         name, "", item.placemark.title ?? "See nearby stops") {
+            focusTitle = name; focusLat = c.latitude; focusLon = c.longitude
+        }
+    }
+
+    /// "Near <place/postal>" — the bus stops and MRT stations around a focused
+    /// location (a tapped place or a geocoded postal code).
+    @ViewBuilder private func nearResults(title: String, lat: Double, lon: Double) -> some View {
+        Button(action: { focusTitle = nil }) {
+            HStack(spacing: 6) {
+                RDSym("chevron.left", size: 15, color: t.primary)
+                Text("Near \(title)").font(rdFont(13, .bold)).foregroundStyle(t.primary).lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+        }
+        .buttonStyle(.plain)
+        let stops = stopsNear(lat, lon)
+        let stations = MrtGeo.nearestStations(
+            to: CLLocationCoordinate2D(latitude: lat, longitude: lon), limit: 3, withinMeters: 1000)
+        if stops.isEmpty && stations.isEmpty {
+            Text("No stops within walking distance")
+                .font(rdFont(13, .medium)).foregroundStyle(t.onVariant)
+                .frame(maxWidth: .infinity).padding(.top, 40)
+        } else {
+            if !stops.isEmpty {
+                label("BUS STOPS")
+                ForEach(stops, id: \.BusStopCode) { s in
+                    let d = Int(haversine(lat, lon, s.Latitude, s.Longitude).rounded())
+                    resultRow(t.busContainer, t.onBusContainer, "signpost.right.fill",
+                              s.Description, "", "\(max(1, d / 80)) min walk · \(s.RoadName)") { m.openStop(code: s.BusStopCode) }
                 }
             }
             if !stations.isEmpty {
                 label("MRT / LRT")
-                ForEach(Array(stations.prefix(6))) { st in
-                    let code = st.codes.first ?? ""
+                ForEach(stations, id: \.station.id) { item in
+                    let st = item.station; let code = st.codes.first ?? ""
                     resultRow(mrtLineColorFor(code), rdMrtBadgeFg(code), "tram.fill",
-                              st.name, "", st.codes.joined(separator: " · ")) { m.openStation(named: st.name) }
-                }
-            }
-            if !stops.isEmpty {
-                label("STOPS")
-                ForEach(stops.prefix(12), id: \.BusStopCode) { s in
-                    resultRow(t.busContainer, t.onBusContainer, "signpost.right.fill",
-                              s.Description, "", "\(s.RoadName) · \(s.BusStopCode)") { m.openStop(code: s.BusStopCode) }
+                              st.name, "", "\(item.walkMin) min walk") { m.openStation(named: st.name) }
                 }
             }
         }
