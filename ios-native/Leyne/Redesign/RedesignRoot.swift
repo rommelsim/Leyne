@@ -16,14 +16,13 @@ enum RedesignFlags {
 struct RedesignRoot: View {
     @StateObject private var m = RedesignModel()
 
-    // Manual offset-driven push/pop. A single `.id + .transition` can't do this:
-    // SwiftUI captures the OUTGOING view's removal at insertion time, so a screen
-    // pushed forward always leaves toward the leading edge even on "back". Driving
-    // both screens by offset guarantees forward = right→left, back = left→right.
-    @State private var curScreen = "map"     // the settled screen (lags m.screen mid-slide)
-    @State private var incoming: String? = nil
-    @State private var curX: CGFloat = 0     // settled screen's x while it slides out
-    @State private var inX: CGFloat = 0      // incoming screen's x while it slides in
+    // Offset-driven push/pop. Screens live in a ForEach keyed by their name, so a
+    // pushed screen is created ONCE (stable identity from the moment it enters the
+    // slide until it settles — no double onAppear / reload flicker), and both the
+    // entering and leaving screens move in the direction `navDir` dictates
+    // (forward = right→left, back = left→right).
+    @State private var layers: [String] = ["map"]     // z-order; front animates in/out by offset
+    @State private var xoff: [String: CGFloat] = ["map": 0]
     // Interactive edge swipe-back — drag the current screen right, commit past ⅓.
     @State private var backDX: CGFloat = 0
     @State private var swiping = false
@@ -94,29 +93,28 @@ struct RedesignRoot: View {
     /// slide in the direction dictated by `navDir`.
     private var screensLayer: some View {
         ZStack {
-            if incoming == nil, backDX > 0, let dest = m.stack.last {
-                screen(dest).id("under-\(dest)")   // revealed under the finger on swipe
+            if layers.count == 1, backDX > 0, let dest = m.stack.last, dest != layers.first {
+                screen(dest).id("scr-\(dest)")   // revealed under the finger during a swipe
             }
-            screen(curScreen).id(curScreen)
-                .offset(x: curX + (incoming == nil ? backDX : 0))
-                .simultaneousGesture(backSwipe)
-            if let inc = incoming {
-                screen(inc).id(inc).offset(x: inX)
+            ForEach(layers, id: \.self) { s in
+                screen(s).id("scr-\(s)")
+                    .offset(x: (xoff[s] ?? 0) + (layers.count == 1 && s == m.screen ? backDX : 0))
             }
         }
-        .onAppear { curScreen = m.screen }   // adopt deep-linked screen without a slide
-        .onChange(of: m.screen) { _, new in
-            guard !swiping, new != curScreen else { return }
+        .simultaneousGesture(backSwipe)
+        .onAppear { layers = [m.screen]; xoff = [m.screen: 0] }   // adopt deep-linked screen
+        .onChange(of: m.screen) { old, new in
+            guard !swiping, new != old else { return }
             let w = UIScreen.main.bounds.width
             let fwd = m.navDir == .forward
-            incoming = new
-            inX = fwd ? w : -w        // new starts off the trailing (fwd) / leading (back) edge
-            curX = 0
+            xoff[new] = fwd ? w : -w                 // new enters off the trailing (fwd)/leading (back) edge
+            xoff[old] = 0
+            layers = fwd ? [old, new] : [new, old]   // forward: new on top; back: new revealed beneath
             withAnimation(.spring(response: 0.42, dampingFraction: 0.9)) {
-                inX = 0                        // new slides to centre
-                curX = fwd ? -w : w            // old exits the opposite way
+                xoff[new] = 0
+                xoff[old] = fwd ? -w : w
             } completion: {
-                curScreen = new; curX = 0; incoming = nil
+                layers = [new]; xoff = [new: 0]
             }
         }
     }
@@ -127,11 +125,11 @@ struct RedesignRoot: View {
         let width = UIScreen.main.bounds.width
         return DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { v in
-                guard incoming == nil, m.canHandleBack, v.startLocation.x < 24, v.translation.width > 0 else { return }
+                guard layers.count == 1, m.canHandleBack, v.startLocation.x < 24, v.translation.width > 0 else { return }
                 backDX = min(v.translation.width, width)
             }
             .onEnded { v in
-                guard incoming == nil, m.canHandleBack, v.startLocation.x < 24 else { backDX = 0; return }
+                guard layers.count == 1, m.canHandleBack, v.startLocation.x < 24 else { backDX = 0; return }
                 let commit = v.translation.width > width * 0.33
                     || v.predictedEndTranslation.width > width * 0.55
                 if commit {
@@ -140,7 +138,7 @@ struct RedesignRoot: View {
                         backDX = width
                     } completion: {
                         m.handleBack()
-                        curScreen = m.screen; backDX = 0; swiping = false
+                        layers = [m.screen]; xoff = [m.screen: 0]; backDX = 0; swiping = false
                     }
                 } else {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { backDX = 0 }

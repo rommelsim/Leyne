@@ -76,6 +76,7 @@ final class RedesignModel: ObservableObject {
                     activeService = env["RD_SVC"] ?? "48"
                     activeRouteStop = env["RD_STOP"] ?? "11111"
                 }
+                if sc == "stop" { activeStopCode = env["RD_STOP"] ?? "11111" }
             }
             if env["RD_DARK"] == "1" { dark = true }
             if let sd = env["RD_SEED"] { seed = sd }
@@ -120,6 +121,27 @@ final class RedesignModel: ObservableObject {
         }
         return rdStop(n)
     }
+
+    /// The stop the Stop screen shows — `activeStopCode` resolved from the FULL
+    /// stop dataset (it may be far from the user, e.g. tapped on a bus route),
+    /// not just the nearby list. Falls back to the nearest stop.
+    var activeStop: RDStop {
+        guard let code = activeStopCode else { return currentStop }
+        if let n = store.nearby.first(where: { $0.stopCode == code }) { return rdStop(n) }
+        let here = LocationManager.shared.location
+        let s = store.stopByCode[code]
+        let dist: Int = (here != nil && s != nil)
+            ? Int(haversine(here!.coordinate.latitude, here!.coordinate.longitude,
+                            s!.Latitude, s!.Longitude).rounded())
+            : 0
+        let n = NearbyStop(id: code, stopName: store.stopName(code), stopCode: code,
+                           distanceM: dist, walkMin: dist > 0 ? max(1, dist / 80) : 0,
+                           services: store.servicesFor(code))
+        return rdStop(n)
+    }
+
+    /// The code the Stop screen is showing (explicit tap, else nearest).
+    var activeStopResolvedCode: String? { activeStopCode ?? store.nearby.first?.stopCode }
 
     var stopSaved: Bool {
         guard let code = currentNearby?.stopCode else { return false }

@@ -8,118 +8,98 @@ struct RDStopScreen: View {
     @ObservedObject var m: RedesignModel
     let t: RDTokens
     @EnvironmentObject private var store: DataStore
+    @State private var pump: Timer?
+
+    private var stopCode: String? { m.activeStopResolvedCode }
 
     var body: some View {
-        let stop = m.currentStop
+        let stop = m.activeStop
         let arrivals = stop.arrivals
         return VStack(spacing: 0) {
-            HStack {
-                RDCircleButton(symbol: "arrow.left", bordered: false, iconSize: 24, t: t) { m.back() }
-                Spacer()
-                Button(action: { m.toggleSaveStop() }) {
-                    ZStack {
-                        Circle().strokeBorder(t.outlineVariant, lineWidth: 1)
-                        RDSym(m.stopSaved ? "bookmark.fill" : "bookmark", size: 21,
-                              color: m.stopSaved ? t.primary : t.onVariant)
+            header(stop)
+            Rectangle().fill(t.outlineVariant).frame(height: 1)
+            liveHeader
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if arrivals.isEmpty {
+                        VStack(spacing: 8) {
+                            RDSym("bus", size: 26, color: t.outline)
+                            Text("No live arrivals right now")
+                                .font(rdFont(13.5, .medium)).foregroundStyle(t.onVariant)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 44)
+                    } else {
+                        ForEach(Array(arrivals.enumerated()), id: \.element.id) { idx, a in
+                            if idx > 0 {
+                                Rectangle().fill(t.outlineVariant).frame(height: 1).padding(.leading, 78)
+                            }
+                            RDArrivalRow(a: a, t: t) { m.openBus(service: a.route, stopCode: stopCode) }
+                        }
                     }
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .padding(.bottom, 16)
+            }
+        }
+        .background(t.surface)
+        .onAppear { warm(); startPump() }
+        .onDisappear { pump?.invalidate(); pump = nil }
+    }
+
+    private func header(_ stop: RDStop) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                RDCircleButton(symbol: "arrow.left", bordered: false, iconSize: 23, t: t) { m.back() }
+                Spacer()
+                RDSym(m.stopSaved ? "bookmark.fill" : "bookmark", size: 22,
+                      color: m.stopSaved ? t.primary : t.onVariant)
+                    .frame(width: 42, height: 42).contentShape(Circle())
+                    .onTapGesture { m.toggleSaveStop() }
             }
             .padding(.horizontal, 10).padding(.top, 8)
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
                     Text(stop.name).font(rdFont(28, .heavy)).foregroundStyle(t.onSurface)
                         .lineLimit(1).minimumScaleFactor(0.7)
                     RDMrtBadgeRow(stopName: stop.name)
                 }
-                HStack(spacing: 12) {
-                    if !stop.dist.isEmpty {
-                        HStack(spacing: 5) {
-                            RDSym("figure.walk", size: 16, color: t.onVariant)
-                            Text(stop.dist).font(rdFont(12.5, .bold)).foregroundStyle(t.onSurface)
-                        }
-                        .padding(.horizontal, 11).padding(.vertical, 5)
-                        .background(t.scHigh).clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    }
-                    if !stop.code.isEmpty {
-                        Text(stop.code).font(rdFont(12, .semibold)).foregroundStyle(t.onVariant)
-                    }
-                }
+                Text(subtitle(stop)).font(rdFont(13, .medium)).foregroundStyle(t.onVariant).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 22).padding(.top, 4).padding(.bottom, 14)
-
-            ScrollView {
-                VStack(spacing: 9) {
-                    if arrivals.isEmpty {
-                        VStack(spacing: 6) {
-                            RDSym("bus", size: 26, color: t.outline)
-                            Text("No live arrivals right now")
-                                .font(rdFont(13, .semibold)).foregroundStyle(t.onVariant)
-                        }
-                        .frame(maxWidth: .infinity).padding(.vertical, 40)
-                    } else {
-                        ForEach(arrivals) { a in routeCard(a) }
-                        HStack(spacing: 7) {
-                            RDSym("clock", size: 16, color: t.onVariant)
-                            Text(freshnessLabel).font(rdFont(11.5, .medium)).foregroundStyle(t.onVariant)
-                        }
-                        .padding(8)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.bottom, 14)
-            }
-        }
-        .background(t.surface)
-        .onAppear {
-            if let code = m.currentNearby?.stopCode { store.ensureArrivals(stop: code) }
+            .padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 14)
         }
     }
 
-    private var freshnessLabel: String {
-        guard let code = m.currentNearby?.stopCode, let last = store.lastRefresh(code) else {
-            return "Live from LTA"
-        }
-        let s = Int(Date().timeIntervalSince(last))
-        return s < 60 ? "Live from LTA · refreshed \(max(0, s))s ago"
-                      : "Live from LTA · refreshed \(s / 60)m ago"
+    private func subtitle(_ stop: RDStop) -> String {
+        [stop.dist.isEmpty ? nil : stop.dist,
+         stop.code.isEmpty ? nil : "Stop \(stop.code)"].compactMap { $0 }.joined(separator: " · ")
     }
 
-    private func routeCard(_ a: RDArrival) -> some View {
-        let occ = rdOcc(a.load, t)
-        return Button(action: { m.openBus(service: a.route, stopCode: m.currentNearby?.stopCode) }) {
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(a.route).font(rdFont(19, .black)).foregroundStyle(t.onSurface)
-                    Text(a.dest).font(rdFont(10, .medium)).foregroundStyle(t.onVariant).lineLimit(1)
-                    HStack(spacing: 4) {
-                        RDDot(color: occ.color, size: 6)
-                        Text(occ.label).font(rdFont(10, .medium)).foregroundStyle(t.onVariant)
-                    }
-                    .padding(.top, 5)
-                }
-                .frame(width: 72, alignment: .leading)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(a.min).font(rdFont(26, .black)).foregroundStyle(t.primary)
-                        Text("min").font(rdFont(9, .medium)).foregroundStyle(t.onVariant)
-                    }
-                    if let then = a.then {
-                        Text(then).font(rdFont(10, .medium)).foregroundStyle(t.onVariant)
-                    }
-                }
-                RDSym("chevron.right", size: 20, color: t.outline).padding(.leading, 14)
-            }
-            .padding(.horizontal, 15).padding(.vertical, 13)
-            .background(t.scLow)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(t.outlineVariant, lineWidth: 1))
+    private var liveHeader: some View {
+        HStack(spacing: 7) {
+            if isFresh { RDDot(color: t.bus) }
+            Text("LIVE ARRIVALS").font(rdFont(11, .heavy)).kerning(0.66).foregroundStyle(t.onVariant)
+            if !isFresh { Text("· \(freshLabel)").font(rdFont(11, .medium)).foregroundStyle(t.onVariant) }
+            Spacer()
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 8)
+    }
+
+    private var freshSeconds: Int? {
+        guard let code = stopCode, let last = store.lastRefresh(code) else { return nil }
+        return Int(Date().timeIntervalSince(last))
+    }
+    private var isFresh: Bool { (freshSeconds ?? 999) < 20 }
+    private var freshLabel: String {
+        guard let s = freshSeconds else { return "Updating…" }
+        return s < 60 ? "Updated \(s)s ago" : "Updated \(s / 60)m ago"
+    }
+
+    private func warm() { if let code = stopCode { store.ensureArrivals(stop: code) } }
+    private func startPump() {
+        pump?.invalidate()
+        pump = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            Task { @MainActor in if let code = stopCode { store.ensureArrivals(stop: code) } }
+        }
     }
 }
 

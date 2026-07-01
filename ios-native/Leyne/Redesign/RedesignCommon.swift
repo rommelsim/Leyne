@@ -96,6 +96,62 @@ struct RDCard<Content: View>: View {
     }
 }
 
+/// "then 11" → "Next 11 min"; nil when there's no following bus.
+func rdNextLabel(_ then: String?) -> String? {
+    guard let then else { return nil }
+    let digits = then.filter(\.isNumber)
+    return digits.isEmpty ? nil : "Next \(digits) min"
+}
+
+/// One live-arrival row, shared by the Home and Stop screens so they stay
+/// identical: a flat grouped-list row (no card) — neutral bus badge, destination,
+/// occupancy dot, and an ETA-dominant right side (green "Now" when arriving) with
+/// the following bus beneath.
+struct RDArrivalRow: View {
+    let a: RDArrival
+    let t: RDTokens
+    let onTap: () -> Void
+
+    var body: some View {
+        let occ = rdOcc(a.load, t)
+        let arriving = (Int(a.min) ?? 99) <= 0
+        return Button(action: onTap) {
+            HStack(spacing: 14) {
+                Text(a.route)
+                    .font(rdFont(17, .heavy)).foregroundStyle(t.onSurface)
+                    .frame(minWidth: 46).frame(height: 38).padding(.horizontal, 8)
+                    .background(t.scHigh).clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(a.dest).font(rdFont(16.5, .semibold)).foregroundStyle(t.onSurface).lineLimit(1)
+                    HStack(spacing: 6) {
+                        RDDot(color: occ.color, size: 7)
+                        Text(occ.label).font(rdFont(12.5, .medium)).foregroundStyle(t.onVariant).lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 2) {
+                    if arriving {
+                        Text("Now").font(rdFont(17, .heavy)).foregroundStyle(t.bus)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text(a.min).font(rdFont(24, .black)).foregroundStyle(t.onSurface)
+                                .contentTransition(.numericText())
+                            Text("min").font(rdFont(11, .bold)).foregroundStyle(t.onVariant)
+                        }
+                    }
+                    if let next = rdNextLabel(a.then) {
+                        Text(next).font(rdFont(10.5, .medium)).foregroundStyle(t.onVariant)
+                    }
+                }
+            }
+            .padding(.horizontal, 18).padding(.vertical, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.35), value: a.min)
+    }
+}
+
 extension View {
     /// Fills the available width and aligns content to the leading edge.
     func rdLeading() -> some View {

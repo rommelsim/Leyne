@@ -278,58 +278,9 @@ struct RDHomeScreen: View {
         return "Updated \(s / 60)m ago"
     }
 
-    /// "then 11" → "Next 11 min"; nil when there's no following bus.
-    private func nextLabel(_ then: String?) -> String? {
-        guard let then else { return nil }
-        let digits = then.filter(\.isNumber)
-        return digits.isEmpty ? nil : "Next \(digits) min"
-    }
-
-    /// One arrival as a flat list row (no card, no border, no chevron). The ETA
-    /// dominates on the right; destination is secondary, occupancy tertiary. Every
-    /// bus-number badge is the same neutral surface — urgency is carried by row
-    /// order and the green "Now"/ETA, not by tinting one badge (blue reads as
-    /// "selected" here, which it isn't).
+    /// Shared flat arrival row (see RDArrivalRow) — keeps Home and Stop identical.
     private func arrivalRow(_ a: RDArrival) -> some View {
-        let occ = rdOcc(a.load, t)
-        let arriving = (Int(a.min) ?? 99) <= 0
-        return Button(action: { m.openBus(service: a.route, stopCode: m.currentNearby?.stopCode) }) {
-            HStack(spacing: 14) {
-                Text(a.route)
-                    .font(rdFont(17, .heavy))
-                    .foregroundStyle(t.onSurface)
-                    .frame(minWidth: 46).frame(height: 38)
-                    .padding(.horizontal, 8)
-                    .background(t.scHigh)
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(a.dest).font(rdFont(16.5, .semibold)).foregroundStyle(t.onSurface).lineLimit(1)
-                    HStack(spacing: 6) {
-                        RDDot(color: occ.color, size: 7)
-                        Text(occ.label).font(rdFont(12.5, .medium)).foregroundStyle(t.onVariant).lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .trailing, spacing: 2) {
-                    if arriving {
-                        Text("Now").font(rdFont(17, .heavy)).foregroundStyle(t.bus)
-                    } else {
-                        HStack(alignment: .firstTextBaseline, spacing: 2) {
-                            Text(a.min).font(rdFont(24, .black)).foregroundStyle(t.onSurface)
-                                .contentTransition(.numericText())   // cross-fades as it ticks
-                            Text("min").font(rdFont(11, .bold)).foregroundStyle(t.onVariant)
-                        }
-                    }
-                    if let next = nextLabel(a.then) {
-                        Text(next).font(rdFont(10.5, .medium)).foregroundStyle(t.onVariant)
-                    }
-                }
-                .animation(.easeInOut(duration: 0.35), value: a.min)
-            }
-            .padding(.horizontal, 18).padding(.vertical, 16)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        RDArrivalRow(a: a, t: t) { m.openBus(service: a.route, stopCode: m.currentNearby?.stopCode) }
     }
 }
 
