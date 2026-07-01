@@ -66,15 +66,25 @@ struct RDLinesScreen: View {
                             : "\(disrupted.count) line\(disrupted.count == 1 ? "" : "s") affected · live from LTA",
                          t: t) { m.back() }
             ScrollView {
-                VStack(spacing: 11) {
-                    ForEach(alerts) { a in majorCard(a) }
-                    ForEach(normal, id: \.self) { line in lineRow(line) }
+                LazyVStack(spacing: 0) {
+                    ForEach(alerts) { a in
+                        disruptionRow(a)
+                        Rectangle().fill(t.outlineVariant).frame(height: 1)
+                    }
+                    ForEach(Array(normal.enumerated()), id: \.element) { i, line in
+                        if i > 0 { linesHairline }
+                        lineRow(line)
+                    }
                 }
-                .padding(.horizontal, 16).padding(.bottom, 14)
+                .padding(.bottom, 14)
             }
         }
         .background(t.surface)
         .onAppear { store.refreshTrainAlertsIfStale() }
+    }
+
+    private var linesHairline: some View {
+        Rectangle().fill(t.outlineVariant).frame(height: 1).padding(.leading, 68)
     }
 
     private func badge(code: String, bg: Color, size: CGFloat = 44) -> some View {
@@ -83,60 +93,60 @@ struct RDLinesScreen: View {
             .background(bg).clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
-    private func majorCard(_ a: TrainAlert) -> some View {
+    /// A disruption — the one case that earns a prominent treatment: a red
+    /// line-colour accent bar + a subtle warn tint (not a bordered floating card).
+    private func disruptionRow(_ a: TrainAlert) -> some View {
         let color = a.line?.color ?? t.mrt
         let code = a.line?.rawValue ?? String(a.lineCode.prefix(2))
-        return VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 12) {
-                badge(code: code, bg: color, size: 42)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(a.title).font(rdFont(16, .heavy)).foregroundStyle(t.onMrtContainer).lineLimit(2)
-                    HStack(spacing: 4) {
-                        RDSym("exclamationmark.triangle.fill", size: 15, color: t.mrt)
-                        Text("DISRUPTION").font(rdFont(11, .heavy)).foregroundStyle(t.mrt).kerning(0.22)
+        return HStack(spacing: 0) {
+            Rectangle().fill(color).frame(width: 4)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 11) {
+                    badge(code: code, bg: color, size: 38)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(a.title).font(rdFont(15.5, .heavy)).foregroundStyle(t.onSurface).lineLimit(2)
+                        HStack(spacing: 4) {
+                            RDSym("exclamationmark.triangle.fill", size: 13, color: t.mrt)
+                            Text("DISRUPTION").font(rdFont(10.5, .heavy)).foregroundStyle(t.mrt).kerning(0.3)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                Text(a.detail).font(rdFont(13, .medium)).foregroundStyle(t.onVariant)
+                if a.freeBus || a.freeShuttle {
+                    HStack(spacing: 6) {
+                        if a.freeBus { freeChip("Free bus rides") }
+                        if a.freeShuttle { freeChip("Free shuttle") }
                     }
                 }
-                Spacer()
             }
-            Text(a.detail).font(rdFont(13, .medium)).foregroundStyle(t.onMrtContainer)
-            if a.freeBus || a.freeShuttle {
-                HStack(spacing: 6) {
-                    if a.freeBus { freeChip("Free bus rides") }
-                    if a.freeShuttle { freeChip("Free shuttle") }
-                }
-            }
+            .padding(.horizontal, 14).padding(.vertical, 13)
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(t.mrtContainer)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(t.mrt, lineWidth: 2))
+        .background(t.mrtContainer.opacity(0.5))
     }
 
     private func freeChip(_ s: String) -> some View {
-        Text(s).font(rdFont(10.5, .bold)).foregroundStyle(t.onMrtContainer)
+        Text(s).font(rdFont(10.5, .bold)).foregroundStyle(t.onSurface)
             .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(t.surface.opacity(0.55)).clipShape(Capsule())
+            .background(t.surface.opacity(0.7)).clipShape(Capsule())
     }
 
     private func lineRow(_ line: MRTLine) -> some View {
-        RDCard(t: t) {
-            HStack(spacing: 13) {
-                badge(code: line.rawValue, bg: line.color)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(line.displayName) Line").font(rdFont(15, .bold)).foregroundStyle(t.onSurface)
-                    Text("Running normally").font(rdFont(12, .medium)).foregroundStyle(t.onVariant)
-                }
-                Spacer()
-                HStack(spacing: 5) {
-                    RDDot(color: t.bus, size: 6)
-                    Text("Normal").font(rdFont(11.5, .bold)).foregroundStyle(t.onBusContainer)
-                }
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(t.busContainer).clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        HStack(spacing: 12) {
+            badge(code: line.rawValue, bg: line.color, size: 38)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(line.displayName) Line").font(rdFont(15.5, .semibold)).foregroundStyle(t.onSurface)
+                Text("Running normally").font(rdFont(12, .medium)).foregroundStyle(t.onVariant)
             }
-            .padding(.horizontal, 15).padding(.vertical, 14)
+            Spacer()
+            HStack(spacing: 5) {
+                RDDot(color: t.bus, size: 6)
+                Text("Normal").font(rdFont(11.5, .bold)).foregroundStyle(t.bus)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(t.busContainer).clipShape(Capsule())
         }
+        .padding(.horizontal, 18).padding(.vertical, 14)
     }
 }
 
@@ -156,25 +166,36 @@ struct RDSavedScreen: View {
                 if stops.isEmpty && buses.isEmpty {
                     emptyState
                 } else {
-                    VStack(spacing: 22) {
+                    LazyVStack(spacing: 0) {
                         if !buses.isEmpty {
-                            section("BUSES") {
-                                rows(buses) { busRow($0) }
+                            savedLabel("BUSES")
+                            ForEach(Array(buses.enumerated()), id: \.element) { i, svc in
+                                if i > 0 { savedDivider }
+                                busRow(svc)
                             }
                         }
                         if !stops.isEmpty {
-                            section("STOPS") {
-                                rows(stops) { code in
-                                    Button(action: { m.openStop(code: code) }) { stopRow(code) }.buttonStyle(.plain)
-                                }
+                            savedLabel("STOPS")
+                            ForEach(Array(stops.enumerated()), id: \.element) { i, code in
+                                if i > 0 { savedDivider }
+                                Button(action: { m.openStop(code: code) }) { stopRow(code) }.buttonStyle(.plain)
                             }
                         }
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .padding(.bottom, 16)
                 }
             }
         }
         .background(t.surface)
+    }
+
+    private func savedLabel(_ s: String) -> some View {
+        Text(s).font(rdFont(11, .heavy)).kerning(0.66).foregroundStyle(t.onVariant)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 6)
+    }
+    private var savedDivider: some View {
+        Rectangle().fill(t.outlineVariant).frame(height: 1).padding(.leading, 18)
     }
 
     private var emptyState: some View {
@@ -187,48 +208,31 @@ struct RDSavedScreen: View {
         .frame(maxWidth: .infinity).padding(.top, 90).padding(.horizontal, 44)
     }
 
-    private func section<C: View>(_ label: String, @ViewBuilder _ content: @escaping () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            RDSectionLabel(text: label, t: t)
-            RDCard(t: t, radius: 20) { content() }
-        }
-    }
-
-    @ViewBuilder
-    private func rows<Item: Hashable, C: View>(_ items: [Item], @ViewBuilder _ row: @escaping (Item) -> C) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element) { i, item in
-                if i > 0 { Rectangle().fill(t.outlineVariant).frame(height: 1) }
-                row(item)
-            }
-        }
-    }
-
     private func busRow(_ svc: String) -> some View {
-        HStack(spacing: 13) {
+        HStack(spacing: 14) {
             Text(svc).font(rdFont(15, .heavy)).foregroundStyle(t.onSurface)
-                .padding(.horizontal, 12).frame(height: 42)
-                .background(t.scHighest)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            Text("Saved bus").font(rdFont(14, .bold)).foregroundStyle(t.onSurface)
+                .frame(minWidth: 46, minHeight: 38)
+                .background(t.scHigh)
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            Text("Saved bus").font(rdFont(15, .semibold)).foregroundStyle(t.onSurface)
             Spacer()
         }
-        .padding(.horizontal, 15).padding(.vertical, 14)
+        .padding(.horizontal, 18).padding(.vertical, 14)
     }
 
     private func stopRow(_ code: String) -> some View {
-        HStack(spacing: 13) {
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
-                    Text(store.stopName(code)).font(rdFont(15, .bold)).foregroundStyle(t.onSurface).lineLimit(1)
+                    Text(store.stopName(code)).font(rdFont(15.5, .semibold)).foregroundStyle(t.onSurface).lineLimit(1)
                     RDMrtBadgeRow(stopName: store.stopName(code), size: 8)
                 }
                 Text("Stop \(code)").font(rdFont(12, .medium)).foregroundStyle(t.onVariant)
             }
             Spacer()
-            RDSym("chevron.right", size: 20, color: t.outline)
+            RDSym("chevron.right", size: 18, color: t.outline)
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .padding(.horizontal, 18).padding(.vertical, 14)
     }
 }
 
