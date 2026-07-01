@@ -310,21 +310,18 @@ struct RDHomeScreen: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 5) {
-                    if !arriving { RDDot(color: t.bus, size: 5) }   // live cue
-                    VStack(alignment: .trailing, spacing: 2) {
-                        if arriving {
-                            Text("Now").font(rdFont(17, .heavy)).foregroundStyle(t.bus)
-                        } else {
-                            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                                Text(a.min).font(rdFont(24, .black)).foregroundStyle(t.onSurface)
-                                    .contentTransition(.numericText())   // cross-fades as it ticks
-                                Text("min").font(rdFont(11, .bold)).foregroundStyle(t.onVariant)
-                            }
+                VStack(alignment: .trailing, spacing: 2) {
+                    if arriving {
+                        Text("Now").font(rdFont(17, .heavy)).foregroundStyle(t.bus)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text(a.min).font(rdFont(24, .black)).foregroundStyle(t.onSurface)
+                                .contentTransition(.numericText())   // cross-fades as it ticks
+                            Text("min").font(rdFont(11, .bold)).foregroundStyle(t.onVariant)
                         }
-                        if let next = nextLabel(a.then) {
-                            Text(next).font(rdFont(10.5, .medium)).foregroundStyle(t.onVariant)
-                        }
+                    }
+                    if let next = nextLabel(a.then) {
+                        Text(next).font(rdFont(10.5, .medium)).foregroundStyle(t.onVariant)
                     }
                 }
                 .animation(.easeInOut(duration: 0.35), value: a.min)

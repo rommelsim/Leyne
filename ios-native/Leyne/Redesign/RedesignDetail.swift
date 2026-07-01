@@ -135,6 +135,7 @@ struct RDStationScreen: View {
     @State private var nearStopCode: String? = nil
     @State private var nearStopName: String = ""
     @State private var nearStopWalk: Int = 0
+    @State private var stripPulse = false
 
     private var station: MrtGeoStation? {
         guard let name = m.activeStationName else { return nil }
@@ -234,6 +235,7 @@ struct RDStationScreen: View {
             store.refreshLiftMaintenanceIfStale()
             for line in lines { store.refreshCrowd(line: line) }
             computeNearestStop()
+            withAnimation(.easeOut(duration: 1.5).repeatForever(autoreverses: false)) { stripPulse = true }
         }
     }
 
@@ -384,7 +386,9 @@ struct RDStationScreen: View {
             }
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
+                    // .top so every node's rail row lines up — otherwise the taller
+                    // (highlighted) current node re-centres and the line zig-zags.
+                    HStack(alignment: .top, spacing: 0) {
                         ForEach(Array(seq.enumerated()), id: \.element.id) { i, st in
                             stripNode(st, line: line, isCur: st.id == curID,
                                       first: i == 0, last: i == seq.count - 1)
@@ -402,23 +406,31 @@ struct RDStationScreen: View {
     }
 
     private func stripNode(_ st: MrtGeoStation, line: MRTLine, isCur: Bool, first: Bool, last: Bool) -> some View {
-        let labeled = isCur || first || last
-        return VStack(spacing: 7) {
+        VStack(spacing: 6) {
             HStack(spacing: 0) {
-                Rectangle().fill(first ? Color.clear : line.color.opacity(0.45)).frame(height: 3).frame(maxWidth: .infinity)
-                Circle()
-                    .fill(isCur ? line.color : line.color.opacity(0.55))
-                    .frame(width: isCur ? 15 : 9, height: isCur ? 15 : 9)
-                    .overlay(Circle().stroke(t.scLow, lineWidth: isCur ? 3 : 0))
-                Rectangle().fill(last ? Color.clear : line.color.opacity(0.45)).frame(height: 3).frame(maxWidth: .infinity)
+                Rectangle().fill(first ? Color.clear : line.color.opacity(0.5))
+                    .frame(height: 3).frame(maxWidth: .infinity)
+                ZStack {
+                    if isCur {   // pulsing halo = "you are here" + the strip feels alive
+                        Circle().fill(line.color.opacity(stripPulse ? 0 : 0.35))
+                            .frame(width: stripPulse ? 30 : 15, height: stripPulse ? 30 : 15)
+                    }
+                    Circle().fill(isCur ? line.color : line.color.opacity(0.6))
+                        .frame(width: isCur ? 14 : 9, height: isCur ? 14 : 9)
+                        .overlay(Circle().stroke(t.scLow, lineWidth: isCur ? 3 : 0))
+                }
+                .frame(width: isCur ? 16 : 10, height: 16)
+                Rectangle().fill(last ? Color.clear : line.color.opacity(0.5))
+                    .frame(height: 3).frame(maxWidth: .infinity)
             }
             .frame(height: 16)
-            Text(labeled ? st.name : " ")
-                .font(rdFont(isCur ? 11 : 9.5, isCur ? .heavy : .medium))
+            Text(st.name)   // every station is labelled now, not just the ends
+                .font(rdFont(isCur ? 10.5 : 9.5, isCur ? .heavy : .medium))
                 .foregroundStyle(isCur ? t.onSurface : t.onVariant)
-                .lineLimit(1).fixedSize()
+                .lineLimit(1).truncationMode(.tail)
+                .frame(width: 58)
         }
-        .frame(width: 42)
+        .frame(width: 62)
         .contentShape(Rectangle())
         .onTapGesture { if !isCur { m.openStation(named: st.name) } }
     }
@@ -484,6 +496,7 @@ struct RDRouteScreen: View {
     @ObservedObject var m: RedesignModel
     let t: RDTokens
     @EnvironmentObject private var store: DataStore
+    @EnvironmentObject private var app: AppModel
     @State private var route: RouteInfo?
 
     private var svcNo: String { m.activeService ?? "" }
@@ -625,15 +638,37 @@ struct RDRouteScreen: View {
 
     /// Compact floating pill — secondary by weight (most riders won't arm it
     /// every trip), lifted off the content with a soft shadow.
+    /// Whether a real arrival alert is currently armed for this bus at this stop
+    /// (reads the live `AppModel.alerts`, so the pill reflects true state).
+    private var isAlerted: Bool {
+        guard let code = stopCode else { return false }
+        return app.alerts.contains { $0.kind == .arrival && $0.busNo == svcNo && $0.stopCode == code }
+    }
+
+    /// Arms/removes a real OS notification (+ Live Activity) via the app's
+    /// existing arrival-alert system — no more mock in-app card.
+    private func toggleNotify() {
+        guard let code = stopCode else { return }
+        Task { @MainActor in
+            if !app.notificationsEnabled { await app.setNotificationsEnabled(true) }
+            switch app.toggleArrivalAlert(busNo: svcNo, stopCode: code,
+                                          stopName: store.stopName(code), dest: destinationName) {
+            case .armed:   m.notify("Alert set · we’ll notify you when \(svcNo) is 1 stop away")
+            case .removed: m.notify("Alert removed")
+            }
+        }
+    }
+
     private var notifyButton: some View {
-        Button(action: { m.trackFromRoute() }) {
+        let on = isAlerted
+        return Button(action: { toggleNotify() }) {
             HStack(spacing: 8) {
-                RDSym("bell.fill", size: 18, color: t.onPrimary)
-                Text("Notify me").font(rdFont(14.5, .bold)).foregroundStyle(t.onPrimary)
+                RDSym(on ? "bell.fill" : "bell", size: 18, color: t.onPrimary)
+                Text(on ? "Notifying you" : "Notify me").font(rdFont(14.5, .bold)).foregroundStyle(t.onPrimary)
             }
             .padding(.horizontal, 32).frame(height: 54)
-            .background(t.primary).clipShape(Capsule())
-            .shadow(color: t.primary.opacity(0.32), radius: 12, y: 5)
+            .background(on ? t.bus : t.primary).clipShape(Capsule())
+            .shadow(color: (on ? t.bus : t.primary).opacity(0.32), radius: 12, y: 5)
         }
         .buttonStyle(.plain)
         .padding(.top, 8).padding(.bottom, 16)

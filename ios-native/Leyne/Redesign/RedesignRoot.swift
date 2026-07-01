@@ -16,6 +16,12 @@ enum RedesignFlags {
 struct RedesignRoot: View {
     @StateObject private var m = RedesignModel()
 
+    // Interactive edge swipe-back (the custom string-nav has no NavigationStack,
+    // so we drive the pop ourselves): drag the current screen right, commit past
+    // a third of the width.
+    @State private var backDX: CGFloat = 0
+    @State private var swiping = false
+
     private var t: RDTokens {
         RDTokens.resolve(dark: m.dark, seed: m.seed, premium: m.premium)
     }
@@ -60,7 +66,9 @@ struct RedesignRoot: View {
                 screenView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .id(m.screen)
-                    .transition(pushTransition)
+                    .transition(swiping ? .identity : pushTransition)
+                    .offset(x: backDX)
+                    .simultaneousGesture(backSwipe)
                 // The bottom nav exists only on the top-level screens. Animating
                 // its slide-out/in (instead of letting it pop) keeps the content
                 // frame from jumping when you push into / pop out of a detail
@@ -92,6 +100,34 @@ struct RedesignRoot: View {
         .animation(.easeOut(duration: 0.28), value: m.searchOpen)
         .animation(.easeOut(duration: 0.32), value: m.luVisible)
         .animation(.easeOut(duration: 0.3), value: m.toast != nil)
+    }
+
+    /// Left-edge drag → pop. `.simultaneousGesture` + an edge/`canHandleBack`
+    /// guard so it never steals normal taps, scrolls or the segmented controls.
+    private var backSwipe: some Gesture {
+        let width = UIScreen.main.bounds.width
+        return DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .onChanged { v in
+                guard m.canHandleBack, v.startLocation.x < 24, v.translation.width > 0 else { return }
+                backDX = min(v.translation.width, width)
+            }
+            .onEnded { v in
+                guard m.canHandleBack, v.startLocation.x < 24 else { backDX = 0; return }
+                let commit = v.translation.width > width * 0.33
+                    || v.predictedEndTranslation.width > width * 0.55
+                if commit {
+                    swiping = true
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        backDX = width
+                    } completion: {
+                        m.handleBack()
+                        backDX = 0
+                        swiping = false
+                    }
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { backDX = 0 }
+                }
+            }
     }
 
     @ViewBuilder private var screenView: some View {
