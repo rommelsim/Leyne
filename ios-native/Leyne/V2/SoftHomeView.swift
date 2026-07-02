@@ -9,9 +9,9 @@ import MapKit
 import UIKit
 
 struct SoftHomeView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
-    @EnvironmentObject var ds: DataStore
+    @Environment(DataStore.self) var ds: DataStore
     @StateObject private var loc = LocationManager.shared
 
     /// Line codes the user has tapped to dismiss this session. Cleared

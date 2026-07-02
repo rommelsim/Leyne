@@ -3,3 +3,5 @@
 - [Architecture patterns](architecture-patterns.md) — AppModel singleton ChangeNotifier god-object; DataStore singleton ChangeNotifier; ListenableBuilder rebuild scope; 1-second global tick
 - [Known code quality issues](known-issues.md) — confirmed P0/P1/P2 issues from 2026-05-30 audit with file:line citations
 - [NEA weather feature](project-weather-feature.md) — files added, design constraints (monochrome only), graceful degradation, 31 unit tests passing
+- [Android Material 3 design audit](android-material-design.md) — 2026-07-02: live V2 surface is Modern M3 (NavigationBar, predictive back, edge-to-edge); real gaps found 2026-07-02 audit, FIXED same day (see material-you-implementation)
+- [Material You implementation](material-you-implementation.md) — 2026-07-02: dynamic colour wiring, LyneSeverity token, mrt_map_screen inverse-panel fix, + a local-SDK gotcha: Theme.SplashScreen/postSplashScreenTheme don't link on this machine's compileSdk 36

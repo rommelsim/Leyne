@@ -2,7 +2,7 @@
 // all arrivals/stops/routes are live from LTA via DataStore. No mock data.
 
 import SwiftUI
-import Combine
+import Observation
 import CoreLocation
 import UIKit
 import ActivityKit
@@ -453,26 +453,69 @@ struct FavService: Codable, Equatable, Identifiable {
     var isAnywhere: Bool { stop == nil }
 }
 
+// Small helper so each UserDefaults-backed computed property below doesn't
+// hand-roll its own get/set boilerplate. `@Observable` classes can't contain
+// `@AppStorage` properties (the two macros both try to synthesize storage for
+// the same property and conflict at compile time — see the Observation
+// migration notes), so these settings are now plain computed properties that
+// read/write UserDefaults.standard directly. Being ordinary computed
+// properties (no attached property wrapper) means the Observable macro DOES
+// instrument their accessors, so — unlike the old @AppStorage-inside-
+// ObservableObject setup, which needed a manual `objectWillChange.send()` to
+// notify observers — reads/writes of these properties are now tracked
+// automatically, same as any other @Observable property.
+private enum Store {
+    static let d = UserDefaults.standard
+    static func bool(_ key: String, default def: Bool) -> Bool {
+        d.object(forKey: key) as? Bool ?? def
+    }
+    static func string(_ key: String, default def: String) -> String {
+        d.string(forKey: key) ?? def
+    }
+    static func int(_ key: String, default def: Int) -> Int {
+        d.object(forKey: key) as? Int ?? def
+    }
+    static func double(_ key: String, default def: Double) -> Double {
+        d.object(forKey: key) as? Double ?? def
+    }
+}
+
 @MainActor
-final class AppModel: ObservableObject {
+@Observable
+final class AppModel {
     // Haptic feedback (v1.0 carry-over).
-    @AppStorage("leyne.haptic") var haptic = true
+    var haptic: Bool {
+        get { Store.bool("leyne.haptic", default: true) }
+        set { Store.d.set(newValue, forKey: "leyne.haptic") }
+    }
 
     // Onboarding completion. Persisted under the Flutter v2.0 key so an
     // upgrade from Flutter → native preserves the user's onboarding flag.
-    @AppStorage("leyne.onboardingDone") var onboarded = false
+    var onboarded: Bool {
+        get { Store.bool("leyne.onboardingDone", default: false) }
+        set { Store.d.set(newValue, forKey: "leyne.onboardingDone") }
+    }
 
     // 24-hour clock display in the LIVE header. Defaults to true (SG locale).
     // 12-hour clock app-wide; no in-app toggle (the option was removed).
-    @AppStorage("leyne.use24h") var use24h = false
+    var use24h: Bool {
+        get { Store.bool("leyne.use24h", default: false) }
+        set { Store.d.set(newValue, forKey: "leyne.use24h") }
+    }
 
     // Appearance override (Settings ▸ Appearance). Defaults to .system — the
     // theme follows OS Settings ▸ Display & Brightness — but the user can
     // force light or dark from in-app Settings.
-    @AppStorage("leyne.themeMode") var themeMode: LeyneThemeMode = .system
+    var themeMode: LeyneThemeMode {
+        get { Store.d.string(forKey: "leyne.themeMode").flatMap(LeyneThemeMode.init(rawValue:)) ?? .system }
+        set { Store.d.set(newValue.rawValue, forKey: "leyne.themeMode") }
+    }
 
     // Language override. Empty string = follow device locale.
-    @AppStorage("leyne.locale") var localeCode = ""
+    var localeCode: String {
+        get { Store.string("leyne.locale", default: "") }
+        set { Store.d.set(newValue, forKey: "leyne.locale") }
+    }
     /// Non-empty when the user has picked a language override; nil otherwise.
     var localeIdentifier: String? { localeCode.isEmpty ? nil : localeCode }
 
@@ -487,25 +530,41 @@ final class AppModel: ObservableObject {
     // having to discover Settings → Notifications first. Existing
     // installs that already toggled this off (the value is persisted)
     // keep their explicit choice.
-    @AppStorage("leyne.notifications") var notificationsEnabled = true
+    var notificationsEnabled: Bool {
+        get { Store.bool("leyne.notifications", default: true) }
+        set { Store.d.set(newValue, forKey: "leyne.notifications") }
+    }
 
     /// Last observed UNAuthorizationStatus, refreshed on launch and whenever
     /// the user toggles the Notifications setting. Drives the warning row
     /// in NotificationsView when the system permission is denied.
-    @Published var notificationAuth: UNAuthorizationStatus = .notDetermined
+    var notificationAuth: UNAuthorizationStatus = .notDetermined
 
     // ─── Active alight ride (persisted) ───────────────────
     // One ride at a time. Setting this schedules a one-shot local
     // notification at `fireAt`, persisted across app restarts so the
     // user sees "your alight is set" when they reopen DetailView.
     // Cleared when the user untaps the alight stop or the bus passes.
-    @AppStorage("lyne.alight.busNo") private var alightBusNoStore = ""
-    @AppStorage("lyne.alight.stopCode") private var alightStopCodeStore = ""
-    @AppStorage("lyne.alight.stopName") private var alightStopNameStore = ""
-    @AppStorage("lyne.alight.fireAt") private var alightFireAtStore: Double = 0
+    private var alightBusNoStore: String {
+        get { Store.string("lyne.alight.busNo", default: "") }
+        set { Store.d.set(newValue, forKey: "lyne.alight.busNo") }
+    }
+    private var alightStopCodeStore: String {
+        get { Store.string("lyne.alight.stopCode", default: "") }
+        set { Store.d.set(newValue, forKey: "lyne.alight.stopCode") }
+    }
+    private var alightStopNameStore: String {
+        get { Store.string("lyne.alight.stopName", default: "") }
+        set { Store.d.set(newValue, forKey: "lyne.alight.stopName") }
+    }
+    private var alightFireAtStore: Double {
+        get { Store.double("lyne.alight.fireAt", default: 0) }
+        set { Store.d.set(newValue, forKey: "lyne.alight.fireAt") }
+    }
 
-    /// The currently-armed alight alert, or nil. Reads from @AppStorage
-    /// so a fresh DetailView open recognizes a previously-set ride.
+    /// The currently-armed alight alert, or nil. Reads from persisted
+    /// UserDefaults storage so a fresh DetailView open recognizes a
+    /// previously-set ride.
     var activeAlight: (busNo: String, stopCode: String,
                        stopName: String, fireAt: Date)? {
         guard !alightBusNoStore.isEmpty, !alightStopCodeStore.isEmpty,
@@ -526,35 +585,41 @@ final class AppModel: ObservableObject {
 
     // Postal-code search radius in metres. Used by the Search screen when
     // the query is a 6-digit postal code.
-    @AppStorage("leyne.searchRadiusM") var searchRadiusM = 500
+    var searchRadiusM: Int {
+        get { Store.int("leyne.searchRadiusM", default: 500) }
+        set { Store.d.set(newValue, forKey: "leyne.searchRadiusM") }
+    }
 
     // What's New gate — the last version the user acknowledged.
-    @AppStorage("leyne.lastSeenVersion") private var lastSeenVersion = ""
+    private var lastSeenVersion: String {
+        get { Store.string("leyne.lastSeenVersion", default: "") }
+        set { Store.d.set(newValue, forKey: "leyne.lastSeenVersion") }
+    }
 
     /// Mirrors the iOS color scheme after applying the user's `themeMode`
     /// override. Set from the SwiftUI environment in `RootView`.
-    @Published var isDark: Bool = false
+    var isDark: Bool = false
     var t: Theme { isDark ? .dark : .light }
 
     /// The running app's marketing version (set once at boot from
     /// Bundle.main). Drives the What's New gate.
-    @Published var currentVersion: String?
+    var currentVersion: String?
 
     /// Module-level stash so LeyneApp.init can record the version before the
     /// AppModel instance exists (init runs on a non-main thread otherwise).
     nonisolated(unsafe) static var bootVersion: String?
 
     // Navigation / overlays
-    @Published var tab: AppTab = .home
-    @Published var launching = true
-    @Published var showOnboarding = false
-    @Published var showAdd = false
-    @Published var searchOpen = false
-    @Published var openCard: CardModel? = nil
-    @Published var liveActivityOn = false
+    var tab: AppTab = .home
+    var launching = true
+    var showOnboarding = false
+    var showAdd = false
+    var searchOpen = false
+    var openCard: CardModel? = nil
+    var liveActivityOn = false
     /// Identifies the bus+stop the running Live Activity belongs to, so the
     /// button can reflect/toggle its state. nil ⟺ no Live Activity running.
-    @Published private(set) var liveActivityKey: String? = nil
+    private(set) var liveActivityKey: String? = nil
     private var liveActivity: Activity<LeyneActivityAttributes>?
     private var liveActivityTask: Task<Void, Never>?
     private var liveActivityEndObserver: Task<Void, Never>?
@@ -567,35 +632,35 @@ final class AppModel: ObservableObject {
     func isLiveActivityActive(_ s: Service, stopCode: String) -> Bool {
         liveActivityKey == Self.liveKey(bus: s.no, stopCode: stopCode)
     }
-    @Published var recentlyAddedId: String? = nil
+    var recentlyAddedId: String? = nil
 
     // Persisted user pins (start empty — no mock seeds)
-    @Published var pins: [Pin] = [] {
+    var pins: [Pin] = [] {
         didSet { persistPins() }
     }
     // Persisted favourite services (a bus anywhere, or a bus at a stop).
-    @Published var favServices: [FavService] = [] {
+    var favServices: [FavService] = [] {
         didSet { persistFavServices() }
     }
     // Persisted recent searches
-    @Published var recents: [String] = []
+    var recents: [String] = []
 
     // Persisted stop codes the user has hidden from the Nearby list (via the
     // long-press "Hide From Nearby" action). Filtered out in SoftHomeView and
     // restored from Settings → Hidden stops.
-    @Published var hiddenNearby: Set<String> = [] {
+    var hiddenNearby: Set<String> = [] {
         didSet { persistHiddenNearby() }
     }
 
     // Saved MRT stations — mirrors favServices/pins; persisted to UserDefaults.
-    @Published var savedMrtStations: [MrtGeoStation] = [] {
+    var savedMrtStations: [MrtGeoStation] = [] {
         didSet { persistSavedMrt() }
     }
 
     // Ids of train disruptions + lift maintenance the user has already viewed on
     // the Alerts tab. "Unseen" = current alert ids minus this set → drives the
     // Alerts-tab badge. Persisted so the badge survives relaunch.
-    @Published var seenAlertIds: Set<String> = [] {
+    var seenAlertIds: Set<String> = [] {
         didSet { persistSeenAlerts() }
     }
 
@@ -606,10 +671,14 @@ final class AppModel: ObservableObject {
     // path are migrated into this list on first load. Alerts are managed via
     // `upsertAlert`/`removeAlert` and are independent of pin/`tracked` card
     // visibility.
-    @Published var alerts: [BusAlert] = []
+    var alerts: [BusAlert] = []
 
-    @Published var tick = 0
-    private var timer: AnyCancellable?
+    var tick = 0
+    /// Structured-concurrency replacement for the old Combine
+    /// `Timer.publish(...).sink`. Cancelled implicitly when AppModel (a
+    /// process-lifetime singleton-ish object owned by the App struct) is
+    /// deallocated; there's no explicit teardown call site today.
+    private var tickTask: Task<Void, Never>?
     private let ds = DataStore.shared
 
     init() {
@@ -620,11 +689,13 @@ final class AppModel: ObservableObject {
         loadAlerts()
         loadHiddenNearby()
         loadSeenAlerts()
-        timer = Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.onTick() }
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.onTick()
             }
+        }
         showOnboarding = !onboarded
         if let s = UserDefaults.standard.string(forKey: "leyne.startTab"),
            let initial = AppTab(rawValue: s), initial != .search { tab = initial }
@@ -1254,7 +1325,6 @@ final class AppModel: ObservableObject {
         NotificationsManager.shared.scheduleAlightAlert(
             busNo: busNo, alightStopCode: stopCode,
             alightStopName: stopName, fireAt: fireAt)
-        objectWillChange.send()
     }
 
     /// Disarm the current alight ride and cancel its pending alert.
@@ -1264,7 +1334,6 @@ final class AppModel: ObservableObject {
         alightStopNameStore = ""
         alightFireAtStore = 0
         NotificationsManager.shared.cancelAlightAlerts()
-        objectWillChange.send()
     }
 
     // ─── Live service composition ─────────────────────────
@@ -1385,7 +1454,8 @@ final class AppModel: ObservableObject {
 
     private func markNew(_ code: String) {
         recentlyAddedId = code
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.4))
             if self?.recentlyAddedId == code { self?.recentlyAddedId = nil }
         }
     }
@@ -1856,11 +1926,7 @@ final class NotificationsManager {
     }
 
     func currentStatus() async -> UNAuthorizationStatus {
-        await withCheckedContinuation { cont in
-            center.getNotificationSettings { settings in
-                cont.resume(returning: settings.authorizationStatus)
-            }
-        }
+        await center.notificationSettings().authorizationStatus
     }
 
     /// Requests `.alert`, `.sound`, and `.timeSensitive` if available — the

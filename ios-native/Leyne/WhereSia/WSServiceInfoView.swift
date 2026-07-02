@@ -12,8 +12,8 @@ struct WSServiceInfoView: View {
     let fromStop: String?
     var onBack: () -> Void
 
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
 
     @State private var route: ServiceRoute?
@@ -28,36 +28,31 @@ struct WSServiceInfoView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            WSHeaderBar(eyebrow: "Service info", onBack: onBack) {
-                Button { m.toggleFavService(no: serviceNo, stop: fromStop) } label: {
-                    WSIcon(glyph: m.isFavService(no: serviceNo, stop: fromStop) ? .bookmarkFilled : .bookmark, size: 19)
-                        .frame(width: 38, height: 38)
-                        .background(ws.panel)
-                        .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
-                }.buttonStyle(.plain)
-            }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    titleRow.padding(.top, 12)
-                    if directions.count > 1 {
-                        WSSegmented(options: directions.map { "To \(shortName($0.destinationName))" },
-                                    selection: $dir)
-                            .padding(.horizontal, 22)
-                    }
-                    firstLastCard
-                    frequencyCard
-                    Text("Buses run at these intervals — there’s no fixed minute timetable. For exact times, check live arrivals.")
-                        .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
-                        .lineSpacing(3)
-                        .padding(.horizontal, 24).padding(.top, 2)
-                    Color.clear.frame(height: 16)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                titleRow.padding(.top, 12)
+                if directions.count > 1 {
+                    WSSegmented(options: directions.map { "To \(shortName($0.destinationName))" },
+                                selection: $dir)
+                        .padding(.horizontal, 22)
                 }
+                firstLastCard
+                frequencyCard
+                Text("Buses run at these intervals — there’s no fixed minute timetable. For exact times, check live arrivals.")
+                    .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
+                    .lineSpacing(3)
+                    .padding(.horizontal, 24).padding(.top, 2)
+                Color.clear.frame(height: 16)
             }
         }
+        .wsEntrance()
         .background(ws.bg)
+        .wsHeaderBar(eyebrow: "Service info", onBack: onBack) {
+            WSHairButton(glyph: m.isFavService(no: serviceNo, stop: fromStop) ? .bookmarkFilled : .bookmark) {
+                m.toggleFavService(no: serviceNo, stop: fromStop)
+            }
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: m.isFavService(no: serviceNo, stop: fromStop))
         .task { await load() }
     }
 
@@ -110,9 +105,9 @@ struct WSServiceInfoView: View {
             HStack {
                 Text(key).font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.dim)
                 Spacer()
-                (Text(WSFmt.firstLast(first)).foregroundColor(ws.text)
-                 + Text(" – ").foregroundColor(ws.dim)
-                 + Text(WSFmt.firstLast(last)).foregroundColor(ws.text))
+                (Text(WSFmt.firstLast(first)).foregroundStyle(ws.text)
+                 + Text(" – ").foregroundStyle(ws.dim)
+                 + Text(WSFmt.firstLast(last)).foregroundStyle(ws.text))
                     .font(ws.mono(14, weight: .bold))
             }
             .padding(.vertical, 11)

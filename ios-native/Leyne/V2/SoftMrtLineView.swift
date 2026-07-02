@@ -15,8 +15,8 @@ struct SoftMrtLineView: View {
     let line: MRTLine
     let onBack: () -> Void
 
-    @EnvironmentObject var m: AppModel
-    @ObservedObject private var ds = DataStore.shared
+    @Environment(AppModel.self) var m: AppModel
+    private let ds = DataStore.shared
 
     @State private var showForecast = false
 

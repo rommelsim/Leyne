@@ -8,7 +8,7 @@ import SwiftUI
 // MARK: - SettingsView
 
 struct SettingsView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
 
     @State private var showAppearanceSheet = false
     @State private var showLanguageSheet = false
@@ -65,7 +65,7 @@ struct SettingsView: View {
                     },
                     footnote: nil
                 )
-                .environmentObject(m)
+                .environment(m)
             }
             .sheet(isPresented: $showLanguageSheet) {
                 OptionSheet(
@@ -80,7 +80,7 @@ struct SettingsView: View {
                     },
                     footnote: "App text is in English today — more languages are rolling out. Your choice still localises dates, pickers and system text."
                 )
-                .environmentObject(m)
+                .environment(m)
             }
             .sheet(isPresented: $showRadiusSheet) {
                 OptionSheet(
@@ -95,7 +95,7 @@ struct SettingsView: View {
                     },
                     footnote: "When you search a 6-digit postal code, bus stops within this distance of that address are shown."
                 )
-                .environmentObject(m)
+                .environment(m)
             }
         }
     }
@@ -306,7 +306,7 @@ struct OptionSheet: View {
     let title: String
     let options: [OptionRow]
     let footnote: String?
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @Environment(\.dismiss) private var dismiss
 
     private var t: Theme { m.t }
@@ -362,7 +362,7 @@ struct OptionSheet: View {
 // MARK: - NotificationsView
 
 struct NotificationsView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     private var t: Theme { m.t }
 
     /// Local mirror of `m.notificationsEnabled` so the Toggle can flip
@@ -462,7 +462,7 @@ struct NotificationsView: View {
 // MARK: - AboutView
 
 struct AboutView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     private var t: Theme { m.t }
 
     private static let thisBuild = [
@@ -611,7 +611,7 @@ struct AboutView: View {
 struct WhatsNewView: View {
     let entry: WhatsNewEntry
     let onDismiss: () -> Void
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     private var t: Theme { m.t }
 
     var body: some View {

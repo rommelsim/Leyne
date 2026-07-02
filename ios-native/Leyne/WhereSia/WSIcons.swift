@@ -24,7 +24,11 @@ enum WSGlyph {
         switch self {
         case .busSingle:      return "bus"
         case .busDouble:      return "bus.doubledecker"
-        case .busBendy:       return "bus"
+        // SF Symbols has no articulated/"bendy" bus glyph, so we differentiate
+        // deliberately within the existing outline set: the filled variant of
+        // the same base symbol, distinct from busSingle's outline "bus" and
+        // busDouble's entirely different silhouette.
+        case .busBendy:       return "bus.fill"
         case .wheelchair:     return "figure.roll"
         case .live:           return "dot.radiowaves.up.forward"
         case .train:          return "tram"
@@ -67,18 +71,13 @@ struct WSIcon: View {
 
     @Environment(\.ws) private var ws
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var on = false
 
     var body: some View {
         Image(systemName: glyph.systemName)
             .font(.system(size: size, weight: weight))
             .symbolRenderingMode(.monochrome)
             .foregroundStyle(color ?? ws.text)
-            .opacity(pulse && !reduceMotion ? (on ? 1 : 0.5) : 1)
-            .animation(pulse && !reduceMotion
-                       ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
-                       : nil, value: on)
-            .onAppear { if pulse { on = true } }
+            .symbolEffect(.pulse, isActive: pulse && !reduceMotion)
             .accessibilityHidden(true)
     }
 }

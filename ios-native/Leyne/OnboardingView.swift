@@ -19,7 +19,7 @@ struct OnboardingView: View {
     var onRequestTracking: () -> Void = {}
     var onFinish: () -> Void = {}
 
-    @EnvironmentObject private var m: AppModel
+    @Environment(AppModel.self) private var m: AppModel
 
     // 0 welcome · 1 live · 2 location · 3 notifications · 4 ATT · 5 done
     @State private var step = 0

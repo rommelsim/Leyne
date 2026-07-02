@@ -10,7 +10,7 @@ import SwiftUI
 struct PromptCard: View {
     let prompt: AppPrompt
 
-    @EnvironmentObject private var m: AppModel
+    @Environment(AppModel.self) private var m: AppModel
     @EnvironmentObject private var fb: Feedback
     @Environment(\.openURL) private var openURL
 

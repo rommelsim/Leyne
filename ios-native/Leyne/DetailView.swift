@@ -6,8 +6,8 @@ import MapKit
 import CoreLocation
 
 struct DetailView: View {
-    @EnvironmentObject var m: AppModel
-    @EnvironmentObject var store: DataStore
+    @Environment(AppModel.self) var m: AppModel
+    @Environment(DataStore.self) var store: DataStore
     let card: CardModel
     let t: Theme
     let dark: Bool
@@ -961,7 +961,7 @@ struct RouteProgress: View {
 /// pin — a singleton list has nothing to swipe between, so RootView falls
 /// back to a plain DetailView and avoids the TabView overhead.
 struct DetailPager: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     let initialStopCode: String
     let initialBusNo: String?
     let t: Theme

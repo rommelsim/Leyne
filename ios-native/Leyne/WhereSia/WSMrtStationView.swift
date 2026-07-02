@@ -11,8 +11,8 @@ struct WSMrtStationView: View {
     let station: MrtGeoStation
     var onBack: () -> Void
 
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
 
     @State private var forecast: [ForecastPoint] = []
@@ -41,29 +41,30 @@ struct WSMrtStationView: View {
     private var crowdNow: CrowdLevel { store.wsCrowd(for: station) ?? .unknown }
 
     var body: some View {
-        VStack(spacing: 0) {
-            WSHeaderBar(eyebrow: "MRT station", onBack: onBack) {
-                Button { m.toggleMrtSaved(station) } label: {
-                    WSIcon(glyph: m.isMrtSaved(station) ? .bookmarkFilled : .bookmark, size: 19)
-                        .frame(width: 38, height: 38)
-                        .background(ws.panel)
-                        .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
-                }.buttonStyle(.plain)
+        // titleRow's "UPD h:mm" stamp is `WSFmt.upd(Date(), ...)` — a live
+        // wall-clock read, not a stored fetch timestamp — so this view needs
+        // a tick dependency to keep advancing under @Observable's
+        // per-property tracking (ObservableObject used to refresh it for
+        // free via the blanket per-second objectWillChange).
+        let _ = m.tick
+        ScrollView {
+            VStack(spacing: 14) {
+                titleRow.padding(.top, 12)
+                crowdNowCard
+                byLineCard
+                forecastCard
+                Color.clear.frame(height: 12)
             }
-
-            ScrollView {
-                VStack(spacing: 14) {
-                    titleRow.padding(.top, 12)
-                    crowdNowCard
-                    byLineCard
-                    forecastCard
-                    Color.clear.frame(height: 12)
-                }
-                .padding(.bottom, 8)
+            .padding(.bottom, 8)
+        }
+        .wsEntrance()
+        .background(ws.bg)
+        .wsHeaderBar(eyebrow: "MRT station", onBack: onBack) {
+            WSHairButton(glyph: m.isMrtSaved(station) ? .bookmarkFilled : .bookmark) {
+                m.toggleMrtSaved(station)
             }
         }
-        .background(ws.bg)
+        .sensoryFeedback(.impact(weight: .light), trigger: m.isMrtSaved(station))
         .onAppear {
             store.wsWarmCrowd(for: [station])
             for l in lines { store.refreshForecast(line: l) }
@@ -94,20 +95,23 @@ struct WSMrtStationView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(crowdNow.wsWord).font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.text)
-                        Text(crowdNow.wsHint).font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.faint)
+                        Text(crowdNow.wsHint).font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
                     }
                     Spacer()
                 }
                 .padding(.top, 8)
-                CrowdGauge(fraction: crowdNow.wsFraction, width: cardWidth, height: 9)
+                // CrowdGauge needs a concrete width up front; a GeometryReader
+                // reads the real local container width (respects the card's
+                // own padding, rotation, and multitasking/split-view) instead
+                // of a hardcoded UIScreen.main.bounds calculation.
+                GeometryReader { geo in
+                    CrowdGauge(fraction: crowdNow.wsFraction, width: geo.size.width, height: 9)
+                }
+                .frame(height: 9)
             }
         }
         .padding(.horizontal, 22)
     }
-
-    // A gauge that stretches — CrowdGauge takes a fixed width, so use a
-    // GeometryReader-free full-width variant via maxWidth.
-    private var cardWidth: CGFloat { UIScreen.main.bounds.width - 44 - 32 }
 
     // MARK: by line
 
@@ -155,9 +159,9 @@ struct WSMrtStationView: View {
                     }
                     .padding(.top, 6)
                     if let busiest = busiestNote {
-                        (Text("Busiest around ").foregroundColor(ws.dim)
-                         + Text(busiest).fontWeight(.bold).foregroundColor(ws.text)
-                         + Text(". Leave a little earlier to beat the crowd.").foregroundColor(ws.dim))
+                        (Text("Busiest around ").foregroundStyle(ws.dim)
+                         + Text(busiest).fontWeight(.bold).foregroundStyle(ws.text)
+                         + Text(". Leave a little earlier to beat the crowd.").foregroundStyle(ws.dim))
                             .font(ws.sans(11.5, weight: .medium))
                             .padding(.top, 12)
                     }

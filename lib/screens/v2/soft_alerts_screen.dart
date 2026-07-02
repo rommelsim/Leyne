@@ -234,7 +234,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                             Icon(
                               Icons.warning_amber_rounded,
                               size: 14,
-                              color: Colors.orange,
+                              color: LyneSeverity.warning.color,
                             ),
                             const SizedBox(width: 6),
                             Expanded(
@@ -334,7 +334,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
             child: Icon(
               Icons.construction_rounded,
               size: 14,
-              color: Colors.orange,
+              color: LyneSeverity.warning.color,
             ),
           ),
           const SizedBox(width: 10),
@@ -441,7 +441,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
             Icon(
               Icons.check_circle_rounded,
               size: 22,
-              color: Colors.green.withValues(alpha: 0.7),
+              color: LyneSeverity.normal.color.withValues(alpha: 0.7),
             ),
             const SizedBox(width: 12),
             Expanded(

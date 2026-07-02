@@ -6,9 +6,9 @@ import SwiftUI
 enum SoftNearbySort: Hashable { case distance, arrival, service }
 
 struct SoftNearbyView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
-    @EnvironmentObject var ds: DataStore
+    @Environment(DataStore.self) var ds: DataStore
     @StateObject private var loc = LocationManager.shared
 
     @State private var sort: SoftNearbySort = .distance

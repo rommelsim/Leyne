@@ -7,8 +7,8 @@
 import SwiftUI
 
 struct WSAlertsView: View {
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
 
@@ -23,6 +23,7 @@ struct WSAlertsView: View {
                     Color.clear.frame(height: 24)
                 }
             }
+            .wsEntrance()
         }
         .background(ws.bg)
         .onAppear {

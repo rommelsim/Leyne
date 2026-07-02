@@ -7,8 +7,8 @@ import BackgroundTasks
 
 @main
 struct LeyneApp: App {
-    @StateObject private var model = AppModel()
-    @StateObject private var store = DataStore.shared
+    @State private var model = AppModel()
+    @State private var store = DataStore.shared
     @StateObject private var location = LocationManager.shared
     @UIApplicationDelegateAdaptor(LeyneAppDelegate.self) private var delegate
     @Environment(\.scenePhase) private var scenePhase
@@ -24,9 +24,9 @@ struct LeyneApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(model)
+                .environment(model)
                 .environmentObject(Feedback.shared)
-                .environmentObject(store)
+                .environment(store)
                 .environmentObject(location)
                 .environmentObject(PromptCenter.shared)
                 .preferredColorScheme(model.themeMode.preferredColorScheme)

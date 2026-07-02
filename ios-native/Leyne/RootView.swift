@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct RootView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
     @EnvironmentObject var prompts: PromptCenter
 
@@ -47,7 +47,7 @@ struct RootView: View {
                let v = m.whatsNewVersion,
                let entry = kChangelog[v] {
                 WhatsNewView(entry: entry, onDismiss: { m.markWhatsNewSeen() })
-                    .environmentObject(m)
+                    .environment(m)
                     .transition(.opacity)
                     .zIndex(55)
             }
@@ -63,7 +63,7 @@ struct RootView: View {
         // Contextual App Store review prompt — paced by PromptCenter.
         .sheet(item: $prompts.active) { prompt in
             PromptCard(prompt: prompt)
-                .environmentObject(m)
+                .environment(m)
                 .environmentObject(fb)
         }
         // Mirror the iOS appearance — system, or overridden by the user's

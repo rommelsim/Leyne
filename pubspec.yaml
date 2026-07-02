@@ -53,8 +53,11 @@ dependencies:
   # rate-limits the dialog; our own guard only asks once per install.
   in_app_review: ^2.0.10
   # Material You wallpaper-derived palette on Android 12+ (API 31+).
-  # On older Android, returns null and we fall back to the static
-  # LyneTheme palette. See lib/main.dart.
+  # Wired via DynamicColorBuilder in lib/main.dart, which feeds the result
+  # into LyneTheme.materialTheme() (lib/theme.dart). On older Android, or
+  # before the OS responds, DynamicColorBuilder yields null and
+  # materialTheme() falls back to a ColorScheme.fromSeed(LyneSignal.meBlue)
+  # palette instead.
   dynamic_color: ^1.7.0
   # Native Android notifications (arrival alerts that fire on the lock
   # screen, not as an in-app toast). flutter_local_notifications schedules

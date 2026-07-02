@@ -338,10 +338,10 @@ class _DisruptionCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.warning_amber_rounded,
                 size: 16,
-                color: Colors.orange,
+                color: LyneSeverity.warning.color,
               ),
               const SizedBox(width: 8),
               Text(
@@ -380,7 +380,7 @@ class _AlertRow extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: Colors.orange,
+              color: LyneSeverity.warning.color,
             ),
           ),
           const SizedBox(height: 2),
@@ -473,7 +473,7 @@ class _StationLiftCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.build_rounded, size: 14, color: Colors.orange),
+              Icon(Icons.build_rounded, size: 14, color: LyneSeverity.warning.color),
               const SizedBox(width: 8),
               Text(
                 'Lift maintenance',
@@ -737,13 +737,13 @@ class _LineCrowdCard extends StatelessWidget {
 Color _crowdColor(CrowdLevel level) {
   switch (level) {
     case CrowdLevel.low:
-      return Colors.green;
+      return LyneSeverity.normal.color;
     case CrowdLevel.moderate:
-      return Colors.orange;
+      return LyneSeverity.warning.color;
     case CrowdLevel.high:
-      return Colors.red;
+      return LyneSeverity.critical.color;
     case CrowdLevel.unknown:
-      return const Color.fromRGBO(128, 128, 128, 0.35);
+      return LyneSeverity.unknown.color;
   }
 }
 

@@ -12,8 +12,8 @@ struct WSHomeView: View {
     var onSearch: () -> Void
     var onOpenMe: () -> Void = {}
 
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @EnvironmentObject private var location: LocationManager
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
@@ -45,6 +45,7 @@ struct WSHomeView: View {
                     Color.clear.frame(height: 24)
                 }
             }
+            .wsEntrance()
         }
         .background(ws.bg)
         .onAppear(perform: bootstrap)
@@ -171,7 +172,8 @@ struct WSHomeView: View {
 private struct StopRow: View {
     let stop: NearbyStop
     var tag: String? = nil
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
 
@@ -181,6 +183,11 @@ private struct StopRow: View {
     }
 
     var body: some View {
+        // Under @Observable, only a view that itself reads `tick` re-renders
+        // each second — this is a separately-tracked child view (not part of
+        // WSHomeView's own body), and it renders a live ETA countdown in
+        // `whenColumn`, so it needs its own read.
+        let _ = m.tick
         Button { push(.busStop(code: stop.stopCode)) } label: {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -214,8 +221,8 @@ private struct StopRow: View {
         if let soonest = wsSoonest(services) {
             let eta = fmtETA(wsLiveETASec(soonest))
             VStack(alignment: .trailing, spacing: 5) {
-                (Text(eta.big).font(ws.mono(19, weight: .bold)).foregroundColor(ws.text)
-                 + Text(eta.big == "Arr" ? "" : " min").font(ws.mono(11, weight: .semibold)).foregroundColor(ws.dim))
+                (Text(eta.big).font(ws.mono(19, weight: .bold)).foregroundStyle(ws.text)
+                 + Text(eta.big == "Arr" ? "" : " min").font(ws.mono(11, weight: .semibold)).foregroundStyle(ws.dim))
                 HStack(spacing: 6) {
                     Text("Bus \(soonest.no) ·").font(ws.mono(10)).foregroundStyle(ws.dim)
                     CrowdGauge(fraction: soonest.load.wsFraction, width: 24)
@@ -223,7 +230,7 @@ private struct StopRow: View {
                 }
             }
         } else {
-            Text("—").font(ws.mono(19, weight: .bold)).foregroundStyle(ws.faint)
+            Text("—").font(ws.mono(19, weight: .bold)).foregroundStyle(ws.dim)
         }
     }
 }
@@ -233,7 +240,7 @@ private struct StopRow: View {
 private struct MrtRow: View {
     let station: MrtGeoStation
     let distanceM: Int
-    @EnvironmentObject private var store: DataStore
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
 

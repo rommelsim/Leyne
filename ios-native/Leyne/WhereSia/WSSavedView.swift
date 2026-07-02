@@ -7,8 +7,8 @@
 import SwiftUI
 
 struct WSSavedView: View {
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
 
@@ -23,6 +23,7 @@ struct WSSavedView: View {
                     Color.clear.frame(height: 24)
                 }
             }
+            .wsEntrance()
         }
         .background(ws.bg)
         .onAppear {
@@ -89,8 +90,8 @@ struct WSSavedView: View {
                 if let soonest = wsSoonest(services) {
                     let eta = fmtETA(wsLiveETASec(soonest))
                     VStack(alignment: .trailing, spacing: 5) {
-                        (Text(eta.big).font(ws.mono(19, weight: .bold)).foregroundColor(ws.text)
-                         + Text(eta.big == "Arr" ? "" : " min").font(ws.mono(11, weight: .semibold)).foregroundColor(ws.dim))
+                        (Text(eta.big).font(ws.mono(19, weight: .bold)).foregroundStyle(ws.text)
+                         + Text(eta.big == "Arr" ? "" : " min").font(ws.mono(11, weight: .semibold)).foregroundStyle(ws.dim))
                         HStack(spacing: 6) {
                             Text("Bus \(soonest.no) ·").font(ws.mono(10)).foregroundStyle(ws.dim)
                             CrowdGauge(fraction: soonest.load.wsFraction, width: 24)
@@ -155,8 +156,8 @@ struct WSSavedView: View {
                 if let svc {
                     let eta = fmtETA(wsLiveETASec(svc))
                     VStack(alignment: .trailing, spacing: 5) {
-                        (Text(eta.big).font(ws.mono(17, weight: .bold)).foregroundColor(ws.text)
-                         + Text(eta.big == "Arr" ? "" : "m").font(ws.mono(10)).foregroundColor(ws.dim))
+                        (Text(eta.big).font(ws.mono(17, weight: .bold)).foregroundStyle(ws.text)
+                         + Text(eta.big == "Arr" ? "" : "m").font(ws.mono(10)).foregroundStyle(ws.dim))
                         HStack(spacing: 5) {
                             CrowdGauge(fraction: svc.load.wsFraction, width: 24)
                             Text(svc.load.wsWord).font(ws.mono(10)).foregroundStyle(ws.dim)

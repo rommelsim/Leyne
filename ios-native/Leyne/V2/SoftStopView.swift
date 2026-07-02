@@ -21,9 +21,9 @@ enum StopSort: Hashable {
 struct SoftStopView: View {
     let stopCode: String
 
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
-    @EnvironmentObject var ds: DataStore
+    @Environment(DataStore.self) var ds: DataStore
 
     let onBack: () -> Void
     let onOpenBus: (String) -> Void
@@ -49,6 +49,12 @@ struct SoftStopView: View {
     private var isPinned: Bool { m.pins.contains { $0.code == stopCode } }
 
     var body: some View {
+        // Dormant screen (V2 predecessor of WSBusStopView), still compiled
+        // into the target. Its arrival cards render a live ETA countdown
+        // with no local refresh timer of its own (unlike SoftBusView's
+        // `ticker`), so — like the live WhereSia screens — it needs an
+        // explicit tick read under @Observable's per-property tracking.
+        let _ = m.tick
         ZStack(alignment: .top) {
             t.bg.ignoresSafeArea()
 
@@ -110,9 +116,9 @@ struct SoftStopView: View {
         // Manage all alerts (reachable from the active-alerts card header).
         .sheet(isPresented: $showManage) {
             NavigationStack { ManageAlertsView() }
-                .environmentObject(m)
+                .environment(m)
                 .environmentObject(fb)
-                .environmentObject(ds)
+                .environment(ds)
         }
         // One-tap arrival-alert Undo toast.
         .arrivalAlertToastOverlay(state: $alertToast, t: t)

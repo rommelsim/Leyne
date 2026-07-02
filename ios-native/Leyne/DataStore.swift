@@ -2,7 +2,7 @@
 
 import Foundation
 import CoreLocation
-import Combine
+import Observation
 import WidgetKit
 
 enum LoadState: Equatable {
@@ -148,31 +148,32 @@ func journeySegment(_ r: RouteInfo) -> [RouteStopLive] {
 }
 
 @MainActor
-final class DataStore: ObservableObject {
+@Observable
+final class DataStore {
     static let shared = DataStore()
 
-    @Published var referenceState: LoadState = .loading
-    @Published var nearby: [NearbyStop] = []
-    @Published var arrivals: [String: ArrivalState] = [:]
-    @Published var routesLoaded = false
+    var referenceState: LoadState = .loading
+    var nearby: [NearbyStop] = []
+    var arrivals: [String: ArrivalState] = [:]
+    var routesLoaded = false
     /// MRT/LRT line disruptions, refreshed periodically by AppModel's tick.
     /// Empty means no disruptions; the Home page renders one card per item.
-    @Published var trainAlerts: [TrainAlert] = []
+    var trainAlerts: [TrainAlert] = []
     private var lastTrainAlertFetch: Date?
 
     /// Network-wide list of lifts currently under maintenance (FacilitiesMaintenance v2).
-    @Published var liftMaintenance: [LiftMaintenance] = []
+    var liftMaintenance: [LiftMaintenance] = []
     private var lastLiftFetch: Date?
 
     /// Live per-line station crowdedness (PCDRealTime), fetched lazily when a
     /// line is expanded on the MRT board.
-    @Published var crowdByLine: [MRTLine: [StationCrowd]] = [:]
+    var crowdByLine: [MRTLine: [StationCrowd]] = [:]
     private var crowdInflight: Set<MRTLine> = []
     private var lastCrowdFetch: [MRTLine: Date] = [:]
 
     /// Forecasted station crowd for the next upcoming half-hour interval
     /// (PCDForecast). Cached aggressively — forecast data is daily.
-    @Published var forecastByLine: [MRTLine: [StationCrowd]] = [:]
+    var forecastByLine: [MRTLine: [StationCrowd]] = [:]
     private var forecastInflight: Set<MRTLine> = []
     private var lastForecastFetch: [MRTLine: Date] = [:]
 
@@ -182,7 +183,7 @@ final class DataStore: ObservableObject {
     /// Last successful arrival fetch per stop. Exposed via `lastRefresh(_:)`
     /// so UI surfaces (the Home freshness dot, per-stop staleness chips)
     /// can render a confidence signal without re-implementing the cache.
-    @Published private(set) var lastFetched: [String: Date] = [:]
+    private(set) var lastFetched: [String: Date] = [:]
     private var inflight: Set<String> = []
     private var lastLoc: CLLocation?
 
@@ -271,8 +272,8 @@ final class DataStore: ObservableObject {
                     title: alert.title,
                     detail: alert.detail)
             }
-            // Don't bounce equal arrays through @Published — keeps the
-            // Home re-render quiet when nothing changed.
+            // Don't bounce equal arrays through the observed property — keeps
+            // the Home re-render quiet when nothing changed.
             if alerts != trainAlerts { trainAlerts = alerts }
         } catch {
             // Network failures here are routine; we keep the previous

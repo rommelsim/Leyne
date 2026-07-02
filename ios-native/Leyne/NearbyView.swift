@@ -13,8 +13,8 @@ import UIKit
 private enum NearbySort { case distance, arrival, service }
 
 struct NearbyView: View {
-    @EnvironmentObject var m: AppModel
-    @EnvironmentObject var store: DataStore
+    @Environment(AppModel.self) var m: AppModel
+    @Environment(DataStore.self) var store: DataStore
     @EnvironmentObject var loc: LocationManager
 
     @State private var sort: NearbySort = .distance

@@ -24,28 +24,36 @@ class MrtMapScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = context.t;
+    // Always-dark immersive chrome, regardless of the app's own light/dark
+    // theme — routed through the existing inverse-panel tokens instead of
+    // raw Colors.black/white/white60. LyneTheme.light's `contrast`/
+    // `contrastFg` pair is ALREADY the dark-panel/light-ink combination
+    // (see theme.dart: `contrast` is an inverse panel — dark in light mode,
+    // light in dark mode) so using the light palette's inverse tokens here
+    // — not `context.t`, which would flip to white in dark mode — is what
+    // keeps this screen unconditionally dark on both app themes.
+    final inv = LyneTheme.light;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: inv.contrast,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: inv.contrast,
         surfaceTintColor: Colors.transparent,
-        foregroundColor: Colors.white,
-        title: const Text(
+        foregroundColor: inv.contrastFg,
+        title: Text(
           'MRT System Map',
           style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w600,
-            color: Colors.white,
+            color: inv.contrastFg,
           ),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.close_rounded, color: Colors.white),
+          icon: Icon(Icons.close_rounded, color: inv.contrastFg),
           onPressed: () => Navigator.of(context).pop(),
           tooltip: 'Close',
         ),
       ),
-      body: _MapBody(t: t),
+      body: _MapBody(t: inv),
     );
   }
 }
@@ -86,6 +94,13 @@ class _MapFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // `t` is `LyneTheme.light` here (passed down from MrtMapScreen — see the
+    // comment there): its `contrastFg` is white ink, so opacity-scaled
+    // variants of it stand in for the old Colors.white60 / translucent-white
+    // panel literals while staying token-sourced.
+    final onDark60 = t.contrastFg.withValues(alpha: 0.6);
+    final panel = t.contrastFg.withValues(alpha: 0.08);
+    final buttonBg = t.contrastFg.withValues(alpha: 0.15);
     return Padding(
       padding: const EdgeInsets.all(32),
       child: Column(
@@ -95,38 +110,38 @@ class _MapFallback extends StatelessWidget {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: const Color.fromRGBO(255, 255, 255, 0.08),
+              color: panel,
               borderRadius: BorderRadius.circular(20),
             ),
             alignment: Alignment.center,
-            child: const Icon(
+            child: Icon(
               Icons.map_rounded,
               size: 36,
-              color: Colors.white60,
+              color: onDark60,
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             'System map not available',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
-              color: Colors.white,
+              color: t.contrastFg,
             ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'The offline map has not been added yet.',
-            style: TextStyle(fontSize: 13, color: Colors.white60),
+            style: TextStyle(fontSize: 13, color: onDark60),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _openLtaMap,
             style: FilledButton.styleFrom(
-              backgroundColor: const Color.fromRGBO(255, 255, 255, 0.15),
-              foregroundColor: Colors.white,
+              backgroundColor: buttonBg,
+              foregroundColor: t.contrastFg,
             ),
             icon: const Icon(Icons.open_in_new_rounded, size: 16),
             label: const Text('Open LTA system map'),

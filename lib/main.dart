@@ -10,6 +10,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -224,26 +225,37 @@ class LyneApp extends StatelessWidget {
     // Rebuild MaterialApp when the user changes Appearance / Language so the
     // themeMode + locale overrides take effect immediately.
     //
-    // The app is intentionally MONOCHROME (matching iOS 2.6.0+) — colour is
-    // reserved for MRT line pills and crowd/occupancy. So we do NOT apply
-    // Material You / wallpaper-derived dynamic colour, which would tint
-    // surfaces with the user's wallpaper and break the monochrome look.
-    // Always use LyneTheme's static palette.
-    return ListenableBuilder(
-      listenable: AppModel.shared,
-      builder: (context, _) {
-        return MaterialApp(
-          title: 'Leyne',
-          debugShowCheckedModeBanner: false,
-          themeMode: AppModel.shared.themeMode,
-          theme: LyneTheme.light.materialTheme(),
-          darkTheme: LyneTheme.dark.materialTheme(),
-          locale: AppModel.shared.locale,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          navigatorKey: _navigatorKey,
-          scaffoldMessengerKey: lyneMessengerKey,
-          home: const _AppRoot(),
+    // Material You (owner decision, 2026-07-02 — supersedes the earlier
+    // "stay monochrome" call for Android): DynamicColorBuilder asks the OS
+    // for a wallpaper-derived palette on Android 12+ and hands it to
+    // LyneTheme.materialTheme() as light/dark ColorSchemes; on older Android
+    // (or if the OS has no palette yet) both come back null and
+    // materialTheme() falls back to its own seeded palette. Either way,
+    // dynamic colour only tints CHROME + ACCENT (NavigationBar/Switch/Chip,
+    // LyneTheme.accent/live) — surfaces, MRT line colours, severity colours
+    // and crowd colours are unaffected. See theme.dart materialTheme() for
+    // the full scope. DynamicColorBuilder sits OUTSIDE the AppModel listener
+    // so the platform-channel round trip to fetch the palette (effectively
+    // once per process) doesn't re-run every time AppModel notifies.
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        return ListenableBuilder(
+          listenable: AppModel.shared,
+          builder: (context, _) {
+            return MaterialApp(
+              title: 'Leyne',
+              debugShowCheckedModeBanner: false,
+              themeMode: AppModel.shared.themeMode,
+              theme: LyneTheme.light.materialTheme(dynamicScheme: lightDynamic),
+              darkTheme: LyneTheme.dark.materialTheme(dynamicScheme: darkDynamic),
+              locale: AppModel.shared.locale,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              navigatorKey: _navigatorKey,
+              scaffoldMessengerKey: lyneMessengerKey,
+              home: const _AppRoot(),
+            );
+          },
         );
       },
     );

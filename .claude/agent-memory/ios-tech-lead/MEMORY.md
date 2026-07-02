@@ -3,3 +3,4 @@
 - [Arrival alert dual-lead](project-notification-dual-lead.md) — two notifications per arrival alert (3 & 1 min); no lead picker for arrivals; destination alerts keep picker
 - [One-tap alert toggle pattern](project-one-tap-alert-toggle.md) — NotifyWhenSheet + NotifyConfirmView deleted 2026-06-10; replaced by AppModel.toggleArrivalAlertWithToast + ArrivalAlertToast overlay
 - [Native ad (Home list)](project-native-ad.md) — NativeAdLoader + NativeAdUIView + NativeAdCard in V2/NativeAdCard.swift; AdConfig.nativeUnitID in AdBanner.swift; placed after 3rd "More stops" card in SoftHomeView
+- [WhereSia glass pass](project-wheresia-glass-pass.md) — 2026-07-02 Liquid Glass chrome on WhereSia/: native toolbar headers, floating glass tab bar via safeAreaInset, dim-token contrast fixes, sheet search

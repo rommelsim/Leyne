@@ -15,13 +15,15 @@ struct WSTrackBusView: View {
     let serviceNo: String
     var onBack: () -> Void
 
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var route: RouteInfo?
     @State private var busIndex: Int?
+    @State private var refreshTick = false
 
     private var service: Service? { store.servicesFor(stopCode).first { $0.no == serviceNo } }
     private var isAlerted: Bool {
@@ -31,71 +33,76 @@ struct WSTrackBusView: View {
     var body: some View {
         let _ = m.tick
         VStack(spacing: 0) {
-            WSHeaderBar(eyebrow: "Track bus", onBack: onBack) {
-                Button {
-                    push(.serviceInfo(no: serviceNo, fromStop: stopCode))
-                } label: {
-                    WSIcon(glyph: .info, size: 19)
-                        .frame(width: 38, height: 38)
-                        .background(ws.panel)
-                        .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
-                }.buttonStyle(.plain)
-            }
-
             liveCard
+                .wsEntrance()
 
             ScrollView { timeline.padding(.top, 4) }
 
             cta
+                .wsEntrance(delay: 0.08)
         }
         .background(ws.bg)
+        .wsHeaderBar(eyebrow: "Track bus", onBack: onBack) {
+            WSHairButton(glyph: .info) {
+                push(.serviceInfo(no: serviceNo, fromStop: stopCode))
+            }
+        }
         .onAppear {
             store.ensureArrivals(stop: stopCode, force: true)
-            Task { await loadRoute() }
+        }
+        .task {
+            // .task (not a fire-and-forget Task in onAppear) so the route
+            // fetch cancels automatically if the user pops before it resolves.
+            await loadRoute()
         }
         .refreshable {
             await store.refreshArrivals(stop: stopCode)
             await loadRoute()
+            refreshTick.toggle()
         }
+        .sensoryFeedback(.success, trigger: refreshTick)
     }
 
     // MARK: live card
 
     private var liveCard: some View {
         let eta = service.map { fmtETA(wsLiveETASec($0)) }
-        return HStack(spacing: 0) {
-            Rectangle().fill(ws.text).frame(width: 4)
-            VStack(alignment: .leading, spacing: 13) {
-                HStack(spacing: 12) {
-                    RouteTile(text: serviceNo, size: .large)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Bus toward").font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim)
-                        Text(service?.dest ?? destName).font(ws.sans(16, weight: .heavy)).foregroundStyle(ws.text)
-                    }
-                    Spacer()
+        let arriving = eta?.big == "Arr"
+        return VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 12) {
+                RouteTile(text: serviceNo, size: .large)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Bus toward").font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim)
+                    Text(service?.dest ?? destName).font(ws.sans(16, weight: .heavy)).foregroundStyle(ws.text)
                 }
-                HStack(spacing: 8) {
-                    WSIcon(glyph: .live, size: 15, color: ws.dim, pulse: true)
-                    if let eta {
-                        (Text("Reaching your stop in ").font(ws.sans(13, weight: .semibold)).foregroundColor(ws.text)
-                         + Text(eta.big == "Arr" ? "now" : "\(eta.big) min").font(ws.mono(13, weight: .bold)).foregroundColor(ws.text))
-                    } else {
-                        Text("Waiting for the next bus…").font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.dim)
-                    }
-                    Spacer()
-                    if let load = service?.load {
-                        HStack(spacing: 7) {
-                            Text(load.wsWord).font(ws.sans(12, weight: .bold)).foregroundStyle(ws.text)
-                            CrowdGauge(fraction: load.wsFraction, width: 34)
-                        }
+                Spacer()
+            }
+            HStack(spacing: 8) {
+                WSIcon(glyph: .live, size: 15, color: ws.accentSoft, pulse: true)
+                if let eta {
+                    (Text("Reaching your stop ").font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.text)
+                     + Text(arriving ? "now" : "in \(eta.big) min").font(ws.mono(13, weight: .bold)).foregroundStyle(ws.text))
+                } else {
+                    Text("Waiting for the next bus…").font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.dim)
+                }
+                Spacer()
+                if let load = service?.load {
+                    HStack(spacing: 7) {
+                        Text(load.wsWord).font(ws.sans(12, weight: .bold)).foregroundStyle(ws.text)
+                        CrowdGauge(fraction: load.wsFraction, width: 34)
                     }
                 }
             }
-            .padding(16)
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(ws.panel)
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(ws.rule, lineWidth: 1))
+        // Left accent bar as a leading overlay (not an HStack sibling): a bare
+        // Rectangle is vertically greedy, and as a sibling it made the whole
+        // card flexible so it split leftover space with the scroll view and
+        // ballooned. As an overlay the card hugs its content height.
+        .overlay(alignment: .leading) { Rectangle().fill(ws.accent).frame(width: 4) }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 22).padding(.top, 14)
     }
@@ -143,9 +150,11 @@ struct WSTrackBusView: View {
             // rail
             VStack(spacing: 0) {
                 Circle()
-                    .fill(isYou ? ws.text : (passed ? ws.faint : ws.bg))
+                    .fill(isYou ? ws.accent : (passed ? ws.faint : ws.bg))
                     .frame(width: isYou ? 15 : 13, height: isYou ? 15 : 13)
-                    .overlay(Circle().stroke(isYou || passed ? ws.text : ws.faint, lineWidth: isYou ? 3 : 2.5))
+                    .overlay(Circle().stroke(isYou ? ws.accent : (passed ? ws.text : ws.faint), lineWidth: isYou ? 3 : 2.5))
+                    // Ping the user's stop — the one node that matters most.
+                    .background { if isYou { WSPing(cornerRadius: 999) } }
                     .padding(.top, 4)
                 Rectangle().fill(passed ? ws.text : ws.rule).frame(width: 3)
             }
@@ -157,7 +166,7 @@ struct WSTrackBusView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(stop.name)
                         .font(ws.sans(14.5, weight: .bold))
-                        .foregroundStyle(passed ? ws.faint : ws.text)
+                        .foregroundStyle(passed ? ws.dim : ws.text)
                     if let ic { interchangeFlag("MRT", ic.codes) }
                 }
                 .padding(.bottom, 18)
@@ -180,7 +189,7 @@ struct WSTrackBusView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ws.panel)
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-        .overlay(alignment: .leading) { Rectangle().fill(ws.text).frame(width: 3) }
+        .overlay(alignment: .leading) { Rectangle().fill(ws.accent).frame(width: 3) }
         .clipShape(RoundedRectangle(cornerRadius: 11))
         .padding(.bottom, 18)
     }
@@ -201,8 +210,11 @@ struct WSTrackBusView: View {
                     .font(ws.mono(12, weight: .bold)).foregroundStyle(ws.text)
                     .frame(width: 34, height: 30)
                     .background(ws.panel2)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(ws.text, lineWidth: 1.5))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(ws.accent, lineWidth: 1.5))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    // Radar ping behind the tile — draws the eye to the bus's
+                    // live position. Added after the clip so the ring emanates.
+                    .background(WSPing(cornerRadius: 8))
                 Rectangle().fill(ws.rule).frame(width: 3)
             }
             .frame(width: 24)
@@ -258,13 +270,18 @@ struct WSTrackBusView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 22).padding(.vertical, 12)
+        // Arming reads as a small win (.success); cancelling is a quieter
+        // acknowledgement (.impact) — matches the app's "quiet by default"
+        // haptic restraint (Feedback.swift).
+        .sensoryFeedback(trigger: isAlerted) { _, new in new ? .success : .impact(weight: .light) }
     }
 
     // MARK: data
 
     private func loadRoute() async {
         guard let r = await store.route(service: serviceNo, stopCode: stopCode) else { return }
-        route = r
+        if reduceMotion { route = r }
+        else { withAnimation(.easeOut(duration: 0.35)) { route = r } }
         // Approximate the bus's position from its live coord → nearest upstream stop.
         if let coord = await store.liveBus(service: serviceNo, stopCode: stopCode) {
             let you = min(max(r.youIndex, 0), r.stops.count - 1)

@@ -12,10 +12,12 @@ struct WSBusStopView: View {
     let code: String
     var onBack: () -> Void
 
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
+
+    @State private var refreshTick = false
 
     private var isPinned: Bool { m.pins.contains { $0.code == code } }
     private var interchange: (name: String, codes: [String])? {
@@ -24,36 +26,33 @@ struct WSBusStopView: View {
 
     var body: some View {
         let _ = m.tick
-        VStack(spacing: 0) {
-            WSHeaderBar(eyebrow: "Bus stop", onBack: onBack) {
-                Button(action: togglePin) {
-                    WSIcon(glyph: isPinned ? .bookmarkFilled : .bookmark, size: 19)
-                        .frame(width: 38, height: 38)
-                        .background(ws.panel)
-                        .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
-                }.buttonStyle(.plain)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(store.stopName(code))
+                    .font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
+                    .padding(.horizontal, 22).padding(.top, 12)
+                Text(metaline)
+                    .font(ws.mono(12)).tracking(0.3).foregroundStyle(ws.dim)
+                    .padding(.horizontal, 22).padding(.top, 6).padding(.bottom, 10)
+
+                if let ic = interchange { interchangeCard(ic).padding(.bottom, 8) }
+
+                servicesSection
+                footer
+                Color.clear.frame(height: 20)
             }
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(store.stopName(code))
-                        .font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
-                        .padding(.horizontal, 22).padding(.top, 12)
-                    Text(metaline)
-                        .font(ws.mono(12)).tracking(0.3).foregroundStyle(ws.dim)
-                        .padding(.horizontal, 22).padding(.top, 6).padding(.bottom, 10)
-
-                    if let ic = interchange { interchangeCard(ic).padding(.bottom, 8) }
-
-                    servicesSection
-                    footer
-                    Color.clear.frame(height: 20)
-                }
-            }
-            .refreshable { await store.refreshArrivals(stop: code) }
         }
+        .refreshable {
+            await store.refreshArrivals(stop: code)
+            refreshTick.toggle()
+        }
+        .wsEntrance()
         .background(ws.bg)
+        .wsHeaderBar(eyebrow: "Bus stop", onBack: onBack) {
+            WSHairButton(glyph: isPinned ? .bookmarkFilled : .bookmark, action: togglePin)
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: isPinned)
+        .sensoryFeedback(.success, trigger: refreshTick)
         .onAppear {
             store.ensureArrivals(stop: code, force: true)
             store.ensureRoutes()
@@ -87,7 +86,7 @@ struct WSBusStopView: View {
                 HStack(spacing: 9) {
                     WSIcon(glyph: .train, size: 17, color: ws.dim)
                     Text(ic.name).font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
-                    Text("AT THIS STOP").font(ws.mono(9)).tracking(0.6).foregroundStyle(ws.faint)
+                    Text("AT THIS STOP").font(ws.mono(9)).tracking(0.6).foregroundStyle(ws.dim)
                     Spacer()
                     WSIcon(glyph: .chevron, size: 17, color: ws.faint)
                 }
@@ -146,9 +145,9 @@ struct WSBusStopView: View {
                             WSIcon(glyph: svc.deck.wsGlyph, size: 16, color: ws.dim)
                             if svc.wab { WSIcon(glyph: .wheelchair, size: 16, color: ws.dim) }
                             if svc.monitored {
-                                WSIcon(glyph: .live, size: 16, color: ws.dim, pulse: true)
+                                WSIcon(glyph: .live, size: 16, color: ws.accentSoft, pulse: true)
                             } else {
-                                Text("· scheduled").font(ws.mono(11)).foregroundStyle(ws.faint)
+                                Text("· scheduled").font(ws.mono(11)).foregroundStyle(ws.dim)
                             }
                         }
                     }
@@ -207,9 +206,9 @@ struct WSBusStopView: View {
                 }
             }
             HStack(spacing: 7) {
-                WSIcon(glyph: .live, size: 13, color: ws.dim, pulse: true)
+                WSIcon(glyph: .live, size: 13, color: ws.accentSoft, pulse: true)
                 Text("Live from LTA DataMall · \(WSFmt.upd(store.lastRefresh(code), use24h: m.use24h)) · refreshes every 20s")
-                    .font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.faint)
+                    .font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
             }
         }
         .padding(.horizontal, 22).padding(.top, 14)

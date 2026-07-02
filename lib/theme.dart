@@ -10,6 +10,7 @@
 
 import 'dart:ui' as ui;
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
 @immutable
@@ -76,6 +77,12 @@ class LyneTheme {
   final Color lineHi;
 
   /// Brand accent. Also used as the "live / arriving" colour.
+  ///
+  /// This field is the static fallback value. At runtime, `context.t.accent`
+  /// (via `LyneThemeContext`) resolves to the *live* Material You accent —
+  /// the resolved `ColorScheme.primary`, which is wallpaper-derived on
+  /// Android 12+ or seed-derived below it — via `LyneTheme.withAccent`. See
+  /// `materialTheme()` for the full dynamic-colour scope.
   final Color accent;
 
   /// Live-data colour (alias for accent in this palette).
@@ -222,22 +229,51 @@ class LyneTheme {
   /// accent), black in dark mode (white accent) — monochrome both ways.
   Color get onAccent => isDark ? _hex('111111') : _hex('FFFFFF');
 
-  /// Material ThemeData built from this palette — wires bg/surface/accent
-  /// into the Material 3 colour scheme so stock widgets (AppBar,
-  /// NavigationBar, ListTile, etc.) inherit the look without per-widget
+  /// Material ThemeData built from this palette — wires bg/surface into the
+  /// Material 3 colour scheme so stock widgets (AppBar, NavigationBar,
+  /// Switch, Chip, ListTile, etc.) inherit the look without per-widget
   /// styling.
   ///
-  /// The palette is the static MONOCHROME one (matching iOS 2.6.0+). We do
-  /// NOT consume Material You / wallpaper-derived dynamic colour — that would
-  /// tint surfaces with the user's wallpaper and break the monochrome look.
-  /// Colour is reserved for MRT line pills and crowd/occupancy elsewhere.
-  ThemeData materialTheme() {
-    final scheme = ColorScheme(
-      brightness: isDark ? Brightness.dark : Brightness.light,
-      primary: accent,
-      onPrimary: contrastFg,
-      secondary: live,
-      onSecondary: contrastFg,
+  /// Material You / dynamic colour (owner decision, 2026-07-02 — supersedes
+  /// the earlier "stay monochrome" call for Android; iOS is untouched and
+  /// stays monochrome, see ios-native/Leyne/Theme.swift): on Android 12+ the
+  /// OS derives [dynamicScheme] from the user's wallpaper (fed in from
+  /// `DynamicColorBuilder` in lib/main.dart). Below API 31, or whenever
+  /// dynamic colour is unavailable, [dynamicScheme] is null and we fall back
+  /// to a seeded palette built from `LyneSignal.meBlue` — the app's existing
+  /// transit-blue "you are here" colour, already established as a brand
+  /// colour, so it's a natural seed.
+  ///
+  /// Scope is deliberately narrow: dynamic colour tints CHROME + ACCENT
+  /// only.
+  ///   • `primary`/`secondary` (and everything Flutter/Material derives from
+  ///     them for free — `Switch`'s active track, `ChoiceChip`'s selected
+  ///     fill) follow the resolved scheme, as does the NavigationBar
+  ///     indicator pill below.
+  ///   • `LyneTheme.accent`/`live` also follow it, but only via
+  ///     `LyneThemeContext.t` → `withAccent` — the static fields on this
+  ///     class stay the monochrome fallback value.
+  ///   • `surface`/`onSurface`/`outline` stay pinned to this palette's own
+  ///     surface/fg/line so the page background and body text never shift
+  ///     with wallpaper. `error` stays pinned to `crit`.
+  ///   • MRT line colours (`MRTLine.color`), severity colours
+  ///     (`LyneSeverity`) and crowd/occupancy colours (`occupancyColor` in
+  ///     proximity.dart) are DATA, not chrome — none of them read from
+  ///     `ColorScheme` at all, dynamic or otherwise.
+  ThemeData materialTheme({ColorScheme? dynamicScheme}) {
+    final brightness = isDark ? Brightness.dark : Brightness.light;
+    final resolved = (dynamicScheme ??
+            ColorScheme.fromSeed(
+              seedColor: LyneSignal.meBlue,
+              brightness: brightness,
+            ))
+        // dynamic_color's harmonized() nudges error/errorContainer toward
+        // the resolved primary so a wallpaper-driven scheme doesn't clash;
+        // harmless here since `error`/`onError` are overridden to our own
+        // `crit`/`contrastFg` tokens immediately below regardless.
+        .harmonized();
+    final scheme = resolved.copyWith(
+      brightness: brightness,
       surface: surface,
       onSurface: fg,
       surfaceContainerHighest: bg,
@@ -268,14 +304,17 @@ class LyneTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: scaffoldBg,
         surfaceTintColor: surfaceTint,
-        indicatorColor: isDark
-            ? const Color.fromRGBO(255, 255, 255, 0.06)
-            : accent.withValues(alpha: 0.12),
+        // Dynamic-colour indicator pill — the one spot in the nav bar that
+        // now tints with wallpaper/seed instead of a flat monochrome wash.
+        indicatorColor: scheme.primary.withValues(alpha: isDark ? 0.20 : 0.12),
         // Resolve icon + label colour per state. Without this the bar's
         // icons fall back to Material's default ColorScheme slots (which
         // this palette never sets), rendering near-invisible on the light
         // warm-white background. Selected = full-contrast fg; unselected =
-        // dim but clearly legible — on both light and dark.
+        // dim but clearly legible — on both light and dark. Icons stay
+        // monochrome ink (not scheme.primary) so wayfinding never depends on
+        // a colour some users may have low contrast with; the coloured pill
+        // behind the icon is the accent moment instead.
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             size: 24,
@@ -294,15 +333,56 @@ class LyneTheme {
       iconTheme: IconThemeData(color: fg),
     );
   }
+
+  /// Returns a copy of this palette with `accent`/`live` replaced by
+  /// [color]. Used exclusively by `LyneThemeContext.t` to adopt the resolved
+  /// `ColorScheme.primary` (Material You wallpaper colour on Android 12+, or
+  /// the seeded fallback — see `materialTheme()`) as the app's own accent:
+  /// the LIVE dot, imminent-ETA highlight, and "you are here" pin. Every
+  /// other field is untouched — surfaces, ink, proximity/severity tokens,
+  /// MRT line colours and crowd colours don't move with wallpaper.
+  LyneTheme withAccent(Color color) => LyneTheme(
+    isDark: isDark,
+    bg: bg,
+    surface: surface,
+    surfaceHi: surfaceHi,
+    contrast: contrast,
+    contrastFg: contrastFg,
+    contrastSurface: contrastSurface,
+    fg: fg,
+    dim: dim,
+    faint: faint,
+    line: line,
+    lineHi: lineHi,
+    accent: color,
+    live: color,
+    liveBg: liveBg,
+    warn: warn,
+    warnBg: warnBg,
+    crit: crit,
+    critBg: critBg,
+    soon: soon,
+    soonBg: soonBg,
+    mid: mid,
+    midBg: midBg,
+  );
 }
 
 /// Convenience extension: any widget can read the current LyneTheme via
 /// `context.t`. We resolve by looking at the current brightness so the
-/// right palette comes back without a Theme provider.
+/// right palette comes back without a Theme provider, then swap in the live
+/// Material You accent (`Theme.of(this).colorScheme.primary` — wallpaper-
+/// derived on Android 12+, seed-derived fallback otherwise; see
+/// `materialTheme()` / `LyneTheme.withAccent`) so every `t.accent`/`t.live`
+/// call site in the app picks up dynamic colour automatically.
 extension LyneThemeContext on BuildContext {
-  LyneTheme get t => Theme.of(this).brightness == Brightness.dark
-      ? LyneTheme.dark
-      : LyneTheme.light;
+  LyneTheme get t {
+    final theme = Theme.of(this);
+    final base = theme.brightness == Brightness.dark
+        ? LyneTheme.dark
+        : LyneTheme.light;
+    return base.withAccent(theme.colorScheme.primary);
+  }
 }
 
 /// Shared corner-radius scale. Before this, screens used ad-hoc radii
@@ -349,8 +429,46 @@ class LyneSignal {
   /// MRT NE-line purple — alert cards and dots.
   static const Color mrtNE = Color(0xFF9B26B6);
 
-  /// Live "ME" location dot on maps.
+  /// Live "ME" location dot on maps. Also `materialTheme()`'s seed colour
+  /// for the Material You fallback palette (see there) — already an
+  /// established brand-ish blue, so it doubles as a sensible seed.
   static const Color meBlue = Color(0xFF3B82F6);
+}
+
+/// Disruption / crowd-density severity colour — the MRT line service status
+/// (normal / disrupted) and the station/line `CrowdLevel` tier (low /
+/// moderate / high / unknown). Centralises what used to be ~20 ad-hoc
+/// `Colors.orange`/`Colors.green`/`Colors.red` literals scattered across
+/// `soft_mrt_screen.dart`, `soft_mrt_line_screen.dart`,
+/// `soft_mrt_station_screen.dart` and `soft_alerts_screen.dart` into one
+/// named set, so severity can be re-tuned in one place. Values are UNCHANGED
+/// from the old inline literals — this is a refactor for control, not a
+/// redesign.
+///
+/// Cross-mode (same value in light/dark) like `LyneSignal`/`MRTLine` — these
+/// are DATA-severity colours, not surface tokens, so they don't flex with
+/// `LyneTheme.light`/`dark` and never come from Material You (dynamic colour
+/// tints chrome + accent only, never data — see `materialTheme()`). This is
+/// a different axis from bus-occupancy colour (`occupancyColor` in
+/// proximity.dart, seats/standing/limited from the LTA `Load` field) — that
+/// one stays exactly as-is, untouched by this token.
+enum LyneSeverity {
+  /// Operating normally / all-clear / low crowd — the check-mark tier.
+  normal(Colors.green),
+
+  /// Disrupted / delayed / moderate crowd — the dominant severity colour
+  /// across MRT + Alerts (banners, borders, icons, status text).
+  warning(Colors.orange),
+
+  /// High crowd — the worst `CrowdLevel` tier. Disruption status has no
+  /// "critical" tier of its own (LTA only reports disrupted/not).
+  critical(Colors.red),
+
+  /// Crowd level not reported — neutral grey, not "normal".
+  unknown(Color.fromRGBO(128, 128, 128, 0.35));
+
+  const LyneSeverity(this.color);
+  final Color color;
 }
 
 /// Singapore MRT line palette. Subset for the colours surfaced in

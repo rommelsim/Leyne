@@ -7,7 +7,7 @@
 import SwiftUI
 
 struct WSMeView: View {
-    @EnvironmentObject private var m: AppModel
+    @Environment(AppModel.self) private var m: AppModel
     @Environment(\.ws) private var ws
 
     @AppStorage("ws.flagWab") private var flagWab = true
@@ -20,6 +20,15 @@ struct WSMeView: View {
     }
 
     var body: some View {
+        // notificationsEnabled/notificationAuth are only read inside the
+        // Notifications row's `Binding(get:set:)` closure below, which
+        // SwiftUI invokes lazily when it renders the Toggle rather than
+        // synchronously during this body call — that's not a guaranteed
+        // Observation dependency. Reading them directly here ties the
+        // Notifications toggle to the async `.task` refresh below (and to
+        // `setNotificationsEnabled`'s permission flow), so a grant/deny
+        // reliably repaints the switch.
+        let _ = (m.notificationsEnabled, m.notificationAuth)
         VStack(spacing: 0) {
             header
             ScrollView {
@@ -32,6 +41,7 @@ struct WSMeView: View {
                 }
                 .padding(.bottom, 8)
             }
+            .wsEntrance()
         }
         .background(ws.bg)
         .task { await m.refreshNotificationAuth() }

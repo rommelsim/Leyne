@@ -21,9 +21,9 @@ enum FavSegment: Hashable { case all, stops, buses, mrt }
 // MARK: - Main view
 
 struct SoftFavouritesView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
-    @EnvironmentObject var ds: DataStore
+    @Environment(DataStore.self) var ds: DataStore
 
     let onOpenStop: (String) -> Void
     let onOpenBus: (String, String) -> Void

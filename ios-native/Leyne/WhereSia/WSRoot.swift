@@ -2,8 +2,9 @@
 //
 // A 4-tab bar (Home · Saved · Alerts · Me) over per-tab NavigationStacks that
 // push the detail screens (Bus stop, MRT station, Service info, Track bus).
-// Search presents modally over the Home tab. Wired to the existing live data
-// (DataStore / AppModel / LocationManager) — WhereSia is a pure design layer.
+// Search presents as a sheet over the Home tab. Wired to the existing live
+// data (DataStore / AppModel / LocationManager) — WhereSia is a pure design
+// layer.
 
 import SwiftUI
 
@@ -33,8 +34,8 @@ extension EnvironmentValues {
 // MARK: - Root
 
 struct WSRoot: View {
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @EnvironmentObject private var location: LocationManager
 
     @State private var tab: WSTab = .home
@@ -47,32 +48,35 @@ struct WSRoot: View {
     private var ws: WSTheme { .resolve(dark: m.isDark) }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ws.bg.ignoresSafeArea()
-
-            Group {
-                switch tab {
-                case .home:   stack($homePath) { WSHomeView(onSearch: { showSearch = true }) }
-                case .saved:  stack($savedPath) { WSSavedView() }
-                case .alerts: stack($alertsPath) { WSAlertsView() }
-                case .me:     stack($mePath) { WSMeView() }
-                }
+        Group {
+            switch tab {
+            case .home:   stack($homePath) { WSHomeView(onSearch: { showSearch = true }) }
+            case .saved:  stack($savedPath) { WSSavedView() }
+            case .alerts: stack($alertsPath) { WSAlertsView() }
+            case .me:     stack($mePath) { WSMeView() }
             }
-            .padding(.bottom, 76)   // clear the floating tab bar
-
+        }
+        .background(ws.bg.ignoresSafeArea())
+        // Floating glass tab bar as a bottom safe-area inset, not a manual
+        // ZStack overlay with a fixed content padding: scroll content can
+        // now reach — and show through — the material at the bottom of a
+        // list, matching the native iOS 26 floating-bar composition.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             WSTabBar(tab: $tab, alertCount: m.unseenAlertCount)
         }
         .environment(\.ws, ws)
-        .fullScreenCover(isPresented: $showSearch) {
+        .sheet(isPresented: $showSearch) {
             WSSearchView(onSelect: { route in
                 showSearch = false
                 tab = .home
                 homePath.append(route)
             }, onClose: { showSearch = false })
             .environment(\.ws, ws)
-            .environmentObject(m)
-            .environmentObject(store)
+            .environment(m)
+            .environment(store)
             .environmentObject(location)
+            .presentationDetents([.large])
+            .presentationBackground(.ultraThinMaterial)
         }
         // Deep links (notification / widget / Spotlight) surface as m.openCard.
         .onChange(of: m.openCard, initial: true) { _, card in
@@ -100,9 +104,15 @@ struct WSRoot: View {
                 .navigationBarBackButtonHidden(true)
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: WSRoute.self) { route in
+                    // Pushed screens supply their own `.wsHeaderBar` toolbar
+                    // (real system nav-bar chrome — Liquid Glass on iOS 26,
+                    // translucent material below), so unlike the tab roots
+                    // above the nav bar stays visible here. That also
+                    // restores the interactive edge-swipe-back gesture for
+                    // free: hiding the back *button* doesn't kill it, only
+                    // hiding the whole nav bar (the old approach) did — this
+                    // replaces the `enableSwipeBack()` workaround entirely.
                     destination(route, path: path)
-                        .navigationBarBackButtonHidden(true)
-                        .toolbar(.hidden, for: .navigationBar)
                 }
         }
         .environment(\.wsPush) { route in path.wrappedValue.append(route) }
@@ -124,7 +134,7 @@ struct WSRoot: View {
     }
 }
 
-// MARK: - Tab bar
+// MARK: - Tab bar (floating Liquid Glass)
 
 struct WSTabBar: View {
     @Binding var tab: WSTab
@@ -132,19 +142,21 @@ struct WSTabBar: View {
     @Environment(\.ws) private var ws
 
     var body: some View {
-        HStack {
+        HStack(spacing: 2) {
             item(.home, "Home", .home)
             item(.saved, "Saved", .saved)
             item(.alerts, "Alerts", .alerts, badge: alertCount)
             item(.me, "Me", .me)
         }
-        .padding(.top, 13)
-        .padding(.bottom, 2)
-        .frame(maxWidth: .infinity)
-        .background(alignment: .top) {
-            ws.tabbar.overlay(alignment: .top) { Rectangle().fill(ws.rule).frame(height: 1) }
-                .ignoresSafeArea(edges: .bottom)
-        }
+        .padding(.horizontal, 8)
+        .padding(.top, 11)
+        .padding(.bottom, 9)
+        .wsGlassChrome(cornerRadius: 26, tint: ws.tabbar)
+        .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 18, x: 0, y: 8)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 6)
+        // One selection tick per tab change, regardless of which item fired it.
+        .sensoryFeedback(.selection, trigger: tab)
     }
 
     @ViewBuilder
@@ -155,7 +167,7 @@ struct WSTabBar: View {
         } label: {
             VStack(spacing: 5) {
                 WSIcon(glyph: glyph, size: 22, weight: on ? .regular : .light,
-                       color: on ? ws.text : ws.faint)
+                       color: on ? ws.text : ws.dim)
                     .overlay(alignment: .topTrailing) {
                         if badge > 0 {
                             Circle().fill(ws.text).frame(width: 7, height: 7).offset(x: 5, y: -2)
@@ -163,9 +175,10 @@ struct WSTabBar: View {
                     }
                 Text(label)
                     .font(ws.sans(10, weight: .bold))
-                    .foregroundStyle(on ? ws.text : ws.faint)
+                    .foregroundStyle(on ? ws.text : ws.dim)
             }
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 44)   // ≥44pt tap target even though the glyph+label are smaller
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

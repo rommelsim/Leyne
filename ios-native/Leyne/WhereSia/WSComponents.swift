@@ -39,6 +39,67 @@ struct CrowdGauge: View {
     }
 }
 
+// MARK: - Entrance (restrained fade + slide-up on appear)
+
+/// The single app-wide entrance motion: content fades in and rises a few points
+/// when its screen appears. One idiom, one line to apply (`.wsEntrance()`), so
+/// every screen animates in consistently. Fully gated behind Reduce Motion.
+struct WSEntrance: ViewModifier {
+    var delay: Double = 0
+    var rise: CGFloat = 12
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : rise)
+            .onAppear {
+                if reduceMotion { shown = true }
+                else { withAnimation(.easeOut(duration: 0.45).delay(delay)) { shown = true } }
+            }
+    }
+}
+
+extension View {
+    /// Fade + slide-up as the view appears. `delay` staggers siblings.
+    func wsEntrance(delay: Double = 0, rise: CGFloat = 12) -> some View {
+        modifier(WSEntrance(delay: delay, rise: rise))
+    }
+}
+
+// MARK: - Ping halo (attention — draws the eye to a live/important node)
+
+/// A repeating "radar ping": a neutral ring that expands and fades out from an
+/// anchor, used to pull the eye to the live things that matter — the moving bus
+/// and the user's stop. Place as a `.background` of the anchor so it inherits
+/// its size and shape. Neutral (text colour — colour stays reserved for lines)
+/// and fully gated behind Reduce Motion.
+struct WSPing: View {
+    /// Match the anchor's corner radius (use a large value for a circle).
+    var cornerRadius: CGFloat = 999
+    var lineWidth: CGFloat = 2
+    var maxScale: CGFloat = 2.0
+
+    @Environment(\.ws) private var ws
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var animate = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .stroke(ws.accentSoft, lineWidth: lineWidth)
+            .scaleEffect(animate ? maxScale : 1)
+            .opacity(animate ? 0 : 0.5)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 1.7).repeatForever(autoreverses: false)) {
+                    animate = true
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Route tiles (mono, neutral — never coloured)
 
 struct RouteTile: View {
@@ -159,10 +220,10 @@ struct ArrivalPill: View {
     var body: some View {
         VStack(spacing: 7) {
             // minutes — "Arr" stands alone; a numeric ETA gets an "m" suffix.
-            (Text(eta.big).font(ws.mono(16, weight: .bold)).foregroundColor(ws.text)
+            (Text(eta.big).font(ws.mono(16, weight: .bold)).foregroundStyle(ws.text)
              + Text(eta.big == "Arr" ? "" : "m")
                 .font(ws.mono(10, weight: .regular))
-                .foregroundColor(ws.dim))
+                .foregroundStyle(ws.dim))
             CrowdGauge(fraction: scheduled ? 0 : (load?.wsFraction ?? 0), width: 30)
             Text(scheduled ? "sched" : (load?.wsShort ?? "—"))
                 .font(ws.mono(9, weight: .regular))
@@ -174,7 +235,7 @@ struct ArrivalPill: View {
         .background(ws.panel2)
         .overlay(
             RoundedRectangle(cornerRadius: 11)
-                .stroke(highlighted ? ws.text : ws.rule, lineWidth: 1)
+                .stroke(highlighted ? ws.accent : ws.rule, lineWidth: highlighted ? 1.5 : 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 11))
         .opacity(scheduled ? 0.55 : 1)
@@ -220,10 +281,12 @@ struct WSSectionHeader: View {
                 .foregroundStyle(ws.dim)
             Rectangle().fill(ws.rule).frame(height: 1)
             if let meta {
+                // Real content (a timestamp / count), not decoration — `dim`
+                // clears WCAG AA 4.5:1 in both themes; `faint` doesn't.
                 Text(meta)
                     .font(ws.mono(11))
                     .tracking(0.5)
-                    .foregroundStyle(ws.faint)
+                    .foregroundStyle(ws.dim)
             }
         }
     }
@@ -283,17 +346,18 @@ struct WSToggle: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Capsule()
-            .fill(isOn ? ws.text : ws.panel2)
-            .overlay(Capsule().stroke(isOn ? ws.text : ws.rule, lineWidth: 1))
+            .fill(isOn ? ws.accent : ws.panel2)
+            .overlay(Capsule().stroke(isOn ? ws.accent : ws.rule, lineWidth: 1))
             .frame(width: 44, height: 26)
             .overlay(alignment: isOn ? .trailing : .leading) {
                 Circle()
-                    .fill(isOn ? ws.bg : ws.faint)
+                    .fill(isOn ? .white : ws.faint)
                     .frame(width: 18, height: 18)
                     .padding(3)
             }
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: isOn)
             .onTapGesture { isOn.toggle() }
+            .sensoryFeedback(.selection, trigger: isOn)
             .accessibilityAddTraits(.isButton)
             .accessibilityValue(isOn ? "on" : "off")
     }
@@ -309,15 +373,17 @@ struct WSSegmented: View {
         HStack(spacing: 6) {
             ForEach(options.indices, id: \.self) { i in
                 let on = i == selection
-                Text(options[i])
-                    .font(ws.sans(12.5, weight: .bold))
-                    .foregroundStyle(on ? ws.bg : ws.dim)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(on ? ws.text : .clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
-                    .contentShape(Rectangle())
-                    .onTapGesture { selection = i }
+                Button { selection = i } label: {
+                    Text(options[i])
+                        .font(ws.sans(12.5, weight: .bold))
+                        .foregroundStyle(on ? .white : ws.dim)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(on ? ws.accent : .clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(4)
@@ -337,21 +403,23 @@ struct WSFilterChips: View {
         HStack(spacing: 8) {
             ForEach(options.indices, id: \.self) { i in
                 let on = i == selection
-                Text(options[i])
-                    .font(ws.sans(13, weight: .bold))
-                    .foregroundStyle(on ? ws.bg : ws.dim)
-                    .padding(.horizontal, 15).padding(.vertical, 8)
-                    .background(on ? ws.text : .clear)
-                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(on ? ws.text : ws.rule, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 11))
-                    .contentShape(Rectangle())
-                    .onTapGesture { selection = i }
+                Button { selection = i } label: {
+                    Text(options[i])
+                        .font(ws.sans(13, weight: .bold))
+                        .foregroundStyle(on ? .white : ws.dim)
+                        .padding(.horizontal, 15).padding(.vertical, 8)
+                        .background(on ? ws.accent : .clear)
+                        .overlay(RoundedRectangle(cornerRadius: 11).stroke(on ? ws.accent : ws.rule, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
     }
 }
 
-// MARK: - Hairline button (38×38 rounded panel with an icon)
+// MARK: - Hairline button (38×38 visual, ≥44×44 tap target)
 
 struct WSHairButton: View {
     let glyph: WSGlyph
@@ -365,41 +433,63 @@ struct WSHairButton: View {
                 .background(ws.panel)
                 .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: 11))
+                // Visual stays 38×38 (the WhereSia chip size); the tappable
+                // area grows to the HIG's 44×44 minimum around it.
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-// MARK: - Header bar (back · eyebrow · action)
-
-struct WSHeaderBar<Trailing: View>: View {
-    let eyebrow: String
-    var onBack: (() -> Void)? = nil
-    @ViewBuilder var trailing: Trailing
-    @Environment(\.ws) private var ws
-    var body: some View {
-        HStack {
-            if let onBack {
-                WSHairButton(glyph: .back, action: onBack)
-            } else {
-                Color.clear.frame(width: 38, height: 38)
-            }
-            Spacer()
-            Text(eyebrow.uppercased())
-                .font(ws.sans(11, weight: .heavy))
-                .tracking(1.4)
-                .foregroundStyle(ws.dim)
-            Spacer()
-            trailing.frame(minWidth: 38, minHeight: 38)
-        }
-        .padding(.horizontal, 22)
-        .padding(.top, 6)
+// MARK: - Header bar (native nav-bar chrome; back · eyebrow · action)
+//
+// Pushed WhereSia screens apply this via `.wsHeaderBar(...)` instead of
+// hosting a header as in-body content: the system now draws the actual nav
+// bar — real Liquid Glass on iOS 26, translucent material on 18–25 — behind
+// our WhereSia-styled leading/principal/trailing content. This also restores
+// the interactive edge-swipe-back gesture for free: hiding the back *button*
+// (`navigationBarBackButtonHidden`) doesn't disable it, only hiding the whole
+// bar (the previous approach, paired with the `enableSwipeBack()` workaround)
+// did.
+extension View {
+    func wsHeaderBar<Trailing: View>(eyebrow: String,
+                                      onBack: (() -> Void)? = nil,
+                                      @ViewBuilder trailing: @escaping () -> Trailing) -> some View {
+        modifier(WSHeaderBarChrome(eyebrow: eyebrow, onBack: onBack, trailing: trailing))
+    }
+    func wsHeaderBar(eyebrow: String, onBack: (() -> Void)? = nil) -> some View {
+        wsHeaderBar(eyebrow: eyebrow, onBack: onBack) { EmptyView() }
     }
 }
 
-extension WSHeaderBar where Trailing == EmptyView {
-    init(eyebrow: String, onBack: (() -> Void)? = nil) {
-        self.init(eyebrow: eyebrow, onBack: onBack) { EmptyView() }
+private struct WSHeaderBarChrome<Trailing: View>: ViewModifier {
+    let eyebrow: String
+    var onBack: (() -> Void)?
+    @ViewBuilder var trailing: () -> Trailing
+    @Environment(\.ws) private var ws
+
+    func body(content: Content) -> some View {
+        content
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                if let onBack {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        WSHairButton(glyph: .back, action: onBack)
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text(eyebrow.uppercased())
+                        .font(ws.sans(11, weight: .heavy))
+                        .tracking(1.4)
+                        .foregroundStyle(ws.dim)
+                        .lineLimit(1)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    trailing()
+                }
+            }
     }
 }
 

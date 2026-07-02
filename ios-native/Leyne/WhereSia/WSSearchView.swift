@@ -11,8 +11,8 @@ struct WSSearchView: View {
     var onSelect: (WSRoute) -> Void
     var onClose: () -> Void
 
-    @EnvironmentObject private var m: AppModel
-    @EnvironmentObject private var store: DataStore
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(DataStore.self) private var store: DataStore
     @EnvironmentObject private var location: LocationManager
     @Environment(\.ws) private var ws
 
@@ -59,6 +59,9 @@ struct WSSearchView: View {
                             .background(ws.panel2)
                             .overlay(Circle().stroke(ws.rule, lineWidth: 1))
                             .clipShape(Circle())
+                            // Visual stays a tight 20×20 dot; tap target grows to 44×44.
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
             }
@@ -262,7 +265,7 @@ struct WSSearchView: View {
 
 func wsHighlight(_ text: String, query: String, ws: WSTheme) -> Text {
     wsHighlightRaw(text, query: query)
-        .foregroundColor(ws.text)
+        .foregroundStyle(ws.text)
 }
 
 func wsHighlightRaw(_ text: String, query: String) -> Text {

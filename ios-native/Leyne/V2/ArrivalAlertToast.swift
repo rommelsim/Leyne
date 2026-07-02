@@ -29,7 +29,7 @@ struct ArrivalAlertToastState: Equatable {
 struct ArrivalAlertToast: View {
     let t: Theme
     @Binding var state: ArrivalAlertToastState?
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
 
     var body: some View {
