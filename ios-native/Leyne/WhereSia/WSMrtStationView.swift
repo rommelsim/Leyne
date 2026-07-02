@@ -1,11 +1,14 @@
 // WhereSia — MRT station (screen 5).
 //
-// Station name + line bullets + service state. Cards: crowd now (wide gauge +
-// word), by-line crowd, and a same-day crowd forecast as a small vertical bar
-// chart with a plain-language "busiest around…" note. Wired to DataStore live
-// crowd (PCDRealTime) + a raw PCDForecast fetch for the bar series.
+// Station name + line bullets + service state, then three dense cards:
+// STATION CROWD (live gauge + word; per-line platform rows only when the
+// station is an interchange — for single-line stations they'd duplicate the
+// headline reading), BUS STOPS AT THIS STATION (nearest stops ≤ 400 m with
+// their live soonest arrival — tap through), and CROWD FORECAST (LTA's real
+// PCDForecast 30-min series — NOT mocked — with a "busiest around…" note).
 
 import SwiftUI
+import CoreLocation
 
 struct WSMrtStationView: View {
     let station: MrtGeoStation
@@ -14,8 +17,10 @@ struct WSMrtStationView: View {
     @Environment(AppModel.self) private var m: AppModel
     @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
+    @Environment(\.wsPush) private var push
 
     @State private var forecast: [ForecastPoint] = []
+    @State private var titleCollapsed = false
 
     struct ForecastPoint: Identifiable {
         let id = UUID()
@@ -48,18 +53,24 @@ struct WSMrtStationView: View {
         // free via the blanket per-second objectWillChange).
         let _ = m.tick
         ScrollView {
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 titleRow.padding(.top, 12)
-                crowdNowCard
-                byLineCard
+                crowdCard
+                busCard
                 forecastCard
                 Color.clear.frame(height: 12)
             }
             .padding(.bottom, 8)
         }
+        .onScrollGeometryChange(for: Bool.self) { g in
+            g.contentOffset.y + g.contentInsets.top > 44
+        } action: { _, isPast in
+            titleCollapsed = isPast
+        }
         .wsEntrance()
         .background(ws.bg)
-        .wsHeaderBar(eyebrow: "MRT station", onBack: onBack) {
+        .wsHeaderBar(eyebrow: "MRT station", title: station.name,
+                     collapsed: titleCollapsed, onBack: onBack) {
             WSHairButton(glyph: m.isMrtSaved(station) ? .bookmarkFilled : .bookmark) {
                 m.toggleMrtSaved(station)
             }
@@ -68,8 +79,15 @@ struct WSMrtStationView: View {
         .onAppear {
             store.wsWarmCrowd(for: [station])
             for l in lines { store.refreshForecast(line: l) }
+            for item in nearbyStops { store.ensureArrivals(stop: item.stop.BusStopCode, silent: true) }
             loadForecast()
         }
+    }
+
+    /// Bus stops physically at/around the station (≤ 400 m walk).
+    private var nearbyStops: [(stop: LTABusStop, distanceM: Int)] {
+        store.wsStopsNear(CLLocationCoordinate2D(latitude: station.lat, longitude: station.lon), limit: 3)
+            .filter { $0.distanceM <= 400 }
     }
 
     private var titleRow: some View {
@@ -87,17 +105,18 @@ struct WSMrtStationView: View {
         .padding(.horizontal, 22)
     }
 
-    // MARK: crowd now
+    // MARK: station crowd (headline + per-platform rows for interchanges)
 
-    private var crowdNowCard: some View {
+    private var crowdCard: some View {
         WSCard(title: "Station crowd · now") {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
+                HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(crowdNow.wsWord).font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.text)
                         Text(crowdNow.wsHint).font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
                     }
                     Spacer()
+                    if crowdNow != .unknown { WSLiveBadge() }
                 }
                 .padding(.top, 8)
                 // CrowdGauge needs a concrete width up front; a GeometryReader
@@ -108,38 +127,69 @@ struct WSMrtStationView: View {
                     CrowdGauge(fraction: crowdNow.wsFraction, width: geo.size.width, height: 9)
                 }
                 .frame(height: 9)
+
+                // Per-line platform readings only where they can differ from
+                // the headline — i.e. interchanges. On a single-line station
+                // this would repeat the number above (the old "By line" card).
+                if lines.count > 1 {
+                    WSRowDivider().padding(.top, 6)
+                    ForEach(lines.indices, id: \.self) { i in
+                        let line = lines[i]
+                        let code = station.codes.first { wsLine(forStationCode: $0) == line } ?? ""
+                        let level = store.crowdByLine[line]?.first { $0.code == code }?.level ?? .unknown
+                        HStack(spacing: 10) {
+                            LineBullet(code: line.pcdLineCode, isLineCode: true)
+                            Text("\(line.displayName) platform")
+                                .font(ws.sans(13, weight: .bold)).foregroundStyle(ws.text)
+                            Spacer()
+                            CrowdGauge(fraction: level.wsFraction, width: 44)
+                            Text(level.wsWord).font(ws.mono(10.5)).foregroundStyle(ws.dim)
+                        }
+                        .padding(.top, 7)
+                    }
+                }
             }
         }
         .padding(.horizontal, 22)
     }
 
-    // MARK: by line
+    // MARK: bus connections
 
-    private var byLineCard: some View {
-        WSCard(title: "By line") {
-            VStack(spacing: 0) {
-                ForEach(lines.indices, id: \.self) { i in
-                    let line = lines[i]
-                    let code = station.codes.first { wsLine(forStationCode: $0) == line } ?? ""
-                    let level = store.crowdByLine[line]?.first { $0.code == code }?.level ?? .unknown
-                    HStack(spacing: 12) {
-                        LineBullet(code: line.pcdLineCode, isLineCode: true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(line.displayName).font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
-                            Text(code).font(ws.mono(11)).foregroundStyle(ws.dim)
+    @ViewBuilder private var busCard: some View {
+        let near = nearbyStops
+        if !near.isEmpty {
+            WSCard(title: "Bus stops at this station") {
+                VStack(spacing: 0) {
+                    ForEach(near.indices, id: \.self) { i in
+                        let item = near[i]
+                        Button { push(.busStop(code: item.stop.BusStopCode)) } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.stop.Description)
+                                        .font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
+                                        .lineLimit(1)
+                                    Text("\(item.stop.BusStopCode) · \(fmtDistance(item.distanceM).uppercased())")
+                                        .font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
+                                }
+                                Spacer(minLength: 8)
+                                if let s = wsSoonest(store.servicesFor(item.stop.BusStopCode)) {
+                                    let eta = fmtETA(wsLiveETASec(s))
+                                    (Text(eta.big).font(ws.mono(15, weight: .bold)).foregroundStyle(ws.text)
+                                     + Text(eta.big == "Arr" ? "" : " min")
+                                        .font(ws.mono(10)).foregroundStyle(ws.dim))
+                                }
+                                WSIcon(glyph: .chevron, size: 15, color: ws.faint)
+                            }
+                            .padding(.vertical, 11)
+                            .contentShape(Rectangle())
                         }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 6) {
-                            Text(level.wsWord).font(ws.sans(12, weight: .bold)).foregroundStyle(ws.text)
-                            CrowdGauge(fraction: level.wsFraction, width: 56)
-                        }
+                        .buttonStyle(.plain)
+                        if i < near.count - 1 { WSRowDivider() }
                     }
-                    .padding(.vertical, 12)
-                    if i < lines.count - 1 { WSRowDivider() }
                 }
             }
+            .padding(.horizontal, 22)
         }
-        .padding(.horizontal, 22)
     }
 
     // MARK: forecast
@@ -165,6 +215,9 @@ struct WSMrtStationView: View {
                             .font(ws.sans(11.5, weight: .medium))
                             .padding(.top, 12)
                     }
+                    // No provenance footnote — users don't care where the
+                    // data comes from (owner, 2026-07-02); the card title +
+                    // time labels say everything.
                 }
             }
         }

@@ -1,10 +1,13 @@
 // WhereSia — Bus stop (screen 4).
 //
 // Big stop name, code · road · updated. If the stop sits at an MRT station, an
-// interchange card. Then one block per service: route tile, destination,
-// operator, bus-type icon, wheelchair icon, live icon; and up to 3 arrival pills
-// (minutes + gauge + word; first highlighted; scheduled dimmed). Footer key
-// legend + a "Live from LTA DataMall · refreshes every 20s" status line.
+// interchange card. Then one glanceable line per service (number-sorted so the
+// board is scannable): route tile · destination · icons that stand on their
+// own (double-decker only when it IS one; wheelchair when accessible) · the
+// next bus big on the right. A bus that's pulling in gets the blue ARRIVING
+// capsule + ping — unmissable from arm's length. Scheduled-only ETAs carry a
+// whisper-quiet "~" (never a banner — feedback_timely_over_honest). No icon
+// legend: if an icon needs a key, the icon is wrong.
 
 import SwiftUI
 
@@ -16,8 +19,10 @@ struct WSBusStopView: View {
     @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var refreshTick = false
+    @State private var titleCollapsed = false
 
     private var isPinned: Bool { m.pins.contains { $0.code == code } }
     private var interchange: (name: String, codes: [String])? {
@@ -31,14 +36,16 @@ struct WSBusStopView: View {
                 Text(store.stopName(code))
                     .font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
                     .padding(.horizontal, 22).padding(.top, 12)
-                Text(metaline)
-                    .font(ws.mono(12)).tracking(0.3).foregroundStyle(ws.dim)
-                    .padding(.horizontal, 22).padding(.top, 6).padding(.bottom, 10)
+                HStack(spacing: 9) {
+                    if case .loaded = store.arrivals[code] { WSLiveBadge() }
+                    Text(metaline)
+                        .font(ws.mono(12)).tracking(0.3).foregroundStyle(ws.dim)
+                }
+                .padding(.horizontal, 22).padding(.top, 6).padding(.bottom, 10)
 
                 if let ic = interchange { interchangeCard(ic).padding(.bottom, 8) }
 
                 servicesSection
-                footer
                 Color.clear.frame(height: 20)
             }
         }
@@ -46,9 +53,17 @@ struct WSBusStopView: View {
             await store.refreshArrivals(stop: code)
             refreshTick.toggle()
         }
+        // Once the big in-content name scrolls under the bar, hand it to the
+        // bar (eyebrow ⇄ title animation); scrolling back up restores "BUS STOP".
+        .onScrollGeometryChange(for: Bool.self) { g in
+            g.contentOffset.y + g.contentInsets.top > 44
+        } action: { _, isPast in
+            titleCollapsed = isPast
+        }
         .wsEntrance()
         .background(ws.bg)
-        .wsHeaderBar(eyebrow: "Bus stop", onBack: onBack) {
+        .wsHeaderBar(eyebrow: "Bus stop", title: store.stopName(code),
+                     collapsed: titleCollapsed, onBack: onBack) {
             WSHairButton(glyph: isPinned ? .bookmarkFilled : .bookmark, action: togglePin)
         }
         .sensoryFeedback(.impact(weight: .light), trigger: isPinned)
@@ -59,6 +74,17 @@ struct WSBusStopView: View {
             if let ic = interchange, let st = MrtGeo.station(forCode: ic.codes.first ?? "") {
                 store.wsWarmCrowd(for: [st])
             }
+        }
+        // AppModel's tick loop only keeps pinned/alerted stops fresh — an
+        // open unpinned stop never re-fetched (owner: stale until
+        // pull-to-refresh). The freshness window + inflight guard inside
+        // ensureArrivals make this a no-op on most ticks (~every 25s it
+        // actually fetches).
+        .onChange(of: m.tick) { _, _ in store.ensureArrivals(stop: code) }
+        // Returning from background: the tick loop was paused, so the data
+        // can be minutes old — refetch immediately.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { store.ensureArrivals(stop: code, force: true) }
         }
     }
 
@@ -77,33 +103,33 @@ struct WSBusStopView: View {
 
     // MARK: interchange card
 
+    /// One dense row — bullets · name/eyebrow · crowd · chevron. The old
+    /// two-row layout left the middle of the card mostly empty.
     private func interchangeCard(_ ic: (name: String, codes: [String])) -> some View {
         let station = MrtGeo.station(forCode: ic.codes.first ?? "")
         return Button {
             if let station { push(.mrtStation(station)) }
         } label: {
-            VStack(alignment: .leading, spacing: 11) {
-                HStack(spacing: 9) {
-                    WSIcon(glyph: .train, size: 17, color: ws.dim)
-                    Text(ic.name).font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
-                    Text("AT THIS STOP").font(ws.mono(9)).tracking(0.6).foregroundStyle(ws.dim)
-                    Spacer()
-                    WSIcon(glyph: .chevron, size: 17, color: ws.faint)
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    ForEach(ic.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
                 }
-                HStack(spacing: 8) {
-                    HStack(spacing: 5) {
-                        ForEach(ic.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
-                    }
-                    Spacer()
-                    if let station, let crowd = store.wsCrowd(for: station), crowd != .unknown {
-                        WSChip(gauge: crowd.wsFraction, text: crowd.wsWord)
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ic.name).font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.text)
+                        .lineLimit(1)
+                    Text("MRT AT THIS STOP").font(ws.mono(9)).tracking(0.6).foregroundStyle(ws.dim)
                 }
+                Spacer(minLength: 8)
+                if let station, let crowd = store.wsCrowd(for: station), crowd != .unknown {
+                    WSChip(gauge: crowd.wsFraction, text: crowd.wsWord)
+                }
+                WSIcon(glyph: .chevron, size: 17, color: ws.faint)
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
+            .padding(.horizontal, 14).padding(.vertical, 11)
             .background(ws.panel)
             .overlay(RoundedRectangle(cornerRadius: 13).stroke(ws.rule, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 13))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 22)
@@ -133,43 +159,102 @@ struct WSBusStopView: View {
             .padding(.horizontal, 22).padding(.vertical, 20)
     }
 
+    /// One glanceable line per service: number · destination on the left,
+    /// the NEXT bus big on the right with its crowd, and later buses as a
+    /// quiet "then 12 · 24 min" — replacing the wall of three boxed pills
+    /// (each with its own gauge + word) the owner flagged as messy. Track
+    /// Bus keeps the full per-bus detail.
+    ///
+    /// Icons carry information only when they say something: the double-decker
+    /// glyph appears only on double-deckers (the default single deck shows
+    /// nothing), wheelchair only when accessible — so no legend is needed.
     private func serviceBlock(_ svc: Service) -> some View {
-        Button { push(.trackBus(stopCode: code, no: svc.no)) } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 13) {
-                    RouteTile(text: svc.no, size: .large)
-                    VStack(alignment: .leading, spacing: 3) {
+        let sched = !svc.monitored
+        let entries = pillEntries(svc)
+        let later = entries.dropFirst().map(\.eta.big)
+        let arrivingNow = !sched && (entries.first?.eta.big == "Arr")
+        return Button { push(.trackBus(stopCode: code, no: svc.no)) } label: {
+            HStack(alignment: .center, spacing: 13) {
+                RouteTile(text: svc.no, size: .large)
+                // Two shared rows so left and right columns actually line up:
+                // destination ⟷ ETA on one text baseline, icons/"then" ⟷ crowd
+                // on the second. (Two independent VStacks centred against each
+                // other put "1 min" visibly above the stop name — owner-flagged.)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(svc.dest).font(ws.sans(15.5, weight: .bold)).foregroundStyle(ws.text)
-                        HStack(spacing: 8) {
-                            Text(svc.op.wsName).font(ws.mono(11)).foregroundStyle(ws.dim)
-                            WSIcon(glyph: svc.deck.wsGlyph, size: 16, color: ws.dim)
-                            if svc.wab { WSIcon(glyph: .wheelchair, size: 16, color: ws.dim) }
-                            if svc.monitored {
-                                WSIcon(glyph: .live, size: 16, color: ws.accentSoft, pulse: true)
-                            } else {
-                                Text("· scheduled").font(ws.mono(11)).foregroundStyle(ws.dim)
-                            }
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        if arrivingNow {
+                            // The "this bus is pulling in" mark: a solid blue
+                            // capsule (the sanctioned live-accent exception).
+                            // Static — the pulsing ping read as distracting
+                            // (owner feedback); the row tint + capsule carry it.
+                            Text("ARRIVING")
+                                .font(ws.mono(11, weight: .bold)).tracking(0.8)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(ws.accent)
+                                .clipShape(Capsule())
+                        } else if let next = entries.first {
+                            // Scheduled-only ETA: whisper-quiet "~", full-strength
+                            // numeral (timeliness is the promise — never dim a row).
+                            (Text(sched ? "~" : "")
+                                .font(ws.mono(15, weight: .semibold)).foregroundStyle(ws.dim)
+                             + Text(next.eta.big).font(ws.mono(19, weight: .bold)).foregroundStyle(ws.text)
+                             + Text(next.eta.big == "Arr" ? "" : " min")
+                                .font(ws.mono(11, weight: .semibold)).foregroundStyle(ws.dim))
+                        } else {
+                            Text("—").font(ws.mono(19, weight: .bold)).foregroundStyle(ws.dim)
                         }
                     }
-                    Spacer()
-                    WSIcon(glyph: .chevron, size: 17, color: ws.faint)
+                    HStack(spacing: 7) {
+                        if svc.deck == .DD { WSIcon(glyph: .busDouble, size: 15, color: ws.dim) }
+                        else if svc.deck == .BD { WSIcon(glyph: .busBendy, size: 15, color: ws.dim) }
+                        if svc.wab { WSIcon(glyph: .wheelchair, size: 15, color: ws.dim) }
+                        if !later.isEmpty {
+                            Text("then \(later.joined(separator: " · ")) min")
+                                .font(ws.mono(11)).foregroundStyle(ws.dim)
+                        }
+                        Spacer(minLength: 8)
+                        if let load = entries.first?.load, !sched {
+                            CrowdGauge(fraction: load.wsFraction, width: 24)
+                            Text(load.wsWord).font(ws.mono(10)).foregroundStyle(ws.dim)
+                        }
+                    }
                 }
-                HStack(spacing: 8) { pills(for: svc) }
+                WSIcon(glyph: .chevron, size: 16, color: ws.faint)
             }
-            .padding(.horizontal, 22).padding(.vertical, 15)
+            .padding(.horizontal, 22).padding(.vertical, 13)
+            // Contained highlight card, inset from the screen edges — a
+            // full-bleed fill read as the colour "bleeding out" past the row.
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(arrivingNow ? ws.accentSoft.opacity(0.08) : Color.clear)
+                    .padding(.horizontal, 12)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    @ViewBuilder private func pills(for svc: Service) -> some View {
-        let sched = !svc.monitored
-        let entries = pillEntries(svc)
-        ForEach(entries.indices, id: \.self) { i in
-            let e = entries[i]
-            ArrivalPill(eta: e.eta, load: e.load,
-                        highlighted: i == 0 && !sched, scheduled: sched)
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Long-press: set the arrival alert or favourite the service without
+        // drilling into Track Bus first.
+        .contextMenu {
+            let alerted = m.alert(kind: .arrival, busNo: svc.no, stopCode: code) != nil
+            Button {
+                _ = m.toggleArrivalAlert(busNo: svc.no, stopCode: code,
+                                         stopName: store.stopName(code), dest: svc.dest)
+            } label: {
+                Label(alerted ? "Cancel arrival alert" : "Alert me 1 stop before",
+                      systemImage: alerted ? "bell.slash" : "bell")
+            }
+            let fav = m.isFavService(no: svc.no, stop: code)
+            Button { m.toggleFavService(no: svc.no, stop: code) } label: {
+                Label(fav ? "Unfavourite bus \(svc.no)" : "Favourite bus \(svc.no)",
+                      systemImage: fav ? "star.slash" : "star")
+            }
         }
+        .accessibilityHint(arrivingNow ? "Bus \(svc.no) is arriving now" : "")
     }
 
     private func pillEntries(_ svc: Service) -> [(eta: ETA, load: Load?)] {
@@ -189,35 +274,7 @@ struct WSBusStopView: View {
         return out
     }
 
-    // MARK: footer
-
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            WSRowDivider()
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 15) {
-                    legend(.busSingle, "Single deck")
-                    legend(.busDouble, "Double deck")
-                    legend(.wheelchair, "Wheelchair")
-                }
-                HStack(spacing: 15) {
-                    HStack(spacing: 6) { CrowdGauge(fraction: 0.67, width: 16); label("How full") }
-                    legend(.live, "Live · else timetable")
-                }
-            }
-            HStack(spacing: 7) {
-                WSIcon(glyph: .live, size: 13, color: ws.accentSoft, pulse: true)
-                Text("Live from LTA DataMall · \(WSFmt.upd(store.lastRefresh(code), use24h: m.use24h)) · refreshes every 20s")
-                    .font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
-            }
-        }
-        .padding(.horizontal, 22).padding(.top, 14)
-    }
-
-    private func legend(_ glyph: WSGlyph, _ text: String) -> some View {
-        HStack(spacing: 6) { WSIcon(glyph: glyph, size: 13, color: ws.dim); label(text) }
-    }
-    private func label(_ s: String) -> some View {
-        Text(s).font(ws.mono(10)).tracking(0.2).foregroundStyle(ws.dim)
-    }
+    // No footer: the metaline under the stop name already carries LIVE +
+    // "Updated h:mm", and users don't care where the data comes from
+    // (owner, 2026-07-02) — the legend went earlier for the same reason.
 }

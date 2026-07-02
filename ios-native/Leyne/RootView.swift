@@ -26,7 +26,6 @@ struct RootView: View {
             // ── Onboarding ──────────────────────────────────
             if m.showOnboarding {
                 OnboardingView(
-                    t: t, dark: m.isDark,
                     onRequestLocation: { LocationManager.shared.requestPermission() },
                     onRequestNotifications: {
                         Task { await m.setNotificationsEnabled(true) }

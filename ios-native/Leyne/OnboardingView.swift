@@ -1,8 +1,13 @@
-// Onboarding — Leyne 3.0 first-run flow:
-// Welcome → "Always up to the minute" (the timeliness wedge) → three primed
-// iOS permission requests (Location → Notifications → ATT) → "You're all
-// set" grant summary. Each primer shows in-app context, then fires the real
+// Onboarding — WhereSia first-run flow:
+// Welcome (wordmark + line colours) → "Always up to the minute" (the
+// timeliness wedge, shown as a mini departure board) → three primed iOS
+// permission requests (Location → Notifications → ATT) → "You're all set"
+// grant summary. Each primer shows in-app context, then fires the real
 // system prompt; the summary reflects the actual granted states.
+//
+// Styled entirely in WhereSia tokens (WSTheme): board surfaces, Inter/Plex
+// faces, greyscale + line-colour capsules, ink CTA. Follows the system
+// colour scheme like the rest of the WhereSia layer.
 
 import SwiftUI
 import CoreLocation
@@ -10,8 +15,6 @@ import UserNotifications
 import AppTrackingTransparency
 
 struct OnboardingView: View {
-    let t: Theme
-    let dark: Bool
     var onRequestLocation: () -> Void = {}
     var onRequestNotifications: () -> Void = {}
     /// Runs UMP + ATT consent (no longer finishes onboarding — the summary
@@ -20,9 +23,18 @@ struct OnboardingView: View {
     var onFinish: () -> Void = {}
 
     @Environment(AppModel.self) private var m: AppModel
+    @Environment(\.colorScheme) private var scheme
+
+    private var ws: WSTheme { .resolve(dark: scheme == .dark) }
 
     // 0 welcome · 1 live · 2 location · 3 notifications · 4 ATT · 5 done
+    // The ATT step only exists while ads are on (AdConfig.adsEnabled) —
+    // with ads off the consent flow is a no-op, so priming for it would be
+    // asking for a permission the app doesn't use.
     @State private var step = 0
+
+    private var showsATT: Bool { AdConfig.adsEnabled }
+    private var permCount: Int { showsATT ? 3 : 2 }
     // Drives the push direction so a "Back" tap slides the opposite way to
     // an "advance" — keeps the slide reading as a coherent stack, not a
     // same-side cross-fade.
@@ -58,7 +70,7 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            t.bg.ignoresSafeArea()
+            ws.bg.ignoresSafeArea()
             VStack(spacing: 0) {
                 topBar
                 // The step content carries `.id`/`.transition` directly (NOT a
@@ -82,6 +94,10 @@ struct OnboardingView: View {
             }
             .padding(.vertical, 20)
         }
+        // WS components used inside (RouteTile, CrowdGauge, WSLiveBadge…)
+        // read the theme from the environment — onboarding sits above WSRoot,
+        // so it resolves + injects its own.
+        .environment(\.ws, ws)
     }
 
     @ViewBuilder
@@ -99,58 +115,65 @@ struct OnboardingView: View {
     private var topBar: some View {
         HStack {
             Button { if step > 0 { goBack() } } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Image(systemName: "chevron.left").font(.system(size: 13, weight: .bold))
                     Text("Back")
                 }
-                .font(t.sans(15))
-                .foregroundStyle(step > 0 && step != 5 ? t.accent : .clear)
+                .font(ws.sans(14, weight: .semibold))
+                .foregroundStyle(step > 0 && step != 5 ? ws.dim : .clear)
             }
             .disabled(step == 0 || step == 5)
             Spacer()
         }
-        .padding(.horizontal, 20).padding(.top, 10)
+        .padding(.horizontal, 22).padding(.top, 10)
     }
 
     // MARK: 0 · Welcome
 
+    /// Wordmark block — quotes the launch screen: eyebrow, WhereSia, the six
+    /// official line colours as capsules (the app's "colour = data" signature).
+    private static let lineOrder = ["NS", "EW", "NE", "CC", "DT", "TE"]
+
     private var welcome: some View {
         VStack(spacing: 0) {
             Spacer()
-            wordmark(size: 44)
-            Text("Singapore’s buses & MRT,\nin real time.")
-                .font(t.sans(20, weight: .semibold))
-                .foregroundStyle(t.fg)
-                .multilineTextAlignment(.center)
-                .padding(.top, 24)
-            Text("Live arrivals the moment they change — your bus on the map, and a nudge before it pulls in.")
-                .font(t.sans(14))
-                .foregroundStyle(t.dim)
-                .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("SINGAPORE · BUS & MRT")
+                    .font(ws.sans(11, weight: .heavy)).tracking(2.2)
+                    .foregroundStyle(ws.dim)
+                Text("WhereSia")
+                    .font(ws.sans(40, weight: .heavy))
+                    .foregroundStyle(ws.text)
+                HStack(spacing: 6) {
+                    ForEach(Self.lineOrder, id: \.self) { code in
+                        Capsule().fill(WSLine.color(forStationCode: code))
+                            .frame(width: 22, height: 5)
+                    }
+                }
+                .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Every bus and train,\nin real time.")
+                .font(ws.sans(19, weight: .bold))
+                .foregroundStyle(ws.text)
                 .lineSpacing(3)
-                .padding(.top, 12)
-                .padding(.horizontal, 8)
-                .frame(maxWidth: 300)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 26)
+            Text("Live arrivals the moment they change — your bus on the map, and a nudge before it pulls in.")
+                .font(ws.sans(14, weight: .medium))
+                .foregroundStyle(ws.dim)
+                .lineSpacing(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
             Spacer()
             primaryButton("Get started") { advance() }
-            Text("No account needed")
-                .font(t.mono(12, weight: .medium))
-                .foregroundStyle(t.faint)
+            Text("NO ACCOUNT NEEDED")
+                .font(ws.mono(10, weight: .medium)).tracking(1.2)
+                .foregroundStyle(ws.faint)
                 .padding(.top, 14)
         }
         .padding(.horizontal, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func wordmark(size: CGFloat) -> some View {
-        HStack(alignment: .bottom, spacing: size * 0.1) {
-            Text("leyne")
-                .font(t.sans(size, weight: .bold))
-                .foregroundStyle(t.fg)
-            Circle().fill(t.accent)
-                .frame(width: size * 0.16, height: size * 0.16)
-                .padding(.bottom, size * 0.18)
-        }
     }
 
     // MARK: 1 · Live (the timeliness wedge)
@@ -158,52 +181,96 @@ struct OnboardingView: View {
     private var live: some View {
         stepScaffold(dotsIndex: -1) {
             VStack(alignment: .leading, spacing: 0) {
-                kicker("Why SG Transit")
+                kicker("Why WhereSia")
                 Text("Always up to the minute.")
-                    .font(t.sans(27, weight: .bold))
-                    .foregroundStyle(t.fg)
+                    .font(ws.sans(26, weight: .heavy))
+                    .foregroundStyle(ws.text)
                     .padding(.top, 8)
                 Text("Real-time arrivals, refreshed continuously — so you always know when to leave and exactly where your bus is.")
-                    .font(t.sans(15))
-                    .foregroundStyle(t.dim)
+                    .font(ws.sans(15, weight: .medium))
+                    .foregroundStyle(ws.dim)
                     .lineSpacing(3)
                     .padding(.top, 12)
-                OnbVisualLive(t: t).padding(.top, 22)
+                boardPreview.padding(.top, 24)
             }
         } cta: {
             primaryButton("Continue") { advance() }
         }
     }
 
+    /// A mini departure board — the actual app idiom (route tile, live badge,
+    /// big mono ETA, crowd gauge + word) instead of an abstract feature list.
+    private var boardPreview: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Text("NEARBY")
+                    .font(ws.sans(10.5, weight: .heavy)).tracking(1.4)
+                    .foregroundStyle(ws.dim)
+                WSLiveBadge()
+                Rectangle().fill(ws.rule).frame(height: 1)
+            }
+            .padding(.bottom, 12)
+            previewRow(no: "174", dest: "Towards Clementi", eta: "3", load: .sea)
+            WSRowDivider().padding(.vertical, 11)
+            previewRow(no: "961M", dest: "Towards Marina Ctr", eta: "7", load: .sda)
+        }
+        .padding(16)
+        .background(ws.panel)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(ws.rule, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Preview of live arrivals")
+    }
+
+    private func previewRow(no: String, dest: String, eta: String, load: Load) -> some View {
+        HStack(spacing: 12) {
+            RouteTile(text: no)
+            Text(dest).font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            (Text(eta).font(ws.mono(17, weight: .bold)).foregroundStyle(ws.text)
+             + Text(" min").font(ws.mono(10, weight: .semibold)).foregroundStyle(ws.dim))
+            CrowdGauge(fraction: load.wsFraction, width: 22)
+            Text(load.wsWord).font(ws.mono(10)).foregroundStyle(ws.dim)
+        }
+    }
+
     // MARK: 2–4 · Permission primers
 
     private var locationPrimer: some View {
-        primer(dotsIndex: 0, icon: "location.fill", kicker: "Permission 1 of 3",
+        primer(dotsIndex: 0, glyph: .location, kicker: "Permission 1 of \(permCount)",
                title: "Find stops around you",
-               body: "SG Transit uses your location to surface the nearest stops and place your bus, you and your stop on the map.",
-               points: [("mappin.and.ellipse", "Nearest stops, sorted by distance"),
-                        ("bus.fill", "See exactly where your stop is")],
+               body: "WhereSia uses your location to surface the nearest stops and place your bus, you and your stop on the map.",
+               points: [(.scope, "Nearest stops, sorted by distance"),
+                        (.busSingle, "See exactly where your stop is")],
                // Guideline 5.1.1(iv): neutral button wording ("Continue", not
                // "Allow location") and NO in-app skip/exit before the system
                // location prompt. The OS dialog is where allow/deny happens.
                primary: "Continue", onPrimary: { onRequestLocation(); advance() })
     }
 
+    /// Advance past the notifications step — skips the ATT primer entirely
+    /// when ads are off.
+    private func advanceAfterNotif() {
+        goingBack = false
+        withAnimation(stepAnimation) { step = showsATT ? 4 : 5 }
+    }
+
     private var notifPrimer: some View {
-        primer(dotsIndex: 1, icon: "bell.fill", kicker: "Permission 2 of 3",
+        primer(dotsIndex: 1, glyph: .alerts, kicker: "Permission 2 of \(permCount)",
                title: "Never miss your bus",
                body: "Get a heads-up when it’s time to leave, and a nudge the moment your bus is pulling in.",
-               points: [("clock", "Leave-now alerts for your trip"),
-                        ("lock.fill", "Live Activity counts down on your lock screen")],
-               primary: "Enable notifications", onPrimary: { onRequestNotifications(); advance() },
-               secondary: "Maybe later", onSecondary: { advance() })
+               points: [(.clock, "Leave-now alerts for your trip"),
+                        (.live, "Live Activity counts down on your lock screen")],
+               primary: "Enable notifications", onPrimary: { onRequestNotifications(); advanceAfterNotif() },
+               secondary: "Maybe later", onSecondary: { advanceAfterNotif() })
     }
 
     private var attPrimer: some View {
-        primer(dotsIndex: 2, icon: "hand.raised.fill", kicker: "Permission 3 of 3",
-               title: "Keep SG Transit free",
-               body: "SG Transit runs a few ads to stay free. Allowing tracking makes them more relevant — but it’s entirely your call, and SG Transit works fully either way.",
-               points: [("xmark", "Decline and nothing changes for you")],
+        primer(dotsIndex: 2, glyph: .info, kicker: "Permission 3 of 3",
+               title: "Keep WhereSia free",
+               body: "WhereSia runs a few ads to stay free. Allowing tracking makes them more relevant — but it’s entirely your call, and WhereSia works fully either way.",
+               points: [(.close, "Decline and nothing changes for you")],
                primary: "Continue", onPrimary: {
                    guard !trackingTapped else { return }
                    trackingTapped = true
@@ -218,17 +285,17 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             Spacer()
             Image(systemName: "checkmark")
-                .font(.system(size: 38, weight: .bold))
-                .foregroundStyle(t.onAccent)
+                .font(.system(size: 36, weight: .bold))
+                .foregroundStyle(ws.bg)
                 .frame(width: 84, height: 84)
-                .background(t.accent, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .background(ws.text, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             Text("You’re all set")
-                .font(t.sans(27, weight: .bold))
-                .foregroundStyle(t.fg)
+                .font(ws.sans(26, weight: .heavy))
+                .foregroundStyle(ws.text)
                 .padding(.top, 26)
-            Text("SG Transit is ready. Your nearest stops are already loading.")
-                .font(t.sans(14))
-                .foregroundStyle(t.dim)
+            Text("WhereSia is ready. Your nearest stops are already loading.")
+                .font(ws.sans(14, weight: .medium))
+                .foregroundStyle(ws.dim)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
                 .padding(.top, 10)
@@ -236,11 +303,11 @@ struct OnboardingView: View {
             VStack(spacing: 8) {
                 grantRow("Location", state: locationGrant)
                 grantRow("Notifications", state: notifGrant)
-                grantRow("Ad tracking", state: attGrant)
+                if showsATT { grantRow("Ad tracking", state: attGrant) }
             }
             .padding(.top, 24)
             Spacer()
-            primaryButton("Enter SG Transit") { onFinish() }
+            primaryButton("Enter WhereSia") { onFinish() }
         }
         .padding(.horizontal, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -249,7 +316,7 @@ struct OnboardingView: View {
     // MARK: Grant summary
 
     private enum Grant { case on, off, skipped
-        var text: String { self == .on ? "On" : self == .off ? "Off" : "Skipped" }
+        var text: String { self == .on ? "ON" : self == .off ? "OFF" : "SKIPPED" }
         var granted: Bool { self == .on }
     }
 
@@ -277,32 +344,34 @@ struct OnboardingView: View {
 
     private func grantRow(_ label: String, state: Grant) -> some View {
         HStack {
-            Text(label).font(t.sans(14, weight: .semibold)).foregroundStyle(t.fg)
+            Text(label).font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
             Spacer()
             Text(state.text)
-                .font(t.mono(12, weight: .semibold))
-                .foregroundStyle(state.granted ? t.fg : t.dim)
+                .font(ws.mono(11, weight: .semibold)).tracking(0.6)
+                .foregroundStyle(state.granted ? ws.text : ws.dim)
             Image(systemName: state.granted ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 16))
-                .foregroundStyle(state.granted ? t.accent : t.faint)
+                .foregroundStyle(state.granted ? ws.accentSoft : ws.faint)
         }
-        .padding(.horizontal, 15).padding(.vertical, 11)
-        .background(t.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 15).padding(.vertical, 12)
+        .background(ws.panel)
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(ws.rule, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: Building blocks
 
     private func kicker(_ s: String) -> some View {
         Text(s.uppercased())
-            .font(t.mono(11, weight: .bold)).tracking(1.2)
-            .foregroundStyle(t.accent)
+            .font(ws.sans(11, weight: .heavy)).tracking(1.6)
+            .foregroundStyle(ws.dim)
     }
 
     private func dots(_ index: Int) -> some View {
         HStack(spacing: 6) {
-            ForEach(0..<3, id: \.self) { i in
+            ForEach(0..<permCount, id: \.self) { i in
                 Capsule()
-                    .fill(i == index ? t.accent : t.line)
+                    .fill(i == index ? ws.accent : ws.rule)
                     .frame(width: i == index ? 18 : 6, height: 6)
             }
         }
@@ -325,45 +394,41 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func primer(dotsIndex: Int, icon: String, kicker kickerText: String,
+    private func primer(dotsIndex: Int, glyph: WSGlyph, kicker kickerText: String,
                         title: String, body: String,
-                        points: [(String, String)],
+                        points: [(WSGlyph, String)],
                         primary: String, onPrimary: @escaping () -> Void,
                         secondary: String? = nil,
                         onSecondary: (() -> Void)? = nil) -> some View {
         stepScaffold(dotsIndex: dotsIndex) {
             VStack(alignment: .leading, spacing: 0) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous).fill(t.surface)
-                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(t.line, lineWidth: 1))
-                    Image(systemName: icon)
-                        .font(.system(size: 34, weight: .regular))
-                        .foregroundStyle(t.accent)
+                    RoundedRectangle(cornerRadius: 20, style: .continuous).fill(ws.panel)
+                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(ws.rule, lineWidth: 1))
+                    WSIcon(glyph: glyph, size: 30, color: ws.text)
                 }
-                .frame(width: 76, height: 76)
+                .frame(width: 72, height: 72)
 
                 self.kicker(kickerText).padding(.top, 26)
                 Text(title)
-                    .font(t.sans(27, weight: .bold))
-                    .foregroundStyle(t.fg)
+                    .font(ws.sans(26, weight: .heavy))
+                    .foregroundStyle(ws.text)
                     .padding(.top, 8)
                 Text(body)
-                    .font(t.sans(15))
-                    .foregroundStyle(t.dim)
+                    .font(ws.sans(15, weight: .medium))
+                    .foregroundStyle(ws.dim)
                     .lineSpacing(3)
                     .padding(.top, 12)
                     .fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 11) {
                     ForEach(points.indices, id: \.self) { i in
                         HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: points[i].0)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(t.fg)
-                                .frame(width: 22, height: 22)
-                                .background(t.surfaceHi, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            WSIcon(glyph: points[i].0, size: 13, color: ws.text)
+                                .frame(width: 24, height: 24)
+                                .background(ws.panel2, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             Text(points[i].1)
-                                .font(t.sans(13.5, weight: .medium))
-                                .foregroundStyle(t.fg)
+                                .font(ws.sans(13.5, weight: .semibold))
+                                .foregroundStyle(ws.text)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
@@ -382,8 +447,8 @@ struct OnboardingView: View {
                 if let secondary, let onSecondary {
                     Button(action: onSecondary) {
                         Text(secondary)
-                            .font(t.sans(14, weight: .semibold))
-                            .foregroundStyle(t.dim)
+                            .font(ws.sans(14, weight: .semibold))
+                            .foregroundStyle(ws.dim)
                             .frame(maxWidth: .infinity).frame(height: 44)
                     }.buttonStyle(.plain)
                 }
@@ -391,13 +456,15 @@ struct OnboardingView: View {
         }
     }
 
+    /// The WhereSia primary CTA — the ink-filled button (same idiom as Track
+    /// Bus's "Alert me"): text-colour fill, board-colour label.
     private func primaryButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(t.sans(16, weight: .semibold))
-                .foregroundStyle(t.onAccent)
-                .frame(maxWidth: .infinity).padding(.vertical, 15)
-                .background(t.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .font(ws.sans(15, weight: .heavy))
+                .foregroundStyle(ws.bg)
+                .frame(maxWidth: .infinity).frame(height: 54)
+                .background(ws.text, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -412,44 +479,5 @@ private struct OnbSlide: ViewModifier {
     let opacity: Double
     func body(content: Content) -> some View {
         content.opacity(opacity).offset(x: dx)
-    }
-}
-
-// MARK: - The timeliness wedge visual (3 feature rows)
-
-private struct OnbVisualLive: View {
-    let t: Theme
-    private struct Row: Identifiable {
-        let id = UUID()
-        let icon: String
-        let title: String
-        let desc: String
-    }
-    private let rows: [Row] = [
-        .init(icon: "dot.radiowaves.up.forward", title: "Live arrivals", desc: "refreshed continuously"),
-        .init(icon: "map.fill",                  title: "On the map",    desc: "your bus, you and your stop"),
-        .init(icon: "bell.fill",                 title: "Smart alerts",  desc: "a nudge before it pulls in"),
-    ]
-    var body: some View {
-        VStack(spacing: 10) {
-            ForEach(rows) { r in
-                HStack(spacing: 12) {
-                    Image(systemName: r.icon)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(t.accent)
-                        .frame(width: 40, height: 40)
-                        .background(t.liveBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(r.title).font(t.sans(14, weight: .semibold)).foregroundStyle(t.fg)
-                        Text(r.desc).font(t.mono(11)).foregroundStyle(t.dim)
-                    }
-                    Spacer(minLength: 8)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .background(t.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(t.line, lineWidth: 1))
-            }
-        }
-        .frame(maxWidth: .infinity)
     }
 }

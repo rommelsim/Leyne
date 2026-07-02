@@ -10,7 +10,10 @@ import SwiftUI
 
 // MARK: - Navigation
 
-enum WSTab: String, CaseIterable { case home, saved, alerts, me }
+// No "Me" tab: it held only a decorative profile and settings iOS already
+// owns (notifications permission is requested on first alert; appearance
+// follows the system). Owner call, 2026-07-02.
+enum WSTab: String, CaseIterable { case home, saved, alerts }
 
 /// Push destinations, shared across every tab's NavigationStack.
 enum WSRoute: Hashable {
@@ -42,10 +45,22 @@ struct WSRoot: View {
     @State private var homePath: [WSRoute] = []
     @State private var savedPath: [WSRoute] = []
     @State private var alertsPath: [WSRoute] = []
-    @State private var mePath: [WSRoute] = []
     @State private var showSearch = false
 
-    private var ws: WSTheme { .resolve(dark: m.isDark) }
+    // Follow the system appearance directly — the in-app Appearance picker
+    // left with the Me tab, and m.isDark would pin users to a stale choice.
+    @Environment(\.colorScheme) private var colorScheme
+    private var ws: WSTheme { .resolve(dark: colorScheme == .dark) }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The navigation path of the currently selected tab.
+    private var activePath: [WSRoute] {
+        switch tab {
+        case .home:   homePath
+        case .saved:  savedPath
+        case .alerts: alertsPath
+        }
+    }
 
     var body: some View {
         Group {
@@ -53,7 +68,6 @@ struct WSRoot: View {
             case .home:   stack($homePath) { WSHomeView(onSearch: { showSearch = true }) }
             case .saved:  stack($savedPath) { WSSavedView() }
             case .alerts: stack($alertsPath) { WSAlertsView() }
-            case .me:     stack($mePath) { WSMeView() }
             }
         }
         .background(ws.bg.ignoresSafeArea())
@@ -61,8 +75,21 @@ struct WSRoot: View {
         // ZStack overlay with a fixed content padding: scroll content can
         // now reach — and show through — the material at the bottom of a
         // list, matching the native iOS 26 floating-bar composition.
+        //
+        // Root tabs only: pushed destinations don't inherit a custom
+        // safe-area inset applied outside their NavigationStack, so the bar
+        // floated OVER pushed content (it hid Track Bus's pinned CTA —
+        // owner-reported). Hiding it on push is also the better design:
+        // detail screens are focused tasks with their own chrome.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            WSTabBar(tab: $tab, alertCount: m.unseenAlertCount)
+            ZStack {
+                if activePath.isEmpty {
+                    WSTabBar(tab: $tab, alertCount: m.unseenAlertCount)
+                        .transition(reduceMotion ? .opacity :
+                            .move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.25), value: activePath.isEmpty)
         }
         .environment(\.ws, ws)
         .sheet(isPresented: $showSearch) {
@@ -107,11 +134,9 @@ struct WSRoot: View {
                     // Pushed screens supply their own `.wsHeaderBar` toolbar
                     // (real system nav-bar chrome — Liquid Glass on iOS 26,
                     // translucent material below), so unlike the tab roots
-                    // above the nav bar stays visible here. That also
-                    // restores the interactive edge-swipe-back gesture for
-                    // free: hiding the back *button* doesn't kill it, only
-                    // hiding the whole nav bar (the old approach) did — this
-                    // replaces the `enableSwipeBack()` workaround entirely.
+                    // above the nav bar stays visible here. NOTE: hiding the
+                    // system back button still disables the edge-swipe pop
+                    // gesture, so `wsHeaderBar` applies `enableSwipeBack()`.
                     destination(route, path: path)
                 }
         }
@@ -146,7 +171,6 @@ struct WSTabBar: View {
             item(.home, "Home", .home)
             item(.saved, "Saved", .saved)
             item(.alerts, "Alerts", .alerts, badge: alertCount)
-            item(.me, "Me", .me)
         }
         .padding(.horizontal, 8)
         .padding(.top, 11)

@@ -1,7 +1,9 @@
 // WhereSia — Alerts (screen 8).
 //
-// Grouped: Train service (line bullet + disruption text), Stations (facility /
-// lift outages), and Your alerts (user reminders with toggles). Wired to
+// A native List (WhereSia-styled), grouped: Train service (line bullet +
+// disruption text), Stations (facility / lift outages), and Your alerts —
+// user reminders whose toggle PAUSES in place (never deletes), with EDIT for
+// drag-to-reorder and swipe-to-delete for actual removal. Wired to
 // DataStore.trainAlerts + liftMaintenance and AppModel.alerts.
 
 import SwiftUI
@@ -12,17 +14,26 @@ struct WSAlertsView: View {
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
 
+    @State private var editMode: EditMode = .inactive
+
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    trainSection
-                    stationsSection
-                    yourSection
-                    Color.clear.frame(height: 24)
-                }
+            List {
+                headerRow(WSSectionHeader(label: "Train service"))
+                trainSection
+                headerRow(WSSectionHeader(label: "Stations"))
+                stationsSection
+                headerRow(WSSectionHeader(label: "Your alerts"))
+                yourSection
+                Color.clear.frame(height: 12)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .deleteDisabled(true).moveDisabled(true)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.editMode, $editMode)
             .wsEntrance()
         }
         .background(ws.bg)
@@ -34,26 +45,61 @@ struct WSAlertsView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(alignment: .lastTextBaseline) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("NOTIFICATIONS").font(ws.sans(11, weight: .heavy)).tracking(1.4).foregroundStyle(ws.dim)
                 Text("Alerts").font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
             }
             Spacer()
+            if !m.alerts.isEmpty {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        editMode = editMode == .active ? .inactive : .active
+                    }
+                } label: {
+                    Text(editMode == .active ? "DONE" : "EDIT")
+                        .font(ws.mono(11, weight: .bold)).tracking(0.8)
+                        .foregroundStyle(ws.text)
+                        .padding(.horizontal, 13).padding(.vertical, 7)
+                        .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .sensoryFeedback(.selection, trigger: editMode)
+            }
         }
         .padding(.horizontal, 22).padding(.top, 8)
     }
 
+    /// Header line as a non-editable list row (pixel-exact WhereSia styling).
+    private func headerRow(_ header: WSSectionHeader) -> some View {
+        header
+            .padding(.top, 18).padding(.bottom, 4)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+            .deleteDisabled(true)
+            .moveDisabled(true)
+    }
+
+    /// Shared row chrome for List rows.
+    private func rowChrome<Content: View>(_ content: Content, editable: Bool = false) -> some View {
+        content
+            .listRowBackground(Color.clear)
+            .listRowSeparatorTint(ws.rule)
+            .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+            .deleteDisabled(!editable)
+            .moveDisabled(!editable)
+    }
+
     // MARK: train service
 
-    private var trainSection: some View {
-        Group {
-            WSSectionHeader(label: "Train service")
-                .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
-            if store.trainAlerts.isEmpty {
-                calmRow("All lines running normally.")
-            } else {
-                ForEach(store.trainAlerts) { a in
+    @ViewBuilder private var trainSection: some View {
+        if store.trainAlerts.isEmpty {
+            rowChrome(calmRow("All lines running normally."))
+        } else {
+            ForEach(store.trainAlerts) { a in
+                rowChrome(
                     HStack(alignment: .top, spacing: 13) {
                         LineBullet(code: a.lineCode, size: .large, isLineCode: true)
                         VStack(alignment: .leading, spacing: 3) {
@@ -68,23 +114,20 @@ struct WSAlertsView: View {
                         }
                         Spacer()
                     }
-                    .padding(.vertical, 15).padding(.horizontal, 22)
-                    WSRowDivider().padding(.horizontal, 22)
-                }
+                    .padding(.vertical, 15)
+                )
             }
         }
     }
 
     // MARK: stations (lift maintenance)
 
-    private var stationsSection: some View {
-        Group {
-            WSSectionHeader(label: "Stations")
-                .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
-            if store.liftMaintenance.isEmpty {
-                calmRow("No lift or facility outages reported.")
-            } else {
-                ForEach(store.liftMaintenance) { lift in
+    @ViewBuilder private var stationsSection: some View {
+        if store.liftMaintenance.isEmpty {
+            rowChrome(calmRow("No lift or facility outages reported."))
+        } else {
+            ForEach(store.liftMaintenance) { lift in
+                rowChrome(
                     HStack(alignment: .top, spacing: 13) {
                         WSIcon(glyph: .lift, size: 20, color: ws.text)
                             .frame(width: 46, height: 40)
@@ -99,38 +142,44 @@ struct WSAlertsView: View {
                         Spacer()
                         miniBadge("LIFT")
                     }
-                    .padding(.vertical, 15).padding(.horizontal, 22)
-                    WSRowDivider().padding(.horizontal, 22)
-                }
+                    .padding(.vertical, 15)
+                )
             }
         }
     }
 
     // MARK: your alerts
 
-    private var yourSection: some View {
-        Group {
-            WSSectionHeader(label: "Your alerts")
-                .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
-            if m.alerts.isEmpty {
-                calmRow("No reminders set. Track a bus and tap “Alert me 1 stop before”.")
-            } else {
-                ForEach(m.alerts) { alert in
+    @ViewBuilder private var yourSection: some View {
+        if m.alerts.isEmpty {
+            rowChrome(calmRow("No reminders set. Track a bus and tap “Alert me 1 stop before”."))
+        } else {
+            ForEach(m.alerts) { alert in
+                rowChrome(
                     HStack(spacing: 13) {
-                        RouteTile(text: alert.busNo, size: .large)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(alert.stopName).font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.text)
-                            Text(alertDesc(alert)).font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                        // Toggle pauses in place; swipe (or EDIT) deletes.
+                        HStack(spacing: 13) {
+                            RouteTile(text: alert.busNo, size: .large)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(alert.stopName).font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.text)
+                                Text(alert.enabled ? alertDesc(alert) : "Paused — flip on to resume")
+                                    .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                            }
                         }
+                        .opacity(alert.enabled ? 1 : 0.55)
                         Spacer()
                         WSToggle(isOn: Binding(
-                            get: { true },
-                            set: { on in if !on { m.removeAlert(id: alert.id) } }))
+                            get: { alert.enabled },
+                            set: { on in m.setAlertEnabled(id: alert.id, on) }))
                     }
-                    .padding(.vertical, 15).padding(.horizontal, 22)
-                    WSRowDivider().padding(.horizontal, 22)
-                }
+                    .padding(.vertical, 15),
+                    editable: true
+                )
             }
+            .onDelete { offsets in
+                for id in offsets.map({ m.alerts[$0].id }) { m.removeAlert(id: id) }
+            }
+            .onMove { m.moveAlerts(fromOffsets: $0, toOffset: $1) }
         }
     }
 

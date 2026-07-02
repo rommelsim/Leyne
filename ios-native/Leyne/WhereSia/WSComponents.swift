@@ -207,6 +207,10 @@ struct TileRow: View {
 }
 
 // MARK: - Arrival pill (minutes + gauge + word)
+//
+// A single-line capsule that hugs its content. The previous stacked layout
+// stretched three pills across the full row width and read as "big boxes"
+// (owner feedback 2026-07-02).
 
 struct ArrivalPill: View {
     let eta: ETA
@@ -218,26 +222,25 @@ struct ArrivalPill: View {
     @Environment(\.ws) private var ws
 
     var body: some View {
-        VStack(spacing: 7) {
+        HStack(spacing: 7) {
             // minutes — "Arr" stands alone; a numeric ETA gets an "m" suffix.
-            (Text(eta.big).font(ws.mono(16, weight: .bold)).foregroundStyle(ws.text)
+            (Text(eta.big).font(ws.mono(14, weight: .bold)).foregroundStyle(ws.text)
              + Text(eta.big == "Arr" ? "" : "m")
                 .font(ws.mono(10, weight: .regular))
                 .foregroundStyle(ws.dim))
-            CrowdGauge(fraction: scheduled ? 0 : (load?.wsFraction ?? 0), width: 30)
+            CrowdGauge(fraction: scheduled ? 0 : (load?.wsFraction ?? 0), width: 22)
             Text(scheduled ? "sched" : (load?.wsShort ?? "—"))
-                .font(ws.mono(9, weight: .regular))
+                .font(ws.mono(9.5, weight: .regular))
                 .foregroundStyle(highlighted ? ws.text : ws.dim)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 9)
-        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .padding(.horizontal, 11)
         .background(ws.panel2)
         .overlay(
-            RoundedRectangle(cornerRadius: 11)
+            Capsule()
                 .stroke(highlighted ? ws.accent : ws.rule, lineWidth: highlighted ? 1.5 : 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 11))
+        .clipShape(Capsule())
         .opacity(scheduled ? 0.55 : 1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(pillLabel)
@@ -267,11 +270,39 @@ struct WSChip: View {
     }
 }
 
-// MARK: - Section header (uppercase label · hairline · right meta)
+// MARK: - Live badge (pulsing dot + the word LIVE)
+//
+// The one unmistakable liveness mark. A lone pulsing radar icon read as
+// decoration from arm's length (owner feedback 2026-07-02) — the word does
+// the explaining, the dot does the pulsing. accentSoft is the sanctioned
+// "live" colour exception.
+
+struct WSLiveBadge: View {
+    @Environment(\.ws) private var ws
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var on = false
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(ws.accentSoft).frame(width: 6, height: 6)
+                .opacity(on || reduceMotion ? 1 : 0.3)
+            Text("LIVE").font(ws.mono(9.5, weight: .bold)).tracking(1.1)
+                .foregroundStyle(ws.accentSoft)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { on = true }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Live data")
+    }
+}
+
+// MARK: - Section header (uppercase label · LIVE badge · hairline · right meta)
 
 struct WSSectionHeader: View {
     let label: String
     var meta: String? = nil
+    var live: Bool = false
     @Environment(\.ws) private var ws
     var body: some View {
         HStack(spacing: 10) {
@@ -279,6 +310,7 @@ struct WSSectionHeader: View {
                 .font(ws.sans(11, weight: .heavy))
                 .tracking(1.4)
                 .foregroundStyle(ws.dim)
+            if live { WSLiveBadge() }
             Rectangle().fill(ws.rule).frame(height: 1)
             if let meta {
                 // Real content (a timestamp / count), not decoration — `dim`
@@ -416,10 +448,19 @@ struct WSFilterChips: View {
                 .buttonStyle(.plain)
             }
         }
+        // Fill the row and lead-align — an HStack that hugs its content gets
+        // centred by parent VStacks, which reads as unaligned.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-// MARK: - Hairline button (38×38 visual, ≥44×44 tap target)
+// MARK: - Hairline button (bare toolbar icon, ≥44×44 tap target)
+//
+// Every current use sits in a toolbar, where iOS 26 already wraps items in
+// its own Liquid Glass circle — drawing our own panel + hairline inside it
+// produced a double outline (owner-reported UI bug, 2026-07-02). The button
+// is now a bare icon: the system supplies the chrome on 26, and a plain
+// icon is the native nav-bar idiom on 18–25.
 
 struct WSHairButton: View {
     let glyph: WSGlyph
@@ -429,12 +470,6 @@ struct WSHairButton: View {
     var body: some View {
         Button(action: action) {
             WSIcon(glyph: glyph, size: 19)
-                .frame(width: 38, height: 38)
-                .background(ws.panel)
-                .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 11))
-                // Visual stays 38×38 (the WhereSia chip size); the tappable
-                // area grows to the HIG's 44×44 minimum around it.
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -453,26 +488,45 @@ struct WSHairButton: View {
 // bar (the previous approach, paired with the `enableSwipeBack()` workaround)
 // did.
 extension View {
+    /// `title` + `collapsed`: when the screen's big in-content title scrolls
+    /// away, pass `collapsed: true` and the bar's eyebrow animates into the
+    /// title (and back on scroll-up) — the large-title→inline idiom.
     func wsHeaderBar<Trailing: View>(eyebrow: String,
+                                      title: String? = nil,
+                                      collapsed: Bool = false,
                                       onBack: (() -> Void)? = nil,
                                       @ViewBuilder trailing: @escaping () -> Trailing) -> some View {
-        modifier(WSHeaderBarChrome(eyebrow: eyebrow, onBack: onBack, trailing: trailing))
+        modifier(WSHeaderBarChrome(eyebrow: eyebrow, title: title,
+                                   collapsed: collapsed, onBack: onBack, trailing: trailing))
     }
-    func wsHeaderBar(eyebrow: String, onBack: (() -> Void)? = nil) -> some View {
-        wsHeaderBar(eyebrow: eyebrow, onBack: onBack) { EmptyView() }
+    func wsHeaderBar(eyebrow: String,
+                     title: String? = nil,
+                     collapsed: Bool = false,
+                     onBack: (() -> Void)? = nil) -> some View {
+        wsHeaderBar(eyebrow: eyebrow, title: title, collapsed: collapsed,
+                    onBack: onBack) { EmptyView() }
     }
 }
 
 private struct WSHeaderBarChrome<Trailing: View>: ViewModifier {
     let eyebrow: String
+    var title: String?
+    var collapsed: Bool = false
     var onBack: (() -> Void)?
     @ViewBuilder var trailing: () -> Trailing
     @Environment(\.ws) private var ws
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var showTitle: Bool { collapsed && title != nil }
 
     func body(content: Content) -> some View {
         content
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
+            // Hiding the system back button also disables the edge-swipe pop
+            // gesture (its delegate requires the default button) — reinstate
+            // it. Owner-reported regression 2026-07-02.
+            .enableSwipeBack()
             .toolbar {
                 if let onBack {
                     ToolbarItem(placement: .navigationBarLeading) {
@@ -480,11 +534,28 @@ private struct WSHeaderBarChrome<Trailing: View>: ViewModifier {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Text(eyebrow.uppercased())
-                        .font(ws.sans(11, weight: .heavy))
-                        .tracking(1.4)
-                        .foregroundStyle(ws.dim)
-                        .lineLimit(1)
+                    ZStack {
+                        if showTitle {
+                            Text(title ?? "")
+                                .font(ws.sans(14, weight: .heavy))
+                                .foregroundStyle(ws.text)
+                                .lineLimit(1)
+                                .transition(reduceMotion ? .opacity :
+                                    .move(edge: .bottom).combined(with: .opacity))
+                        } else {
+                            Text(eyebrow.uppercased())
+                                .font(ws.sans(11, weight: .heavy))
+                                .tracking(1.4)
+                                .foregroundStyle(ws.dim)
+                                .lineLimit(1)
+                                .transition(reduceMotion ? .opacity :
+                                    .move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.snappy(duration: 0.22), value: showTitle)
+                    // The bar region clips, so the moving lines slide in/out
+                    // of the chrome instead of floating over content.
+                    .clipped()
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     trailing()

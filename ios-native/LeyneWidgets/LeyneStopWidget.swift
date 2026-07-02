@@ -147,43 +147,41 @@ private struct SmallStopView: View {
             let arriving = next.mon1 && (next.eta1 ?? 99) <= 1
             VStack(alignment: .leading, spacing: 0) {
                 Text(block.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(wSans(12.5, .semibold))
                     .foregroundStyle(wFg).lineLimit(1)
 
                 Spacer(minLength: 4)
 
-                Text(next.id)
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(wFg)
+                WServiceBadge(no: next.id)
 
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(schedPrefix(next.mon1, next.eta1) + etaLabel(next.eta1))
-                        .font(.system(size: etaLabel(next.eta1) == "Arr" ? 30 : 40,
-                                      weight: arriving ? .bold : .medium)
-                              .monospacedDigit())
-                        .foregroundStyle(wFg)
-                        // Arriving: ink weight (bold) is the signal — no hue.
-                        // Keep widgetAccentable so StandBy/Lock Screen can tint.
+                        .font(wMono(etaLabel(next.eta1) == "Arr" ? 28 : 38,
+                                    arriving ? .bold : .medium))
+                        // Arriving: the blue live accent — matches the in-app
+                        // board. widgetAccentable lets StandBy/tinted re-tint.
+                        .foregroundStyle(arriving ? wAccentSoft : wFg)
                         .widgetAccentable(arriving)
                     if etaLabel(next.eta1) != "Arr" {
                         Text("min")
-                            .font(.system(size: 13)).foregroundStyle(wDim)
+                            .font(wMono(12)).foregroundStyle(wDim)
                     }
                 }
                 .contentTransition(.numericText(countsDown: true))
+                .padding(.top, 2)
 
                 Spacer(minLength: 0)
 
                 HStack {
                     if let eta2 = next.eta2 {
                         Text("then \(etaLabel(eta2))\(eta2 <= 0 ? "" : "m")")
-                            .font(.system(size: 10).monospacedDigit())
+                            .font(wMono(10))
                             .foregroundStyle(wDim)
                     }
                     Spacer()
                     if block.rows.count > 1 {
                         Text("+\(block.rows.count - 1)")
-                            .font(.system(size: 10, weight: .medium).monospacedDigit())
+                            .font(wMono(10, .medium))
                             .foregroundStyle(wFaint)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .overlay(Capsule().stroke(wLine, lineWidth: 1))
@@ -232,26 +230,24 @@ private struct MediumStopView: View {
     var body: some View {
         if let block {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 5) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(wDim)
-                        .widgetAccentable()
+                HStack(spacing: 8) {
                     Text(block.name)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(wSans(13.5, .bold))
                         .foregroundStyle(wFg)
                         .lineLimit(1)
+                    if block.rows.contains(where: { $0.mon1 }) { WLiveBadge() }
                     Spacer(minLength: 0)
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 11))
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 10))
                         .foregroundStyle(wFaint)
+                        .widgetAccentable()
                 }
                 Rectangle().fill(wLine).frame(height: 1).padding(.top, 6)
 
                 if block.rows.isEmpty {
                     Spacer()
                     Text("No live arrivals")
-                        .font(.system(size: 12)).foregroundStyle(wDim)
+                        .font(wSans(12, .medium)).foregroundStyle(wDim)
                         .frame(maxWidth: .infinity)
                     Spacer()
                 } else {
@@ -300,18 +296,16 @@ private struct LargeCommuteView: View {
         let maxRows: Int
         var body: some View {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 10)).foregroundStyle(wDim)
-                        .widgetAccentable()
+                HStack(spacing: 8) {
                     Text(block.name)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(wSans(13, .bold))
                         .foregroundStyle(wFg).lineLimit(1)
+                    if block.rows.contains(where: { $0.mon1 }) { WLiveBadge() }
                     Spacer(minLength: 0)
                 }
                 if block.rows.isEmpty {
                     Text("No live arrivals")
-                        .font(.system(size: 11)).foregroundStyle(wDim)
+                        .font(wSans(11, .medium)).foregroundStyle(wDim)
                 } else {
                     VStack(spacing: 2) {
                         ForEach(Array(block.rows.prefix(maxRows))) { r in
@@ -331,11 +325,11 @@ private struct EmptyStopView: View {
             Image(systemName: "bookmark.slash")
                 .font(.system(size: 18))
                 .foregroundStyle(wDim)
-            Text("Pin a stop in SG Transit")
-                .font(.system(size: 12, weight: .semibold))
+            Text("Save a stop in WhereSia")
+                .font(wSans(12, .semibold))
                 .foregroundStyle(wFg)
             Text("Long-press the widget to choose one")
-                .font(.system(size: 10))
+                .font(wSans(10, .medium))
                 .foregroundStyle(wDim)
                 .multilineTextAlignment(.center)
         }
@@ -374,8 +368,8 @@ struct LeyneStopWidget: Widget {
                                provider: StopProvider()) { entry in
             StopWidgetView(entry: entry)
         }
-        .configurationDisplayName("Pinned Stop")
-        .description("Live arrivals for a stop you pinned in SG Transit. Large size shows two stops.")
+        .configurationDisplayName("Saved Stop")
+        .description("Live arrivals for a stop you saved in WhereSia. Large size shows two stops.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

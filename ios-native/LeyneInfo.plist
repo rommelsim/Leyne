@@ -2,30 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Inter-Regular.ttf</string>
-		<string>Inter-Medium.ttf</string>
-		<string>Inter-SemiBold.ttf</string>
-		<string>Inter-Bold.ttf</string>
-		<string>Inter-ExtraBold.ttf</string>
-		<string>IBMPlexMono-Regular.ttf</string>
-		<string>IBMPlexMono-Medium.ttf</string>
-		<string>IBMPlexMono-SemiBold.ttf</string>
-		<string>IBMPlexMono-Bold.ttf</string>
-	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.leyne.Leyne.alertsRefresh</string>
 	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>fetch</string>
-	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDisplayName</key>
-	<string>SG Transit</string>
+	<string>WhereSia</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -42,11 +26,11 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>SG Transit uses your location to show nearby bus stops and accurate arrival times.</string>
+	<string>WhereSia uses your location to show nearby bus stops and accurate arrival times.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>SG Transit uses your location to show nearby bus stops and accurate arrival times.</string>
+	<string>WhereSia uses your location to show nearby bus stops and accurate arrival times.</string>
 	<key>NSUserTrackingUsageDescription</key>
-	<string>SG Transit uses your device identifier to show ads relevant to you and to keep the app free.</string>
+	<string>WhereSia uses your device identifier to show ads relevant to you and to keep the app free.</string>
 	<key>SKAdNetworkItems</key>
 	<array>
 		<dict>
@@ -250,5 +234,26 @@
 			<string>3qcr597p9d.skadnetwork</string>
 		</dict>
 	</array>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter-Regular.ttf</string>
+		<string>Inter-Medium.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
+		<string>Inter-Bold.ttf</string>
+		<string>Inter-ExtraBold.ttf</string>
+		<string>IBMPlexMono-Regular.ttf</string>
+		<string>IBMPlexMono-Medium.ttf</string>
+		<string>IBMPlexMono-SemiBold.ttf</string>
+		<string>IBMPlexMono-Bold.ttf</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>WSLaunchBackground</string>
+	</dict>
 </dict>
 </plist>

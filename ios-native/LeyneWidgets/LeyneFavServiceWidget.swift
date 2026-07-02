@@ -47,7 +47,7 @@ struct FavChoiceQuery: EntityQuery {
 struct SelectFavIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Pick favourite service"
     static var description = IntentDescription(
-        "Choose which favourited service this widget shows. Favourite a service in SG Transit to add it here."
+        "Choose which favourited service this widget shows. Favourite a service in WhereSia to add it here."
     )
 
     @Parameter(title: "Service")
@@ -109,67 +109,63 @@ private struct FavWidgetView: View {
     private func content(_ fav: WFavService) -> some View {
         let arriving = (entry.row?.mon1 ?? false) && (entry.row?.eta1 ?? 99) <= 1
         return VStack(alignment: .leading, spacing: 0) {
-            // Header: service badge + destination + favourite star.
-            HStack(spacing: 9) {
+            // Header: route tile + destination + favourite star.
+            HStack(spacing: 10) {
                 WServiceBadge(no: fav.no)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Towards").font(.system(size: 10)).foregroundStyle(wDim)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("TOWARDS").font(wMono(8.5)).kerning(0.8).foregroundStyle(wDim)
                     Text(fav.dest.isEmpty ? fav.stopName : fav.dest)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(wSans(14, .bold))
                         .foregroundStyle(wFg).lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "star.fill").font(.system(size: 12)).foregroundStyle(wDim)
+                Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(wFaint)
                     .widgetAccentable()
             }
 
             Rectangle().fill(wLine).frame(height: 1).padding(.vertical, 10)
 
-            Text("Nearest arrival")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(wDim)
-                .textCase(.uppercase)
-                .tracking(0.4)
+            // Board section header — with the LIVE mark when the reading is
+            // GPS-monitored (the word explains itself; no legend needed).
+            HStack(spacing: 8) {
+                Text("NEXT ARRIVAL")
+                    .font(wSans(9, .heavy)).kerning(1.1)
+                    .foregroundStyle(wDim)
+                if entry.row?.mon1 == true { WLiveBadge() }
+                Spacer(minLength: 0)
+            }
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                HStack(spacing: 5) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.system(size: 13)).foregroundStyle(wDim)
-                        .widgetAccentable()
-                    Text(fav.stopName)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(wFg).lineLimit(1)
-                }
+                Text(fav.stopName)
+                    .font(wSans(13.5, .semibold))
+                    .foregroundStyle(wFg).lineLimit(1)
                 Spacer(minLength: 4)
                 if let row = entry.row {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
-                            .font(.system(size: etaLabel(row.eta1) == "Arr" ? 26 : 34,
-                                          weight: arriving ? .bold : .medium)
-                                  .monospacedDigit())
-                            .foregroundStyle(wFg)
+                            .font(wMono(etaLabel(row.eta1) == "Arr" ? 24 : 32,
+                                        arriving ? .bold : .medium))
+                            .foregroundStyle(arriving ? wAccentSoft : wFg)
                             .widgetAccentable(arriving)
                             .contentTransition(.numericText(countsDown: true))
                         if etaLabel(row.eta1) != "Arr" {
-                            Text("min").font(.system(size: 11)).foregroundStyle(wDim)
+                            Text("min").font(wMono(10.5)).foregroundStyle(wDim)
                         }
                     }
                 } else {
-                    Text("—").font(.system(size: 26).monospacedDigit()).foregroundStyle(wFaint)
+                    Text("—").font(wMono(24)).foregroundStyle(wFaint)
                 }
             }
             .padding(.top, 4)
 
-            // Following two arrivals, thin, mirroring the mockup's "18  35".
+            // Following two arrivals — the quiet "then 12 · 24 min" line.
             if let row = entry.row, row.eta2 != nil || row.eta3 != nil {
-                HStack(spacing: 10) {
+                HStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    ForEach(Array([row.eta2, row.eta3].compactMap { $0 }.prefix(2).enumerated()),
-                            id: \.offset) { _, m in
-                        Text("then \(m <= 0 ? "Arr" : "\(m) min")")
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundStyle(wFaint)
-                    }
+                    Text("then " + [row.eta2, row.eta3].compactMap { $0 }.prefix(2)
+                        .map { $0 <= 0 ? "Arr" : "\($0)" }.joined(separator: " · ") + " min")
+                        .font(wMono(10.5))
+                        .foregroundStyle(wFaint)
                 }
                 .padding(.top, 2)
             }
@@ -184,10 +180,10 @@ private struct EmptyFavView: View {
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: "star.slash").font(.system(size: 18)).foregroundStyle(wDim)
-            Text("Favourite a service in SG Transit")
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(wFg)
+            Text("Favourite a service in WhereSia")
+                .font(wSans(12, .semibold)).foregroundStyle(wFg)
             Text("Tap the star on a bus to add it here")
-                .font(.system(size: 10)).foregroundStyle(wDim)
+                .font(wSans(10, .medium)).foregroundStyle(wDim)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -203,7 +199,7 @@ struct LeyneFavServiceWidget: Widget {
             FavWidgetView(entry: entry)
         }
         .configurationDisplayName("Favourite Service")
-        .description("Live arrivals for a service you favourited in SG Transit.")
+        .description("Live arrivals for a service you favourited in WhereSia.")
         .supportedFamilies([.systemMedium])
     }
 }

@@ -211,7 +211,14 @@ final class DataStore {
             stopByCode = Dictionary(s.map { ($0.BusStopCode, $0) }) { a, _ in a }
             services = v
             referenceState = .ready
-            if let loc = lastLoc { updateNearby(loc) }
+            // Cold-start race: if the first location fix beat this bootstrap,
+            // the nearby list was derived from an empty stop directory and the
+            // arrival prefetch ran on nothing. Re-derive AND re-prefetch here —
+            // location updates won't retrigger it (the fix is often static).
+            if let loc = lastLoc {
+                updateNearby(loc)
+                prefetchNearbyArrivals()
+            }
         } catch {
             referenceState = .error((error as? LTAError)?.errorDescription
                                     ?? error.localizedDescription)
@@ -439,6 +446,18 @@ final class DataStore {
         return []
     }
 
+    /// Natural service-number order ("2" < "10" < "10e" < "100"). Arrivals are
+    /// sorted by bus NUMBER, not ETA: a stop's board must be scannable — the
+    /// same service always sits in the same place — and ETA order would
+    /// reshuffle rows (and tap targets) on every 20-second refresh. "What's
+    /// next" is answered by the arriving highlight, not row position.
+    static func serviceNumberOrder(_ a: String, _ b: String) -> Bool {
+        let na = Int(a.filter(\.isNumber)) ?? Int.max
+        let nb = Int(b.filter(\.isNumber)) ?? Int.max
+        if na != nb { return na < nb }
+        return a < b
+    }
+
     /// `silent` warms data without publishing a `.loading` state (used by
     /// prefetch so entering Nearby doesn't burst-republish the whole list).
     func ensureArrivals(stop code: String, force: Bool = false, silent: Bool = false) {
@@ -459,7 +478,7 @@ final class DataStore {
                     let destCode = svc.NextBus.DestinationCode ?? ""
                     return svc.toService(destName: self.stopName(destCode))
                 }
-                .sorted { $0.etaSec < $1.etaSec }
+                .sorted { Self.serviceNumberOrder($0.no, $1.no) }
                 self.arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
                 self.lastFetched[code] = Date()
             } catch {
@@ -486,7 +505,7 @@ final class DataStore {
                 let destCode = svc.NextBus.DestinationCode ?? ""
                 return svc.toService(destName: self.stopName(destCode))
             }
-            .sorted { $0.etaSec < $1.etaSec }
+            .sorted { Self.serviceNumberOrder($0.no, $1.no) }
             arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
             lastFetched[code] = Date()
         } catch {
@@ -587,12 +606,7 @@ final class DataStore {
         for r in routes where r.BusStopCode == code {
             set.insert(r.ServiceNo)
         }
-        return set.sorted { a, b in
-            let na = Int(a.filter(\.isNumber)) ?? Int.max
-            let nb = Int(b.filter(\.isNumber)) ?? Int.max
-            if na != nb { return na < nb }
-            return a < b
-        }
+        return set.sorted { Self.serviceNumberOrder($0, $1) }
     }
 
     func route(service no: String, stopCode: String) async -> RouteInfo? {

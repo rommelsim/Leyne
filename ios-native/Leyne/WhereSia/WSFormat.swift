@@ -78,10 +78,11 @@ enum WSFmt {
         return f.string(from: date)
     }
 
-    /// "UPD 9:41" eyebrow used in section headers + meta lines.
+    /// "Updated 9:41" meta used in section headers + status lines. Owner
+    /// feedback 2026-07-02: "UPD" read as jargon — spell it out.
     static func upd(_ date: Date?, use24h: Bool) -> String {
-        guard let date else { return "UPD —" }
-        return "UPD " + clock(date, use24h: use24h)
+        guard let date else { return "Updated —" }
+        return "Updated " + clock(date, use24h: use24h)
     }
 
     /// LTA "HHmm" (e.g. "0530", past-midnight "2512") → "05:30" / "01:12".

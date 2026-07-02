@@ -1110,7 +1110,29 @@ final class AppModel {
     private func rearmAlertNotifications() {
         guard notificationsEnabled else { return }
         NotificationsManager.shared.scheduleArrivalAlerts(
-            alerts: alerts, cards: alertSchedulingCards)
+            alerts: alerts.filter(\.enabled), cards: alertSchedulingCards)
+    }
+
+    /// Pause or resume an alert in place — toggle OFF keeps the row in
+    /// "Your alerts", it just stops firing (owner decision 2026-07-02).
+    func setAlertEnabled(id: String, _ on: Bool) {
+        guard let i = alerts.firstIndex(where: { $0.id == id }) else { return }
+        alerts[i].disabled = on ? nil : true
+        persistAlerts()
+        if !on { NotificationsManager.shared.cancelAlert(alerts[i]) }
+        rearmAlertNotifications()
+        // Pausing the alert the Live Activity is tracking ends the activity;
+        // autoTrackSoonestAlert re-points it at the next enabled alert.
+        if !on, alerts[i].kind == .arrival,
+           liveActivityKey == Self.liveKey(bus: alerts[i].busNo, stopCode: alerts[i].stopCode) {
+            stopLiveActivity()
+        }
+    }
+
+    /// Reorder "Your alerts" (List drag-to-reorder). Persisted immediately.
+    func moveAlerts(fromOffsets: IndexSet, toOffset: Int) {
+        alerts.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        persistAlerts()
     }
 
     /// Live cards covering every stop an arrival alert references, so the
@@ -1118,7 +1140,7 @@ final class AppModel {
     /// kept fresh by the tick; alert stops that aren't pinned still resolve
     /// from whatever arrivals the DataStore holds.
     private var alertSchedulingCards: [CardModel] {
-        let codes = Set(alerts.filter { $0.kind == .arrival }.map(\.stopCode))
+        let codes = Set(alerts.filter { $0.kind == .arrival && $0.enabled }.map(\.stopCode))
         return codes.map { code in
             CardModel(id: code, label: ds.stopName(code), stopName: ds.stopName(code),
                       stopCode: code, walkMin: 0,
@@ -1182,7 +1204,7 @@ final class AppModel {
     /// Activity, keeping both surfaces in sync.
     private func clearFulfilledArrivalAlerts() {
         var fulfilled: [String] = []
-        for a in alerts where a.kind == .arrival {
+        for a in alerts where a.kind == .arrival && a.enabled {
             guard let svc = liveServices(code: a.stopCode, tracked: [a.busNo]).first
             else { continue }   // bus not in the feed this tick — wait for it
             if svc.etaSec > 0 {
@@ -1212,7 +1234,7 @@ final class AppModel {
 
         // Keep every alert's stop fresh (not just pinned ones) so the
         // scheduler reads current arrivalDates for un-pinned alert stops.
-        for a in alerts where a.kind == .arrival { ds.ensureArrivals(stop: a.stopCode) }
+        for a in alerts where a.kind == .arrival && a.enabled { ds.ensureArrivals(stop: a.stopCode) }
 
         // One-shot arrival alerts: once the tracked bus actually reaches the
         // stop, the alert has done its job — clear it (and its paired Live
@@ -1262,7 +1284,7 @@ final class AppModel {
     /// ≤60 s ETA. Deduplicated per alert id; re-arms once ETA > 90 s so each
     /// incoming bus triggers exactly one buzz. Mirrors Flutter's _buzzApproachingBuses.
     private func buzzApproachingAlertedBuses() {
-        for a in alerts where a.kind == .arrival {
+        for a in alerts where a.kind == .arrival && a.enabled {
             let svcs = liveServices(code: a.stopCode, tracked: [a.busNo])
             guard let s = svcs.first else { continue }
             if s.etaSec <= 60 {
@@ -1601,7 +1623,7 @@ final class AppModel {
         // Scan all arrival alerts for the one with the smallest ETA > 0.
         var soonestAlert: BusAlert? = nil
         var soonestEta = Int.max
-        for a in alerts where a.kind == .arrival {
+        for a in alerts where a.kind == .arrival && a.enabled {
             let svcs = liveServices(code: a.stopCode, tracked: [a.busNo])
             guard let s = svcs.first, s.etaSec > 0 else { continue }
             if s.etaSec < soonestEta {
@@ -2114,9 +2136,24 @@ final class NotificationsManager {
         let desiredIds = Set(desired.map(\.id))
         let prefixes = arrivalPrefixes
         center.getPendingNotificationRequests { reqs in
-            let toCancel = reqs.map(\.identifier).filter { id in
-                prefixes.contains { id.hasPrefix($0) } && !desiredIds.contains(id)
-            }
+            let sweepNow = Date()
+            let toCancel = reqs.filter { req in
+                let id = req.identifier
+                guard prefixes.contains(where: { id.hasPrefix($0) }),
+                      !desiredIds.contains(id) else { return false }
+                // An imminent trigger IS the alert doing its job. The moment
+                // the live ETA drops inside a lead window that lead leaves the
+                // `desired` set — cancelling it here killed the "arriving now"
+                // banner right before it fired (owner-reported: no
+                // notification when the bus arrives). Let anything due within
+                // two minutes ride to delivery.
+                if let t = req.trigger as? UNTimeIntervalNotificationTrigger,
+                   let fire = t.nextTriggerDate(),
+                   fire.timeIntervalSince(sweepNow) < 120 {
+                    return false
+                }
+                return true
+            }.map(\.identifier)
             if !toCancel.isEmpty {
                 self.center.removePendingNotificationRequests(withIdentifiers: toCancel)
             }

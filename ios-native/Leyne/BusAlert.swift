@@ -20,6 +20,12 @@ struct BusAlert: Codable, Identifiable, Equatable {
     var dest: String          // headsign for display (may be "")
     var boardStopCode: String // destination: stop the bus was opened from; arrival: == stopCode
     var leadMinutes: Int
+    /// Paused flag, stored inverted-and-optional so alerts persisted before
+    /// this field existed decode as active (missing key → nil → enabled).
+    /// Toggle OFF pauses the alert in place; it does NOT delete it.
+    var disabled: Bool? = nil
+
+    var enabled: Bool { !(disabled ?? false) }
 
     var id: String { "\(kind.rawValue):\(busNo)@\(stopCode)" }
 }

@@ -30,7 +30,12 @@ enum AdConfig {
     ///   • `AdConsent.gatherThenStart()` runs UMP + ATT
     ///   • `MobileAds.shared.start()` initializes the SDK
     ///   • Onboarding's "Ads" step is shown (see OnboardingView)
-    static let adsEnabled = true
+    ///
+    /// OFF for now — owner request 2026-07-02 during the WhereSia redesign
+    /// test cycle (no ads while verifying the new UI). Flip back to `true`
+    /// to restore every placement + the consent flow + the ATT onboarding
+    /// step in one move.
+    static let adsEnabled = false
 
     // ╔══════════════════════════════════════════════════════════════╗
     // ║ TESTFLIGHT TOGGLE — Force test ad unit in a Release Archive. ║

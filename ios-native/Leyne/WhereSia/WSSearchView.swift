@@ -1,11 +1,13 @@
 // WhereSia — Search (screens 2 & 3).
 //
-// Presented modally over Home. Empty state: "Search near me" + a Recent list.
-// Typing: results grouped by type (MRT stations / Bus stops / Bus services) with
-// the query term bolded and type filter chips. Wired to DataStore.searchStops/
-// searchServices + MrtGeo.stations(matching:).
+// Presented modally over Home. Empty state: Recent searches. Typing: results
+// grouped by type (MRT stations / Bus stops / Bus services) with the query
+// term bolded and type filter chips; misspellings get a "Did you mean …?"
+// row. A 6-digit postal code geocodes to the nearest stops + MRT instead.
+// Wired to DataStore.searchStops/searchServices + MrtGeo.
 
 import SwiftUI
+import CoreLocation
 
 struct WSSearchView: View {
     var onSelect: (WSRoute) -> Void
@@ -13,21 +15,29 @@ struct WSSearchView: View {
 
     @Environment(AppModel.self) private var m: AppModel
     @Environment(DataStore.self) private var store: DataStore
-    @EnvironmentObject private var location: LocationManager
     @Environment(\.ws) private var ws
 
     @State private var query = ""
     @State private var filter = 0     // 0 All · 1 Bus · 2 MRT · 3 Stops
-    @State private var nearMe = false
+    @State private var postal = PostalState.idle
     @FocusState private var focused: Bool
 
+    private enum PostalState: Equatable {
+        case idle, locating, failed
+        case located(lat: Double, lon: Double)
+    }
+
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
+    private var isPostal: Bool { detectQueryKind(trimmed).kind == "postal" }
 
     var body: some View {
         VStack(spacing: 0) {
             field
-            if trimmed.isEmpty && !nearMe {
+            if trimmed.isEmpty {
                 emptyState
+            } else if isPostal {
+                postalResults
+                    .task(id: trimmed) { await geocodePostal() }
             } else {
                 WSFilterChips(options: ["All", "Bus", "MRT", "Stops"], selection: $filter)
                     .padding(.horizontal, 22).padding(.top, 14)
@@ -45,7 +55,7 @@ struct WSSearchView: View {
             HStack(spacing: 10) {
                 WSIcon(glyph: .search, size: 18, color: ws.dim)
                 TextField("", text: $query, prompt:
-                    Text("Search stop, bus or MRT").foregroundStyle(ws.dim))
+                    Text("Stop, bus, MRT or postal code").foregroundStyle(ws.dim))
                     .font(ws.sans(15, weight: .semibold))
                     .foregroundStyle(ws.text)
                     .focused($focused)
@@ -53,7 +63,7 @@ struct WSSearchView: View {
                     .textInputAutocapitalization(.never)
                     .submitLabel(.search)
                 if !query.isEmpty {
-                    Button { query = ""; nearMe = false } label: {
+                    Button { query = "" } label: {
                         WSIcon(glyph: .close, size: 11, color: ws.dim)
                             .frame(width: 20, height: 20)
                             .background(ws.panel2)
@@ -77,32 +87,15 @@ struct WSSearchView: View {
         .padding(.horizontal, 22).padding(.top, 14)
     }
 
-    // MARK: empty state (near me + recent)
+    // MARK: empty state (recent searches)
 
     private var emptyState: some View {
         ScrollView {
             VStack(spacing: 0) {
-                Button {
-                    location.requestPermission()
-                    nearMe = true
-                    store.prefetchNearbyArrivals()
-                } label: {
-                    HStack(spacing: 13) {
-                        iconWell(.scope)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Search near me").font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.text)
-                            Text("USE CURRENT LOCATION").font(ws.mono(10)).tracking(0.4).foregroundStyle(ws.dim)
-                        }
-                        Spacer()
-                        WSIcon(glyph: .chevron, size: 18, color: ws.faint)
-                    }
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-                    .background(ws.panel)
-                    .overlay(RoundedRectangle(cornerRadius: 13).stroke(ws.rule, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 13))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 22).padding(.top, 16)
+                Text("Try a stop name, bus number, MRT station or postal code.")
+                    .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 22).padding(.top, 16)
 
                 if !m.recents.isEmpty {
                     HStack {
@@ -114,7 +107,7 @@ struct WSSearchView: View {
                     .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
 
                     ForEach(m.recents, id: \.self) { r in
-                        Button { query = r; nearMe = false } label: {
+                        Button { query = r } label: {
                             HStack(spacing: 13) {
                                 iconWell(.search)
                                 Text(r).font(ws.sans(15, weight: .bold)).foregroundStyle(ws.text)
@@ -131,14 +124,81 @@ struct WSSearchView: View {
         }
     }
 
+    // MARK: postal code → nearby stops + MRT
+
+    private func geocodePostal() async {
+        postal = .locating
+        // Debounce: don't geocode every keystroke of a 6-digit entry.
+        try? await Task.sleep(for: .milliseconds(350))
+        guard !Task.isCancelled else { return }
+        do {
+            let marks = try await CLGeocoder().geocodeAddressString("\(trimmed), Singapore")
+            guard !Task.isCancelled else { return }
+            if let c = marks.first?.location?.coordinate {
+                postal = .located(lat: c.latitude, lon: c.longitude)
+            } else {
+                postal = .failed
+            }
+        } catch {
+            if !Task.isCancelled { postal = .failed }
+        }
+    }
+
+    @ViewBuilder private var postalResults: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                switch postal {
+                case .idle, .locating:
+                    hint("Locating \(trimmed)…")
+                case .failed:
+                    hint("Couldn’t find postal code \(trimmed). Check the six digits and try again.")
+                case .located(let lat, let lon):
+                    let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                    let mrt = MrtGeo.nearestStations(to: coord, limit: 3, withinMeters: 1600)
+                    let near = store.wsStopsNear(coord, limit: 8)
+                    if mrt.isEmpty && near.isEmpty {
+                        hint("Nothing near \(trimmed).")
+                    }
+                    if !mrt.isEmpty {
+                        WSSectionHeader(label: "MRT near \(trimmed)")
+                            .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
+                        ForEach(mrt, id: \.station.id) { item in
+                            resultRow(icon: .train, name: item.station.name,
+                                      sub: "\(fmtDistance(item.distanceM).uppercased()) · \(item.walkMin) MIN WALK",
+                                      codes: item.station.codes) {
+                                select(.mrtStation(item.station), label: item.station.name)
+                            }
+                        }
+                    }
+                    if !near.isEmpty {
+                        WSSectionHeader(label: "Bus stops near \(trimmed)")
+                            .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
+                        ForEach(near, id: \.stop.BusStopCode) { item in
+                            resultRow(icon: .busSingle, name: item.stop.Description,
+                                      sub: "\(item.stop.BusStopCode) · \(item.stop.RoadName.uppercased()) · \(fmtDistance(item.distanceM).uppercased())",
+                                      codes: []) {
+                                select(.busStop(code: item.stop.BusStopCode), label: item.stop.Description)
+                            }
+                        }
+                    }
+                }
+                Color.clear.frame(height: 24)
+            }
+        }
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(ws.sans(14, weight: .medium)).foregroundStyle(ws.dim)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 22).padding(.top, 30)
+    }
+
     // MARK: results
 
-    private var stations: [MrtGeoStation] { nearMe ? [] : MrtGeo.stations(matching: trimmed) }
-    private var stops: [LTABusStop] {
-        if nearMe { return store.nearby.compactMap { store.stopByCode[$0.stopCode] } }
-        return store.searchStops(trimmed)
-    }
-    private var services: [LTABusServiceDTO] { nearMe ? [] : store.searchServices(trimmed) }
+    private var stations: [MrtGeoStation] { MrtGeo.stations(matching: trimmed) }
+    private var stops: [LTABusStop] { store.searchStops(trimmed) }
+    private var services: [LTABusServiceDTO] { store.searchServices(trimmed) }
 
     private var showStations: Bool { filter == 0 || filter == 2 }
     private var showStops: Bool { filter == 0 || filter == 3 }
@@ -174,10 +234,27 @@ struct WSSearchView: View {
                     }
                 }
                 if noResults {
+                    if let suggestion = WSSpell.suggest(for: trimmed, store: store) {
+                        Button { query = suggestion } label: {
+                            HStack(spacing: 13) {
+                                iconWell(.search)
+                                (Text("Did you mean ")
+                                 + Text(suggestion).fontWeight(.heavy)
+                                 + Text("?"))
+                                    .font(ws.sans(15, weight: .medium)).foregroundStyle(ws.text)
+                                Spacer()
+                                WSIcon(glyph: .chevron, size: 18, color: ws.faint)
+                            }
+                            .padding(.vertical, 13).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 22).padding(.top, 12)
+                        WSRowDivider().padding(.horizontal, 22)
+                    }
                     Text("No matches for “\(trimmed)”.")
                         .font(ws.sans(14, weight: .medium)).foregroundStyle(ws.dim)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 22).padding(.top, 30)
+                        .padding(.horizontal, 22).padding(.top, 16)
                 }
                 Color.clear.frame(height: 24)
             }
@@ -185,7 +262,7 @@ struct WSSearchView: View {
     }
 
     private var noResults: Bool {
-        !nearMe && !trimmed.isEmpty
+        !trimmed.isEmpty
             && (!showStations || stations.isEmpty)
             && (!showStops || stops.isEmpty)
             && (!showServices || services.isEmpty)

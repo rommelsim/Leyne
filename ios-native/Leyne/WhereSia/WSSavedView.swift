@@ -1,8 +1,10 @@
 // WhereSia — Saved (screen 9).
 //
-// Saved Stops (each with an optional HOME/WORK/GYM tag) + saved MRT stations,
-// and saved Lines, showing live next-arrival + crowd inline. Wired to
-// AppModel.pins / savedMrtStations / favServices.
+// A native List in WhereSia clothes: saved stops (optional HOME/WORK tag),
+// saved MRT stations and saved lines, each with live next-arrival + crowd
+// inline and a code · road / line subline. Swipe left to remove; EDIT (or a
+// long drag) reorders — mutations persist via AppModel's didSet observers.
+// Wired to AppModel.pins / savedMrtStations / favServices.
 
 import SwiftUI
 
@@ -12,20 +14,25 @@ struct WSSavedView: View {
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
 
+    @State private var editMode: EditMode = .inactive
+
+    private var isEmpty: Bool {
+        m.pins.isEmpty && m.savedMrtStations.isEmpty && m.favServices.isEmpty
+    }
+
     var body: some View {
         let _ = m.tick
         VStack(spacing: 0) {
             header
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    stopsSection
-                    linesSection
-                    Color.clear.frame(height: 24)
-                }
+            if isEmpty {
+                emptyState
+            } else {
+                list
             }
-            .wsEntrance()
         }
         .background(ws.bg)
+        .sensoryFeedback(.impact(weight: .light),
+                         trigger: m.pins.count + m.savedMrtStations.count + m.favServices.count)
         .onAppear {
             for p in m.pins { store.ensureArrivals(stop: p.code) }
             for f in m.favServices { if let s = f.stop { store.ensureArrivals(stop: s) } }
@@ -34,44 +41,95 @@ struct WSSavedView: View {
         }
     }
 
+    // MARK: header
+
     private var header: some View {
-        HStack {
-            HStack(spacing: 11) {
-                RoundedRectangle(cornerRadius: 11).fill(ws.panel)
-                    .frame(width: 38, height: 38)
-                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-                    .overlay(WSIcon(glyph: .bookmarkFilled, size: 18, color: ws.text))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("YOUR PLACES").font(ws.sans(11, weight: .heavy)).tracking(1.4).foregroundStyle(ws.dim)
-                    Text("Saved").font(ws.sans(20, weight: .heavy)).foregroundStyle(ws.text)
-                }
+        HStack(alignment: .lastTextBaseline) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("YOUR PLACES").font(ws.sans(11, weight: .heavy)).tracking(1.4).foregroundStyle(ws.dim)
+                Text("Saved").font(ws.sans(26, weight: .heavy)).foregroundStyle(ws.text)
             }
             Spacer()
-        }
-        .padding(.horizontal, 22).padding(.top, 8)
-    }
-
-    // MARK: stops
-
-    private var stopsSection: some View {
-        Group {
-            WSSectionHeader(label: "Stops",
-                            meta: WSFmt.upd(store.newestRefresh(amongst: m.pins.map(\.code)), use24h: m.use24h))
-                .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
-            if m.pins.isEmpty && m.savedMrtStations.isEmpty {
-                empty("Bookmark a stop or MRT station to see it here.")
-            } else {
-                ForEach(m.pins, id: \.code) { pin in
-                    savedStopRow(pin)
-                    WSRowDivider().padding(.horizontal, 22)
+            if !isEmpty {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        editMode = editMode == .active ? .inactive : .active
+                    }
+                } label: {
+                    Text(editMode == .active ? "DONE" : "EDIT")
+                        .font(ws.mono(11, weight: .bold)).tracking(0.8)
+                        .foregroundStyle(ws.text)
+                        .padding(.horizontal, 13).padding(.vertical, 7)
+                        .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
+                        .contentShape(Capsule())
                 }
-                ForEach(m.savedMrtStations) { st in
-                    savedStationRow(st)
-                    WSRowDivider().padding(.horizontal, 22)
-                }
+                .buttonStyle(.plain)
+                .sensoryFeedback(.selection, trigger: editMode)
             }
         }
+        .padding(.horizontal, 22).padding(.top, 10)
     }
+
+    // MARK: list
+
+    private var list: some View {
+        List {
+            headerRow(WSSectionHeader(
+                label: "Stops",
+                meta: WSFmt.upd(store.newestRefresh(amongst: m.pins.map(\.code)), use24h: m.use24h)))
+            ForEach(m.pins, id: \.code) { pin in
+                row { savedStopRow(pin) }
+            }
+            .onDelete { m.pins.remove(atOffsets: $0) }
+            .onMove { m.pins.move(fromOffsets: $0, toOffset: $1) }
+
+            ForEach(m.savedMrtStations) { st in
+                row { savedStationRow(st) }
+            }
+            .onDelete { m.savedMrtStations.remove(atOffsets: $0) }
+            .onMove { m.savedMrtStations.move(fromOffsets: $0, toOffset: $1) }
+
+            if !m.favServices.isEmpty {
+                headerRow(WSSectionHeader(label: "Lines"))
+                ForEach(m.favServices) { fav in
+                    row { lineRow(fav) }
+                }
+                .onDelete { m.favServices.remove(atOffsets: $0) }
+                .onMove { m.favServices.move(fromOffsets: $0, toOffset: $1) }
+            }
+
+            Color.clear.frame(height: 12)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .deleteDisabled(true).moveDisabled(true)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .environment(\.editMode, $editMode)
+        .wsEntrance()
+    }
+
+    /// Non-editable header line rendered as a list row (keeps pixel-exact
+    /// WhereSia styling instead of the plain-list sticky header's).
+    private func headerRow(_ header: WSSectionHeader) -> some View {
+        header
+            .padding(.top, 18).padding(.bottom, 4)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+            .deleteDisabled(true)
+            .moveDisabled(true)
+    }
+
+    /// Shared row chrome: WhereSia insets, hairline separator, transparent bg.
+    private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .listRowBackground(Color.clear)
+            .listRowSeparatorTint(ws.rule)
+            .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+    }
+
+    // MARK: rows
 
     private func savedStopRow(_ pin: Pin) -> some View {
         let services = store.servicesFor(pin.code)
@@ -84,6 +142,8 @@ struct WSSavedView: View {
                             .padding(.bottom, 3)
                     }
                     Text(store.stopName(pin.code)).font(ws.sans(15.5, weight: .bold)).foregroundStyle(ws.text)
+                    Text(stopSubline(pin.code))
+                        .font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
                     if !tiles.isEmpty { TileRow(services: tiles).padding(.top, 8) }
                 }
                 Spacer(minLength: 8)
@@ -100,43 +160,36 @@ struct WSSavedView: View {
                     }
                 }
             }
-            .padding(.vertical, 14).padding(.horizontal, 22)
+            .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
+    private func stopSubline(_ code: String) -> String {
+        let road = store.roadName(code)
+        return road.isEmpty ? code : "\(code) · \(road.uppercased())"
+    }
+
     private func savedStationRow(_ st: MrtGeoStation) -> some View {
         Button { push(.mrtStation(st)) } label: {
             HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(st.name).font(ws.sans(15.5, weight: .bold)).foregroundStyle(ws.text)
+                    Text(wsLineNames(from: st.codes).uppercased())
+                        .font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
                     HStack(spacing: 5) { ForEach(st.codes.prefix(3), id: \.self) { LineBullet(code: $0) } }
+                        .padding(.top, 6)
                 }
                 Spacer(minLength: 8)
                 if let crowd = store.wsCrowd(for: st), crowd != .unknown {
                     WSChip(gauge: crowd.wsFraction, text: crowd.wsWord)
                 }
             }
-            .padding(.vertical, 14).padding(.horizontal, 22)
+            .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: lines
-
-    private var linesSection: some View {
-        Group {
-            if !m.favServices.isEmpty {
-                WSSectionHeader(label: "Lines")
-                    .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
-                ForEach(m.favServices) { fav in
-                    lineRow(fav)
-                    WSRowDivider().padding(.horizontal, 22)
-                }
-            }
-        }
     }
 
     private func lineRow(_ fav: FavService) -> some View {
@@ -165,15 +218,25 @@ struct WSSavedView: View {
                     }
                 }
             }
-            .padding(.vertical, 14).padding(.horizontal, 22)
+            .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private func empty(_ text: String) -> some View {
-        Text(text).font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 22).padding(.vertical, 14)
+    // MARK: empty state
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            WSIcon(glyph: .bookmark, size: 30, color: ws.faint)
+            Text("Nothing saved yet")
+                .font(ws.sans(15.5, weight: .bold)).foregroundStyle(ws.text)
+            Text("Tap the bookmark on a stop, station or bus\nto keep it one tap away.")
+                .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 40)
+        .padding(.bottom, 60)
     }
 }
