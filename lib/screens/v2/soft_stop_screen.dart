@@ -3,8 +3,8 @@
 // Layout mirrors the current iOS WhereSia spec, ios-native/Leyne/WhereSia/
 // WSBusStopView.swift (NOT the dormant V2/SoftStopView.swift predecessor
 // this screen used to track):
-//   • Top bar: circular back + star (save/pin) — no sort menu. WhereSia has
-//     no per-stop sort control; the board is always number-sorted.
+//   • Top bar: circular back + bookmark (save/pin) — no sort menu. WhereSia
+//     has no per-stop sort control; the board is always number-sorted.
 //   • Title block: large stop name, "● LIVE" (when loaded) + code · ROAD ·
 //     Updated h:mm on one line. No walk/distance row (not in the iOS spec).
 //   • No section header text before the arrivals list (iOS goes straight
@@ -384,7 +384,7 @@ class _SoftStopScreenState extends State<SoftStopScreen>
   }
 
   // ── Top bar ──────────────────────────────────────────────────────────────
-  // Back · (spacer) · star  — 44×44 circular icon buttons. Mirrors iOS
+  // Back · (spacer) · bookmark  — 44×44 circular icon buttons. Mirrors iOS
   // WSBusStopView's nav-bar back + bookmark trailing button, drawn in-content
   // (Flutter idiom) rather than as native chrome.
 
@@ -403,20 +403,22 @@ class _SoftStopScreenState extends State<SoftStopScreen>
         ),
         const Spacer(),
         // Pin/unpin this stop — matches iOS's bookmark toggle exactly (no
-        // popup; a plain toggle). The star fills when the stop is saved.
-        _starMenu(context, isPinned),
+        // popup; a plain toggle). The bookmark fills when the stop is saved.
+        _bookmarkButton(context, isPinned),
       ],
     );
   }
 
-  /// Pin/unpin toggle. The star fills when the stop is saved. Mirrors iOS
-  /// WSBusStopView's trailing bookmark button (`togglePin`).
-  Widget _starMenu(BuildContext context, bool isPinned) {
+  /// Pin/unpin toggle. The bookmark fills when the stop is saved. Mirrors
+  /// iOS WSBusStopView's trailing bookmark button (`togglePin`), which uses
+  /// WSIcons' `.bookmark` / `.bookmarkFilled` glyph pair (not the star used
+  /// elsewhere for per-bus favourites — see `_swipeNotify`).
+  Widget _bookmarkButton(BuildContext context, bool isPinned) {
     final t = context.t;
     final name = DataStore.shared.stopName(widget.stopCode);
-    // Save toggle — pins/unpins this stop. A pin glyph fills when saved; to
-    // save a specific bus instead, open the bus and toggle its (bus-glyph)
-    // save there.
+    // Save toggle — pins/unpins this stop. A bookmark glyph fills when
+    // saved; to save a specific bus instead, open the bus and toggle its
+    // (star-glyph) save there.
     return Semantics(
       label: isPinned ? '$name saved. Tap to remove.' : 'Save stop $name',
       button: true,
@@ -435,7 +437,9 @@ class _SoftStopScreenState extends State<SoftStopScreen>
             ),
             alignment: Alignment.center,
             child: Icon(
-              isPinned ? Icons.star_rounded : Icons.star_outline_rounded,
+              isPinned
+                  ? Icons.bookmark_rounded
+                  : Icons.bookmark_outline_rounded,
               size: 20,
               color: isPinned ? t.soon : t.fg,
             ),
