@@ -214,8 +214,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       animation: anim,
                       child: child,
                       builder: (context, child) {
-                        final exiting =
-                            anim.status == AnimationStatus.reverse;
+                        final exiting = anim.status == AnimationStatus.reverse;
                         // Incoming slides from the dir-side to centre; outgoing
                         // exits to the opposite side. Both move the same way, so
                         // it reads as one push (Next ←, Back →).
@@ -593,10 +592,9 @@ class _PrimerStep extends StatelessWidget {
               ),
               child: Text(
                 secondaryLabel!,
-                style: t.sans(
-                  14,
-                  weight: FontWeight.w600,
-                ).copyWith(color: t.dim),
+                style: t
+                    .sans(14, weight: FontWeight.w600)
+                    .copyWith(color: t.dim),
               ),
             ),
           const SizedBox(height: 4),
@@ -633,8 +631,7 @@ class _DoneStep extends StatelessWidget {
 
   _Grant get _notifGrant => switch (AppModel.shared.notificationAuth) {
     NotifPermStatus.granted => _Grant.on,
-    NotifPermStatus.denied ||
-    NotifPermStatus.permanentlyDenied => _Grant.off,
+    NotifPermStatus.denied || NotifPermStatus.permanentlyDenied => _Grant.off,
     NotifPermStatus.notDetermined => _Grant.skipped,
   };
 
@@ -657,11 +654,7 @@ class _DoneStep extends StatelessWidget {
                 child: SizedBox(
                   width: 84,
                   height: 84,
-                  child: Icon(
-                    Icons.check_rounded,
-                    size: 42,
-                    color: t.onAccent,
-                  ),
+                  child: Icon(Icons.check_rounded, size: 42, color: t.onAccent),
                 ),
               ),
               const SizedBox(height: 26),
@@ -785,10 +778,7 @@ class _GrantRow extends StatelessWidget {
               text,
               style: t
                   .mono(11, weight: FontWeight.w600)
-                  .copyWith(
-                    color: granted ? t.fg : t.dim,
-                    letterSpacing: 0.6,
-                  ),
+                  .copyWith(color: granted ? t.fg : t.dim, letterSpacing: 0.6),
             ),
             const SizedBox(width: 8),
             Icon(
@@ -882,7 +872,9 @@ class _BoardPreview extends StatelessWidget {
                 children: [
                   const Eyebrow('Nearby'),
                   const SizedBox(width: 10),
-                  const ConfidenceStatusPill(confidence: ArrivalConfidence.live),
+                  const ConfidenceStatusPill(
+                    confidence: ArrivalConfidence.live,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(child: Container(height: 1, color: t.line)),
                 ],

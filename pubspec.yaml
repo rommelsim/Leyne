@@ -92,6 +92,15 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # Generates the Android launcher icon (legacy mipmaps + adaptive icon +
+  # Android 13+ themed/monochrome layer) from the iOS AppIcon artwork — a
+  # dev-time codegen tool, not a runtime dependency. Config lives in
+  # flutter_launcher_icons.yaml. Pinned exact (not ^) since it only runs as
+  # a one-off `dart run` step; no reason to let it float between runs.
+  # 0.14.4 is current latest on pub.dev, requires Dart >=3.0.0 <4.0.0 —
+  # compatible with this project's ^3.12.0 / Flutter 3.44.
+  flutter_launcher_icons: 0.14.4
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

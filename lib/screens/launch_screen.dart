@@ -7,11 +7,16 @@
 // a still, fully-revealed frame and an earlier dismiss.
 //
 // Wired in main.dart's `_AppRoot` as a layer over the root Stack (see
-// `_launching`), shown only for returning users past onboarding — first-run
-// users go straight to OnboardingScreen, whose own welcome step already
-// carries this exact beat (eyebrow/wordmark/line capsules), so stacking this
-// splash in front of it would just repeat the same reveal with nothing new
-// to say.
+// `_launching`), shown on EVERY cold start — first-run installs included —
+// mirroring RootView.swift, where LaunchScreenView sits at the top zIndex
+// unconditionally and reveals whichever screen is underneath (OnboardingView
+// there, OnboardingScreen here) once it finishes. So on a fresh install this
+// splash plays FIRST, then OnboardingScreen's own welcome step appears
+// (which repeats the same eyebrow/wordmark/line-capsule beat, just without
+// the staged reveal) — the same order iOS uses, and the reason onboarding's
+// permission primers (steps 2–3) can never fire a system prompt while this
+// splash is still covering the screen: nothing behind it is reachable until
+// [onDone] fires.
 //
 // This widget never removes itself from the tree — it calls [onDone] once
 // the reveal (or a tap-to-skip) finishes, and the caller stops rendering it.

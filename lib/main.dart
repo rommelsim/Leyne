@@ -162,14 +162,12 @@ void main() async {
       // isInDebugMode: true, // uncomment to force immediate execution in debug
     );
     await Workmanager().registerPeriodicTask(
-      kAlertsRefreshTask,          // unique task name
-      kAlertsRefreshTask,          // task name passed to callbackDispatcher
+      kAlertsRefreshTask, // unique task name
+      kAlertsRefreshTask, // task name passed to callbackDispatcher
       frequency: const Duration(minutes: 15),
       // keepAlive: true so Android 12+ doesn't skip our task on the
       // first few scheduling windows.
-      constraints: Constraints(
-        networkType: NetworkType.connected,
-      ),
+      constraints: Constraints(networkType: NetworkType.connected),
       existingWorkPolicy:
           ExistingPeriodicWorkPolicy.keep, // don't reset the clock
     );
@@ -248,7 +246,9 @@ class LyneApp extends StatelessWidget {
               debugShowCheckedModeBanner: false,
               themeMode: AppModel.shared.themeMode,
               theme: LyneTheme.light.materialTheme(dynamicScheme: lightDynamic),
-              darkTheme: LyneTheme.dark.materialTheme(dynamicScheme: darkDynamic),
+              darkTheme: LyneTheme.dark.materialTheme(
+                dynamicScheme: darkDynamic,
+              ),
               locale: AppModel.shared.locale,
               localizationsDelegates: AppLocalizations.localizationsDelegates,
               supportedLocales: AppLocalizations.supportedLocales,
@@ -268,11 +268,23 @@ class LyneApp extends StatelessWidget {
 /// Settings can re-enter onboarding mid-session, and so dismissing What's
 /// New drops straight through to Home.
 ///
-/// Also owns the one-shot [LaunchScreen] overlay: a Stack layer shown only
-/// for a returning user (onboarding already done) on this cold start.
-/// First-run users go straight to OnboardingScreen — its own welcome step
-/// already carries the identical eyebrow/wordmark/line-capsule reveal, so
-/// layering the splash on top of it would just repeat the same beat twice.
+/// Also owns the one-shot [LaunchScreen] overlay: a Stack layer shown on
+/// EVERY cold start — first-run and returning users alike — mirroring
+/// RootView.swift, where LaunchScreenView sits at the top zIndex
+/// unconditionally and only reveals whatever's underneath (OnboardingView
+/// or WSRoot) once its reveal finishes. Concretely this means the overlay
+/// masks OnboardingScreen too: the splash plays first, THEN onboarding's
+/// welcome step appears once it dismisses — never the other way around.
+///
+/// This matters for permissions: onboarding's location/notification
+/// primers (steps 2–3) only fire an OS prompt when the user taps through to
+/// them, and the splash's opaque tap-to-skip layer sits on top of
+/// OnboardingScreen the whole time it's up, so no tap — and therefore no
+/// permission prompt — can reach the screen underneath before the splash
+/// is gone. Before this was `_launching && onboardingDone`, which skipped
+/// the splash entirely for first-run installs and only played it AFTER
+/// onboarding (and its permission asks) had already completed — the
+/// opposite of the owner's "context before permission asks" intent.
 class _AppRoot extends StatefulWidget {
   const _AppRoot();
 
@@ -335,7 +347,11 @@ class _AppRootState extends State<_AppRoot> {
         return Stack(
           children: [
             body,
-            if (_launching && onboardingDone)
+            // Unconditional on onboardingDone (see class doc): the splash is
+            // the FIRST thing any cold start sees, first-run included, and
+            // its opaque tap-to-skip layer blocks all touches to `body`
+            // underneath until it dismisses.
+            if (_launching)
               Positioned.fill(
                 child: LaunchScreen(
                   onDone: () {
