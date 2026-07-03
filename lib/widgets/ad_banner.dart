@@ -71,7 +71,11 @@ const bool kLyneScreenshotMode = bool.fromEnvironment(
 /// during an AdMob account suspension) — the banner widget short-circuits
 /// to an empty SizedBox, no SDK request is ever made, and AdConsent stays
 /// a no-op.
-const bool kLyneAdsEnabled = true;
+///
+/// OFF for now — owner request 2026-07-03: ads are disabled PRODUCT-WIDE
+/// during the WhereSia redesign test cycle (iOS's AdConfig.adsEnabled is
+/// off too). Flip both back together before the next revenue release.
+const bool kLyneAdsEnabled = false;
 
 /// Resolve the banner ad unit ID at runtime. Flutter powers the Android
 /// build only — iOS ships via the SwiftUI app at `ios-native/`.

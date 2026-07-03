@@ -6,9 +6,9 @@
 import SwiftUI
 
 struct HiddenStopsView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
-    @EnvironmentObject var ds: DataStore
+    @Environment(DataStore.self) var ds: DataStore
 
     private var t: Theme { m.t }
 

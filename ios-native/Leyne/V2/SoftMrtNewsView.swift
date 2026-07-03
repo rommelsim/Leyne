@@ -9,8 +9,8 @@
 import SwiftUI
 
 struct SoftMrtNewsView: View {
-    @EnvironmentObject var m: AppModel
-    @ObservedObject private var ds = DataStore.shared
+    @Environment(AppModel.self) var m: AppModel
+    private let ds = DataStore.shared
     let onBack: () -> Void
 
     private var t: Theme { m.t }

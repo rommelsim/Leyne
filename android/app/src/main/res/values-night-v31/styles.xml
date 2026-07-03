@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31) SplashScreen API — dark. See values-v31/styles.xml
+         for the full rationale (including why this isn't parented on
+         android:style/Theme.SplashScreen); this variant only differs in
+         parent theme (Theme.Black.NoTitleBar, matching values-night/styles.xml)
+         and background colour, matching LyneTheme.dark.bg (#0F0F0F, see
+         lib/theme.dart). -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">#FF0F0F0F</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

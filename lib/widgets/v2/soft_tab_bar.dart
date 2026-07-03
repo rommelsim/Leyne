@@ -1,7 +1,10 @@
 // SoftTabBar (Material 3) — bottom NavigationBar with pill-indicator
-// behind the active icon. Mirrors the iOS tab set exactly:
-// Bus (Home) · MRT · Saved · Search · Settings — matching SoftRoot.swift
-// Tab declaration order.
+// behind the active icon. Mirrors the iOS WSTabBar set exactly:
+// Home · Saved · Alerts — matching WSRoot.swift's WSTab declaration order
+// (no Search destination in the bar — Search is reached via Home's search
+// bar → onOpenSearch, and stays a pushed route; no MRT destination either —
+// MRT stations are reached from Home's nearby-stations strip and Search,
+// matching iOS which has no MRT overview tab).
 //
 // SoftBottomBar stacks the AdMob banner above SoftTabBar for the
 // tabbed screens — this is what those Scaffolds mount as bottomNavigationBar.
@@ -16,7 +19,17 @@ import '../ad_banner.dart';
 // Phase 1: Reordered to Bus · MRT · Saved · Search · Settings.
 // Phase 2: Replaced `settings` tab with `alerts` — Settings is now a gear-
 //          button sheet accessed from the Alerts tab. Mirrors iOS SoftRoot.
-// Android visible order: Bus(Home) · MRT · Saved · Search · Alerts.
+// WhereSia redesign: Search removed as a bar destination — mirrors WSRoot's
+// 3-tab WSTab enum (home/saved/alerts). SoftTab.search is KEPT as an enum
+// member: soft_root.dart still uses it as a pushed-route marker (Search is
+// always a pushed screen, never a tab body — see SoftRoot._handleTab), and
+// SoftBusScreen/SoftStopScreen/SoftSearchScreen still pass it around as a
+// `tabSelection` value for screens reached via search.
+// Owner walkthrough 2026-07-03: MRT destination removed — iOS WSTab has no
+// MRT tab (stations open from Home's strip / Search). SoftTab.mrt is KEPT
+// as an enum member: soft_root.dart still mounts SoftMrtScreen for it and
+// detail screens still carry it as a `tabSelection` value.
+// Android visible order: Home · Saved · Alerts.
 enum SoftTab { home, favourites, mrt, alerts, search }
 
 class SoftTabBar extends StatelessWidget {
@@ -42,25 +55,16 @@ class SoftTabBar extends StatelessWidget {
       backgroundColor: t.bg,
       surfaceTintColor: Colors.transparent,
       destinations: [
+        // Glyphs mirror iOS WSIcons: house · bookmark · bell.
         const NavigationDestination(
-          icon: Icon(Icons.directions_bus_outlined),
-          selectedIcon: Icon(Icons.directions_bus_rounded),
-          label: 'Bus',
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home_rounded),
+          label: 'Home',
         ),
         const NavigationDestination(
-          icon: Icon(Icons.train_outlined),
-          selectedIcon: Icon(Icons.train_rounded),
-          label: 'MRT',
-        ),
-        const NavigationDestination(
-          icon: Icon(Icons.star_outline_rounded),
-          selectedIcon: Icon(Icons.star_rounded),
+          icon: Icon(Icons.bookmark_outline_rounded),
+          selectedIcon: Icon(Icons.bookmark_rounded),
           label: 'Saved',
-        ),
-        const NavigationDestination(
-          icon: Icon(Icons.search_rounded),
-          selectedIcon: Icon(Icons.search_rounded),
-          label: 'Search',
         ),
         NavigationDestination(
           icon: Badge(
@@ -83,18 +87,34 @@ class SoftTabBar extends StatelessWidget {
     );
   }
 
-  // Order mirrors iOS SoftRoot: Bus · MRT · Saved · Search · Alerts.
+  // Order mirrors iOS WSTabBar: Home · Saved · Alerts. Search and MRT are
+  // deliberately absent — Search is a pushed route (SoftTab.search) and MRT
+  // stations open from Home's strip / Search; see the SoftTab doc comment.
   static const _visibleTabs = [
     SoftTab.home,
-    SoftTab.mrt,
     SoftTab.favourites,
-    SoftTab.search,
     SoftTab.alerts,
   ];
 
   static int _visibleIndex(SoftTab t) {
     final i = _visibleTabs.indexOf(t);
     return i < 0 ? 0 : i;
+  }
+}
+
+/// Bottom slot for PUSHED detail screens (Stop / Bus / Station / Line /
+/// Settings): the AdBanner only, no tab bar. iOS hides its floating tab bar
+/// on pushed routes ("detail screens are focused tasks with their own
+/// chrome" — WSRoot.swift), so Android mirrors that; the banner stays
+/// because Android's ad inventory is independent of the iOS design (which
+/// currently ships no banners at all). SafeArea keeps the banner clear of
+/// the gesture-nav home indicator, which NavigationBar used to absorb.
+class SoftDetailBottomBar extends StatelessWidget {
+  const SoftDetailBottomBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const SafeArea(top: false, child: AdBanner());
   }
 }
 

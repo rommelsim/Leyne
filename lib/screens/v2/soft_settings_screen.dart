@@ -137,17 +137,11 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      // Suppress the bottom nav bar when presented as a modal sheet (from the
-      // Alerts tab gear). When used as the standalone Settings tab it still
-      // renders. The `settings` tab enum value is kept for compatibility even
-      // though the tab itself is no longer shown; once the old tab routing is
-      // fully retired this can be cleaned up.
-      bottomNavigationBar: widget.asSheet
-          ? null
-          : SoftBottomBar(
-              selection: SoftTab.alerts,
-              onSelect: widget.onTab,
-            ),
+      // No bottom bar as a modal sheet; when pushed full-screen it gets the
+      // detail treatment — banner only, no tab bar (iOS parity: WSRoot hides
+      // the floating bar on pushed routes).
+      bottomNavigationBar:
+          widget.asSheet ? null : const SoftDetailBottomBar(),
       body: SafeArea(
         child: ListenableBuilder(
           listenable: AppModel.shared,
@@ -245,7 +239,7 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
 
                 // ── Footer ────────────────────────────────────────────────
                 Text(
-                  'Leyne v$_version · Data from LTA DataMall.',
+                  'Departly v$_version · Data from LTA DataMall.',
                   style: t.mono(10, color: t.faint),
                 ),
               ],

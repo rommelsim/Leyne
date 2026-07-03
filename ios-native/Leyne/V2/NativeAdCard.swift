@@ -550,7 +550,7 @@ private final class PaddedLabel: UILabel {
 ///
 /// Placement: use inside a SwiftUI List after about the 3rd stop card.
 struct NativeAdCard: View {
-    @EnvironmentObject private var m: AppModel
+    @Environment(AppModel.self) private var m: AppModel
     @StateObject private var loader = NativeAdLoader()
 
     var body: some View {

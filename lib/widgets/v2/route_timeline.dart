@@ -3,8 +3,10 @@
 
 import 'package:flutter/material.dart';
 import '../../data/bus_progress.dart';
+import '../../data/models.dart';
 import '../../data/mrt_stations.dart';
 import '../../theme.dart';
+import 'confidence.dart';
 
 enum SoftRouteStopState { past, here, board, next, alight }
 
@@ -27,11 +29,19 @@ class SoftRouteStop {
     required this.name,
     required this.state,
     this.etaMin,
+    this.load,
   });
   final String id;
   final String name;
   final SoftRouteStopState state;
   final int? etaMin;
+
+  /// The tracked bus's onboard crowd, attached only to the `here` stop (the
+  /// bus's current GPS-snapped position) — mirrors iOS WSTrackBusView's
+  /// vehicle-row crowd gauge (commit 5c52c74: a bare lowercase "seats" read
+  /// as a mystery; the standard gauge+word idiom fixes that here too). Null
+  /// on every other stop.
+  final Load? load;
 }
 
 class RouteTimeline extends StatefulWidget {
@@ -44,6 +54,7 @@ class RouteTimeline extends StatefulWidget {
     this.now,
     this.selectable = true,
     this.embedded = false,
+    this.onOpenStop,
   });
 
   final String svc;
@@ -56,6 +67,13 @@ class RouteTimeline extends StatefulWidget {
   /// and rows aren't tappable (alight selection disabled). Used in the bus
   /// view's route card, which is a glanceable viewer, not an editor.
   final bool selectable;
+
+  /// When set, EVERY stop row becomes tappable and opens that stop's own
+  /// arrivals via this callback (`SoftRouteStop.id` is the stop code) —
+  /// takes priority over the alight-selection tap behaviour above. Used by
+  /// the bus view's full-route sheet (iOS RouteTimeline parity: any stop row
+  /// pushes that stop, not just the upcoming/alightable ones).
+  final ValueChanged<String>? onOpenStop;
 
   /// When true, drop the inner card chrome (padding + surface) so the list
   /// sits flush inside its parent — e.g. embedded in the route bottom sheet.
@@ -89,8 +107,9 @@ class _RouteTimelineState extends State<RouteTimeline> {
     final stops = widget.stops;
 
     final hereIdx = stops.indexWhere((s) => s.state == SoftRouteStopState.here);
-    final boardIdx =
-        stops.indexWhere((s) => s.state == SoftRouteStopState.board);
+    final boardIdx = stops.indexWhere(
+      (s) => s.state == SoftRouteStopState.board,
+    );
 
     // "N STOPS AWAY" badge: only meaningful when we have a live bus position
     // (`here`) and the boarding stop ahead of it. Count from the bus to YOUR
@@ -98,7 +117,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
     final showAhead = hereIdx >= 0 && boardIdx > hereIdx;
     final aheadCount = showAhead ? boardIdx - hereIdx : 0;
 
-    final showHint = widget.selectable &&
+    final showHint =
+        widget.selectable &&
         stops.any((s) => s.state == SoftRouteStopState.next);
 
     // Long-route collapse: fold the lead-in (everything more than 2 stops
@@ -116,7 +136,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
       focalIdx = 0;
     }
     final keepFrom = (focalIdx - 2).clamp(0, stops.length);
-    final canCollapse = stops.length > RouteTimeline.maxVisible && keepFrom >= 2;
+    final canCollapse =
+        stops.length > RouteTimeline.maxVisible && keepFrom >= 2;
     final startIdx = (canCollapse && !_expanded) ? keepFrom : 0;
 
     // Trailing collapse: fold the run from past your stop → terminus so the
@@ -133,8 +154,9 @@ class _RouteTimelineState extends State<RouteTimeline> {
         : (tailAnchorIdx + 2).clamp(0, stops.length - 1);
     final canCollapseTail =
         tailAnchorIdx >= 0 && (stops.length - 1 - tailKeepTo) >= 2;
-    final effectiveEndIdx =
-        (canCollapseTail && !_tailExpanded) ? tailKeepTo : stops.length - 1;
+    final effectiveEndIdx = (canCollapseTail && !_tailExpanded)
+        ? tailKeepTo
+        : stops.length - 1;
 
     return Container(
       padding: EdgeInsets.all(widget.embedded ? 0 : 16),
@@ -349,11 +371,16 @@ class _RouteTimelineState extends State<RouteTimeline> {
     // MRT tag for "Stn" names we can't map.
     final mrt = resolveMrtStation(stop.name);
 
+    final openStop = widget.onOpenStop;
+    final onTap = openStop != null
+        ? () => openStop(stop.id)
+        : (upcoming && widget.selectable)
+        ? () => widget.onAlight(widget.alightId == stop.id ? null : stop.id)
+        : null;
+
     return InkWell(
       borderRadius: BorderRadius.circular(6),
-      onTap: (upcoming && widget.selectable)
-          ? () => widget.onAlight(widget.alightId == stop.id ? null : stop.id)
-          : null,
+      onTap: onTap,
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -386,8 +413,8 @@ class _RouteTimelineState extends State<RouteTimeline> {
                           color: last
                               ? Colors.transparent
                               : (BusProgress.lowerConnectorIsGreen(resolved)
-                                  ? t.soon
-                                  : t.line),
+                                    ? t.soon
+                                    : t.line),
                         ),
                       ),
                     ],
@@ -405,17 +432,19 @@ class _RouteTimelineState extends State<RouteTimeline> {
                     final isBoard = resolved == SoftRouteStopState.board;
                     final nameText = Text(
                       stop.name,
-                      style: t.sans(
-                        14,
-                        weight: resolved == SoftRouteStopState.past
-                            ? FontWeight.w400
-                            : (isBoard ? FontWeight.w700 : FontWeight.w600),
-                        color: resolved == SoftRouteStopState.past
-                            ? t.dim
-                            : (isBoard ? t.soon : t.fg),
-                        // Tight leading so each stop row is as compact as iOS,
-                        // where SwiftUI lays text out with less default leading.
-                      ).copyWith(height: 1.1),
+                      style: t
+                          .sans(
+                            14,
+                            weight: resolved == SoftRouteStopState.past
+                                ? FontWeight.w400
+                                : (isBoard ? FontWeight.w700 : FontWeight.w600),
+                            color: resolved == SoftRouteStopState.past
+                                ? t.dim
+                                : (isBoard ? t.soon : t.fg),
+                            // Tight leading so each stop row is as compact as iOS,
+                            // where SwiftUI lays text out with less default leading.
+                          )
+                          .copyWith(height: 1.1),
                     );
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -476,15 +505,17 @@ class _RouteTimelineState extends State<RouteTimeline> {
                               // from the displayed name — parity with iOS.
                               if (stop.id != stop.name) ...[
                                 const SizedBox(height: 1),
-                                Text(stop.id,
-                                    style: t.mono(10, color: t.faint)),
+                                Text(
+                                  stop.id,
+                                  style: t.mono(10, color: t.faint),
+                                ),
                               ],
                             ],
                           ),
                         ),
                         const SizedBox(height: 2),
                         if (resolved == SoftRouteStopState.here)
-                          _chip(t, 'BUS HERE NOW', filled: true),
+                          _hereRow(t, stop.load),
                         if (resolved == SoftRouteStopState.alight)
                           _alightChip(t),
                       ],
@@ -531,8 +562,11 @@ class _RouteTimelineState extends State<RouteTimeline> {
               height: 18,
               alignment: Alignment.center,
               decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
-              child: Icon(Icons.directions_walk_rounded,
-                  size: 11, color: t.contrastFg),
+              child: Icon(
+                Icons.directions_walk_rounded,
+                size: 11,
+                color: t.contrastFg,
+              ),
             ),
           ],
         );
@@ -613,14 +647,13 @@ class _RouteTimelineState extends State<RouteTimeline> {
   Widget _mrtStationPill(LyneTheme t, MrtStation mrt) {
     final tint = mrt.codes.length == 1 ? mrt.codes.first.color : null;
     return Semantics(
-      label: 'MRT station ${mrt.name}, '
+      label:
+          'MRT station ${mrt.name}, '
           '${mrt.codes.map((c) => c.code).join(", ")}',
       child: Container(
         padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
         decoration: BoxDecoration(
-          color: tint != null
-              ? tint.withValues(alpha: 0.14)
-              : t.surfaceHi,
+          color: tint != null ? tint.withValues(alpha: 0.14) : t.surfaceHi,
           borderRadius: BorderRadius.circular(99),
         ),
         child: Row(
@@ -664,6 +697,23 @@ class _RouteTimelineState extends State<RouteTimeline> {
     );
   }
 
+  /// "BUS HERE NOW" chip + the onboard crowd (compact gauge + short word) —
+  /// the bus's live GPS position is snapped to this stop, so its crowd is the
+  /// best read of what's actually approaching. Mirrors iOS WSTrackBusView's
+  /// vehicle-row crowd gauge.
+  Widget _hereRow(LyneTheme t, Load? load) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _chip(t, 'BUS HERE NOW', filled: true),
+        if (load != null) ...[
+          const SizedBox(width: 8),
+          CrowdMeter(load: load, compact: true),
+        ],
+      ],
+    );
+  }
+
   Widget _chip(LyneTheme t, String text, {required bool filled}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -701,7 +751,11 @@ class _RouteTimelineState extends State<RouteTimeline> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.notifications_active_rounded, size: 10, color: t.contrastFg),
+          Icon(
+            Icons.notifications_active_rounded,
+            size: 10,
+            color: t.contrastFg,
+          ),
           const SizedBox(width: 3),
           Text(
             'ALIGHT',
@@ -795,8 +849,11 @@ class _BusHereDotState extends State<_BusHereDot>
           height: 18,
           alignment: Alignment.center,
           decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
-          child:
-              Icon(Icons.directions_bus_rounded, size: 11, color: t.contrastFg),
+          child: Icon(
+            Icons.directions_bus_rounded,
+            size: 11,
+            color: t.contrastFg,
+          ),
         ),
       ],
     );

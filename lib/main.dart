@@ -10,6 +10,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,7 @@ import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'data/mrt_geo.dart';
 import 'l10n/app_localizations.dart';
+import 'screens/launch_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/v2/soft_bus_screen.dart';
 import 'screens/v2/soft_root.dart';
@@ -160,14 +162,12 @@ void main() async {
       // isInDebugMode: true, // uncomment to force immediate execution in debug
     );
     await Workmanager().registerPeriodicTask(
-      kAlertsRefreshTask,          // unique task name
-      kAlertsRefreshTask,          // task name passed to callbackDispatcher
+      kAlertsRefreshTask, // unique task name
+      kAlertsRefreshTask, // task name passed to callbackDispatcher
       frequency: const Duration(minutes: 15),
       // keepAlive: true so Android 12+ doesn't skip our task on the
       // first few scheduling windows.
-      constraints: Constraints(
-        networkType: NetworkType.connected,
-      ),
+      constraints: Constraints(networkType: NetworkType.connected),
       existingWorkPolicy:
           ExistingPeriodicWorkPolicy.keep, // don't reset the clock
     );
@@ -224,26 +224,39 @@ class LyneApp extends StatelessWidget {
     // Rebuild MaterialApp when the user changes Appearance / Language so the
     // themeMode + locale overrides take effect immediately.
     //
-    // The app is intentionally MONOCHROME (matching iOS 2.6.0+) — colour is
-    // reserved for MRT line pills and crowd/occupancy. So we do NOT apply
-    // Material You / wallpaper-derived dynamic colour, which would tint
-    // surfaces with the user's wallpaper and break the monochrome look.
-    // Always use LyneTheme's static palette.
-    return ListenableBuilder(
-      listenable: AppModel.shared,
-      builder: (context, _) {
-        return MaterialApp(
-          title: 'Leyne',
-          debugShowCheckedModeBanner: false,
-          themeMode: AppModel.shared.themeMode,
-          theme: LyneTheme.light.materialTheme(),
-          darkTheme: LyneTheme.dark.materialTheme(),
-          locale: AppModel.shared.locale,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          navigatorKey: _navigatorKey,
-          scaffoldMessengerKey: lyneMessengerKey,
-          home: const _AppRoot(),
+    // Material You (owner decision, 2026-07-02 — supersedes the earlier
+    // "stay monochrome" call for Android): DynamicColorBuilder asks the OS
+    // for a wallpaper-derived palette on Android 12+ and hands it to
+    // LyneTheme.materialTheme() as light/dark ColorSchemes; on older Android
+    // (or if the OS has no palette yet) both come back null and
+    // materialTheme() falls back to its own seeded palette. Either way,
+    // dynamic colour only tints CHROME + ACCENT (NavigationBar/Switch/Chip,
+    // LyneTheme.accent/live) — surfaces, MRT line colours, severity colours
+    // and crowd colours are unaffected. See theme.dart materialTheme() for
+    // the full scope. DynamicColorBuilder sits OUTSIDE the AppModel listener
+    // so the platform-channel round trip to fetch the palette (effectively
+    // once per process) doesn't re-run every time AppModel notifies.
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        return ListenableBuilder(
+          listenable: AppModel.shared,
+          builder: (context, _) {
+            return MaterialApp(
+              title: 'Departly',
+              debugShowCheckedModeBanner: false,
+              themeMode: AppModel.shared.themeMode,
+              theme: LyneTheme.light.materialTheme(dynamicScheme: lightDynamic),
+              darkTheme: LyneTheme.dark.materialTheme(
+                dynamicScheme: darkDynamic,
+              ),
+              locale: AppModel.shared.locale,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              navigatorKey: _navigatorKey,
+              scaffoldMessengerKey: lyneMessengerKey,
+              home: const _AppRoot(),
+            );
+          },
         );
       },
     );
@@ -254,48 +267,96 @@ class LyneApp extends StatelessWidget {
 /// persisted state. Listens to AppModel so the "Show again" entry in
 /// Settings can re-enter onboarding mid-session, and so dismissing What's
 /// New drops straight through to Home.
-class _AppRoot extends StatelessWidget {
+///
+/// Also owns the one-shot [LaunchScreen] overlay: a Stack layer shown on
+/// EVERY cold start — first-run and returning users alike — mirroring
+/// RootView.swift, where LaunchScreenView sits at the top zIndex
+/// unconditionally and only reveals whatever's underneath (OnboardingView
+/// or WSRoot) once its reveal finishes. Concretely this means the overlay
+/// masks OnboardingScreen too: the splash plays first, THEN onboarding's
+/// welcome step appears once it dismisses — never the other way around.
+///
+/// This matters for permissions: onboarding's location/notification
+/// primers (steps 2–3) only fire an OS prompt when the user taps through to
+/// them, and the splash's opaque tap-to-skip layer sits on top of
+/// OnboardingScreen the whole time it's up, so no tap — and therefore no
+/// permission prompt — can reach the screen underneath before the splash
+/// is gone. Before this was `_launching && onboardingDone`, which skipped
+/// the splash entirely for first-run installs and only played it AFTER
+/// onboarding (and its permission asks) had already completed — the
+/// opposite of the owner's "context before permission asks" intent.
+class _AppRoot extends StatefulWidget {
   const _AppRoot();
+
+  @override
+  State<_AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<_AppRoot> {
+  /// True until the launch screen finishes its reveal (or is tapped away).
+  /// Lives on this State — not AppModel — so it resets only on a real cold
+  /// start (a new `_AppRootState`), never on the ListenableBuilder rebuilds
+  /// below.
+  bool _launching = true;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: AppModel.shared,
       builder: (context, _) {
-        if (AppModel.shared.onboardingDone) {
+        final onboardingDone = AppModel.shared.onboardingDone;
+        final Widget body;
+        if (onboardingDone) {
           // A returning user who just updated into a build with release
           // notes sees them once before Home.
           final wn = AppModel.shared.whatsNewVersion;
           if (wn != null) {
-            return WhatsNewScreen(
+            body = WhatsNewScreen(
               version: wn,
               entry: kChangelog[wn]!,
               onDismiss: AppModel.shared.markWhatsNewSeen,
             );
+          } else {
+            body = const SoftRoot();
           }
-          return const SoftRoot();
+        } else {
+          body = OnboardingScreen(
+            // Awaited by the primer: the step advances only after the OS
+            // dialog settles, so the transition never runs (and freezes)
+            // underneath it — see OnboardingScreen.onRequestLocation.
+            onRequestLocation: () => LocationService.shared.requestAndStart(),
+            // AppModel handles the Android 13+ POST_NOTIFICATIONS prompt +
+            // alert scheduling; same await-then-advance shape as location.
+            onRequestNotifications: () =>
+                AppModel.shared.setNotificationsEnabled(true),
+            onFinish: () async {
+              // UMP consent (Android only — no ATT), then MobileAds.initialize,
+              // then dismiss onboarding. AdConsent.gatherThenStart is a no-op
+              // for ATT on Android; the dedicated ATT primer view was removed.
+              await AdConsent.gatherThenStart(
+                testDeviceIdentifiers: kTestDeviceIdentifiers,
+              );
+              AppModel.shared.finishOnboarding();
+            },
+          );
         }
-        return OnboardingScreen(
-          onRequestLocation: () {
-            // Fire-and-forget: the OS dialog races with the step
-            // transition, matching the legacy iOS behaviour.
-            LocationService.shared.requestAndStart();
-          },
-          onRequestNotifications: () {
-            // Fire-and-forget like onRequestLocation — the step has
-            // already advanced; the OS prompt races with the
-            // transition. AppModel handles permission + scheduling.
-            AppModel.shared.setNotificationsEnabled(true);
-          },
-          onFinish: () async {
-            // UMP consent (Android only — no ATT), then MobileAds.initialize,
-            // then dismiss onboarding. AdConsent.gatherThenStart is a no-op
-            // for ATT on Android; the dedicated ATT primer view was removed.
-            await AdConsent.gatherThenStart(
-              testDeviceIdentifiers: kTestDeviceIdentifiers,
-            );
-            AppModel.shared.finishOnboarding();
-          },
+
+        return Stack(
+          children: [
+            body,
+            // Unconditional on onboardingDone (see class doc): the splash is
+            // the FIRST thing any cold start sees, first-run included, and
+            // its opaque tap-to-skip layer blocks all touches to `body`
+            // underneath until it dismisses.
+            if (_launching)
+              Positioned.fill(
+                child: LaunchScreen(
+                  onDone: () {
+                    if (mounted) setState(() => _launching = false);
+                  },
+                ),
+              ),
+          ],
         );
       },
     );

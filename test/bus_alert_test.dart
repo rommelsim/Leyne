@@ -105,6 +105,77 @@ void main() {
     });
   });
 
+  group('BusAlert pause/resume (disabled/enabled)', () {
+    test('a freshly-created alert is enabled by default', () {
+      final a = BusAlert(
+        kind: AlertKind.arrival,
+        busNo: '88',
+        stopCode: '53061',
+        stopName: 'Stop',
+        leadMinutes: 5,
+      );
+      expect(a.disabled, isNull);
+      expect(a.enabled, isTrue);
+    });
+
+    test('old JSON with no disabled key decodes as enabled (back-compat)', () {
+      final b = BusAlert.fromJson(const {
+        'kind': 'arrival',
+        'busNo': '88',
+        'stopCode': '53061',
+        'stopName': 'Stop',
+        'leadMinutes': 5,
+      });
+      expect(b.disabled, isNull);
+      expect(b.enabled, isTrue);
+    });
+
+    test('withEnabled(false) pauses; withEnabled(true) resumes to null', () {
+      final a = BusAlert(
+        kind: AlertKind.arrival,
+        busNo: '88',
+        stopCode: '53061',
+        stopName: 'Stop',
+        leadMinutes: 5,
+      );
+      final paused = a.withEnabled(false);
+      expect(paused.disabled, isTrue);
+      expect(paused.enabled, isFalse);
+      // id/identity untouched by pausing.
+      expect(paused.id, a.id);
+      expect(paused, equals(a));
+
+      final resumed = paused.withEnabled(true);
+      expect(resumed.disabled, isNull); // back to the "never paused" shape
+      expect(resumed.enabled, isTrue);
+    });
+
+    test('toJson omits disabled when null, includes it when set', () {
+      final a = BusAlert(
+        kind: AlertKind.arrival,
+        busNo: '88',
+        stopCode: '53061',
+        stopName: 'Stop',
+        leadMinutes: 5,
+      );
+      expect(a.toJson().containsKey('disabled'), isFalse);
+      expect(a.withEnabled(false).toJson()['disabled'], isTrue);
+    });
+
+    test('disabled round-trips through JSON', () {
+      final a = BusAlert(
+        kind: AlertKind.arrival,
+        busNo: '88',
+        stopCode: '53061',
+        stopName: 'Stop',
+        leadMinutes: 5,
+      ).withEnabled(false);
+      final b = BusAlert.fromJson(a.toJson());
+      expect(b.disabled, isTrue);
+      expect(b.enabled, isFalse);
+    });
+  });
+
   group('AppModel alert CRUD', () {
     test('upsert adds, then replaces by id', () async {
       final m = AppModel.forTesting();
@@ -186,6 +257,107 @@ void main() {
       expect(a.stopName, 'Clementi Int');
       expect(a.boardStopCode, '17171');
       expect(a.leadMinutes, 30);
+    });
+  });
+
+  group('AppModel alert pause/resume', () {
+    test('setAlertEnabled(false) pauses in place — alert is not removed', () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      await m.upsertAlert(BusAlert(
+        kind: AlertKind.arrival,
+        busNo: '88',
+        stopCode: '53061',
+        stopName: 'Stop A',
+        leadMinutes: 5,
+      ));
+      final id = BusAlert.makeId(AlertKind.arrival, '88', '53061');
+
+      await m.setAlertEnabled(id, false);
+      expect(m.alerts.length, 1); // still present
+      expect(m.alertFor(kind: AlertKind.arrival, busNo: '88', stopCode: '53061')
+          ?.enabled, isFalse);
+
+      await m.setAlertEnabled(id, true);
+      expect(m.alertFor(kind: AlertKind.arrival, busNo: '88', stopCode: '53061')
+          ?.enabled, isTrue);
+    });
+
+    test('setAlertEnabled is a no-op for an unknown id', () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      await m.setAlertEnabled('does-not-exist', false);
+      expect(m.alerts, isEmpty);
+    });
+
+    test('paused state survives a load() round-trip', () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      await m.upsertAlert(BusAlert(
+        kind: AlertKind.destination,
+        busNo: '158',
+        stopCode: '17009',
+        stopName: 'Clementi Int',
+        boardStopCode: '17171',
+        leadMinutes: 10,
+      ));
+      await m.setAlertEnabled(
+          BusAlert.makeId(AlertKind.destination, '158', '17009'), false);
+
+      final m2 = AppModel.forTesting();
+      await m2.load();
+      expect(m2.alerts.single.enabled, isFalse);
+    });
+  });
+
+  group('AppModel reorderAlerts', () {
+    test('reorders alerts to the given id order and persists', () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      for (final no in ['15', '88', '21']) {
+        await m.upsertAlert(BusAlert(
+          kind: AlertKind.arrival,
+          busNo: no,
+          stopCode: '53061',
+          stopName: 'Stop',
+          leadMinutes: 5,
+        ));
+      }
+      expect(m.alerts.map((a) => a.busNo).toList(), ['15', '88', '21']);
+
+      final newOrder = [
+        BusAlert.makeId(AlertKind.arrival, '21', '53061'),
+        BusAlert.makeId(AlertKind.arrival, '15', '53061'),
+        BusAlert.makeId(AlertKind.arrival, '88', '53061'),
+      ];
+      m.reorderAlerts(newOrder);
+      expect(m.alerts.map((a) => a.busNo).toList(), ['21', '15', '88']);
+
+      final m2 = AppModel.forTesting();
+      await m2.load();
+      expect(m2.alerts.map((a) => a.busNo).toList(), ['21', '15', '88']);
+    });
+
+    test('ids absent from newIds keep their relative order, appended after',
+        () async {
+      final m = AppModel.forTesting();
+      await m.load();
+      for (final no in ['15', '88', '21']) {
+        await m.upsertAlert(BusAlert(
+          kind: AlertKind.arrival,
+          busNo: no,
+          stopCode: '53061',
+          stopName: 'Stop',
+          leadMinutes: 5,
+        ));
+      }
+      // Only reorder within a subset (e.g. one section of a sectioned UI) —
+      // '88' is left out and should land after the reordered pair.
+      m.reorderAlerts([
+        BusAlert.makeId(AlertKind.arrival, '21', '53061'),
+        BusAlert.makeId(AlertKind.arrival, '15', '53061'),
+      ]);
+      expect(m.alerts.map((a) => a.busNo).toList(), ['21', '15', '88']);
     });
   });
 

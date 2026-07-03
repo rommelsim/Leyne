@@ -115,8 +115,8 @@ struct StickyCompactBar: View {
 // MARK: - HomeView
 
 struct HomeView: View {
-    @EnvironmentObject var m: AppModel
-    @EnvironmentObject var store: DataStore
+    @Environment(AppModel.self) var m: AppModel
+    @Environment(DataStore.self) var store: DataStore
     @State private var collapsed = false
     @State private var refreshing = false
     @State private var pullY: CGFloat = 0

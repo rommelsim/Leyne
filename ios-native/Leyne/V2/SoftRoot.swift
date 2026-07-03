@@ -71,7 +71,7 @@ enum SoftMrtRoute: Hashable {
 }
 
 struct SoftRoot: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
 
     @State private var tab: SoftTab = .home
@@ -155,7 +155,7 @@ struct SoftRoot: View {
                     // Opens as a half card; drag up for the rest.
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
-                    .environmentObject(m)
+                    .environment(m)
                     .environmentObject(fb)
                 }
                 .onChange(of: showAlerts) { _, open in
@@ -187,9 +187,9 @@ struct SoftRoot: View {
                     )
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
-                    .environmentObject(m)
+                    .environment(m)
                     .environmentObject(fb)
-                    .environmentObject(DataStore.shared)
+                    .environment(DataStore.shared)
                 }
 
             // Map handoff toast overlays the whole stack.

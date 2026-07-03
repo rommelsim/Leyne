@@ -6,3 +6,4 @@
 - [Slide-to-Unpin Spec](project_slide_to_unpin_spec.md) — per-platform gesture spec, button-removal verdict, undo, discoverability, a11y, edit-mode interplay — 2026-05-30
 - [SoftBusView Audit](project_softbusview_audit.md) — P0–P2 findings: "Arr" clip, map/caption contradiction, notify+LiveActivity confusion, FOLLOWING label — 2026-05-30
 - [Habit Loop & Retention Strategy](project_habit_loop.md) — trigger gap analysis, commute card concept, notification plan, share ETA virality, ratings timing — 2026-06-09
+- [WhereSia Modern iOS Audit](project_wheresia_modern_ios_audit.md) — 2026-07-02: grade Mixed; zero Liquid Glass/materials/haptics, custom nav/tab/search opt out of iOS 26 chrome; contrast + tap-target + onTapGesture bugs w/ file:line

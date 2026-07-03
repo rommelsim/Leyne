@@ -30,7 +30,12 @@ enum AdConfig {
     ///   • `AdConsent.gatherThenStart()` runs UMP + ATT
     ///   • `MobileAds.shared.start()` initializes the SDK
     ///   • Onboarding's "Ads" step is shown (see OnboardingView)
-    static let adsEnabled = true
+    ///
+    /// OFF for now — owner request 2026-07-02 during the WhereSia redesign
+    /// test cycle (no ads while verifying the new UI). Flip back to `true`
+    /// to restore every placement + the consent flow + the ATT onboarding
+    /// step in one move.
+    static let adsEnabled = false
 
     // ╔══════════════════════════════════════════════════════════════╗
     // ║ TESTFLIGHT TOGGLE — Force test ad unit in a Release Archive. ║
@@ -557,7 +562,7 @@ private enum BottomAdBannerProbe {
 /// collapses fully-transparent accessory content, which made an unloaded
 /// banner look like it wasn't mounted at all.
 struct AdBanner: View {
-    @EnvironmentObject private var m: AppModel
+    @Environment(AppModel.self) private var m: AppModel
     /// False until a creative actually loads. The banner stays mounted the whole
     /// time (so it keeps requesting + retrying), but the gutter collapses to zero
     /// height until something loads — so a no-fill shows nothing instead of an
@@ -598,7 +603,7 @@ struct AdBanner: View {
 /// `AdBanner`). Self-suppresses when ads are disabled or in screenshot mode, so
 /// callers can mount it unconditionally.
 struct MediumRectAd: View {
-    @EnvironmentObject private var m: AppModel
+    @Environment(AppModel.self) private var m: AppModel
     var body: some View {
         if AdConfig.adsSuppressed {
             EmptyView()

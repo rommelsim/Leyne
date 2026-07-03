@@ -1,68 +1,106 @@
 // Shared foundation for every Home Screen widget in the extension. The
-// extension can't import the app module, so the palette, the App Group
-// readers, the self-contained LTA client, and the common UI atoms all live
-// here once instead of being copy-pasted per widget. Values mirror
-// Leyne/Theme.swift and the in-app V2 components (ServiceBadge, ArrivingPill)
-// so a widget always reads as a quote of the app.
+// extension can't import the app module, so the palette, the fonts, the App
+// Group readers, the self-contained LTA client, and the common UI atoms all
+// live here once instead of being copy-pasted per widget. Values mirror
+// Leyne/WhereSia/WSTheme.swift and the WhereSia components (RouteTile,
+// WSLiveBadge) so a widget always reads as a quote of the app.
 
 import WidgetKit
 import SwiftUI
 import UIKit
+import CoreText
 
-// ─── Palette — dynamic, mirrors Theme.light / Theme.dark ─────────────
-// Monochrome both ways: dark = near-black surfaces + white ink;
-// light = near-white surfaces + black ink. No mint/parchment — the widget
-// reads as a card lifted straight from the app (2.6.0+ monochrome identity).
-//
-// dim/faint alphas are nudged slightly vs the app (0.65 / 0.45) for
-// legibility at widget scale on unpredictable wallpapers; liveBg is a
-// solid ink-tinted fill rather than a transparent one.
+// ─── Palette — dynamic, mirrors WSTheme.dark / WSTheme.light ─────────
+// The WhereSia departure board: near-black board surfaces + off-white ink in
+// dark, white + near-black in light. Colour discipline carries over: the ONLY
+// colour is the blue live/arriving accent (accentSoft) — crowd, badges and
+// text stay greyscale/tonal.
 func wDyn(light: UIColor, dark: UIColor) -> Color {
     Color(uiColor: UIColor { trait in
         trait.userInterfaceStyle == .dark ? dark : light
     })
 }
 
-// surface — the widget card background (Theme.surface)
-// dark: #1A1A1A  light: #FFFFFF
-let wBg     = wDyn(light: UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1),
-                   dark:  UIColor(red: 0x1A/255, green: 0x1A/255, blue: 0x1A/255, alpha: 1))
+private func wHex(_ hex: UInt32, alpha: CGFloat = 1) -> UIColor {
+    UIColor(red: CGFloat((hex & 0xFF0000) >> 16) / 255,
+            green: CGFloat((hex & 0x00FF00) >> 8) / 255,
+            blue: CGFloat(hex & 0x0000FF) / 255, alpha: alpha)
+}
 
-// fg — primary text (Theme.fg)
-// dark: #FFFFFF  light: #111111
-let wFg     = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1),
-                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1))
+// bg — the widget card background (WSTheme.bg)
+let wBg     = wDyn(light: wHex(0xFFFFFF), dark: wHex(0x0F1216))
 
-// dim — secondary text (Theme.dim), nudged slightly for widget legibility
-// dark: white@0.65  light: black@0.65
-let wDim    = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.65),
-                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.65))
+// panel2 — nested tile fill (WSTheme.panel2; route-tile background)
+let wPanel2 = wDyn(light: wHex(0xEEF0F3), dark: wHex(0x1B2027))
 
-// faint — tertiary text (Theme.faint), nudged slightly for widget legibility
-// dark: white@0.45  light: black@0.45
-let wFaint  = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.45),
-                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.45))
+// text — primary ink (WSTheme.text)
+let wFg     = wDyn(light: wHex(0x14181D), dark: wHex(0xE8EAED))
 
-// line — hairline dividers (Theme.line)
-// dark: white@0.10  light: black@0.10
-let wLine   = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 0.10),
-                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 0.10))
+// dim — secondary text (WSTheme.dim)
+let wDim    = wDyn(light: wHex(0x6B7280), dark: wHex(0x8A93A2))
 
-// accent / live — INK. The "live / arriving" signal is weight + shape,
-// not hue. Mirrors Theme.accent (white dark / black light). No mint.
-// dark: #FFFFFF  light: #111111
-let wLive   = wDyn(light: UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1),
-                   dark:  UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1))
+// faint — tertiary (WSTheme.faint)
+let wFaint  = wDyn(light: wHex(0xA2A8B2), dark: wHex(0x5A626E))
 
-// liveBg — subtle ink-tinted row fill for "arriving" rows (Theme.liveBg)
-// dark: #242424  light: #EDEDED
-let wLiveBg = wDyn(light: UIColor(red: 0xED/255, green: 0xED/255, blue: 0xED/255, alpha: 1),
-                   dark:  UIColor(red: 0x24/255, green: 0x24/255, blue: 0x24/255, alpha: 1))
+// rule — hairline borders (WSTheme.rule)
+let wLine   = wDyn(light: wHex(0xE6E8EC), dark: wHex(0x242A33))
 
-// onAccent — text on an ink-filled badge (Theme.onAccent)
-// dark: #111111  light: #FFFFFF
-let wOnLive = wDyn(light: UIColor(red: 0xFF/255, green: 0xFF/255, blue: 0xFF/255, alpha: 1),
-                   dark:  UIColor(red: 0x11/255, green: 0x11/255, blue: 0x11/255, alpha: 1))
+// accentSoft — the live/arriving blue (WSTheme.accentSoft). The disciplined
+// exception to "no colour": marks LIVE data and a bus that's pulling in.
+let wAccentSoft = wDyn(light: wHex(0x1F6FE0), dark: wHex(0x3B9EFF))
+
+// accent — solid Downtown-line blue (WSTheme.accent); white text sits on it.
+let wAccent = wDyn(light: wHex(0x005EC4), dark: wHex(0x005EC4))
+
+// live — kept as a named token for arriving emphasis (now the blue accent,
+// no longer ink — the app moved off monochrome-arriving on 2026-07-02).
+let wLive   = wAccentSoft
+
+// liveBg — soft blue wash behind an "arriving" row (quotes the in-app
+// arriving-row highlight).
+let wLiveBg = wDyn(light: wHex(0x1F6FE0, alpha: 0.10), dark: wHex(0x3B9EFF, alpha: 0.13))
+
+// onAccent — text on a solid accent fill.
+let wOnLive = Color.white
+
+// ─── Fonts — Inter (sans) + IBM Plex Mono (numerals), bundled ────────
+// The TTFs ship in the extension (LeyneWidgets/Fonts + UIAppFonts in the
+// widget Info.plist). The CTFontManager call is a belt-and-braces fallback —
+// registration is idempotent and safe if UIAppFonts already loaded them.
+private let wFontsReady: Bool = {
+    for name in ["Inter-Regular", "Inter-Medium", "Inter-SemiBold", "Inter-Bold",
+                 "Inter-ExtraBold", "IBMPlexMono-Regular", "IBMPlexMono-Medium",
+                 "IBMPlexMono-SemiBold", "IBMPlexMono-Bold"] {
+        if let url = Bundle.main.url(forResource: name, withExtension: "ttf") {
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+    }
+    return true
+}()
+
+/// Inter — UI text. Same weight → PostScript-face mapping as in-app WSFont.
+func wSans(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+    _ = wFontsReady
+    let name: String
+    if weight == .medium { name = "Inter-Medium" }
+    else if weight == .semibold { name = "Inter-SemiBold" }
+    else if weight == .bold { name = "Inter-Bold" }
+    else if weight == .heavy || weight == .black { name = "Inter-ExtraBold" }
+    else { name = "Inter-Regular" }
+    return .custom(name, fixedSize: size)
+}
+
+/// IBM Plex Mono — every numeral, code and time (tabular figures, so a
+/// ticking ETA never shifts its neighbours).
+func wMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+    _ = wFontsReady
+    let name: String
+    if weight == .medium { name = "IBMPlexMono-Medium" }
+    else if weight == .semibold { name = "IBMPlexMono-SemiBold" }
+    else if weight == .bold || weight == .heavy || weight == .black { name = "IBMPlexMono-Bold" }
+    else { name = "IBMPlexMono-Regular" }
+    return .custom(name, fixedSize: size)
+}
 
 // ─── Shared App Group (published by the app) ─────────────────────────
 enum WGroup {
@@ -168,7 +206,14 @@ enum WLTA {
                        eta2: mins($0.NextBus2.EstimatedArrival),
                        eta3: mins($0.NextBus3.EstimatedArrival),
                        mon1: ($0.NextBus.Monitored ?? 1) == 1) }
-            .sorted { ($0.eta1 ?? 999) < ($1.eta1 ?? 999) }
+            // Number order, matching the in-app board: rows must not
+            // reshuffle between refreshes.
+            .sorted { a, b in
+                let na = Int(a.id.filter(\.isNumber)) ?? Int.max
+                let nb = Int(b.id.filter(\.isNumber)) ?? Int.max
+                if na != nb { return na < nb }
+                return a.id < b.id
+            }
     }
 }
 
@@ -194,28 +239,47 @@ func serviceURL(_ no: String, stop: String) -> URL? {
 
 // ─── Shared UI atoms ─────────────────────────────────────────────────
 
-/// Ink-filled service-number badge — the widget counterpart of in-app
-/// ServiceBadge. Monochrome: accent (ink) fill, onAccent text, SF Pro default
-/// design (NOT rounded — matches the app's sans() font). Width adapts to fit
-/// "21A" etc. Uses a continuous RoundedRectangle to match in-app style.
+/// Route tile — the widget counterpart of in-app RouteTile: mono numerals on
+/// a panel2 fill with a hairline, NEVER coloured (colour is reserved for the
+/// live accent + MRT lines). Width adapts to fit "21A" etc.
 struct WServiceBadge: View {
     let no: String
     var compact = false
     var body: some View {
         Text(no)
-            .font(.system(size: compact ? 13 : 15, weight: .semibold))
-            .foregroundStyle(wOnLive)
-            .padding(.horizontal, compact ? 5 : 7)
-            .frame(minWidth: compact ? 26 : 32, minHeight: compact ? 20 : 24)
-            .background(wLive, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .font(wMono(compact ? 12 : 14, .bold))
+            .foregroundStyle(wFg)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 6)
+            .frame(minWidth: compact ? 26 : 32, minHeight: compact ? 21 : 26)
+            .background(wPanel2, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(wLine, lineWidth: 1))
             .widgetAccentable()
     }
 }
 
-/// The "2 / 18 / 35 min" arrival triple from the mockup: a hero ETA plus up
-/// to two thin follow-up columns. "Arriving" emphasis is ink weight + an
-/// ink-filled liveBg row — never a hue. monospacedDigit keeps digit-width
-/// stable as the countdown ticks (proportional letters, fixed-width digits).
+/// The unmistakable liveness mark — quotes in-app WSLiveBadge (blue dot +
+/// the word LIVE). Static here: widget snapshots don't animate, so the word
+/// carries the meaning on its own.
+struct WLiveBadge: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(wAccentSoft).frame(width: 5, height: 5)
+            Text("LIVE").font(wMono(8.5, .bold)).kerning(1.0)
+                .foregroundStyle(wAccentSoft)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Live data")
+        .widgetAccentable()
+    }
+}
+
+/// The "2 / 18 / 35 min" arrival triple: a hero ETA plus up to two thin
+/// follow-up columns. "Arriving" emphasis is the blue live accent + bold,
+/// matching the in-app board. Plex Mono keeps digit widths stable as the
+/// countdown ticks.
 struct WEtaColumns: View {
     let row: WLTA.Row
     var heroSize: CGFloat = 22
@@ -225,13 +289,12 @@ struct WEtaColumns: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
-                    .font(.system(size: etaLabel(row.eta1) == "Arr" ? heroSize * 0.78 : heroSize,
-                                  weight: arriving ? .bold : .medium)
-                          .monospacedDigit())
-                    .foregroundStyle(arriving ? wFg : wFg)
+                    .font(wMono(etaLabel(row.eta1) == "Arr" ? heroSize * 0.78 : heroSize,
+                                arriving ? .bold : .medium))
+                    .foregroundStyle(arriving ? wAccentSoft : wFg)
                     .widgetAccentable(arriving)
                 if etaLabel(row.eta1) != "Arr" {
-                    Text("min").font(.system(size: 9)).foregroundStyle(wDim)
+                    Text("min").font(wMono(9)).foregroundStyle(wDim)
                 }
             }
             .contentTransition(.numericText(countsDown: true))
@@ -239,7 +302,7 @@ struct WEtaColumns: View {
             ForEach(Array([row.eta2, row.eta3].compactMap { $0 }.prefix(2).enumerated()),
                     id: \.offset) { _, m in
                 Text(m <= 0 ? "Arr" : "\(m)")
-                    .font(.system(size: 13).monospacedDigit())
+                    .font(wMono(12))
                     .foregroundStyle(wFaint)
             }
         }

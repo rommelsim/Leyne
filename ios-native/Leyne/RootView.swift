@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct RootView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
     @EnvironmentObject var prompts: PromptCenter
 
@@ -18,13 +18,14 @@ struct RootView: View {
         ZStack {
             t.bg.ignoresSafeArea()
 
-            // ── Main Soft UI ────────────────────────────────
-            SoftRoot()
+            // ── Main UI — WhereSia "departure board" design ──
+            // (design-remake branch: the WhereSia layer replaces the previous
+            // "Soft" UI as the app root; swap back to SoftRoot() to revert.)
+            WSRoot()
 
             // ── Onboarding ──────────────────────────────────
             if m.showOnboarding {
                 OnboardingView(
-                    t: t, dark: m.isDark,
                     onRequestLocation: { LocationManager.shared.requestPermission() },
                     onRequestNotifications: {
                         Task { await m.setNotificationsEnabled(true) }
@@ -45,7 +46,7 @@ struct RootView: View {
                let v = m.whatsNewVersion,
                let entry = kChangelog[v] {
                 WhatsNewView(entry: entry, onDismiss: { m.markWhatsNewSeen() })
-                    .environmentObject(m)
+                    .environment(m)
                     .transition(.opacity)
                     .zIndex(55)
             }
@@ -61,7 +62,7 @@ struct RootView: View {
         // Contextual App Store review prompt — paced by PromptCenter.
         .sheet(item: $prompts.active) { prompt in
             PromptCard(prompt: prompt)
-                .environmentObject(m)
+                .environment(m)
                 .environmentObject(fb)
         }
         // Mirror the iOS appearance — system, or overridden by the user's

@@ -12,7 +12,7 @@ import SwiftUI
 private enum SettingsDest: Hashable { case hiddenStops }
 
 struct SoftSettingsView: View {
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
     @Environment(\.dismiss) private var dismiss
 
@@ -121,7 +121,7 @@ struct SoftSettingsView: View {
                 },
                 footnote: nil
             )
-            .environmentObject(m)
+            .environment(m)
         }
     }
 

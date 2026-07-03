@@ -39,9 +39,9 @@ struct SoftBusView: View {
     /// When true the route timeline shows the ENTIRE route (opened from a bus
     /// search — no "your stop" context). Matches Android's `fullRoute` flag.
     var fullRoute: Bool = false
-    @EnvironmentObject var m: AppModel
+    @Environment(AppModel.self) var m: AppModel
     @EnvironmentObject var fb: Feedback
-    @EnvironmentObject var ds: DataStore
+    @Environment(DataStore.self) var ds: DataStore
 
     let onBack: () -> Void
 

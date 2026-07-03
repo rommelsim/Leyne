@@ -2,7 +2,7 @@
 
 import Foundation
 import CoreLocation
-import Combine
+import Observation
 import WidgetKit
 
 enum LoadState: Equatable {
@@ -148,31 +148,32 @@ func journeySegment(_ r: RouteInfo) -> [RouteStopLive] {
 }
 
 @MainActor
-final class DataStore: ObservableObject {
+@Observable
+final class DataStore {
     static let shared = DataStore()
 
-    @Published var referenceState: LoadState = .loading
-    @Published var nearby: [NearbyStop] = []
-    @Published var arrivals: [String: ArrivalState] = [:]
-    @Published var routesLoaded = false
+    var referenceState: LoadState = .loading
+    var nearby: [NearbyStop] = []
+    var arrivals: [String: ArrivalState] = [:]
+    var routesLoaded = false
     /// MRT/LRT line disruptions, refreshed periodically by AppModel's tick.
     /// Empty means no disruptions; the Home page renders one card per item.
-    @Published var trainAlerts: [TrainAlert] = []
+    var trainAlerts: [TrainAlert] = []
     private var lastTrainAlertFetch: Date?
 
     /// Network-wide list of lifts currently under maintenance (FacilitiesMaintenance v2).
-    @Published var liftMaintenance: [LiftMaintenance] = []
+    var liftMaintenance: [LiftMaintenance] = []
     private var lastLiftFetch: Date?
 
     /// Live per-line station crowdedness (PCDRealTime), fetched lazily when a
     /// line is expanded on the MRT board.
-    @Published var crowdByLine: [MRTLine: [StationCrowd]] = [:]
+    var crowdByLine: [MRTLine: [StationCrowd]] = [:]
     private var crowdInflight: Set<MRTLine> = []
     private var lastCrowdFetch: [MRTLine: Date] = [:]
 
     /// Forecasted station crowd for the next upcoming half-hour interval
     /// (PCDForecast). Cached aggressively — forecast data is daily.
-    @Published var forecastByLine: [MRTLine: [StationCrowd]] = [:]
+    var forecastByLine: [MRTLine: [StationCrowd]] = [:]
     private var forecastInflight: Set<MRTLine> = []
     private var lastForecastFetch: [MRTLine: Date] = [:]
 
@@ -182,7 +183,7 @@ final class DataStore: ObservableObject {
     /// Last successful arrival fetch per stop. Exposed via `lastRefresh(_:)`
     /// so UI surfaces (the Home freshness dot, per-stop staleness chips)
     /// can render a confidence signal without re-implementing the cache.
-    @Published private(set) var lastFetched: [String: Date] = [:]
+    private(set) var lastFetched: [String: Date] = [:]
     private var inflight: Set<String> = []
     private var lastLoc: CLLocation?
 
@@ -200,21 +201,51 @@ final class DataStore: ObservableObject {
     private let api = LTAService.shared
 
     // ─── Bootstrap reference data ─────────────────────────
+    /// Re-entry guard: Home retries a failed bootstrap on appear/foreground,
+    /// and those can overlap the launch-time call.
+    private var bootstrapping = false
+
     func bootstrap() async {
         if case .ready = referenceState { return }
+        if bootstrapping { return }
+        bootstrapping = true
+        defer { bootstrapping = false }
         referenceState = .loading
-        do {
-            async let stops = api.busStops()
-            async let svcs = api.busServices()
-            let (s, v) = try await (stops, svcs)
-            stopByCode = Dictionary(s.map { ($0.BusStopCode, $0) }) { a, _ in a }
-            services = v
-            referenceState = .ready
-            if let loc = lastLoc { updateNearby(loc) }
-        } catch {
-            referenceState = .error((error as? LTAError)?.errorDescription
-                                    ?? error.localizedDescription)
+        // LTA DataMall is occasionally flaky — a fresh request sometimes
+        // returns a transient 5xx for a few seconds. Try up to 3 times with
+        // 2s + 4s backoff before surfacing the error (mirrors the Flutter
+        // bootstrap). Without this, one flake at launch left Home stuck on
+        // "Finding stops near you…" for the whole session (owner-reported).
+        var lastMessage = "Couldn’t reach LTA"
+        for attempt in 0..<3 {
+            do {
+                if attempt > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+                }
+                async let stops = api.busStops()
+                async let svcs = api.busServices()
+                let (s, v) = try await (stops, svcs)
+                stopByCode = Dictionary(s.map { ($0.BusStopCode, $0) }) { a, _ in a }
+                services = v
+                referenceState = .ready
+                // Cold-start race: if the first location fix beat this bootstrap,
+                // the nearby list was derived from an empty stop directory and the
+                // arrival prefetch ran on nothing. Re-derive AND re-prefetch here —
+                // location updates won't retrigger it (the fix is often static).
+                if let loc = lastLoc {
+                    updateNearby(loc)
+                    prefetchNearbyArrivals()
+                }
+                return
+            } catch {
+                lastMessage = (error as? LTAError)?.errorDescription
+                    ?? error.localizedDescription
+                // Auth-shaped errors won't fix themselves — don't retry.
+                if case LTAError.badResponse(let code) = error,
+                   (400..<500).contains(code) { break }
+            }
         }
+        referenceState = .error(lastMessage)
     }
 
     func stopName(_ code: String) -> String {
@@ -271,8 +302,8 @@ final class DataStore: ObservableObject {
                     title: alert.title,
                     detail: alert.detail)
             }
-            // Don't bounce equal arrays through @Published — keeps the
-            // Home re-render quiet when nothing changed.
+            // Don't bounce equal arrays through the observed property — keeps
+            // the Home re-render quiet when nothing changed.
             if alerts != trainAlerts { trainAlerts = alerts }
         } catch {
             // Network failures here are routine; we keep the previous
@@ -438,6 +469,18 @@ final class DataStore: ObservableObject {
         return []
     }
 
+    /// Natural service-number order ("2" < "10" < "10e" < "100"). Arrivals are
+    /// sorted by bus NUMBER, not ETA: a stop's board must be scannable — the
+    /// same service always sits in the same place — and ETA order would
+    /// reshuffle rows (and tap targets) on every 20-second refresh. "What's
+    /// next" is answered by the arriving highlight, not row position.
+    static func serviceNumberOrder(_ a: String, _ b: String) -> Bool {
+        let na = Int(a.filter(\.isNumber)) ?? Int.max
+        let nb = Int(b.filter(\.isNumber)) ?? Int.max
+        if na != nb { return na < nb }
+        return a < b
+    }
+
     /// `silent` warms data without publishing a `.loading` state (used by
     /// prefetch so entering Nearby doesn't burst-republish the whole list).
     func ensureArrivals(stop code: String, force: Bool = false, silent: Bool = false) {
@@ -451,25 +494,51 @@ final class DataStore: ObservableObject {
 
         Task { [weak self] in
             guard let self else { return }
-            do {
-                let resp = try await self.api.busArrival(stopCode: code)
-                let mapped: [Service] = resp.Services.compactMap { svc in
-                    guard svc.NextBus.hasData else { return nil }
-                    let destCode = svc.NextBus.DestinationCode ?? ""
-                    return svc.toService(destName: self.stopName(destCode))
+            // LTA DataMall is occasionally flaky — transient 5xx, plus
+            // spike-arrest rejections when a request lands mid-burst (e.g.
+            // tapping a stop while the nearby prefetch wave is in flight).
+            // Retry twice with short backoff before surfacing anything, so
+            // a flake never reaches the user as an error card. Mirrors the
+            // Flutter bootstrap's 3-attempt policy.
+            var failed = false
+            for attempt in 0..<3 {
+                do {
+                    if attempt > 0 {
+                        try? await Task.sleep(nanoseconds: UInt64(attempt) * 800_000_000)
+                    }
+                    let resp = try await self.api.busArrival(stopCode: code)
+                    let mapped: [Service] = resp.Services.compactMap { svc in
+                        guard svc.NextBus.hasData else { return nil }
+                        let destCode = svc.NextBus.DestinationCode ?? ""
+                        return svc.toService(destName: self.stopName(destCode))
+                    }
+                    .sorted { Self.serviceNumberOrder($0.no, $1.no) }
+                    self.arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
+                    self.lastFetched[code] = Date()
+                    failed = false
+                    break
+                } catch {
+                    failed = true
+                    // Auth/client errors won't fix themselves — don't retry.
+                    if case LTAError.badResponse(let status) = error,
+                       (400..<500).contains(status) { break }
                 }
-                .sorted { $0.etaSec < $1.etaSec }
-                self.arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
-                self.lastFetched[code] = Date()
-            } catch {
-                if self.arrivals[code] == nil || self.arrivals[code] == .loading {
-                    self.arrivals[code] = .error(
-                        (error as? LTAError)?.errorDescription ?? "Couldn’t reach LTA")
-                }
+            }
+            if failed, self.arrivals[code] == nil || self.arrivals[code] == .loading {
+                // Quiet, human copy — never a raw HTTP code (the per-tick
+                // ensureArrivals loop keeps retrying, so "retrying" is true).
+                self.arrivals[code] = .error(Self.arrivalsFlakeMessage)
             }
             self.inflight.remove(code)
         }
     }
+
+    /// What a stop view shows when live arrivals can't be fetched right now.
+    /// Deliberately not the underlying error ("LTA returned HTTP 502") —
+    /// uncertainty stays whisper-quiet, and the view's tick loop is already
+    /// retrying in the background.
+    static let arrivalsFlakeMessage =
+        "Live arrivals are taking a moment. Retrying…"
 
     /// Async force-refresh for pull-to-refresh. Unlike `ensureArrivals`,
     /// this awaits the LTA round-trip so SwiftUI's `.refreshable` keeps the
@@ -485,13 +554,12 @@ final class DataStore: ObservableObject {
                 let destCode = svc.NextBus.DestinationCode ?? ""
                 return svc.toService(destName: self.stopName(destCode))
             }
-            .sorted { $0.etaSec < $1.etaSec }
+            .sorted { Self.serviceNumberOrder($0.no, $1.no) }
             arrivals[code] = mapped.isEmpty ? .empty : .loaded(mapped)
             lastFetched[code] = Date()
         } catch {
             if arrivals[code] == nil || arrivals[code] == .loading {
-                arrivals[code] = .error(
-                    (error as? LTAError)?.errorDescription ?? "Couldn’t reach LTA")
+                arrivals[code] = .error(Self.arrivalsFlakeMessage)
             }
         }
     }
@@ -507,7 +575,23 @@ final class DataStore: ObservableObject {
     /// is its own concurrent `Task`, so a user-tapped stop is never queued
     /// behind the wave. `nearby` is already capped at 12.
     func prefetchNearbyArrivals() {
-        for s in nearby { ensureArrivals(stop: s.stopCode, silent: true) }
+        // Waves of 4, not all 12 at once: LTA's spike-arrest policy rejects
+        // any 5th+ request in a burst window with a 5xx (documented on the
+        // Flutter side, lta_service.dart `_pageWindow`). Firing the whole
+        // nearby list concurrently made a user-tapped stop's own request the
+        // burst violation — the reported "LTA returned HTTP 502" on opening
+        // a stop. 400ms between waves keeps the warm-up brisk while leaving
+        // burst headroom for taps that land mid-prefetch.
+        let codes = nearby.map(\.stopCode)
+        Task { [weak self] in
+            for (i, code) in codes.enumerated() {
+                if i > 0, i.isMultiple(of: 4) {
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                }
+                guard let self else { return }
+                self.ensureArrivals(stop: code, silent: true)
+            }
+        }
     }
 
     // ─── Search (Buses + Stops, both live) ────────────────
@@ -586,12 +670,7 @@ final class DataStore: ObservableObject {
         for r in routes where r.BusStopCode == code {
             set.insert(r.ServiceNo)
         }
-        return set.sorted { a, b in
-            let na = Int(a.filter(\.isNumber)) ?? Int.max
-            let nb = Int(b.filter(\.isNumber)) ?? Int.max
-            if na != nb { return na < nb }
-            return a < b
-        }
+        return set.sorted { Self.serviceNumberOrder($0, $1) }
     }
 
     func route(service no: String, stopCode: String) async -> RouteInfo? {

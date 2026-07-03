@@ -333,6 +333,16 @@ class DataStore extends ChangeNotifier {
   final Set<MRTLine> _forecastInflight = {};
   final Map<MRTLine, DateTime> _lastForecastFetch = {};
 
+  /// Raw (uncollapsed) forecast rows per line — the full ordered half-hour
+  /// interval list per station, alongside the single-value-per-station
+  /// [_forecastByLine] used by the crowd toggle elsewhere. Populated by the
+  /// same [refreshForecast] fetch (no extra network call) so callers that
+  /// need the full-day series — e.g. a per-station forecast chart — can read
+  /// it directly. Additive: does not change [forecastByLine]'s contract.
+  final Map<MRTLine, List<LtaStationForecast>> _forecastRawByLine = {};
+  Map<MRTLine, List<LtaStationForecast>> get forecastRawByLine =>
+      _forecastRawByLine;
+
   /// Tick from AppModel calls this once per second; the inner gate
   /// keeps us at one network hit per 60 s.
   void refreshTrainAlertsIfStale({bool force = false}) {
@@ -560,6 +570,7 @@ class DataStore extends ChangeNotifier {
     () async {
       try {
         final rows = await _api.stationForecast(_pcdLineCode(line));
+        _forecastRawByLine[line] = rows;
         final now = DateTime.now();
         final mapped = rows
             .map((forecast) {
@@ -590,6 +601,7 @@ class DataStore extends ChangeNotifier {
       } catch (_) {
         // On error: leave existing data intact; if nothing yet, mark empty.
         _forecastByLine.putIfAbsent(line, () => const []);
+        _forecastRawByLine.putIfAbsent(line, () => const []);
         notifyListeners();
       } finally {
         _forecastInflight.remove(line);
@@ -814,6 +826,12 @@ class DataStore extends ChangeNotifier {
         // Reference data (stop names + coords) just resolved — re-publish the
         // home-screen widgets so names fill in.
         WidgetBridge.instance.pushAll();
+        // Warm the BusRoutes dataset now (fire-and-forget), AFTER the two
+        // bootstrap fetches above have finished so it doesn't contend for
+        // LTA's 4-request burst budget. Without this, the ~52-page crawl
+        // only started when the user first opened a Bus view — the reported
+        // "route takes a while to load".
+        ensureRoutes();
         return;
       } on LtaException catch (e) {
         lastErr = e;
@@ -981,6 +999,30 @@ class DataStore extends ChangeNotifier {
     await _fetchArrivals(code);
   }
 
+  /// What a stop view shows when live arrivals can't be fetched right now.
+  /// Deliberately not the underlying error ("LTA returned HTTP 502") —
+  /// uncertainty stays whisper-quiet. Mirrors iOS
+  /// `DataStore.arrivalsFlakeMessage`.
+  static const String arrivalsFlakeMessage =
+      'Live arrivals are taking a moment. Retrying…';
+
+  /// busArrival with quiet retries: LTA DataMall occasionally returns a
+  /// transient 5xx (flakes, plus spike-arrest rejections when a tap lands
+  /// mid-prefetch-burst). Two retries with short backoff absorb those before
+  /// anything reaches the UI; 4xx (auth-shaped) rethrows immediately.
+  Future<LtaArrivalResponse> _busArrivalWithRetry(String code) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await _api.busArrival(code);
+      } on LtaException catch (e) {
+        final s = e.statusCode;
+        final retryable = s == null || s >= 500;
+        if (!retryable || attempt >= 2) rethrow;
+      }
+      await Future.delayed(Duration(milliseconds: 800 * (attempt + 1)));
+    }
+  }
+
   /// Shared network body for [ensureArrivals] / [refreshArrivals]. The caller
   /// owns the `_inflight` add; this clears it in `finally`. On error an
   /// existing `.loaded` result is preserved (we don’t blank good data).
@@ -989,7 +1031,7 @@ class DataStore extends ChangeNotifier {
     // can compare "what the UI last saw" against "what just came in".
     final prevState = _arrivals[code];
     try {
-      final resp = await _api.busArrival(code);
+      final resp = await _busArrivalWithRetry(code);
       final mapped =
           resp.services
               .where((s) => s.nextBus.hasData)
@@ -1004,15 +1046,13 @@ class DataStore extends ChangeNotifier {
           ? ArrivalState.empty()
           : ArrivalState.loaded(mapped);
       _lastFetched[code] = DateTime.now();
-    } on LtaException catch (e) {
-      final prev = _arrivals[code];
-      if (prev == null || prev.kind == ArrivalStateKind.loading) {
-        _arrivals[code] = ArrivalState.error(e.message);
-      }
     } catch (_) {
+      // Quiet, human copy — never the raw failure ("LTA returned HTTP 502").
+      // Callers keep re-polling on their refresh cadence, so "retrying" is
+      // true. Mirrors iOS DataStore.arrivalsFlakeMessage.
       final prev = _arrivals[code];
       if (prev == null || prev.kind == ArrivalStateKind.loading) {
-        _arrivals[code] = ArrivalState.error('Couldn’t reach LTA');
+        _arrivals[code] = ArrivalState.error(arrivalsFlakeMessage);
       }
     } finally {
       _inflight.remove(code);
@@ -1076,9 +1116,21 @@ class DataStore extends ChangeNotifier {
   /// in-flight/fresh requests so repeat calls are cheap. Fired whenever
   /// `_nearby` is (re)populated — see `updateNearby` and `bootstrap`.
   void prefetchNearbyArrivals() {
-    for (final s in _nearby) {
-      ensureArrivals(s.stopCode, silent: true);
-    }
+    // Waves of 4, not the whole list at once: LTA's spike-arrest policy
+    // rejects any 5th+ request in a burst window with a 5xx (see
+    // lta_service.dart `_pageWindow`). Bursting all ~12 nearby stops made a
+    // user-tapped stop's own request the violation. 400ms between waves
+    // keeps warm-up brisk while leaving burst headroom for taps that land
+    // mid-prefetch. Mirrors iOS `DataStore.prefetchNearbyArrivals`.
+    final codes = _nearby.map((s) => s.stopCode).toList(growable: false);
+    unawaited(() async {
+      for (var i = 0; i < codes.length; i++) {
+        if (i > 0 && i % 4 == 0) {
+          await Future.delayed(const Duration(milliseconds: 400));
+        }
+        ensureArrivals(codes[i], silent: true);
+      }
+    }());
   }
 
   // ─── Search (Buses + Stops, both live) ─────────────────────
@@ -1139,8 +1191,19 @@ class DataStore extends ChangeNotifier {
 
   // ─── Routes (lazy, big dataset, disk-cached) ───────────────
 
-  Future<List<LtaBusRoute>?> _loadRoutes() async {
-    if (_routesAll != null) return _routesAll;
+  // In-flight memo so concurrent callers (e.g. Search warming routes while
+  // the user opens a Bus view) share ONE paginated fetch — before this, each
+  // caller started its own ~52-page BusRoutes crawl, and the duplicates
+  // contended for LTA's 4-request burst budget, slowing both down.
+  Future<List<LtaBusRoute>?>? _routesInFlight;
+
+  Future<List<LtaBusRoute>?> _loadRoutes() {
+    final loaded = _routesAll;
+    if (loaded != null) return Future.value(loaded);
+    return _routesInFlight ??= _doLoadRoutes();
+  }
+
+  Future<List<LtaBusRoute>?> _doLoadRoutes() async {
     try {
       final r = await _api.busRoutes();
       _routesAll = r;
@@ -1150,6 +1213,10 @@ class DataStore extends ChangeNotifier {
       return r;
     } catch (_) {
       return null;
+    } finally {
+      // Clear even on success (callers hit the _routesAll fast path) so a
+      // failed fetch can be retried by the next caller.
+      _routesInFlight = null;
     }
   }
 
@@ -1199,6 +1266,39 @@ class DataStore extends ChangeNotifier {
       };
       if (first == null || last == null) return null;
       return (first: first, last: last);
+    }
+    return null;
+  }
+
+  /// First/last scheduled bus for `serviceNo` at `stopCode`, for every day
+  /// type at once (weekday / Saturday / Sunday-or-P.H.) — unlike [busTimings]
+  /// (which picks one day type based on `now`), this returns all three so a
+  /// "first & last bus" table can show every row together. Individual fields
+  /// are null when LTA didn't publish that day-type's times (service doesn't
+  /// run that day). The whole result is null until the BusRoutes dataset has
+  /// loaded (`ensureRoutes()`), or when there's no route row for this
+  /// (service, stop) pair.
+  ({
+    String? firstWd,
+    String? lastWd,
+    String? firstSat,
+    String? lastSat,
+    String? firstSun,
+    String? lastSun,
+  })?
+  operatingWindow({required String serviceNo, required String stopCode}) {
+    final routes = _routesAll;
+    if (routes == null) return null;
+    for (final r in routes) {
+      if (r.serviceNo != serviceNo || r.busStopCode != stopCode) continue;
+      return (
+        firstWd: r.wdFirstBus,
+        lastWd: r.wdLastBus,
+        firstSat: r.satFirstBus,
+        lastSat: r.satLastBus,
+        firstSun: r.sunFirstBus,
+        lastSun: r.sunLastBus,
+      );
     }
     return null;
   }

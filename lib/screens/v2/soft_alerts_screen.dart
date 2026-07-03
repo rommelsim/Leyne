@@ -7,23 +7,34 @@
 //   1. Service status — live train disruptions from DataStore.trainAlerts
 //      and lift maintenance from DataStore.liftMaintenance, each with a
 //      calm "all clear" empty state.
-//   2. Your alerts   — a tappable row to ManageAlertsScreen (personal bus
-//      arrival alerts), showing how many are set.
-//   3. A gear button in the page header opens SoftSettingsScreen as a
-//      modal bottom sheet (Settings is no longer a tab).
+//   2. Your alerts   — the user's personal bus arrival alerts INLINE (owner
+//      decision, 2026-07-02 — mirrors WSAlertsView.swift:153-184, which
+//      manages alerts directly on the Alerts tab rather than pushing to a
+//      separate screen): pause/resume toggle, swipe-to-delete, and an Edit
+//      affordance for drag-to-reorder. ManageAlertsScreen still exists —
+//      it's reachable from the Bus view (soft_bus_screen.dart) — this
+//      screen just no longer routes to it.
+//
+// Owner decision, 2026-07-03 (punch list Section E, item 9): the header gear
+// that opened SoftSettingsScreen as a modal sheet is REMOVED — WSAlertsView
+// has no settings entry at all, and Android shouldn't invent one iOS lacks.
+// SoftSettingsScreen itself and its routes are untouched; this was the ONLY
+// call site that presented it (grep verified), so Settings — Appearance,
+// Hidden stops, Buy-me-a-coffee, Haptics — is currently unreachable in the
+// Android app until a new entry point is chosen. Flagged to the owner.
 //
 // Pull-to-refresh triggers stale-check refreshes on both feeds. The screen
 // also calls refreshIfStale on first render (onAppear parity).
 
 import 'package:flutter/material.dart';
 
+import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
 import '../../state/app_model.dart';
+import '../../state/bus_alert.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
-import 'manage_alerts_screen.dart';
-import 'soft_settings_screen.dart';
 
 class SoftAlertsScreen extends StatefulWidget {
   const SoftAlertsScreen({
@@ -49,6 +60,10 @@ class SoftAlertsScreen extends StatefulWidget {
 }
 
 class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
+  /// Edit affordance for "Your alerts" — reveals drag handles for
+  /// reordering. Swipe-to-delete works in both modes.
+  bool _editingAlerts = false;
+
   @override
   void initState() {
     super.initState();
@@ -64,35 +79,6 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     DataStore.shared.refreshTrainAlertsIfStale(force: true);
     DataStore.shared.refreshLiftMaintenanceIfStale(force: true);
     widget.onAlertsDataChanged();
-  }
-
-  void _openSettings() {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: context.t.bg,
-      // A drag handle + safe area give an always-available dismiss affordance.
-      // Without these (and with the full-height settings content capturing
-      // vertical drags) there was no obvious way to close the sheet, which read
-      // as the app being locked. SoftSettingsScreen also renders an explicit
-      // close button in asSheet mode. Cap the height so a sliver of tappable
-      // scrim remains above the sheet too.
-      showDragHandle: true,
-      useSafeArea: true,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.92,
-      ),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(LyneRadius.lg)),
-      ),
-      builder: (_) => SoftSettingsScreen(onTab: widget.onTab, asSheet: true),
-    );
-  }
-
-  void _openManageAlerts() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ManageAlertsScreen()),
-    );
   }
 
   @override
@@ -111,11 +97,20 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
           builder: (context, _) {
             final trainAlerts = DataStore.shared.trainAlerts;
             final liftItems = DataStore.shared.liftMaintenance;
-            final busAlertsCount = AppModel.shared.alerts.length;
+            final busAlerts = AppModel.shared.alerts;
+
+            // Auto-exit edit mode when the list becomes empty (mirrors
+            // SoftFavouritesScreen).
+            if (_editingAlerts && busAlerts.isEmpty) {
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => setState(() => _editingAlerts = false),
+              );
+            }
 
             return RefreshIndicator(
               color: t.accent,
-              onRefresh: _onRefresh,
+              // Disable pull-to-refresh while editing — drag gestures conflict.
+              onRefresh: _editingAlerts ? () async {} : _onRefresh,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -126,7 +121,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                   const SizedBox(height: 20),
                   _liftSection(context, liftItems),
                   const SizedBox(height: 20),
-                  _yourAlertsSection(context, busAlertsCount),
+                  _yourAlertsSection(context, busAlerts),
                 ],
               ),
             );
@@ -140,45 +135,19 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
 
   Widget _header(BuildContext context) {
     final t = context.t;
-    return Row(
+    // No trailing gear — WSAlertsView has no settings entry on this screen
+    // either (owner decision 2026-07-03, punch list item 9).
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Alerts',
-                style: t.sans(28, weight: FontWeight.w700, color: t.fg),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Service status & your notifications',
-                style: t.sans(13, color: t.dim),
-              ),
-            ],
-          ),
+        Text(
+          'Alerts',
+          style: t.sans(28, weight: FontWeight.w700, color: t.fg),
         ),
-        const SizedBox(width: 12),
-        // Gear → Settings sheet (mirrors iOS SoftAlertsView gear button).
-        Semantics(
-          button: true,
-          label: 'Settings',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(99),
-            onTap: _openSettings,
-            child: Container(
-              width: 42,
-              height: 42,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: t.surface,
-                shape: BoxShape.circle,
-                border: Border.all(color: t.line, width: 1),
-              ),
-              child: Icon(Icons.settings_rounded, size: 20, color: t.fg),
-            ),
-          ),
+        const SizedBox(height: 2),
+        Text(
+          'Service status & your notifications',
+          style: t.sans(13, color: t.dim),
         ),
       ],
     );
@@ -186,8 +155,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
 
   // ── Service status (train disruptions) ─────────────────────────────────────
 
-  Widget _advisoriesSection(
-      BuildContext context, List<TrainAlert> alerts) {
+  Widget _advisoriesSection(BuildContext context, List<TrainAlert> alerts) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -234,7 +202,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                             Icon(
                               Icons.warning_amber_rounded,
                               size: 14,
-                              color: Colors.orange,
+                              color: LyneSeverity.warning.color,
                             ),
                             const SizedBox(width: 6),
                             Expanded(
@@ -250,10 +218,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                           ],
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          alert.detail,
-                          style: t.sans(13, color: t.dim),
-                        ),
+                        Text(alert.detail, style: t.sans(13, color: t.dim)),
                       ],
                     ),
                   ),
@@ -266,13 +231,17 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                   spacing: 6,
                   children: [
                     if (alert.freeBus)
-                      _freeChip(context,
-                          icon: Icons.directions_bus_rounded,
-                          label: 'Free bus rides'),
+                      _freeChip(
+                        context,
+                        icon: Icons.directions_bus_rounded,
+                        label: 'Free bus rides',
+                      ),
                     if (alert.freeShuttle)
-                      _freeChip(context,
-                          icon: Icons.train_rounded,
-                          label: 'Free MRT shuttle'),
+                      _freeChip(
+                        context,
+                        icon: Icons.train_rounded,
+                        label: 'Free MRT shuttle',
+                      ),
                   ],
                 ),
               ],
@@ -285,8 +254,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
 
   // ── Lift maintenance ────────────────────────────────────────────────────────
 
-  Widget _liftSection(
-      BuildContext context, List<LiftMaintenance> items) {
+  Widget _liftSection(BuildContext context, List<LiftMaintenance> items) {
     final t = context.t;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,11 +277,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                 for (var i = 0; i < items.length; i++) ...[
                   _liftRow(context, items[i]),
                   if (i < items.length - 1)
-                    Divider(
-                      color: t.line,
-                      height: 1,
-                      indent: 40,
-                    ),
+                    Divider(color: t.line, height: 1, indent: 40),
                 ],
               ],
             ),
@@ -334,7 +298,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
             child: Icon(
               Icons.construction_rounded,
               size: 14,
-              color: Colors.orange,
+              color: LyneSeverity.warning.color,
             ),
           ),
           const SizedBox(width: 10),
@@ -347,10 +311,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                   style: t.sans(13, weight: FontWeight.w600, color: t.fg),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  item.detail,
-                  style: t.sans(12, color: t.dim),
-                ),
+                Text(item.detail, style: t.sans(12, color: t.dim)),
               ],
             ),
           ),
@@ -359,102 +320,228 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     );
   }
 
-  // ── Your alerts (personal bus notifications) ────────────────────────────────
+  // ── Your alerts (personal bus notifications, managed inline) ────────────────
+  // Owner decision 2026-07-02: manage bus alerts directly on this tab rather
+  // than pushing to ManageAlertsScreen (mirrors WSAlertsView.swift:153-184).
 
-  Widget _yourAlertsSection(BuildContext context, int busAlertsCount) {
+  Widget _yourAlertsSection(BuildContext context, List<BusAlert> alerts) {
     final t = context.t;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _eyebrow(context, 'Your alerts'),
-        const SizedBox(height: 10),
-        Material(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(LyneRadius.lg),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: _openManageAlerts,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              child: Row(
-                children: [
-                  // Icon chip — 32×32 rounded tile, matches SoftSettingsScreen.
-                  Container(
-                    width: 32,
-                    height: 32,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: t.surfaceHi,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.notifications_rounded,
-                      size: 16,
-                      color: t.fg,
-                    ),
+        Row(
+          children: [
+            Expanded(child: _eyebrow(context, 'Your alerts')),
+            if (alerts.isNotEmpty)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _editingAlerts = !_editingAlerts),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
+                  child: Text(
+                    _editingAlerts ? 'DONE' : 'EDIT',
+                    style: t
+                        .mono(10, weight: FontWeight.w600, color: t.accent)
+                        .copyWith(letterSpacing: 0.8),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Bus arrival alerts',
-                          style: t.sans(15,
-                              weight: FontWeight.w500, color: t.fg),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          busAlertsCount == 0
-                              ? 'None set yet'
-                              : '$busAlertsCount set',
-                          style: t.sans(12, color: t.dim),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.chevron_right_rounded, color: t.faint, size: 18),
-                ],
+                ),
               ),
-            ),
-          ),
+          ],
         ),
+        const SizedBox(height: 10),
+        if (alerts.isEmpty)
+          _calmCard(
+            context,
+            title: 'No bus alerts',
+            body: 'Set one from any bus.',
+          )
+        else if (_editingAlerts)
+          _yourAlertsReorderable(context, t, alerts)
+        else
+          Column(
+            children: [
+              for (var i = 0; i < alerts.length; i++) ...[
+                if (i > 0) const SizedBox(height: 10),
+                _yourAlertRow(context, t, alerts[i]),
+              ],
+            ],
+          ),
       ],
     );
   }
 
-  // ── Shared primitives ───────────────────────────────────────────────────────
+  /// Edit-mode drag-to-reorder list. Restricts drag activation to an
+  /// explicit handle (rather than long-press-anywhere) so it doesn't steal
+  /// the row's own toggle gesture. Mirrors ManageAlertsScreen/
+  /// SoftFavouritesScreen's reorderable sections and AppModel.reorderAlerts'
+  /// contract (onReorderItem's newIndex is pre-adjusted — no extra offset).
+  Widget _yourAlertsReorderable(
+    BuildContext context,
+    LyneTheme t,
+    List<BusAlert> alerts,
+  ) {
+    return ReorderableListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      buildDefaultDragHandles: false,
+      proxyDecorator: (child, index, animation) =>
+          Material(elevation: 0, color: Colors.transparent, child: child),
+      onReorderItem: (oldIndex, newIndex) {
+        final reordered = [...alerts];
+        final item = reordered.removeAt(oldIndex);
+        reordered.insert(newIndex, item);
+        AppModel.shared.reorderAlerts(reordered.map((a) => a.id).toList());
+      },
+      children: [
+        for (final a in alerts)
+          Padding(
+            key: ValueKey('reorder-your-alert-${a.id}'),
+            padding: EdgeInsets.only(bottom: a == alerts.last ? 0 : 10),
+            child: Row(
+              children: [
+                Expanded(child: _yourAlertCard(context, t, a)),
+                ReorderableDragStartListener(
+                  index: alerts.indexOf(a),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      size: 22,
+                      color: t.dim,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 
-  /// Calm "all clear" card. Green check icon + title + body — shown when
-  /// a section has no items. Mirrors iOS SoftAlertsView.calmCard.
-  Widget _calmCard(BuildContext context,
-      {required String title, required String body}) {
-    final t = context.t;
+  /// Swipe-to-delete wrapper used outside edit mode.
+  Widget _yourAlertRow(BuildContext context, LyneTheme t, BusAlert a) {
+    return Dismissible(
+      key: ValueKey('your-alert-${a.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        decoration: BoxDecoration(
+          color: t.critBg,
+          borderRadius: BorderRadius.circular(LyneRadius.lg),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: Icon(Icons.delete_outline_rounded, color: t.crit),
+      ),
+      onDismissed: (_) => AppModel.shared.removeAlert(a.id),
+      child: _yourAlertCard(context, t, a),
+    );
+  }
+
+  /// Shared row visuals for a bus alert — route badge + stop name + subtitle
+  /// ("{stop} · {lead}", or "Paused — flip on to resume" at 55% opacity) and
+  /// a pause/resume toggle. Mirrors manage_alerts_screen.dart:227-350's
+  /// _alertCard.
+  Widget _yourAlertCard(BuildContext context, LyneTheme t, BusAlert a) {
+    final isDest = a.kind == AlertKind.destination;
+    final title = isDest
+        ? (a.dest.isNotEmpty ? a.dest : a.stopName)
+        : a.stopName;
+    final leadText = isDest
+        ? AlertTiming.leadRowSubtitle(a.leadMinutes)
+        : AlertTiming.arrivalRowSubtitle;
+    final subtitle = a.enabled
+        ? '${a.stopName} · $leadText'
+        : 'Paused — flip on to resume';
+
     return Material(
       color: t.surface,
       borderRadius: BorderRadius.circular(LyneRadius.lg),
+      clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
-            Icon(
-              Icons.check_circle_rounded,
-              size: 22,
-              color: Colors.green.withValues(alpha: 0.7),
-            ),
-            const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(body, style: t.sans(13, color: t.dim)),
-                ],
+              child: Opacity(
+                opacity: a.enabled ? 1 : 0.55,
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: t.soonBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        isDest
+                            ? Icons.flag_rounded
+                            : Icons.notifications_active_rounded,
+                        size: 20,
+                        color: t.soon,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: t.liveBg,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  a.busNo,
+                                  style: t.mono(
+                                    11,
+                                    weight: FontWeight.w700,
+                                    color: t.fg,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  title,
+                                  style: t.sans(
+                                    15,
+                                    weight: FontWeight.w600,
+                                    color: t.fg,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            style: t.sans(12, color: t.dim),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Semantics(
+              label: a.enabled ? 'Pause alert' : 'Resume alert',
+              child: SoftToggle(
+                value: a.enabled,
+                onChanged: (v) => AppModel.shared.setAlertEnabled(a.id, v),
               ),
             ),
           ],
@@ -463,10 +550,50 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     );
   }
 
+  // ── Shared primitives ───────────────────────────────────────────────────────
+
+  /// Calm "all clear" card — title + body, no icon. Shown when a section
+  /// has no items. Mirrors iOS WSAlertsView.calmRow, which is plain dim
+  /// text with no glyph at all.
+  ///
+  /// Owner decision 2026-07-03 (punch list item 8): this used to lead with
+  /// a green check-circle icon (`LyneSeverity.normal.color`). Green is
+  /// reserved for EWL line identity only and must never signal status, so
+  /// the icon is dropped entirely rather than just recoloured — matching
+  /// what iOS does in the same spot.
+  Widget _calmCard(
+    BuildContext context, {
+    required String title,
+    required String body,
+  }) {
+    final t = context.t;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.lg),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+            ),
+            const SizedBox(height: 2),
+            Text(body, style: t.sans(13, color: t.dim)),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Small pill chip for free-bus / free-shuttle indicators on alert cards.
   /// Mirrors iOS SoftAlertsView.freeChip.
-  Widget _freeChip(BuildContext context,
-      {required IconData icon, required String label}) {
+  Widget _freeChip(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+  }) {
     final t = context.t;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -491,11 +618,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     final t = context.t;
     return Text(
       label.toUpperCase(),
-      style: t.mono(
-        10,
-        weight: FontWeight.w600,
-        color: t.dim,
-      ),
+      style: t.mono(10, weight: FontWeight.w600, color: t.dim),
     );
   }
 }

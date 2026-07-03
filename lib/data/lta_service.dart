@@ -7,16 +7,18 @@
 //     fetched in concurrent windows of 4 pages per wave (LTA's
 //     spike-arrest limit). Same 80,000-row safety bound.
 //
-// Disk caching is intentionally NOT implemented in the Flutter port —
-// the canonical path_provider plugin transitively pulls in
+// Disk caching for the bulk datasets uses `dart:io` Directory.systemTemp
+// directly — on Android that resolves to the app's private cache dir
+// (/data/user/0/<pkg>/cache), on iOS the app's tmp dir. Deliberately NOT
+// path_provider: that plugin transitively pulls in
 // path_provider_foundation → objective_c, whose iOS framework binary
 // ships an arm64e-only architecture slice. That conflicts with Flutter
 // engine's arm64-only Flutter.framework and causes App Store upload
-// rejections (ITMS-91080). Re-fetching ~5500 stops + ~600 services on
-// each cold start (~200KB JSON, ~3-5s on cellular) is the acceptable
-// trade-off vs. the alternative. If a future Flutter / path_provider
-// release publishes objective_c with both arm64 and arm64e slices, this
-// file can be reverted to disk-caching from this file's git history.
+// rejections (ITMS-91080). Cached rows are served for 7 days (reference
+// data changes rarely — LTA republishes on service changes, not daily),
+// then refreshed from the network; a failed refresh falls back to the
+// stale cache rather than erroring. Only the `shared` singleton caches —
+// test instances built around a mock http.Client stay purely in-memory.
 //
 // Dart equivalents for the network bits:
 //   URLSession  → http.Client with custom timeout
@@ -24,6 +26,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'lta_config.dart';
@@ -46,13 +49,21 @@ class LtaException implements Exception {
 }
 
 class LtaService {
-  LtaService({http.Client? client}) : _client = client ?? http.Client();
+  LtaService({http.Client? client, this.diskCache = false})
+    : _client = client ?? http.Client();
 
   /// Singleton matching the Swift `LTAService.shared`. Tests can construct
-  /// their own instance with a mock `http.Client`.
-  static final LtaService shared = LtaService();
+  /// their own instance with a mock `http.Client` (disk cache stays off so
+  /// runs can't bleed into each other through systemTemp).
+  static final LtaService shared = LtaService(diskCache: true);
 
   final http.Client _client;
+
+  /// Whether the bulk reference datasets are cached on disk (see header).
+  final bool diskCache;
+
+  /// Bulk-dataset cache freshness window.
+  static const Duration _cacheTtl = Duration(days: 7);
 
   /// Pages fetched concurrently per wave. LTA DataMall enforces a "Spike
   /// arrest" policy of maxBurstMessageCount=4 — any 5th+ request in the
@@ -197,7 +208,26 @@ class LtaService {
     String path,
     T Function(Map<String, dynamic>) fromJson,
   ) async {
-    final out = <T>[];
+    // Fresh cache → skip the network entirely.
+    final cached = await _readCache(path, maxAge: _cacheTtl);
+    if (cached != null) {
+      return cached.map(fromJson).toList(growable: false);
+    }
+    final List<Map<String, dynamic>> rows;
+    try {
+      rows = await _fetchAllPagedRaw(path);
+    } catch (e) {
+      // Network failed — a stale cache beats an error screen.
+      final stale = await _readCache(path, maxAge: null);
+      if (stale != null) return stale.map(fromJson).toList(growable: false);
+      rethrow;
+    }
+    await _writeCache(path, rows);
+    return rows.map(fromJson).toList(growable: false);
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchAllPagedRaw(String path) async {
+    final out = <Map<String, dynamic>>[];
     var base = 0;
     while (true) {
       final skips = List.generate(
@@ -208,10 +238,7 @@ class LtaService {
         skips.map((skip) async {
           final json = await _get(_pageUri(path, skip));
           final value = (json['value'] as List?) ?? const [];
-          return value
-              .cast<Map<String, dynamic>>()
-              .map(fromJson)
-              .toList(growable: false);
+          return value.cast<Map<String, dynamic>>();
         }),
       );
 
@@ -225,5 +252,44 @@ class LtaService {
       if (base > 80000) break; // safety bound, matches legacy
     }
     return out;
+  }
+
+  // ─── Bulk-dataset disk cache ───────────────────────────────
+
+  File _cacheFile(String path) =>
+      File('${Directory.systemTemp.path}/lta_${path.toLowerCase()}.json');
+
+  /// Rows from the on-disk cache, or null when missing/expired/unreadable.
+  /// `maxAge: null` accepts any age (stale-fallback path).
+  Future<List<Map<String, dynamic>>?> _readCache(
+    String path, {
+    required Duration? maxAge,
+  }) async {
+    if (!diskCache) return null;
+    try {
+      final f = _cacheFile(path);
+      if (!await f.exists()) return null;
+      final json = jsonDecode(await f.readAsString());
+      if (json is! Map<String, dynamic>) return null;
+      final at = DateTime.fromMillisecondsSinceEpoch((json['at'] as num).toInt());
+      if (maxAge != null && DateTime.now().difference(at) > maxAge) return null;
+      final rows = json['rows'];
+      if (rows is! List) return null;
+      return rows.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return null; // corrupt/unreadable cache reads as absent
+    }
+  }
+
+  Future<void> _writeCache(String path, List<Map<String, dynamic>> rows) async {
+    if (!diskCache) return;
+    try {
+      final f = _cacheFile(path);
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(
+        jsonEncode({'at': DateTime.now().millisecondsSinceEpoch, 'rows': rows}),
+      );
+      await tmp.rename(f.path); // atomic-ish: never a half-written cache
+    } catch (_) {/* cache write is best-effort */}
   }
 }

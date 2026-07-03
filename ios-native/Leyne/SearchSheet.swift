@@ -12,8 +12,8 @@ struct SearchSheetA: View {
     let onClose: () -> Void
     let onPick: (String) -> Void          // stop code
 
-    @EnvironmentObject var m: AppModel
-    @EnvironmentObject var store: DataStore
+    @Environment(AppModel.self) var m: AppModel
+    @Environment(DataStore.self) var store: DataStore
     @State private var q = ""
     @FocusState private var focused: Bool
 
@@ -369,8 +369,8 @@ struct SearchSheetB: View {
     let onClose: () -> Void
     let onPick: (String) -> Void
 
-    @EnvironmentObject var m: AppModel
-    @EnvironmentObject var store: DataStore
+    @Environment(AppModel.self) var m: AppModel
+    @Environment(DataStore.self) var store: DataStore
     @State private var q = ""
     @FocusState private var focused: Bool
 

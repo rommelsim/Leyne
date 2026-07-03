@@ -349,10 +349,33 @@ class ConfidenceStatusPill extends StatelessWidget {
 /// Matches ios-native/Leyne/V2/Confidence.swift CrowdMeter exactly.
 /// Unknown shows three faint outline persons, honestly rather than hidden.
 class CrowdMeter extends StatelessWidget {
-  const CrowdMeter({super.key, required this.load, this.showLabel = true});
+  const CrowdMeter({
+    super.key,
+    required this.load,
+    this.showLabel = true,
+    this.compact = false,
+    this.showGlyphs = true,
+  });
 
   final Load? load; // null → unknown
+
   final bool showLabel;
+
+  /// Short single-word label (Seats · Standing · Limited) matching iOS
+  /// `Load.wsWord` — for tight trailing columns (Home/Saved when-columns)
+  /// where the full phrasing crushed the leading title (owner-reported).
+  final bool compact;
+
+  /// Word-only mode: skip the three person glyphs and render just the label.
+  /// The glyphs alone cost ~42dp (3×13px icons + gaps) — in an already
+  /// width-capped host (a Home/Saved when-column sharing the row with a
+  /// stop-name title) that's often the single biggest contributor to title
+  /// truncation, since the level is already legible from the word alone in
+  /// that compact context. Other call sites (Bus/Stop screens, timeline)
+  /// default to `true` and are unaffected — this is opt-out, not a behavior
+  /// change. See soft_home_screen.dart `_whenColumn` (owner-reported
+  /// 2026-07-03: "Farrer Rd St…" titles crushed to ~105dp).
+  final bool showGlyphs;
 
   int get _fill {
     switch (load) {
@@ -381,6 +404,20 @@ class CrowdMeter extends StatelessWidget {
     }
   }
 
+  /// Compact word — mirrors iOS WSFormat.swift `Load.wsWord`.
+  String get _compactLabel {
+    switch (load) {
+      case Load.sea:
+        return 'Seats';
+      case Load.sda:
+        return 'Standing';
+      case Load.lsd:
+        return 'Limited';
+      case null:
+        return '—';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = context.t;
@@ -390,32 +427,39 @@ class CrowdMeter extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < 3; i++) ...[
-                if (i > 0) const SizedBox(width: 1.5),
-                Icon(
-                  (load != null && i < _fill)
-                      ? Icons.person_rounded
-                      : Icons.person_outline_rounded,
-                  size: 13,
-                  color: _personColor(i, t),
-                ),
+          if (showGlyphs) ...[
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < 3; i++) ...[
+                  if (i > 0) const SizedBox(width: 1.5),
+                  Icon(
+                    (load != null && i < _fill)
+                        ? Icons.person_rounded
+                        : Icons.person_outline_rounded,
+                    size: 13,
+                    color: _personColor(i, t),
+                  ),
+                ],
               ],
-            ],
-          ),
-          if (showLabel) ...[
-            const SizedBox(width: 5),
+            ),
+            if (showLabel) const SizedBox(width: 5),
+          ],
+          if (showLabel)
+            // maxLines+ellipsis so a width-capped host (Home/Saved
+            // when-columns) truncates the word instead of overflowing.
+            // No Flexible here — most call sites put the meter in an
+            // unbounded Row, where a nested flex child would throw.
             Text(
-              _label,
+              compact ? _compactLabel : _label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: t.mono(
                 10,
                 weight: FontWeight.w500,
                 color: load == null ? t.faint : _occupancyColor(load, t),
               ),
             ),
-          ],
         ],
       ),
     );
@@ -428,21 +472,15 @@ class CrowdMeter extends StatelessWidget {
     return i < _fill ? _occupancyColor(load, t) : t.line;
   }
 
-  /// Crowd/occupancy colour — hardcoded green/amber/grey so these meters
-  /// stay coloured even after the 2.6.0 monochrome theme change (which
-  /// set t.soon/t.mid to white/black ink). Mirrors iOS CrowdMeter which
-  /// keeps colour via a dedicated occupancyColor helper independent of
-  /// the theme's soon/mid tokens.
-  ///   sea → green  (seats available)
-  ///   sda → amber  (standing available)
-  ///   lsd/null → t.dim (limited/unknown — neutral grey)
+  /// Crowd/occupancy colour — NEUTRAL ink (owner decision 2026-07-03,
+  /// matching the iOS WhereSia rule: crowd is NEVER colour-coded; the
+  /// level is carried by the fill COUNT + the word, not a hue).
   static Color _occupancyColor(Load? load, LyneTheme t) {
     switch (load) {
       case Load.sea:
-        return const Color(0xFF34C759); // system green
       case Load.sda:
-        return const Color(0xFFFF9500); // system orange/amber
       case Load.lsd:
+        return t.fg;
       case null:
         return t.dim;
     }

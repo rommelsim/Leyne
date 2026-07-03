@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31) SplashScreen API — light.
+         The framework draws this straight from the theme, before any Kotlin
+         or Flutter code runs, and dismisses it automatically once the first
+         frame is drawn. No flutter_native_splash dependency, no extra native
+         code needed — this resource-qualified style is the whole mechanism.
+         Only resolves on API 31+; devices below that keep using the legacy
+         values/styles.xml + drawable/launch_background layer-list untouched.
+
+         Deliberately NOT parented on `android:style/Theme.SplashScreen` (the
+         convenience base style most guides use): the compileSdk 36 / Android
+         16 SDK installed in this toolchain doesn't expose that style (or
+         `android:postSplashScreenTheme`) in its public compile-time resource
+         table — `aapt2 dump resources` on platforms/android-36/android.jar
+         confirms `windowSplashScreenBackground`/`windowSplashScreenAnimatedIcon`
+         are public, but `Theme.SplashScreen` and `postSplashScreenTheme`
+         aren't, so linking against them fails
+         (`resource android:style/Theme.SplashScreen not found`). Neither is
+         actually required: the OS reads the two splash attributes straight
+         off whatever theme is resolved for the launching Activity, no matter
+         what it extends from, so layering them on our existing
+         Theme.Light.NoTitleBar-based LaunchTheme is sufficient. The
+         "switch to the normal theme after the splash is dismissed" job that
+         `postSplashScreenTheme` would otherwise do is already handled,
+         unconditionally and on every API level, by Flutter's own
+         `FlutterActivity.switchLaunchThemeForNormalTheme()` — driven by the
+         `io.flutter.embedding.android.NormalTheme` meta-data already on
+         MainActivity in AndroidManifest.xml — so nothing is lost.
+
+         windowSplashScreenBackground matches LyneTheme.light.bg (#F2F2F2,
+         see lib/theme.dart) instead of a stock system white, so the splash
+         reads as this app rather than a generic flash before it. The icon
+         reuses the existing launcher asset (mipmap/ic_launcher) rather than
+         a new branding asset. -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">#FFF2F2F2</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

@@ -397,12 +397,18 @@ class NotificationsService {
       if (arrivalDate == null) continue;
       // Fixed dual reminder — 3 min before AND 1 min before (AlertTiming
       // .arrivalLeads). Each lead is its own scheduled notification with a
-      // distinct identifier so they fire (and get swept) independently. A lead
-      // whose fire time has already passed (the bus is already closer than that
-      // lead) is skipped; the nearer reminder still fires.
+      // distinct identifier so they fire (and get swept) independently.
       for (final lead in AlertTiming.arrivalLeads) {
         final fireAt = AlertTiming.arrivalFireAt(arrivalDate, lead);
-        if (!fireAt.isAfter(now.add(const Duration(seconds: 1)))) continue;
+        if (!fireAt.isAfter(now.add(const Duration(seconds: 1)))) {
+          // Inside the lead window (or just past it): the previously
+          // scheduled request for this lead — if still pending — is the
+          // notification doing its job. Skipping WITHOUT keeping its id let
+          // the sweep below cancel the "arriving now" banner moments before
+          // it fired (owner-reported on iOS 2026-07-03; same bug here).
+          keepIds.add(_arrivalIdentifier(a, lead));
+          continue;
+        }
         final identifier = _arrivalIdentifier(a, lead);
         keepIds.add(identifier);
         await _zonedSchedule(

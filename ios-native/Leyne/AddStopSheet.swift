@@ -7,8 +7,8 @@ struct AddStopSheet: View {
     let onClose: () -> Void
     let onAdd: (String, [String]) -> Void     // (stopCode, trackedServiceNos)
 
-    @EnvironmentObject var m: AppModel
-    @EnvironmentObject var store: DataStore
+    @Environment(AppModel.self) var m: AppModel
+    @Environment(DataStore.self) var store: DataStore
     @State private var q = ""
     @State private var selectedCode: String?
     @State private var tracked: Set<String> = []

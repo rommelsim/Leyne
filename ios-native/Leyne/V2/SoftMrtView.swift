@@ -13,8 +13,8 @@ import SwiftUI
 import CoreLocation
 
 struct SoftMrtView: View {
-    @EnvironmentObject var m: AppModel
-    @ObservedObject private var ds = DataStore.shared
+    @Environment(AppModel.self) var m: AppModel
+    private let ds = DataStore.shared
     @StateObject private var loc = LocationManager.shared
 
     /// Which card/sheet is presented (nil = none). SwiftUI reliably honours only

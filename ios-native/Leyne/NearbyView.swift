@@ -13,8 +13,8 @@ import UIKit
 private enum NearbySort { case distance, arrival, service }
 
 struct NearbyView: View {
-    @EnvironmentObject var m: AppModel
-    @EnvironmentObject var store: DataStore
+    @Environment(AppModel.self) var m: AppModel
+    @Environment(DataStore.self) var store: DataStore
     @EnvironmentObject var loc: LocationManager
 
     @State private var sort: NearbySort = .distance
@@ -170,7 +170,7 @@ struct NearbyView: View {
             }
             Text("See stops near you")
                 .font(t.sans(17, weight: .semibold)).foregroundStyle(t.fg)
-            Text("Leyne uses your location only to find bus stops within walking distance. It stays on your device.")
+            Text("Departly uses your location only to find bus stops within walking distance. It stays on your device.")
                 .font(t.sans(13)).foregroundStyle(t.dim)
                 .multilineTextAlignment(.center)
             Button {

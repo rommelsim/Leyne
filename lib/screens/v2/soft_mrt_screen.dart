@@ -41,6 +41,7 @@ class SoftMrtScreen extends StatefulWidget {
     super.key,
     required this.onTab,
     required this.onOpenStation,
+    required this.onOpenStop,
   });
 
   final ValueChanged<SoftTab> onTab;
@@ -51,6 +52,12 @@ class SoftMrtScreen extends StatefulWidget {
   /// station-open path.
   final void Function(MrtGeoStation station, int distanceM, int walkMin)
   onOpenStation;
+
+  /// Opens a bus stop (SoftRoot owns the actual push, incl. its onOpenBus /
+  /// onSeeAll wiring). Threaded straight through to the line + station detail
+  /// screens pushed below so their "bus stops here" rows don't need to
+  /// duplicate that wiring locally.
+  final ValueChanged<String> onOpenStop;
 
   @override
   State<SoftMrtScreen> createState() => _SoftMrtScreenState();
@@ -113,6 +120,7 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
           line: line,
           onTab: widget.onTab,
           tabSelection: SoftTab.mrt,
+          onOpenStop: widget.onOpenStop,
         ),
       ),
     );
@@ -128,6 +136,7 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
           tabSelection: SoftTab.mrt,
           distanceM: distanceM,
           walkMin: walkMin,
+          onOpenStop: widget.onOpenStop,
         ),
       ),
     );
@@ -281,7 +290,7 @@ class _DisruptionBanner extends StatelessWidget {
           Icon(
             Icons.check_circle_rounded,
             size: 13,
-            color: Colors.green.withValues(alpha: 0.8),
+            color: LyneSeverity.normal.color.withValues(alpha: 0.8),
           ),
           const SizedBox(width: 6),
           Text(
@@ -299,15 +308,15 @@ class _DisruptionBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.12),
+        color: LyneSeverity.warning.color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.warning_amber_rounded,
             size: 16,
-            color: Colors.orange,
+            color: LyneSeverity.warning.color,
           ),
           const SizedBox(width: 10),
           Text(
@@ -638,7 +647,7 @@ class _LineTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: disrupted
-                    ? Colors.orange.withValues(alpha: 0.4)
+                    ? LyneSeverity.warning.color.withValues(alpha: 0.4)
                     : t.line,
               ),
             ),
@@ -674,8 +683,8 @@ class _LineTile extends StatelessWidget {
                           : Icons.check_circle_rounded,
                       size: 14,
                       color: disrupted
-                          ? Colors.orange
-                          : Colors.green.withValues(alpha: 0.75),
+                          ? LyneSeverity.warning.color
+                          : LyneSeverity.normal.color.withValues(alpha: 0.75),
                     ),
                   ],
                 ),
@@ -697,7 +706,7 @@ class _LineTile extends StatelessWidget {
                   disrupted ? 'Disrupted' : 'Normal service',
                   style: TextStyle(
                     fontSize: 11,
-                    color: disrupted ? Colors.orange : t.dim,
+                    color: disrupted ? LyneSeverity.warning.color : t.dim,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

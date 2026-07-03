@@ -36,11 +36,16 @@ class SoftMrtLineScreen extends StatefulWidget {
     required this.line,
     required this.onTab,
     required this.tabSelection,
+    required this.onOpenStop,
   });
 
   final MRTLine line;
   final ValueChanged<SoftTab> onTab;
   final SoftTab tabSelection;
+
+  /// Opens a bus stop — threaded down from SoftMrtScreen, which passes
+  /// through the SoftRoot-owned callback. See SoftMrtScreen.onOpenStop.
+  final ValueChanged<String> onOpenStop;
 
   @override
   State<SoftMrtLineScreen> createState() => _SoftMrtLineScreenState();
@@ -72,6 +77,7 @@ class _SoftMrtLineScreenState extends State<SoftMrtLineScreen> {
           onBack: () => Navigator.of(context).pop(),
           onTab: widget.onTab,
           tabSelection: widget.tabSelection,
+          onOpenStop: widget.onOpenStop,
         ),
       ),
     );
@@ -106,10 +112,9 @@ class _SoftMrtLineScreenState extends State<SoftMrtLineScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      bottomNavigationBar: SoftBottomBar(
-        selection: widget.tabSelection,
-        onSelect: widget.onTab,
-      ),
+      // Pushed detail screen: banner only, no tab bar (iOS parity — WSRoot
+      // hides the floating bar on pushed routes).
+      bottomNavigationBar: const SoftDetailBottomBar(),
       body: ListenableBuilder(
         listenable: DataStore.shared,
         builder: (context, _) {
@@ -294,8 +299,8 @@ class _SoftMrtLineScreenState extends State<SoftMrtLineScreen> {
                     margin: const EdgeInsets.only(right: 5),
                     decoration: BoxDecoration(
                       color: disrupted
-                          ? Colors.orange
-                          : Colors.green.withValues(alpha: 0.8),
+                          ? LyneSeverity.warning.color
+                          : LyneSeverity.normal.color.withValues(alpha: 0.8),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -303,7 +308,7 @@ class _SoftMrtLineScreenState extends State<SoftMrtLineScreen> {
                     disrupted ? 'Disrupted' : 'Operating normally',
                     style: TextStyle(
                       fontSize: 12,
-                      color: disrupted ? Colors.orange : t.dim,
+                      color: disrupted ? LyneSeverity.warning.color : t.dim,
                     ),
                   ),
                 ],
@@ -342,7 +347,7 @@ class _AlertCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.10),
+        color: LyneSeverity.warning.color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -350,10 +355,10 @@ class _AlertCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.warning_amber_rounded,
                 size: 14,
-                color: Colors.orange,
+                color: LyneSeverity.warning.color,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -745,13 +750,13 @@ class _PeopleDensityGlyph extends StatelessWidget {
 Color _crowdColor(CrowdLevel level) {
   switch (level) {
     case CrowdLevel.low:
-      return Colors.green;
+      return LyneSeverity.normal.color;
     case CrowdLevel.moderate:
-      return Colors.orange;
+      return LyneSeverity.warning.color;
     case CrowdLevel.high:
-      return Colors.red;
+      return LyneSeverity.critical.color;
     case CrowdLevel.unknown:
-      return const Color.fromRGBO(128, 128, 128, 0.35);
+      return LyneSeverity.unknown.color;
   }
 }
 

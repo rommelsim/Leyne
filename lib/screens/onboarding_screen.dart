@@ -1,11 +1,13 @@
 // Onboarding — 5-step first-run flow mirroring ios-native/Leyne/OnboardingView.swift.
 //
 // Flow:
-//   step 0  welcome         — wordmark, tagline, "Get started"
-//   step 1  live wedge      — "WHY LEYNE / Always up to the minute" + 3-row card
+//   step 0  welcome         — eyebrow, "WhereSia" wordmark, line-colour
+//                             capsules, tagline, "Get started"
+//   step 1  live wedge      — "WHY WHERESIA / Always up to the minute" + a
+//                             mini departure-board preview
 //   step 2  location primer — "Permission 1 of 2", primes OS location prompt
 //   step 3  notif primer    — "Permission 2 of 2", primes POST_NOTIFICATIONS
-//   step 4  done            — grant summary + "Enter Leyne" → onFinish
+//   step 4  done            — LIVE grant summary + "Enter WhereSia" → onFinish
 //
 // Android differences from iOS:
 //   • No ATT / App Tracking Transparency step (Android has none).
@@ -18,12 +20,18 @@
 // a single AnimatedSwitcher keyed by step index so text, cards, and CTAs all
 // slide as one unit. Persistent chrome (back row, dots) stays outside it.
 //
-// There is no Skip: onboarding completes only via the "Enter Leyne" button on
-// the done step, ensuring every user passes through the priming steps.
+// There is no Skip: onboarding completes only via the "Enter WhereSia" button
+// on the done step, ensuring every user passes through the priming steps.
 
 import 'package:flutter/material.dart';
 
+import '../data/models.dart' show Load;
+import '../services/location_service.dart';
+import '../services/notifications.dart' show NotifPermStatus;
+import '../state/app_model.dart';
 import '../theme.dart';
+import '../widgets/v2/confidence.dart';
+import '../widgets/v2/soft_components.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({
@@ -34,17 +42,20 @@ class OnboardingScreen extends StatefulWidget {
   });
 
   /// Location-primer "Allow location" tap. Implementations should call
-  /// LocationService.requestAndStart() and return — the step advances on its
-  /// own; the OS dialog races with the transition, matching iOS behaviour.
-  final VoidCallback onRequestLocation;
+  /// LocationService.requestAndStart(); the returned future must settle when
+  /// the OS dialog does. The step only advances AFTER that — on Android the
+  /// permission dialog pauses the activity, so a transition started in the
+  /// same frame froze half-rendered behind the dialog (owner-reported: step
+  /// objects "not rendering" until the dialog was dismissed).
+  final Future<void> Function() onRequestLocation;
 
   /// Notifications-primer "Enable notifications" tap. Implementations should
   /// call AppModel.setNotificationsEnabled(true), which fires the Android 13+
-  /// POST_NOTIFICATIONS prompt before scheduling alerts. Same fire-and-forget
-  /// shape as onRequestLocation.
-  final VoidCallback onRequestNotifications;
+  /// POST_NOTIFICATIONS prompt before scheduling alerts. Same await-then-
+  /// advance shape as onRequestLocation.
+  final Future<void> Function() onRequestNotifications;
 
-  /// Done step "Enter Leyne" tap. Implementations should run UMP consent
+  /// Done step "Enter WhereSia" tap. Implementations should run UMP consent
   /// (AdConsent.gatherThenStart — a no-op on Android for ATT) then call
   /// AppModel.shared.finishOnboarding(). There is no ATT view on Android;
   /// this callback is the sole completion path.
@@ -79,7 +90,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // Advances the step forward (used by primary CTAs on non-permission steps
-  // and by the done step's "Enter Leyne").
+  // and by the done step's "Enter WhereSia").
   void _next() {
     if (_busy) return;
     if (_step == 4) {
@@ -96,16 +107,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  // Primary action on permission primers: fires the callback THEN advances.
-  // The callback is fire-and-forget; the OS dialog races with the transition.
-  void _primePrimary(VoidCallback permissionCallback) {
+  // Primary action on permission primers: fires the callback, AWAITS the OS
+  // dialog, then advances. Advancing in the same frame as the dialog froze
+  // the transition mid-flight (Android pauses the activity, halting frames)
+  // — the next step sat near-invisible behind the dialog and snapped in on
+  // resume. Holding the current step until the dialog settles keeps every
+  // transition fully rendered. _busy guards re-taps while the dialog is up.
+  Future<void> _primePrimary(
+    Future<void> Function() permissionCallback,
+  ) async {
     if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await permissionCallback();
+    } catch (_) {/* a failed prompt still advances — primer shown once */}
+    if (!mounted) return;
     setState(() {
-      _busy = true;
       _direction = 1;
       _step += 1;
     });
-    permissionCallback();
     _unlockAfterTransition();
   }
 
@@ -160,14 +180,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             (_step > 0 && _step < _kStepCount - 1 && !_busy)
                             ? _back
                             : null,
+                        // Quiet grey, not accent — mirrors iOS's ws.dim Back.
                         icon: Icon(
                           Icons.chevron_left,
                           size: 18,
-                          color: t.accent,
+                          color: t.dim,
                         ),
                         label: Text(
                           'Back',
-                          style: t.sans(15).copyWith(color: t.accent),
+                          style: t.sans(15).copyWith(color: t.dim),
                         ),
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
@@ -178,6 +199,37 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                     const Spacer(),
                   ],
+                ),
+              ),
+
+              // ── Page dots — permission progress only (2 dots), top-centre
+              // directly under the Back row: iOS parity (OnboardingView's
+              // stepScaffold `dots`; owner-flagged mismatch 2026-07-04 — they
+              // used to sit at the bottom counting ALL steps). Outside the
+              // switcher so they morph in place; invisible but
+              // space-preserving on non-permission steps, like iOS's
+              // opacity-0 dots.
+              AnimatedOpacity(
+                duration: _anim,
+                opacity: (_step == 2 || _step == 3) ? 1 : 0,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < 2; i++)
+                        AnimatedContainer(
+                          duration: _anim,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          width: i == _step - 2 ? 18 : 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: i == _step - 2 ? t.accent : t.line,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
 
@@ -206,8 +258,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       animation: anim,
                       child: child,
                       builder: (context, child) {
-                        final exiting =
-                            anim.status == AnimationStatus.reverse;
+                        final exiting = anim.status == AnimationStatus.reverse;
                         // Incoming slides from the dir-side to centre; outgoing
                         // exits to the opposite side. Both move the same way, so
                         // it reads as one push (Next ←, Back →).
@@ -239,28 +290,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
 
-              // ── Page dots ─────────────────────────────────────────────
-              // Outside the switcher so they don't animate — they update
-              // in place via AnimatedContainer, matching iOS behaviour.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < _kStepCount; i++)
-                      AnimatedContainer(
-                        duration: _anim,
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        width: i == _step ? 20 : 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: i == _step ? t.accent : t.line,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -291,13 +320,15 @@ class _StepBody extends StatelessWidget {
   final bool busy;
   final VoidCallback onNext;
 
-  /// Fires the OS permission callback then advances. Used by primer primaries.
-  final void Function(VoidCallback permissionCallback) onPrimePrimary;
+  /// Fires the OS permission callback, awaits it, then advances. Used by
+  /// primer primaries.
+  final void Function(Future<void> Function() permissionCallback)
+  onPrimePrimary;
 
   /// Advances silently without a permission prompt. Used by primer secondaries.
   final VoidCallback onPrimeSecondary;
-  final VoidCallback onRequestLocation;
-  final VoidCallback onRequestNotifications;
+  final Future<void> Function() onRequestLocation;
+  final Future<void> Function() onRequestNotifications;
   final LyneTheme t;
 
   @override
@@ -314,11 +345,13 @@ class _StepBody extends StatelessWidget {
         t: t,
         busy: busy,
         onPrimaryTap: () => onPrimePrimary(onRequestLocation),
-        icon: Icons.location_on_rounded,
+        // Outline glyphs, not filled — iOS's primer tiles use thin outlined
+        // icons (navigation arrow / bell) in quiet ink.
+        icon: Icons.near_me_outlined,
         kicker: 'Permission 1 of 2',
         title: 'Find stops around you',
         body:
-            'Leyne uses your location to surface the nearest stops and place your bus, you and your stop on the map.',
+            'Departly uses your location to surface the nearest stops and place your bus, you and your stop on the map.',
         points: const [
           (Icons.my_location_rounded, 'Nearest stops, sorted by distance'),
           (Icons.map_outlined, 'See exactly where your stop is'),
@@ -330,7 +363,7 @@ class _StepBody extends StatelessWidget {
         busy: busy,
         onPrimaryTap: () => onPrimePrimary(onRequestNotifications),
         onSecondaryTap: onPrimeSecondary,
-        icon: Icons.notifications_rounded,
+        icon: Icons.notifications_none_rounded,
         kicker: 'Permission 2 of 2',
         title: 'Never miss your bus',
         body:
@@ -360,6 +393,17 @@ class _WelcomeStep extends StatelessWidget {
   final bool busy;
   final VoidCallback onNext;
 
+  /// The app's official MRT line palette, in the same NS/EW/NE/CC/DT/TE
+  /// order as the launch screen and OnboardingView.swift's `lineOrder`.
+  static const _lineOrder = [
+    MRTLine.ns,
+    MRTLine.ew,
+    MRTLine.ne,
+    MRTLine.cc,
+    MRTLine.dt,
+    MRTLine.te,
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -367,28 +411,42 @@ class _WelcomeStep extends StatelessWidget {
       child: Column(
         children: [
           const Spacer(),
-          // Wordmark: "leyne" + accent dot, mirroring iOS wordmark().
+          // Eyebrow + "WhereSia" wordmark + line-colour capsules — quotes the
+          // launch screen (LaunchScreenView.swift) and OnboardingView.swift's
+          // welcome() block, replacing the old "leyne"+dot wordmark.
+          Text(
+            'SINGAPORE · BUS & MRT',
+            textAlign: TextAlign.center,
+            style: t
+                .sans(11, weight: FontWeight.w800)
+                .copyWith(color: t.dim, letterSpacing: 2.2),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Departly',
+            textAlign: TextAlign.center,
+            style: t.sans(40, weight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
           Row(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('leyne', style: t.sans(44, weight: FontWeight.w700)),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 9, left: 5),
-                child: Container(
-                  width: 7,
-                  height: 7,
+              for (final line in _lineOrder) ...[
+                if (line != _lineOrder.first) const SizedBox(width: 6),
+                Container(
+                  width: 22,
+                  height: 5,
                   decoration: BoxDecoration(
-                    color: t.accent,
-                    shape: BoxShape.circle,
+                    color: line.color,
+                    borderRadius: BorderRadius.circular(2.5),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 28),
           Text(
-            'Singapore\'s buses & MRT,\nin real time.',
+            'Every bus and train,\nin real time.',
             textAlign: TextAlign.center,
             style: t.sans(20, weight: FontWeight.w600),
           ),
@@ -434,7 +492,7 @@ class _LiveStep extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 16),
-                  _Kicker(label: 'Why Leyne', t: t),
+                  _Kicker(label: 'Why Departly', t: t),
                   const SizedBox(height: 8),
                   Text(
                     'Always up to the minute.',
@@ -446,7 +504,7 @@ class _LiveStep extends StatelessWidget {
                     style: t.sans(15).copyWith(color: t.dim, height: 1.5),
                   ),
                   const SizedBox(height: 22),
-                  _OnbVisualLive(t: t),
+                  _BoardPreview(t: t),
                 ],
               ),
             ),
@@ -504,24 +562,29 @@ class _PrimerStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 16),
-                  // Icon card — matches iOS's surface-backed ZStack icon.
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: t.surface,
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: t.line),
+            // Center: the icon/copy block sits vertically centred between
+            // the dots and the CTA (iOS stepScaffold parity — content used
+            // to hug the top, owner-flagged mismatch 2026-07-04). The scroll
+            // view still takes over when the block outgrows the viewport.
+            child: Center(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Icon card — matches iOS's surface-backed ZStack icon:
+                    // quiet ink glyph, not accent-tinted.
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: t.surface,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: t.line),
+                      ),
+                      child: SizedBox(
+                        width: 76,
+                        height: 76,
+                        child: Icon(icon, size: 34, color: t.fg),
+                      ),
                     ),
-                    child: SizedBox(
-                      width: 76,
-                      height: 76,
-                      child: Icon(icon, size: 34, color: t.accent),
-                    ),
-                  ),
                   const SizedBox(height: 26),
                   _Kicker(label: kicker, t: t),
                   const SizedBox(height: 8),
@@ -538,6 +601,7 @@ class _PrimerStep extends StatelessWidget {
                     const SizedBox(height: 11),
                   ],
                 ],
+                ),
               ),
             ),
           ),
@@ -560,10 +624,9 @@ class _PrimerStep extends StatelessWidget {
               ),
               child: Text(
                 secondaryLabel!,
-                style: t.sans(
-                  14,
-                  weight: FontWeight.w600,
-                ).copyWith(color: t.dim),
+                style: t
+                    .sans(14, weight: FontWeight.w600)
+                    .copyWith(color: t.dim),
               ),
             ),
           const SizedBox(height: 4),
@@ -575,6 +638,10 @@ class _PrimerStep extends StatelessWidget {
 
 // ─── Step 4: Done ────────────────────────────────────────────────────────────
 
+/// The actual grant outcome of a primed permission, mirroring
+/// OnboardingView.swift's `Grant` enum (`on` / `off` / `skipped`).
+enum _Grant { on, off, skipped }
+
 class _DoneStep extends StatelessWidget {
   const _DoneStep({required this.t, required this.busy, required this.onNext});
 
@@ -582,43 +649,77 @@ class _DoneStep extends StatelessWidget {
   final bool busy;
   final VoidCallback onNext;
 
+  /// Reads the real, current OS grant — never assumed. [LocationService] and
+  /// [AppModel] are updated in place by `onRequestLocation`/
+  /// `onRequestNotifications` (see main.dart) once the system dialog they
+  /// primed resolves, so listening to both here (rather than snapshotting
+  /// once) means a dialog that's still in flight when this step first
+  /// appears flips the row live the moment it settles.
+  _Grant get _locationGrant => switch (LocationService.shared.auth) {
+    LocAuth.authorized => _Grant.on,
+    LocAuth.denied || LocAuth.deniedForever => _Grant.off,
+    LocAuth.notDetermined => _Grant.skipped,
+  };
+
+  _Grant get _notifGrant => switch (AppModel.shared.notificationAuth) {
+    NotifPermStatus.granted => _Grant.on,
+    NotifPermStatus.denied || NotifPermStatus.permanentlyDenied => _Grant.off,
+    NotifPermStatus.notDetermined => _Grant.skipped,
+  };
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 0, 28, 0),
-      child: Column(
-        children: [
-          const Spacer(),
-          // Checkmark in an accent rounded rect — mirrors iOS done screen.
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: t.accent,
-              borderRadius: BorderRadius.circular(26),
-            ),
-            child: SizedBox(
-              width: 84,
-              height: 84,
-              child: Icon(Icons.check_rounded, size: 42, color: t.onAccent),
-            ),
+    return ListenableBuilder(
+      listenable: Listenable.merge([LocationService.shared, AppModel.shared]),
+      builder: (context, _) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 0),
+          child: Column(
+            children: [
+              const Spacer(),
+              // Checkmark in an accent rounded rect — mirrors iOS done screen.
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: t.accent,
+                  borderRadius: BorderRadius.circular(26),
+                ),
+                child: SizedBox(
+                  width: 84,
+                  height: 84,
+                  child: Icon(Icons.check_rounded, size: 42, color: t.onAccent),
+                ),
+              ),
+              const SizedBox(height: 26),
+              Text(
+                'You\'re all set',
+                style: t.sans(27, weight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Departly is ready. Your nearest stops are already loading.',
+                textAlign: TextAlign.center,
+                style: t.sans(14).copyWith(color: t.dim, height: 1.5),
+              ),
+              const SizedBox(height: 24),
+              // Live grant summary — Location + Notifications only (no ATT
+              // on Android). Each row reflects the actual system permission
+              // state, not an assumption that the primer's primary button
+              // means "granted".
+              _GrantRow(label: 'Location', state: _locationGrant, t: t),
+              const SizedBox(height: 8),
+              _GrantRow(label: 'Notifications', state: _notifGrant, t: t),
+              const Spacer(),
+              _PrimaryButton(
+                label: 'Enter Departly',
+                t: t,
+                busy: busy,
+                onTap: onNext,
+              ),
+              const SizedBox(height: 8),
+            ],
           ),
-          const SizedBox(height: 26),
-          Text('You\'re all set', style: t.sans(27, weight: FontWeight.w700)),
-          const SizedBox(height: 10),
-          Text(
-            'Leyne is ready. Your nearest stops are already loading.',
-            textAlign: TextAlign.center,
-            style: t.sans(14).copyWith(color: t.dim, height: 1.5),
-          ),
-          const SizedBox(height: 24),
-          // Grant summary — Location + Notifications only (no ATT on Android).
-          _GrantRow(label: 'Location', t: t),
-          const SizedBox(height: 8),
-          _GrantRow(label: 'Notifications', t: t),
-          const Spacer(),
-          _PrimaryButton(label: 'Enter Leyne', t: t, busy: busy, onTap: onNext),
-          const SizedBox(height: 8),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -632,11 +733,12 @@ class _Kicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Dim grey, not accent — mirrors iOS's ws.dim kicker.
     return Text(
       label.toUpperCase(),
       style: t
           .mono(11, weight: FontWeight.w700)
-          .copyWith(color: t.accent, letterSpacing: 1.2),
+          .copyWith(color: t.dim, letterSpacing: 1.2),
     );
   }
 }
@@ -676,12 +778,23 @@ class _PointRow extends StatelessWidget {
 }
 
 class _GrantRow extends StatelessWidget {
-  const _GrantRow({required this.label, required this.t});
+  const _GrantRow({required this.label, required this.state, required this.t});
   final String label;
+  final _Grant state;
   final LyneTheme t;
 
   @override
   Widget build(BuildContext context) {
+    // Mirrors iOS OnboardingView.grantRow: label, state word (ON/OFF/
+    // SKIPPED), and a filled check only when actually granted — an empty
+    // ring otherwise, so "skipped" and "denied" both read honestly instead
+    // of a blanket checkmark.
+    final granted = state == _Grant.on;
+    final text = switch (state) {
+      _Grant.on => 'ON',
+      _Grant.off => 'OFF',
+      _Grant.skipped => 'SKIPPED',
+    };
     return DecoratedBox(
       decoration: BoxDecoration(
         color: t.surface,
@@ -694,10 +807,18 @@ class _GrantRow extends StatelessWidget {
           children: [
             Text(label, style: t.sans(14, weight: FontWeight.w600)),
             const Spacer(),
-            // Static — the user saw the permission dialogs; the row is just
-            // a summary confirming those steps ran. Matches iOS "Skipped"
-            // neutral state: a circle icon at faint opacity.
-            Icon(Icons.check_circle_rounded, size: 16, color: t.accent),
+            Text(
+              text,
+              style: t
+                  .mono(11, weight: FontWeight.w600)
+                  .copyWith(color: granted ? t.fg : t.dim, letterSpacing: 0.6),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              granted ? Icons.check_circle_rounded : Icons.circle_outlined,
+              size: 16,
+              color: granted ? t.accent : t.faint,
+            ),
           ],
         ),
       ),
@@ -707,9 +828,11 @@ class _GrantRow extends StatelessWidget {
 
 /// Primary action button — shared by all steps.
 ///
-/// Uses `t.accent` background and `t.onAccent` foreground so dark-mode
-/// (accent = white) renders correctly: white background, dark text.
-/// The previous `Colors.white` foreground caused white-on-white in dark mode.
+/// Ink pill (`t.fg` background, `t.bg` text): mirrors iOS onboarding's ink
+/// CTA. Was `t.accent`, but at runtime that resolves to the Material You
+/// dynamic colour, which made the CTA read wallpaper-tinted while iOS's is
+/// black — owner-flagged mismatch 2026-07-04. Ink flips correctly in dark
+/// mode (near-white pill, dark text), same as iOS.
 class _PrimaryButton extends StatelessWidget {
   const _PrimaryButton({
     required this.label,
@@ -730,12 +853,12 @@ class _PrimaryButton extends StatelessWidget {
       child: FilledButton(
         onPressed: busy ? null : onTap,
         style: FilledButton.styleFrom(
-          backgroundColor: t.accent,
-          foregroundColor: t.onAccent,
+          backgroundColor: t.fg,
+          foregroundColor: t.bg,
           // Keep the button visually identical while the multi-tap guard is
           // engaged — a grey flicker between steps would be noticeable.
-          disabledBackgroundColor: t.accent,
-          disabledForegroundColor: t.onAccent,
+          disabledBackgroundColor: t.fg,
+          disabledForegroundColor: t.bg,
           padding: const EdgeInsets.symmetric(vertical: 15),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -745,71 +868,125 @@ class _PrimaryButton extends StatelessWidget {
           label,
           style: t
               .sans(16, weight: FontWeight.w600)
-              .copyWith(color: t.onAccent),
+              .copyWith(color: t.bg),
         ),
       ),
     );
   }
 }
 
-// ─── OnbVisualLive: 3-row feature card (step 1) ──────────────────────────────
+// ─── Board preview: mini departure board (step 1) ────────────────────────────
 //
-// Mirrors iOS OnbVisualLive — three rows in surface cards: icon + title + desc.
-// Monochrome: icon foreground is t.accent (white/black), background is t.liveBg.
+// Mirrors iOS OnboardingView.boardPreview: the actual app idiom (route
+// badge, LIVE status, big mono ETA, crowd meter) instead of an abstract
+// feature list — reuses the same atoms the real Home/Stop screens render
+// (ServiceBadge, ConfidenceStatusPill, CrowdMeter) so onboarding previews
+// exactly what the user is about to see, not a mockup of it.
 
-class _OnbVisualLive extends StatelessWidget {
-  const _OnbVisualLive({required this.t});
+class _BoardPreview extends StatelessWidget {
+  const _BoardPreview({required this.t});
   final LyneTheme t;
-
-  static const _rows = [
-    (Icons.wifi_tethering_rounded, 'Live arrivals', 'refreshed continuously'),
-    (Icons.map_rounded, 'On the map', 'your bus, you and your stop'),
-    (Icons.notifications_rounded, 'Smart alerts', 'a nudge before it pulls in'),
-  ];
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        for (final (ico, title, desc) in _rows) ...[
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: t.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: t.line),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
+    return Semantics(
+      label: 'Preview of live arrivals',
+      container: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(LyneRadius.md),
+          border: Border.all(color: t.line),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: t.liveBg,
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Icon(ico, size: 18, color: t.accent),
-                    ),
+                  const Eyebrow('Nearby'),
+                  const SizedBox(width: 10),
+                  const ConfidenceStatusPill(
+                    confidence: ArrivalConfidence.live,
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: t.sans(14, weight: FontWeight.w600)),
-                        const SizedBox(height: 1),
-                        Text(desc, style: t.mono(11).copyWith(color: t.dim)),
-                      ],
-                    ),
-                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Container(height: 1, color: t.line)),
                 ],
               ),
-            ),
+              const SizedBox(height: 14),
+              _BoardRow(
+                no: '174',
+                dest: 'Towards Clementi',
+                etaMin: 3,
+                load: Load.sea,
+                t: t,
+              ),
+              Container(
+                height: 1,
+                color: t.line,
+                margin: const EdgeInsets.symmetric(vertical: 11),
+              ),
+              _BoardRow(
+                no: '961M',
+                dest: 'Towards Marina Ctr',
+                etaMin: 7,
+                load: Load.sda,
+                t: t,
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BoardRow extends StatelessWidget {
+  const _BoardRow({
+    required this.no,
+    required this.dest,
+    required this.etaMin,
+    required this.load,
+    required this.t,
+  });
+
+  final String no;
+  final String dest;
+  final int etaMin;
+  final Load load;
+  final LyneTheme t;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        ServiceBadge(svc: no, size: ServiceBadgeSize.sm),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            dest,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: t.sans(14, weight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text('$etaMin', style: t.mono(17, weight: FontWeight.w700)),
+            const SizedBox(width: 2),
+            Text(
+              ' min',
+              style: t.mono(10, weight: FontWeight.w600, color: t.dim),
+            ),
+          ],
+        ),
+        const SizedBox(width: 10),
+        CrowdMeter(load: load, showLabel: false),
       ],
     );
   }
