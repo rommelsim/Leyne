@@ -21,14 +21,16 @@ Future<bool> toggleArrivalAlert({
   String dest = '',
 }) async {
   final m = AppModel.shared;
-  final existing =
-      m.alertFor(kind: AlertKind.arrival, busNo: busNo, stopCode: stopCode);
+  final existing = m.alertFor(
+    kind: AlertKind.arrival,
+    busNo: busNo,
+    stopCode: stopCode,
+  );
   if (existing != null) {
     await m.removeAlert(existing.id);
     _alertSnack(
       'Alert off for Bus $busNo',
-      onUndo: () =>
-          _addArrivalAlert(busNo, stopCode, stopName, dest),
+      onUndo: () => _addArrivalAlert(busNo, stopCode, stopName, dest),
     );
     return false;
   }
@@ -49,16 +51,17 @@ Future<void> _addArrivalAlert(
   String stopCode,
   String stopName,
   String dest,
-) =>
-    AppModel.shared.upsertAlert(BusAlert(
-      kind: AlertKind.arrival,
-      busNo: busNo,
-      stopCode: stopCode,
-      stopName: stopName,
-      dest: dest,
-      // Lead is fixed (3 min + 1 min, see AlertTiming.arrivalLeads).
-      leadMinutes: 1,
-    ));
+) => AppModel.shared.upsertAlert(
+  BusAlert(
+    kind: AlertKind.arrival,
+    busNo: busNo,
+    stopCode: stopCode,
+    stopName: stopName,
+    dest: dest,
+    // Lead is fixed (3 min + 1 min, see AlertTiming.arrivalLeads).
+    leadMinutes: 1,
+  ),
+);
 
 /// Floating snackbar with an Undo action, shown via the app-wide messenger so it
 /// works from any screen (including over a just-popped route).
