@@ -59,6 +59,12 @@ class _WeatherItem extends _Item {}
 
 class _HeaderItem extends _Item {}
 
+/// Tap-to-search pill — mirrors WSHomeView.swift's `searchBar`: sits directly
+/// under the header/title, above everything else (including the MRT strip).
+/// Not an inline TextField — the whole pill is a button that pushes the real
+/// search screen via `onOpenSearch`, same as iOS's `Button(action: onSearch)`.
+class _SearchBarItem extends _Item {}
+
 class _LiveRowItem extends _Item {}
 
 class _GapItem extends _Item {
@@ -232,7 +238,13 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
   /// intl isn't a direct pubspec dependency (only pulled in transitively),
   /// so this formats manually rather than adding a new dependency for one line.
   static const _weekdayNames = [
-    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', //
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday', //
   ];
   static const _monthNames = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
@@ -446,7 +458,9 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       items.add(_GapItem(8));
     }
     items.add(_HeaderItem());
-    items.add(_GapItem(6));
+    items.add(_GapItem(14));
+    items.add(_SearchBarItem());
+    items.add(_GapItem(16));
     items.add(_LiveRowItem());
 
     // MRT — nearby stations strip. Its own small section above the bus stop
@@ -593,6 +607,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     return switch (item) {
       _WeatherItem() => const WeatherHeader(),
       _HeaderItem() => _header(context),
+      _SearchBarItem() => _searchBar(context),
       _LiveRowItem() => _liveRow(context),
       _GapItem(:final height) => SizedBox(height: height),
       _EyebrowItem(:final label) => Eyebrow(label),
@@ -644,9 +659,54 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         const SizedBox(height: 2),
         Text(
           'Nearby',
-          style: t.sans(30, weight: FontWeight.w700, color: t.fg),
+          // 30 → 26: matches WSHomeView.swift's title (ws.sans(26, .heavy)) —
+          // Android's was reading noticeably larger than iOS at the same
+          // visual hierarchy position.
+          style: t.sans(26, weight: FontWeight.w700, color: t.fg),
         ),
       ],
+    );
+  }
+
+  /// Tap-to-search pill — Material take on WSHomeView.swift's `searchBar`:
+  /// same copy, same placement directly under the title (before the MRT
+  /// strip / bus list), same hairline-bordered pill shape. Whole row taps
+  /// through to the real search screen; no inline TextField here, matching
+  /// iOS's plain `Button`.
+  Widget _searchBar(BuildContext context) {
+    final t = context.t;
+    return Semantics(
+      button: true,
+      label: 'Search for a stop, bus, MRT station or postal code',
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(LyneRadius.md),
+          onTap: widget.onOpenSearch,
+          child: Container(
+            height: 50,
+            padding: const EdgeInsets.symmetric(horizontal: 15),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(LyneRadius.md),
+              border: Border.all(color: t.line, width: 1),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.search_rounded, size: 19, color: t.dim),
+                const SizedBox(width: 11),
+                Text(
+                  'Stop, bus, MRT or postal code',
+                  style: t.sans(15, weight: FontWeight.w600, color: t.dim),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -672,29 +732,33 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
             decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
           ),
           const SizedBox(width: 5),
+          // 10 → 11: legibility floor (owner directive — Android type must
+          // never go below 11, even where the size otherwise mirrors the
+          // WSLiveBadge word iOS sets at 9.5).
           Text(
             'LIVE',
             style: t
-                .mono(10, weight: FontWeight.w700, color: t.dim)
+                .mono(11, weight: FontWeight.w700, color: t.dim)
                 .copyWith(letterSpacing: 0.8),
           ),
         ] else
           Text(
             'LOCATION OFF',
             style: t
-                .mono(10, weight: FontWeight.w700, color: t.dim)
+                .mono(11, weight: FontWeight.w700, color: t.dim)
                 .copyWith(letterSpacing: 0.8),
           ),
         // Freshness meta — newest of the visible nearby stops' last refresh.
-        // Mirrors WSHomeView.swift's `WSFmt.upd(...)` section-header meta.
+        // Mirrors WSHomeView.swift's `WSFmt.upd(...)` section-header meta
+        // (ws.mono(11) — matches Android's floor here exactly).
         if (updated != null) ...[
           const SizedBox(width: 5),
-          Text('·', style: t.mono(10, color: t.faint)),
+          Text('·', style: t.mono(11, color: t.faint)),
           const SizedBox(width: 5),
           Text(
             'UPDATED $updated',
             style: t
-                .mono(10, weight: FontWeight.w500, color: t.faint)
+                .mono(11, weight: FontWeight.w500, color: t.faint)
                 .copyWith(letterSpacing: 0.8),
           ),
         ],
@@ -898,14 +962,18 @@ class _NearbyCard extends StatelessWidget {
             children: [
               Text(
                 name,
-                style: t.sans(17, weight: FontWeight.w600, color: t.fg),
+                // 17/w600 → 15.5/w700: matches WSHomeView.swift's StopRow
+                // title (ws.sans(15.5, .bold)) — was reading larger than iOS.
+                style: t.sans(15.5, weight: FontWeight.w700, color: t.fg),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: t.mono(12.5, color: t.dim),
+                // 12.5 → 11.5/w500: matches WSHomeView.swift's StopRow
+                // subline (ws.mono(11.5, .medium)).
+                style: t.mono(11.5, weight: FontWeight.w500, color: t.dim),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -943,7 +1011,10 @@ class _NearbyCard extends StatelessWidget {
       ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
     final soonest = sorted.isEmpty ? null : sorted.first;
     if (soonest == null) {
-      return Text('—', style: t.mono(19, weight: FontWeight.w700, color: t.dim));
+      return Text(
+        '—',
+        style: t.mono(19, weight: FontWeight.w700, color: t.dim),
+      );
     }
 
     // Everything inside the "Arr" window (< 60s live), soonest first — since
@@ -954,11 +1025,15 @@ class _NearbyCard extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text('Arr', style: t.mono(19, weight: FontWeight.w700, color: t.fg)),
+          Text(
+            'Arr',
+            style: t.mono(19, weight: FontWeight.w700, color: t.fg),
+          ),
           const SizedBox(height: 3),
           Text(
             _arrivingLabel(arriving),
-            style: t.mono(10, color: t.dim),
+            // 10 → 11: legibility floor (iOS's own value here is 10).
+            style: t.mono(11, color: t.dim),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -978,7 +1053,10 @@ class _NearbyCard extends StatelessWidget {
                 style: t.mono(19, weight: FontWeight.w700, color: t.fg),
               ),
               if (eta.big != 'Arr')
-                TextSpan(text: ' min', style: t.mono(11, color: t.dim)),
+                TextSpan(
+                  text: ' min',
+                  style: t.mono(11, weight: FontWeight.w600, color: t.dim),
+                ),
             ],
           ),
         ),
@@ -986,7 +1064,8 @@ class _NearbyCard extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Bus ${soonest.no} ·', style: t.mono(10, color: t.dim)),
+            // 10 → 11: legibility floor (iOS's own value here is 10).
+            Text('Bus ${soonest.no} ·', style: t.mono(11, color: t.dim)),
             const SizedBox(width: 5),
             // Compact word (iOS wsWord parity: Seats/Standing/Limited) in a
             // Flexible so the width-capped column ellipsizes the word rather
@@ -1075,8 +1154,10 @@ class _RouteChipsRow extends StatelessWidget {
         border: Border.all(color: t.faint, width: 1),
       ),
       child: Text(
+        // 10 → 11: matches WSHomeView.swift's OverflowTile (ws.mono(11, .bold))
+        // and clears the 11pt legibility floor.
         '+$count',
-        style: t.mono(10, weight: FontWeight.w700, color: t.dim),
+        style: t.mono(11, weight: FontWeight.w700, color: t.dim),
         maxLines: 1,
       ),
     ),
@@ -1174,12 +1255,16 @@ class _MrtStationCard extends StatelessWidget {
                           ),
                           child: Text(
                             code,
+                            // 9.5 → 11: legibility floor (also closer to
+                            // WSHomeView.swift's LineBullet at ws.mono(12)).
                             style: const TextStyle(
-                              fontSize: 9.5,
+                              fontSize: 11,
                               fontWeight: FontWeight.w700,
                               color: Colors.white,
                               fontFeatures: [FontFeature.tabularFigures()],
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       );
@@ -1195,12 +1280,17 @@ class _MrtStationCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      Text(
-                        _crowdWord(crowd.level),
-                        style: t.sans(
-                          10,
-                          weight: FontWeight.w500,
-                          color: t.dim,
+                      Flexible(
+                        child: Text(
+                          _crowdWord(crowd.level),
+                          // 10 → 11: legibility floor.
+                          style: t.sans(
+                            11,
+                            weight: FontWeight.w500,
+                            color: t.dim,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -1209,14 +1299,18 @@ class _MrtStationCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   station.name,
-                  style: t.sans(14, weight: FontWeight.w700, color: t.fg),
+                  // 14 → 15: matches WSHomeView.swift's MrtCard name
+                  // (ws.sans(15, .bold)).
+                  style: t.sans(15, weight: FontWeight.w700, color: t.fg),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
                 Text(
                   '${fmtDistance(entry.distanceM)} · ${entry.walkMin} min walk',
-                  style: t.mono(10.5, color: t.dim),
+                  // 10.5 → 11: legibility floor (iOS's own value here is
+                  // 10.5 — ws.mono(10.5)).
+                  style: t.mono(11, color: t.dim),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1271,15 +1365,31 @@ void _showMrtStationMenu(BuildContext context, MrtGeoStation station) {
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     child: Row(
                       children: [
+                        // Icon convention audit: this is a STATION SAVE
+                        // affordance, not a "favourite" toggle — iOS uses
+                        // bookmark/bookmark.slash for save even inside a
+                        // context menu (WSHomeView.swift MrtCard), reserving
+                        // literal stars for the separate "favourite bus
+                        // service" action (WSBusStopView.swift). Was
+                        // Icons.star_rounded/star_outline_rounded (wrong
+                        // glyph family); now matches the bookmark pair
+                        // soft_mrt_station_screen.dart already uses for the
+                        // same action.
                         Icon(
-                          saved ? Icons.star_rounded : Icons.star_outline_rounded,
+                          saved
+                              ? Icons.bookmark_rounded
+                              : Icons.bookmark_outline_rounded,
                           size: 20,
                           color: t.fg,
                         ),
                         const SizedBox(width: 14),
                         Text(
                           saved ? 'Remove from Saved' : 'Save station',
-                          style: t.sans(15, weight: FontWeight.w500, color: t.fg),
+                          style: t.sans(
+                            15,
+                            weight: FontWeight.w500,
+                            color: t.fg,
+                          ),
                         ),
                       ],
                     ),
@@ -1458,7 +1568,14 @@ class _StopPeekSheet extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 3),
-            Text(subtitle, style: t.mono(12.5, color: t.dim)),
+            // maxLines+ellipsis: a long road name shouldn't clip the sheet
+            // layout mid-render (audit pass — this Text had neither before).
+            Text(
+              subtitle,
+              style: t.mono(12.5, color: t.dim),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             const SizedBox(height: 14),
             // Live arrivals — AppModel.shared drives the 1-second ETA tick.
             ListenableBuilder(
@@ -1476,11 +1593,18 @@ class _StopPeekSheet extends StatelessWidget {
                 final pinned = AppModel.shared.isPinned(code);
                 return Column(
                   children: [
+                    // Icon convention audit: STOP SAVE affordance (not a
+                    // "favourite" toggle) — iOS uses bookmark/bookmark.slash
+                    // here too, even inside its context menu
+                    // (WSHomeView.swift StopRow); stars are reserved for the
+                    // separate "favourite bus service" action elsewhere. Was
+                    // Icons.star_rounded/star_outline_rounded; now matches
+                    // soft_stop_screen.dart's pin-toggle icon pair.
                     _actionRow(
                       t,
                       icon: pinned
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
+                          ? Icons.bookmark_rounded
+                          : Icons.bookmark_outline_rounded,
                       label: pinned ? 'Remove from Saved' : 'Add to Saved',
                       onTap: () => AppModel.shared.togglePin(code),
                     ),
@@ -1607,7 +1731,18 @@ class _StopPeekSheet extends StatelessWidget {
             ),
             child: Text(
               s.no,
-              style: t.sans(15, weight: FontWeight.w700, color: t.onAccent),
+              // Bus service number is a NUMERAL set in the sans face — give
+              // it tabular figures (theme.dart's new `sans(tabularFigures:)`
+              // param) so stacked badges in this list don't jitter/misalign
+              // digit widths against each other.
+              style: t.sans(
+                15,
+                weight: FontWeight.w700,
+                color: t.onAccent,
+                tabularFigures: true,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(width: 10),

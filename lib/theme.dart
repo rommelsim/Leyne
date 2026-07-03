@@ -138,7 +138,19 @@ class LyneTheme {
     double size, {
     FontWeight weight = FontWeight.w400,
     Color? color,
-  }) => TextStyle(fontSize: size, fontWeight: weight, color: color ?? fg);
+    // Sans (Inter/Roboto) numerals are proportional by default — unlike
+    // `mono()`, which is always tabular. Pass true wherever a NUMBER (not a
+    // word) is set in the sans face — a service-number badge, a bus count —
+    // so ticking/adjacent digits don't jitter or misalign width-to-width.
+    bool tabularFigures = false,
+  }) => TextStyle(
+    fontSize: size,
+    fontWeight: weight,
+    color: color ?? fg,
+    fontFeatures: tabularFigures
+        ? const [ui.FontFeature.tabularFigures()]
+        : null,
+  );
 
   static Color _hex(String hex) {
     final s = hex.replaceFirst('#', '');
@@ -262,16 +274,17 @@ class LyneTheme {
   ///     `ColorScheme` at all, dynamic or otherwise.
   ThemeData materialTheme({ColorScheme? dynamicScheme}) {
     final brightness = isDark ? Brightness.dark : Brightness.light;
-    final resolved = (dynamicScheme ??
-            ColorScheme.fromSeed(
-              seedColor: LyneSignal.meBlue,
-              brightness: brightness,
-            ))
-        // dynamic_color's harmonized() nudges error/errorContainer toward
-        // the resolved primary so a wallpaper-driven scheme doesn't clash;
-        // harmless here since `error`/`onError` are overridden to our own
-        // `crit`/`contrastFg` tokens immediately below regardless.
-        .harmonized();
+    final resolved =
+        (dynamicScheme ??
+                ColorScheme.fromSeed(
+                  seedColor: LyneSignal.meBlue,
+                  brightness: brightness,
+                ))
+            // dynamic_color's harmonized() nudges error/errorContainer toward
+            // the resolved primary so a wallpaper-driven scheme doesn't clash;
+            // harmless here since `error`/`onError` are overridden to our own
+            // `crit`/`contrastFg` tokens immediately below regardless.
+            .harmonized();
     final scheme = resolved.copyWith(
       brightness: brightness,
       surface: surface,
