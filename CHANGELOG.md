@@ -8,6 +8,39 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Departly 3.0.0 · Android (51) · 2026-07-04
+
+**2026-07-04 — Android AAB (3.0.0, build 51):** Major release — the public
+rename to **Departly** plus the new app icon ship in this build. versionName
+`3.0.0`, versionCode `51`. Built from `design-remake`. Artifact:
+`build/app/outputs/bundle/release/app-release.aab`. User-facing What's New
+entry added under `3.0.0` in `lib/data/changelog.dart`.
+
+- **Departly rename** — launcher label, onboarding wordmark/copy, widget
+  strings, notification copy all say Departly (bundle ID stays
+  `com.leyne.leyne`).
+- **New "pin-clock" app icon** — white map pin with a countdown-clock face on
+  a coral→red gradient. Proper adaptive split layers (gradient background
+  image + glyph-only foreground — a flat colour couldn't seam-match the
+  gradient) plus a punched-silhouette themed icon. SVG sources at
+  `assets/icon/src/`; old letterform generator superseded.
+- **Home: LIVE moved into the bus-stops header** — the standalone
+  `● LIVE · UPDATED` row under the search bar is gone; the first bus-stop
+  section eyebrow now carries the LIVE badge with `Updated h:mm`
+  right-aligned (owner-flagged mismatch vs iOS's BUS STOPS header).
+- **Onboarding follows iOS** — page dots top-centre showing permission
+  progress only (2 dots), content block vertically centred, ink CTA pill +
+  dim kicker/Back (previously wallpaper-tinted via dynamic colour), outlined
+  glyphs.
+- **Visible page transitions** — theme-level `FadeForwardsPageTransitionsBuilder`
+  (Android 15 slide+fade spec): opening a stop / bus / MRT station now
+  visibly pushes instead of the near-invisible M3 zoom.
+- **Closed-MRT forecast fix** — `ForecastWindow` returns empty once the day's
+  final slot has passed (was: stale tail with the last slot flagged "now");
+  the forecast card says "Service has ended for today" instead. Unit tests
+  updated to pin the new contract. (Same gate applied on iOS, where the
+  owner-reported "Busiest around now" bug lived.)
+
 ## Leyne 2.9.0 · iOS (build 30) · 2026-06-23
 
 **2026-06-23 — iOS Archive (2.9.0, build 30):** Feature release. `MARKETING_VERSION`
