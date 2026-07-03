@@ -39,8 +39,12 @@
 //     confirmDismiss always returns false — AppModel mutation +
 //     ListenableBuilder rebuilds the list; Dismissible never removes the
 //     widget itself.
-//   • EDIT mode reorders via ReorderableListView (Android's idiomatic
-//     equivalent of WSSavedView's `.onMove`/`EditMode`).
+//   • EDIT mode reorders via SliverReorderableList (Android's idiomatic
+//     equivalent of WSSavedView's `.onMove`/`EditMode`) — each editable
+//     section is a sibling sliver of the page's own CustomScrollView rather
+//     than a separately-scrolling ReorderableListView nested inside it, so
+//     the drag's auto-scroll has a real Scrollable to work with once the
+//     list runs past one screen (see the long comment in build()).
 //   • Empty state: centred glyph + "Nothing saved yet" + one line of body
 //     copy, no CTA — mirrors WSSavedView's `emptyState` (no button there
 //     either).
@@ -317,21 +321,45 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
               color: t.accent,
               // Disable pull-to-refresh while editing — drag gestures conflict.
               onRefresh: _editing ? () async {} : _refreshAll,
-              child: ListView(
+              // CustomScrollView + SliverReorderableList, NOT a plain ListView
+              // wrapping a shrinkWrap/NeverScrollableScrollPhysics
+              // ReorderableListView. That older nesting (still used for the
+              // static, non-editing render below, which is harmless) is a
+              // known Flutter footgun for the EDITING path specifically:
+              // SliverReorderableList drives its drag auto-scroll off
+              // `Scrollable.of(context)`, which — nested one level down as
+              // it was — resolved to its OWN never-scrollable, already
+              // fully-laid-out inner Scrollable instead of this page's, so
+              // auto-scroll during a drag was a no-op. Any list longer than
+              // one screen (a realistic case for pinned stops) could only be
+              // reordered within whatever was already on-screen; dragging to
+              // an off-screen position silently failed to move further,
+              // which read as "reorder doesn't stick." Making every editable
+              // section a sibling SLIVER of ONE shared CustomScrollView gives
+              // SliverReorderableList the real, scrollable ancestor it needs.
+              child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                children: [
-                  _header(context),
-                  const SizedBox(height: 20),
-                  if (_isEmpty)
-                    _emptyState(context)
-                  else ...[
-                    _stopsSection(context),
-                    if (AppModel.shared.favServices.isNotEmpty) ...[
-                      const SizedBox(height: 20),
-                      _linesSection(context),
-                    ],
-                  ],
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    sliver: SliverMainAxisGroup(
+                      slivers: [
+                        SliverToBoxAdapter(child: _header(context)),
+                        const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                        if (_isEmpty)
+                          SliverToBoxAdapter(child: _emptyState(context))
+                        else ...[
+                          ..._stopsSectionSlivers(context),
+                          if (AppModel.shared.favServices.isNotEmpty) ...[
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 20),
+                            ),
+                            ..._linesSectionSlivers(context),
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
                 ],
               ),
             );
@@ -430,29 +458,38 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   // ─── Stops section (pins + saved MRT stations, one continuous section) ────
   // Mirrors WSSavedView.list: both ForEach blocks sit directly under a
   // single "Stops" header with no sub-header between them.
+  //
+  // Returns a flat list of SLIVERS (not one Column) so the editing path can
+  // hand its ReorderableListView-equivalent (SliverReorderableList) straight
+  // to the page's single CustomScrollView — see the long comment in build()
+  // on why the editable lists need to be real siblings of the page's own
+  // Scrollable rather than nested inside a second, shrink-wrapped one.
 
-  Widget _stopsSection(BuildContext context) {
+  List<Widget> _stopsSectionSlivers(BuildContext context) {
     final pins = AppModel.shared.pins;
     final stations = AppModel.shared.savedMrtStations;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionHeader(context, label: 'Stops', meta: _updatedLabel(pins)),
-        if (pins.isNotEmpty || stations.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          if (pins.isNotEmpty)
-            _editing
-                ? _reorderablePins(context, pins)
-                : _staticPins(context, pins),
-          if (pins.isNotEmpty && stations.isNotEmpty)
-            const SizedBox(height: 10),
-          if (stations.isNotEmpty)
-            _editing
-                ? _reorderableStations(context, stations)
-                : _staticStations(context, stations),
-        ],
+    return [
+      SliverToBoxAdapter(
+        child: _sectionHeader(
+          context,
+          label: 'Stops',
+          meta: _updatedLabel(pins),
+        ),
+      ),
+      if (pins.isNotEmpty || stations.isNotEmpty) ...[
+        const SliverToBoxAdapter(child: SizedBox(height: 10)),
+        if (pins.isNotEmpty)
+          _editing
+              ? _reorderablePinsSliver(context, pins)
+              : SliverToBoxAdapter(child: _staticPins(context, pins)),
+        if (pins.isNotEmpty && stations.isNotEmpty)
+          const SliverToBoxAdapter(child: SizedBox(height: 10)),
+        if (stations.isNotEmpty)
+          _editing
+              ? _reorderableStationsSliver(context, stations)
+              : SliverToBoxAdapter(child: _staticStations(context, stations)),
       ],
-    );
+    ];
   }
 
   Widget _staticPins(BuildContext context, List<Pin> pins) {
@@ -467,10 +504,9 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
-  Widget _reorderablePins(BuildContext context, List<Pin> pins) {
-    return ReorderableListView(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+  Widget _reorderablePinsSliver(BuildContext context, List<Pin> pins) {
+    return SliverReorderableList(
+      itemCount: pins.length,
       // Remove the default drag elevation / Material shadow.
       proxyDecorator: (child, index, animation) =>
           Material(elevation: 0, color: Colors.transparent, child: child),
@@ -480,35 +516,35 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         reordered.insert(newIndex, item);
         AppModel.shared.reorderPins(reordered.map((p) => p.code).toList());
       },
-      children: [
-        for (final pin in pins)
-          Padding(
-            key: ValueKey('reorder-pin-${pin.code}'),
-            padding: EdgeInsets.only(bottom: pin == pins.last ? 0 : 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _StopCard(
-                    pin: pin,
-                    onTap: () => widget.onOpenStop(pin.code),
+      itemBuilder: (context, index) {
+        final pin = pins[index];
+        return Padding(
+          key: ValueKey('reorder-pin-${pin.code}'),
+          padding: EdgeInsets.only(bottom: index == pins.length - 1 ? 0 : 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: _StopCard(
+                  pin: pin,
+                  onTap: () => widget.onOpenStop(pin.code),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ReorderableDragStartListener(
+                index: index,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(
+                    Icons.drag_handle_rounded,
+                    size: 22,
+                    color: context.t.dim,
                   ),
                 ),
-                const SizedBox(width: 8),
-                ReorderableDragStartListener(
-                  index: pins.indexOf(pin),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(
-                      Icons.drag_handle_rounded,
-                      size: 22,
-                      color: context.t.dim,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-      ],
+        );
+      },
     );
   }
 
@@ -549,10 +585,12 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
-  Widget _reorderableStations(BuildContext context, List<MrtGeoStation> items) {
-    return ReorderableListView(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+  Widget _reorderableStationsSliver(
+    BuildContext context,
+    List<MrtGeoStation> items,
+  ) {
+    return SliverReorderableList(
+      itemCount: items.length,
       proxyDecorator: (child, index, animation) =>
           Material(elevation: 0, color: Colors.transparent, child: child),
       onReorderItem: (oldIndex, newIndex) {
@@ -561,35 +599,35 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         reordered.insert(newIndex, item);
         AppModel.shared.reorderSavedMrt(reordered.map((s) => s.id).toList());
       },
-      children: [
-        for (final station in items)
-          Padding(
-            key: ValueKey('reorder-mrt-${station.id}'),
-            padding: EdgeInsets.only(bottom: station == items.last ? 0 : 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _StationCard(
-                    station: station,
-                    onTap: () => widget.onOpenStation(station),
+      itemBuilder: (context, index) {
+        final station = items[index];
+        return Padding(
+          key: ValueKey('reorder-mrt-${station.id}'),
+          padding: EdgeInsets.only(bottom: index == items.length - 1 ? 0 : 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: _StationCard(
+                  station: station,
+                  onTap: () => widget.onOpenStation(station),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ReorderableDragStartListener(
+                index: index,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(
+                    Icons.drag_handle_rounded,
+                    size: 22,
+                    color: context.t.dim,
                   ),
                 ),
-                const SizedBox(width: 8),
-                ReorderableDragStartListener(
-                  index: items.indexOf(station),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(
-                      Icons.drag_handle_rounded,
-                      size: 22,
-                      color: context.t.dim,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-      ],
+        );
+      },
     );
   }
 
@@ -621,19 +659,15 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   // ─── Lines section (saved bus services) ────────────────────────────────
   // Only rendered when non-empty — mirrors `if !m.favServices.isEmpty`.
 
-  Widget _linesSection(BuildContext context) {
+  List<Widget> _linesSectionSlivers(BuildContext context) {
     final items = AppModel.shared.favServices;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionHeader(context, label: 'Lines'),
-        const SizedBox(height: 10),
-        if (_editing)
-          _reorderableLines(context, items)
-        else
-          _staticLines(context, items),
-      ],
-    );
+    return [
+      SliverToBoxAdapter(child: _sectionHeader(context, label: 'Lines')),
+      const SliverToBoxAdapter(child: SizedBox(height: 10)),
+      _editing
+          ? _reorderableLinesSliver(context, items)
+          : SliverToBoxAdapter(child: _staticLines(context, items)),
+    ];
   }
 
   Widget _staticLines(BuildContext context, List<FavService> items) {
@@ -648,10 +682,9 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
-  Widget _reorderableLines(BuildContext context, List<FavService> items) {
-    return ReorderableListView(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+  Widget _reorderableLinesSliver(BuildContext context, List<FavService> items) {
+    return SliverReorderableList(
+      itemCount: items.length,
       proxyDecorator: (child, index, animation) =>
           Material(elevation: 0, color: Colors.transparent, child: child),
       onReorderItem: (oldIndex, newIndex) {
@@ -660,30 +693,30 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         reordered.insert(newIndex, item);
         AppModel.shared.reorderFavServices(reordered.map((f) => f.id).toList());
       },
-      children: [
-        for (final fav in items)
-          Padding(
-            key: ValueKey('reorder-svc-${fav.id}'),
-            padding: EdgeInsets.only(bottom: fav == items.last ? 0 : 10),
-            child: Row(
-              children: [
-                Expanded(child: _lineCard(context, fav)),
-                const SizedBox(width: 8),
-                ReorderableDragStartListener(
-                  index: items.indexOf(fav),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(
-                      Icons.drag_handle_rounded,
-                      size: 22,
-                      color: context.t.dim,
-                    ),
+      itemBuilder: (context, index) {
+        final fav = items[index];
+        return Padding(
+          key: ValueKey('reorder-svc-${fav.id}'),
+          padding: EdgeInsets.only(bottom: index == items.length - 1 ? 0 : 10),
+          child: Row(
+            children: [
+              Expanded(child: _lineCard(context, fav)),
+              const SizedBox(width: 8),
+              ReorderableDragStartListener(
+                index: index,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(
+                    Icons.drag_handle_rounded,
+                    size: 22,
+                    color: context.t.dim,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-      ],
+        );
+      },
     );
   }
 
@@ -995,9 +1028,20 @@ class _StopCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                ListenableBuilder(
-                  listenable: AppModel.shared,
-                  builder: (context, _) => _SoonestColumn(services: services),
+                // Width-capped (iOS parity note): an unconstrained trailing
+                // column takes its full natural width regardless of how
+                // little space is left (Flutter always gives a Row's
+                // non-flex children unbounded width) — that starved the
+                // leading Expanded column down to a sliver, collapsing its
+                // service-tile Wrap into a single vertical stack (owner-
+                // reported "ETAs render vertically"). Same bug/fix as Home's
+                // when-column (see soft_home_screen.dart `_identityRow`).
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: ListenableBuilder(
+                    listenable: AppModel.shared,
+                    builder: (context, _) => _SoonestColumn(services: services),
+                  ),
                 ),
               ],
             ),
@@ -1051,8 +1095,16 @@ class _SoonestColumn extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Bus ${soonest.no} · ', style: t.mono(10.5, color: t.dim)),
-              CrowdMeter(load: soonest.load, compact: true),
+              // 10pt matches WSSavedView's `ws.mono(10)` for this prefix —
+              // also keeps this row's fixed-width portion (prefix + 3 crowd
+              // glyphs) under the 150 cap above with room for the crowd
+              // word, avoiding a fresh RenderFlex overflow at the width cap.
+              Text('Bus ${soonest.no} · ', style: t.mono(10, color: t.dim)),
+              // Flexible so the compact word ellipsizes instead of
+              // overflowing when the 150-wide host is tight — safe here
+              // specifically because the host is bounded (see CrowdMeter's
+              // own "No Flexible here" note for unbounded call sites).
+              Flexible(child: CrowdMeter(load: soonest.load, compact: true)),
             ],
           ),
         ],
