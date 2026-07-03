@@ -176,6 +176,8 @@ struct LineBullet: View {
             Text(code)
                 .font(ws.mono(12, weight: .bold))
                 .foregroundStyle(WSLine.onLine)
+                .lineLimit(1)
+                .fixedSize()   // never let a station code wrap ("EW2/1") in a tight row
                 .padding(.horizontal, 6)
                 .frame(minWidth: 26, minHeight: 21)
                 .background(colour)
@@ -184,6 +186,8 @@ struct LineBullet: View {
             Text(code)
                 .font(ws.mono(15, weight: .bold))
                 .foregroundStyle(WSLine.onLine)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .frame(width: 46, height: 40)
                 .background(colour)
                 .clipShape(RoundedRectangle(cornerRadius: 10))

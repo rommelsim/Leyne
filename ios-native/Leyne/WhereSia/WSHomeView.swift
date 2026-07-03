@@ -304,11 +304,16 @@ private struct MrtCard: View {
         Button { push(.mrtStation(station)) } label: {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 5) {
-                    ForEach(station.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
+                    // Two bullets max in the fixed-width card — three plus the
+                    // crowd chip can't fit 186pt (the full set lives on the
+                    // station screen). Bullets are fixedSize now, so an
+                    // overflow would draw past the card instead of wrapping.
+                    ForEach(station.codes.prefix(2), id: \.self) { LineBullet(code: $0) }
                     Spacer(minLength: 0)
                     if let crowd = store.wsCrowd(for: station), crowd != .unknown {
                         CrowdGauge(fraction: crowd.wsFraction, width: 22)
                         Text(crowd.wsWord).font(ws.mono(10, weight: .bold)).foregroundStyle(ws.dim)
+                            .lineLimit(1)
                     }
                 }
                 Text(station.name)
