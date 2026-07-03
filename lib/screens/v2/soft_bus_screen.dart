@@ -1,21 +1,29 @@
 // SoftBusScreen — Leyne bus tracking (Material 3 Android).
 //
 // Mirrors iOS WSTrackBusView (ios-native/Leyne/WhereSia/WSTrackBusView.swift)
-// structurally: a live card, then the route, then a single pinned CTA.
-// Android intentionally has NO map — see memory "android-no-map": the map is
+// structurally: a live card, then the route bare on the background, then a
+// single pinned CTA — no other section is carded, matching iOS exactly
+// (owner punch-list Section F, items 10/12/13, 2026-07-03). Android
+// intentionally has NO map — see memory "android-no-map": the map is
 // iOS-only (native MapKit); the route timeline is the substitute, not a
 // secondary affordance behind a tap. Layout:
-//   1. Top bar — back · info · more (save/manage alerts/share — an
-//      Android-only overflow; WSTrackBusView itself carries neither, since
-//      this screen is reached only after the user already picked a service).
-//   2. Title   — "Bus {svc}" + "Towards {dest}" + LIVE
+//   1. Top bar — back · "Bus {svc}" title · info. No overflow button: the
+//      former save/manage-alerts/share menu is gone (WSTrackBusView carries
+//      neither, and the title is now the compact bar title iOS shows, not a
+//      big in-content heading — see _buildTopBar for exactly where each
+//      former overflow action landed).
+//   2. Dest row — "Towards {dest}" + LIVE, directly under the bar (no
+//      duplicate "Bus {svc}" heading now that the bar owns the title).
 //   3. Hero    — ETA (a bare "—" when there's no live bus yet) + approach
 //      context + crowd, then deck/wheelchair + next two (Android-only
 //      enrichment — WSTrackBusView doesn't surface these on this screen).
+//      The one card on this screen, matching iOS's carded liveCard.
 //   4. Route   — "ROUTE · N stops" header + the full collapsible route
-//      timeline (shared RouteTimeline widget), inline in the scroll — no
-//      "tap to see the full route" modal step, matching iOS's single-scroll
-//      structure.
+//      timeline (shared RouteTimeline widget), inline in the scroll, bare on
+//      the screen background — no card (iOS's Route section is a plain
+//      VStack on ws.bg, not a panel; a t.surface card here was a
+//      restructure-era regression, fixed 2026-07-03). No "tap to see the
+//      full route" modal step either, matching iOS's single-scroll structure.
 //   5. CTA     — "Alert me 1 stop before" pinned above the ad banner, the
 //      one primary action on this screen (iOS parity).
 //
@@ -28,7 +36,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../data/alert_timing.dart';
 import '../../data/bus_progress.dart';
@@ -40,7 +47,6 @@ import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/route_timeline.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
-import 'manage_alerts_screen.dart';
 import 'soft_service_info_screen.dart';
 import 'soft_stop_screen.dart';
 
@@ -89,10 +95,6 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   // is open (the global app tick only refreshes pinned / open-card stops).
   Timer? _ticker;
 
-  // ── Transient confirmation toast ─────────────────────────────────────
-  ({IconData icon, String text})? _toast;
-  Timer? _toastTimer;
-
   // ── Lifecycle ────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -135,7 +137,6 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   @override
   void dispose() {
     _ticker?.cancel();
-    _toastTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -302,106 +303,124 @@ class _SoftBusScreenState extends State<SoftBusScreen>
         listenable: DataStore.shared,
         builder: (context, _) {
           final t = context.t;
-          return Stack(
-            children: [
-              SafeArea(
-                bottom: false,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildTopBar(t),
-                    // Fill-or-scroll: content hugs its natural height when
-                    // short; a long route makes the whole area scroll
-                    // instead of overflowing. Pull-to-refresh re-fetches
-                    // arrivals AND the route (iOS WSTrackBusView parity:
-                    // .refreshable does both).
-                    Expanded(
-                      child: RefreshIndicator(
-                        color: t.accent,
-                        onRefresh: () async {
-                          await DataStore.shared.refreshArrivals(
-                            widget.stopCode,
-                          );
-                          await _loadRoute();
-                        },
-                        child: LayoutBuilder(
-                          builder: (ctx, c) => SingleChildScrollView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minHeight: c.maxHeight,
-                              ),
-                              child: IntrinsicHeight(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        16,
-                                        2,
-                                        16,
-                                        0,
-                                      ),
-                                      child: _buildTitleBlock(
-                                        context,
-                                        t,
-                                        _liveService(),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 14),
-                                    // INNER listener: AppModel only —
-                                    // rebuilds every second so the ETA
-                                    // countdown ticks. Only _buildHeroCard
-                                    // (which reads DateTime.now()) is inside
-                                    // it; everything else stays in the outer
-                                    // DataStore scope.
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                      ),
-                                      child: ListenableBuilder(
-                                        listenable: AppModel.shared,
-                                        builder: (context, _) =>
-                                            _buildHeroCard(t),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                      ),
-                                      child: _buildRouteSection(t),
-                                    ),
-                                    const Spacer(),
-                                  ],
+          return SafeArea(
+            bottom: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildTopBar(t),
+                // Fill-or-scroll: content hugs its natural height when
+                // short; a long route makes the whole area scroll
+                // instead of overflowing. Pull-to-refresh re-fetches
+                // arrivals AND the route (iOS WSTrackBusView parity:
+                // .refreshable does both).
+                Expanded(
+                  child: RefreshIndicator(
+                    color: t.accent,
+                    onRefresh: () async {
+                      await DataStore.shared.refreshArrivals(widget.stopCode);
+                      await _loadRoute();
+                    },
+                    child: LayoutBuilder(
+                      builder: (ctx, c) => SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: c.maxHeight),
+                          child: IntrinsicHeight(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    2,
+                                    16,
+                                    0,
+                                  ),
+                                  child: _buildDestRow(
+                                    context,
+                                    t,
+                                    _liveService(),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 14),
+                                // INNER listener: AppModel only —
+                                // rebuilds every second so the ETA
+                                // countdown ticks. Only _buildHeroCard
+                                // (which reads DateTime.now()) is inside
+                                // it; everything else stays in the outer
+                                // DataStore scope.
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: ListenableBuilder(
+                                    listenable: AppModel.shared,
+                                    builder: (context, _) => _buildHeroCard(t),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                // Bare on the screen background — NOT a
+                                // card. iOS's Route section (WSSectionHeader
+                                // + timeline) sits directly on ws.bg inside a
+                                // plain ScrollView; only the hero card above
+                                // is carded. A t.surface panel here used to
+                                // double-card the screen (owner item 10,
+                                // 2026-07-03) — removed.
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: _buildRouteSection(t),
+                                ),
+                                const SizedBox(height: 16),
+                                const Spacer(),
+                              ],
                             ),
                           ),
                         ),
                       ),
                     ),
-                    // The one primary action on this screen (iOS
-                    // WSTrackBusView parity) — its own AppModel listener so
-                    // the label/icon flips the instant the alert toggles.
-                    ListenableBuilder(
-                      listenable: AppModel.shared,
-                      builder: (context, _) => _buildAlertCta(t),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-              if (_toast != null) _buildToast(context, t),
-            ],
+                // The one primary action on this screen (iOS
+                // WSTrackBusView parity) — its own AppModel listener so
+                // the label/icon flips the instant the alert toggles.
+                ListenableBuilder(
+                  listenable: AppModel.shared,
+                  builder: (context, _) => _buildAlertCta(t),
+                ),
+              ],
+            ),
           );
         },
       ),
     );
   }
 
-  // ── 1. Top bar — back · info · more (save/manage alerts/share). The
-  //    boarding-alert toggle lives at the bottom as the single primary CTA
-  //    (iOS WSTrackBusView parity: the header carries only back + info). ───
+  // ── 1. Top bar — back · "Bus {svc}" title · info. No overflow button
+  //    (owner item 13, 2026-07-03): iOS's bar carries only back + the
+  //    compact title + info, so the former save/manage-alerts/share menu is
+  //    gone rather than folded in wholesale —
+  //      • Save service   → already lives on SoftServiceInfoScreen's own
+  //        bookmark toggle (opened by the info button right next to this
+  //        title), which bookmarks the same (serviceNo, stop) pair. Nothing
+  //        to add — it was already a fully equivalent, reachable action.
+  //      • Manage alerts  → DROPPED. Its only remaining job (pause/resume,
+  //        delete, reorder) is already done inline on the Alerts tab
+  //        (SoftAlertsScreen — see its 2026-07-02 owner decision doc
+  //        comment), which superseded routing to ManageAlertsScreen from
+  //        everywhere except this one menu. Removing this entry leaves
+  //        ManageAlertsScreen with zero call sites (grep-verified) — flagged
+  //        to the owner, same as the already-accepted SoftSettingsScreen gap
+  //        noted in soft_alerts_screen.dart.
+  //      • Share bus      → DROPPED. WSTrackBusView has no share affordance
+  //        at all on this screen, and no other Android screen offers "share
+  //        a bus" either (grep-verified) — nothing to fold in, this was an
+  //        Android-only addition with no iOS equivalent to mirror.
+  //    The boarding-alert toggle lives at the bottom as the single primary
+  //    CTA (iOS WSTrackBusView parity: the header carries only back + title
+  //    + info). ─────────────────────────────────────────────────────────
   Widget _buildTopBar(LyneTheme t) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -412,16 +431,20 @@ class _SoftBusScreenState extends State<SoftBusScreen>
             semanticsLabel: 'Back',
             child: Icon(Icons.arrow_back_rounded, size: 20, color: t.fg),
           ),
-          const Spacer(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Bus ${widget.svc}',
+              style: t.sans(24, weight: FontWeight.w700, color: t.fg),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
           _CircleButton(
             onTap: _openServiceInfo,
             semanticsLabel: 'Bus ${widget.svc} service info',
             child: Icon(Icons.info_outline_rounded, size: 20, color: t.fg),
-          ),
-          const SizedBox(width: 8),
-          ListenableBuilder(
-            listenable: AppModel.shared,
-            builder: (context, _) => _moreButton(t),
           ),
         ],
       ),
@@ -443,103 +466,7 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
-  /// Save service · manage alerts · share, folded into one overflow button so
-  /// the header stays a clean back + info + more — matching iOS's minimal bar
-  /// while keeping the save/share affordances the Android app already offers.
-  /// (WSTrackBusView itself has no save/share on this screen — this is a
-  /// deliberate Android addition, not something being mirrored from iOS.)
-  Widget _moreButton(LyneTheme t) {
-    final saved =
-        AppModel.shared.isFavService(no: widget.svc, stop: widget.stopCode) ||
-        AppModel.shared.isFavService(no: widget.svc, stop: null);
-    return PopupMenuButton<String>(
-      tooltip: 'More options',
-      padding: EdgeInsets.zero,
-      color: t.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-      ),
-      onSelected: (v) {
-        if (v == 'save') {
-          _toggleServiceSaved();
-        } else if (v == 'manage') {
-          Navigator.of(
-            context,
-          ).push(MaterialPageRoute(builder: (_) => const ManageAlertsScreen()));
-        } else if (v == 'share') {
-          _shareBus();
-        }
-      },
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          value: 'save',
-          child: Row(
-            children: [
-              Icon(
-                saved ? Icons.star_rounded : Icons.star_outline_rounded,
-                size: 18,
-                color: t.dim,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                saved ? 'Remove from saved' : 'Save bus ${widget.svc}',
-                style: t.sans(14, color: t.fg),
-              ),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'manage',
-          child: Row(
-            children: [
-              Icon(Icons.notifications_rounded, size: 18, color: t.dim),
-              const SizedBox(width: 10),
-              Text('Manage alerts', style: t.sans(14, color: t.fg)),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'share',
-          child: Row(
-            children: [
-              Icon(Icons.ios_share_rounded, size: 18, color: t.dim),
-              const SizedBox(width: 10),
-              Text('Share bus ${widget.svc}', style: t.sans(14, color: t.fg)),
-            ],
-          ),
-        ),
-      ],
-      child: Semantics(
-        button: true,
-        label: 'More options for bus ${widget.svc}',
-        child: SizedBox(
-          width: 48,
-          height: 48,
-          child: Center(
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: t.line, width: 1),
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.more_vert_rounded, size: 20, color: t.fg),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _shareBus() {
-    final text =
-        'Bus ${widget.svc} from Stop ${widget.stopCode} — tracked on Leyne';
-    Clipboard.setData(ClipboardData(text: text));
-    _showToast(Icons.check_rounded, 'Bus ${widget.svc} link copied');
-  }
-
-  // ── Boarding-alert + save toggles (with toast/snackbar feedback) ───────
+  // ── Boarding-alert toggle ───────────────────────────────────────────────
   bool get _boardingAlertOn =>
       AppModel.shared.alertFor(
         kind: AlertKind.arrival,
@@ -560,79 +487,12 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     if (mounted) setState(() {});
   }
 
-  void _toggleServiceSaved() {
-    final m = AppModel.shared;
-    final savedHere = m.isFavService(no: widget.svc, stop: widget.stopCode);
-    final savedAnywhere = m.isFavService(no: widget.svc, stop: null);
-    if (savedHere || savedAnywhere) {
-      if (savedHere) m.toggleFavService(no: widget.svc, stop: widget.stopCode);
-      if (savedAnywhere) m.toggleFavService(no: widget.svc, stop: null);
-      _showToast(
-        Icons.directions_bus_outlined,
-        'Bus ${widget.svc} removed from saved',
-      );
-    } else {
-      m.toggleFavService(no: widget.svc, stop: widget.stopCode);
-      _showToast(
-        Icons.directions_bus_rounded,
-        'Bus ${widget.svc} saved — find it under Saved',
-      );
-    }
-  }
-
-  // ── Toast ─────────────────────────────────────────────────────────────
-  void _showToast(IconData icon, String text) {
-    setState(() => _toast = (icon: icon, text: text));
-    _toastTimer?.cancel();
-    _toastTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _toast = null);
-    });
-  }
-
-  Widget _buildToast(BuildContext context, LyneTheme t) {
-    final toast = _toast!;
-    return Positioned(
-      top: MediaQuery.paddingOf(context).top + 8,
-      left: 16,
-      right: 16,
-      child: IgnorePointer(
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-            decoration: BoxDecoration(
-              color: t.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: t.line, width: 1),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: t.isDark ? 0.34 : 0.10),
-                  blurRadius: 16,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(toast.icon, size: 16, color: t.soon),
-                const SizedBox(width: 9),
-                Flexible(
-                  child: Text(
-                    toast.text,
-                    style: t.sans(13, weight: FontWeight.w500, color: t.fg),
-                    maxLines: 2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ── 2. Title block ────────────────────────────────────────────────────
-  Widget _buildTitleBlock(BuildContext context, LyneTheme t, Service? live) {
+  // ── 2. Dest row — "Towards {dest}" + LIVE ───────────────────────────────
+  // The former "Bus {svc}" heading that used to open this block is gone —
+  // the top bar's own title now carries that (owner item 12, 2026-07-03), so
+  // this section no longer duplicates it; only the destination + freshness
+  // indicator remain, directly under the bar.
+  Widget _buildDestRow(BuildContext context, LyneTheme t, Service? live) {
     final feed = Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
     final conf = live != null
         ? ArrivalConfidence.of(monitored: live.monitored, feed: feed)
@@ -640,55 +500,43 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     final isLive = conf != ArrivalConfidence.none;
     final dest = live?.dest ?? '';
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(
-          'Bus ${widget.svc}',
-          style: t.sans(28, weight: FontWeight.w700, color: t.fg),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        Expanded(
+          child: Text(
+            dest.isEmpty ? 'Loading route…' : 'Towards $dest',
+            style: t.sans(15, color: t.dim),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                dest.isEmpty ? 'Loading route…' : 'Towards $dest',
-                style: t.sans(15, color: t.dim),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (isLive) ...[
-              const SizedBox(width: 8),
-              Semantics(
-                label: 'Live tracking',
-                excludeSemantics: true,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: t.soon,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'LIVE',
-                      style: t
-                          .mono(10, weight: FontWeight.w700, color: t.soon)
-                          .copyWith(letterSpacing: 0.8),
-                    ),
-                  ],
+        if (isLive) ...[
+          const SizedBox(width: 8),
+          Semantics(
+            label: 'Live tracking',
+            excludeSemantics: true,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: t.soon,
+                    shape: BoxShape.circle,
+                  ),
                 ),
-              ),
-            ],
-          ],
-        ),
+                const SizedBox(width: 4),
+                Text(
+                  'LIVE',
+                  style: t
+                      .mono(10, weight: FontWeight.w700, color: t.soon)
+                      .copyWith(letterSpacing: 0.8),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -857,7 +705,11 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   // ── 4. Route — full-route timeline (no map on Android; this timeline IS
   //    the route-progress affordance). Always inline, matching iOS
   //    WSTrackBusView's single-scroll structure — no "tap to see the full
-  //    route" modal step. ───────────────────────────────────────────────
+  //    route" modal step. Bare on the screen background, NOT a card: iOS's
+  //    Route section is a plain VStack directly on ws.bg inside the
+  //    ScrollView (only the liveCard above is carded) — a t.surface panel
+  //    here double-carded the screen (owner item 10, 2026-07-03; fixed by
+  //    dropping the wrapping Container this method used to return). ───────
   Widget _buildRouteSection(LyneTheme t) {
     final hasRoute =
         _routeLoaded &&
@@ -897,21 +749,15 @@ class _SoftBusScreenState extends State<SoftBusScreen>
       );
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: t.line, width: 1),
-      ),
-      child: body,
-    );
+    // SizedBox, not Container — no fill/border/radius. Bare on t.bg, matching
+    // iOS; width:double.infinity only keeps the loading/unavailable states
+    // (Column(mainAxisSize: min) centred inside) full-width as before.
+    return SizedBox(width: double.infinity, child: body);
   }
 
   /// "ROUTE ───── N stops" — mirrors iOS's WSSectionHeader recipe (uppercase
-  /// heavy label · hairline rule · mono meta) inside Android's own card
-  /// chrome.
+  /// heavy label · hairline rule · mono meta), now directly on the screen
+  /// background rather than inside a card.
   Widget _routeSectionHeader(LyneTheme t, int count) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -933,31 +779,40 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
-  /// Shown while the route fetch is in flight.
+  /// Shown while the route fetch is in flight. Padded on its own (rather than
+  /// via the card padding this used to sit inside) now that the section is
+  /// bare on the background — mirrors iOS's own top-padded "Loading route…"
+  /// fallback text.
   Widget _routeLoadingState(LyneTheme t) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 22,
-          height: 22,
-          child: CircularProgressIndicator(strokeWidth: 2.4, color: t.dim),
-        ),
-        const SizedBox(height: 12),
-        Text('Loading route…', style: t.sans(14, color: t.dim)),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2.4, color: t.dim),
+          ),
+          const SizedBox(height: 12),
+          Text('Loading route…', style: t.sans(14, color: t.dim)),
+        ],
+      ),
     );
   }
 
   /// Shown when the fetch resolves with no route for this service.
   Widget _routeUnavailableState(LyneTheme t) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.route_rounded, size: 30, color: t.faint),
-        const SizedBox(height: 10),
-        Text('Route unavailable', style: t.sans(14, color: t.dim)),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.route_rounded, size: 30, color: t.faint),
+          const SizedBox(height: 10),
+          Text('Route unavailable', style: t.sans(14, color: t.dim)),
+        ],
+      ),
     );
   }
 

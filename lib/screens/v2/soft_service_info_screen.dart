@@ -196,9 +196,13 @@ class _SoftServiceInfoScreenState extends State<SoftServiceInfoScreen> {
     return cat.isEmpty ? 'BUS SERVICE' : cat;
   }
 
-  /// Trailing star toggle — bookmarks this (serviceNo, fromStop) favourite.
-  /// Mirrors iOS's app-bar bookmark button; matches the star idiom already
-  /// used for "Save service" on SoftBusScreen and station saves elsewhere.
+  /// Trailing bookmark toggle — bookmarks this (serviceNo, fromStop)
+  /// favourite. Mirrors iOS's app-bar button exactly: WSServiceInfoView.swift
+  /// uses `.bookmark`/`.bookmarkFilled` for this save affordance, not a star
+  /// — on iOS a literal star is reserved for long-press context menus (SF
+  /// "star"/"star.slash"), not header save controls (icon audit, Section B,
+  /// 2026-07-03; this screen previously used star_rounded here, which was
+  /// the wrong glyph for this spot).
   Widget _saveAction(LyneTheme t) {
     return ListenableBuilder(
       listenable: AppModel.shared,
@@ -209,7 +213,7 @@ class _SoftServiceInfoScreenState extends State<SoftServiceInfoScreen> {
         );
         return IconButton(
           icon: Icon(
-            saved ? Icons.star_rounded : Icons.star_outline_rounded,
+            saved ? Icons.bookmark_rounded : Icons.bookmark_outline_rounded,
             size: 22,
             color: saved ? t.soon : t.fg,
           ),

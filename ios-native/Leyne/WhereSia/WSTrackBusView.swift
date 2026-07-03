@@ -24,7 +24,8 @@ struct WSTrackBusView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var route: RouteInfo?
+    @State private var serviceRouteData: ServiceRoute?
+    @State private var selectedDirIndex = 0
     @State private var busIndex: Int?
     @State private var refreshTick = false
     @State private var showEarlier = false
@@ -33,6 +34,38 @@ struct WSTrackBusView: View {
     private var service: Service? { store.servicesFor(stopCode).first { $0.no == serviceNo } }
     private var isAlerted: Bool {
         m.alert(kind: .arrival, busNo: serviceNo, stopCode: stopCode) != nil
+    }
+
+    /// The direction currently shown in the Route section below — starts on
+    /// whichever direction serves `stopCode` but can be flipped with the
+    /// switcher when the service runs both ways (mirrors Android's
+    /// SegmentedButton on this same screen, restyled via WSSegmented).
+    private var currentDirection: RouteDirection? {
+        guard let sr = serviceRouteData, selectedDirIndex < sr.directions.count else { return nil }
+        return sr.directions[selectedDirIndex]
+    }
+
+    /// The direction that actually serves the tracked stop, regardless of
+    /// which one is currently being browsed. Anything describing the REAL bus
+    /// being tracked (hero card, live bus marker) is grounded here so
+    /// switching to the other direction never misrepresents it.
+    private var anchorDirection: RouteDirection? {
+        serviceRouteData?.directions.first(where: \.anchorPresent) ?? serviceRouteData?.directions.first
+    }
+
+    /// Stop list for whichever direction is currently displayed in the
+    /// timeline below.
+    private var route: RouteInfo? {
+        guard let dir = currentDirection else { return nil }
+        return RouteInfo(stops: dir.stops, youIndex: dir.youIndex, busIndex: nil, busCoord: nil)
+    }
+
+    /// The live bus marker's stop index — meaningful only against the
+    /// direction that actually serves this stop. Nil while the OTHER
+    /// direction is being browsed, so a tracked bus is never drawn onto (or
+    /// used to grey out stops on) a route it isn't actually running.
+    private var displayBusIndex: Int? {
+        (currentDirection?.anchorPresent ?? true) ? busIndex : nil
     }
 
     var body: some View {
@@ -46,6 +79,14 @@ struct WSTrackBusView: View {
                     if let r = route, !r.stops.isEmpty {
                         WSSectionHeader(label: "Route", meta: "\(r.stops.count) stops")
                             .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 10)
+                        // Loop / single-direction services stay silent here; most
+                        // services run both ways (Android parity: the toggle sits
+                        // under this same header on soft_bus_screen.dart).
+                        if let sr = serviceRouteData, sr.directions.count > 1 {
+                            WSSegmented(options: sr.directions.map { "To \(shortDest($0.destinationName))" },
+                                        selection: $selectedDirIndex)
+                                .padding(.horizontal, 22).padding(.bottom, 12)
+                        }
                     }
                     timeline
                 }
@@ -146,16 +187,24 @@ struct WSTrackBusView: View {
     }
 
     private var destName: String {
-        route?.stops.last?.name ?? "—"
+        let name = anchorDirection?.destinationName ?? ""
+        return name.isEmpty ? "—" : name
     }
 
     // MARK: timeline
 
     @ViewBuilder private var timeline: some View {
         if let r = route, !r.stops.isEmpty {
-            let you = min(max(r.youIndex, 0), r.stops.count - 1)
-            let baseStart = busIndex.map { min($0, you) } ?? max(0, you - 6)
-            let baseEnd = min(r.stops.count - 1, you + 1)
+            // The live bus marker and "your stop" highlight only mean anything
+            // on the direction that actually serves this stop — browsing the
+            // OTHER direction shows its full, plain route instead of guessing
+            // where a bus that isn't running that way would be (Android
+            // parity: dir.anchorPresent gates canMarkBoard / the bus estimate
+            // there too).
+            let anchorHere = currentDirection?.anchorPresent ?? true
+            let you = anchorHere ? min(max(r.youIndex, 0), r.stops.count - 1) : -1
+            let baseStart = anchorHere ? (displayBusIndex.map { min($0, you) } ?? max(0, you - 6)) : 0
+            let baseEnd = anchorHere ? min(r.stops.count - 1, you + 1) : r.stops.count - 1
             let start = showEarlier ? 0 : baseStart
             let end = showLater ? r.stops.count - 1 : baseEnd
             VStack(alignment: .leading, spacing: 0) {
@@ -168,7 +217,7 @@ struct WSTrackBusView: View {
                 }
                 ForEach(start...end, id: \.self) { i in
                     stepRow(r, index: i, you: you)
-                    if busIndex == i && i < end {
+                    if displayBusIndex == i && i < end {
                         vehicleRow(r)
                     }
                 }
@@ -182,6 +231,7 @@ struct WSTrackBusView: View {
                 }
             }
             .padding(.horizontal, 22)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: selectedDirIndex)
         } else {
             Text("Loading route…")
                 .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
@@ -191,7 +241,7 @@ struct WSTrackBusView: View {
 
     private func stepRow(_ r: RouteInfo, index i: Int, you: Int) -> some View {
         let stop = r.stops[i]
-        let passed = busIndex.map { i < $0 } ?? false
+        let passed = displayBusIndex.map { i < $0 } ?? false
         let isYou = i == you
         let ic = wsInterchange(forStopName: stop.name)
         return HStack(alignment: .top, spacing: 15) {
@@ -361,15 +411,30 @@ struct WSTrackBusView: View {
     // MARK: data
 
     private func loadRoute() async {
-        guard let r = await store.route(service: serviceNo, stopCode: stopCode) else { return }
-        if reduceMotion { route = r }
-        else { withAnimation(.easeOut(duration: 0.35)) { route = r } }
-        // Approximate the bus's position from its live coord → nearest upstream stop.
+        guard let sr = await store.serviceRoute(service: serviceNo, stopCode: stopCode) else { return }
+        let isFirstLoad = serviceRouteData == nil
+        if reduceMotion { serviceRouteData = sr }
+        else { withAnimation(.easeOut(duration: 0.35)) { serviceRouteData = sr } }
+        // Preserve a manual direction switch across pull-to-refresh reloads —
+        // only (re)seat the selection on first load, or if it's gone stale
+        // (fewer directions came back than the index needs).
+        if isFirstLoad || selectedDirIndex >= sr.directions.count {
+            selectedDirIndex = sr.initialIndex
+        }
+        // The live bus position is plotted only against the direction that
+        // actually serves this stop — grounded here regardless of which
+        // direction is currently browsed below, so the tracked bus is never
+        // drawn onto a route it isn't actually running.
+        guard let anchor = sr.directions.first(where: { $0.anchorPresent }) ?? sr.directions.first,
+              !anchor.stops.isEmpty else {
+            busIndex = nil
+            return
+        }
         if let coord = await store.liveBus(service: serviceNo, stopCode: stopCode) {
-            let you = min(max(r.youIndex, 0), r.stops.count - 1)
+            let you = min(max(anchor.youIndex, 0), anchor.stops.count - 1)
             var best: (idx: Int, d: Double)? = nil
             for i in 0...you {
-                let s = r.stops[i]
+                let s = anchor.stops[i]
                 let d = haversine(coord.latitude, coord.longitude, s.lat, s.lon)
                 if best == nil || d < best!.d { best = (i, d) }
             }
@@ -377,5 +442,14 @@ struct WSTrackBusView: View {
         } else {
             busIndex = nil
         }
+    }
+
+    /// Keeps direction-switcher labels tight — same truncation as
+    /// WSServiceInfoView's segmented control over this same RouteDirection
+    /// data, so the two screens' toggles read consistently.
+    private func shortDest(_ s: String) -> String {
+        let trimmed = s.replacingOccurrences(of: " Int", with: "")
+                       .replacingOccurrences(of: " Stn", with: "")
+        return trimmed.count > 12 ? String(trimmed.prefix(12)) + "…" : trimmed
     }
 }
