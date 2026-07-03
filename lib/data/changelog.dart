@@ -30,6 +30,34 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  '3.0.0': WhatsNewEntry(
+    headline: 'Meet Departly — same app, new name.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.pin_drop_rounded,
+        title: 'A new name and icon',
+        body:
+            'Leyne is now Departly, with a fresh pin-clock icon — a map pin '
+            'counting down to your next departure. Your saved stops and '
+            'settings are untouched.',
+      ),
+      WhatsNewItem(
+        icon: Icons.palette_rounded,
+        title: 'A cleaner Home',
+        body:
+            'The live status now sits right on the bus-stops list where it '
+            'belongs, screens glide in when you open a stop or station, and '
+            'onboarding got a tidier look.',
+      ),
+      WhatsNewItem(
+        icon: Icons.train_rounded,
+        title: 'Honest station forecasts',
+        body:
+            'When the MRT has closed for the night, the crowd forecast now '
+            'says so instead of showing stale bars.',
+      ),
+    ],
+  ),
   '2.9.0': WhatsNewEntry(
     headline: 'Departly, right on your Home Screen.',
     items: [
