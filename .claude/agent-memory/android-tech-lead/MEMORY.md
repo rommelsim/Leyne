@@ -5,3 +5,4 @@
 - [NEA weather feature](project-weather-feature.md) — files added, design constraints (monochrome only), graceful degradation, 31 unit tests passing
 - [Android Material 3 design audit](android-material-design.md) — 2026-07-02: live V2 surface is Modern M3 (NavigationBar, predictive back, edge-to-edge); real gaps found 2026-07-02 audit, FIXED same day (see material-you-implementation)
 - [Material You implementation](material-you-implementation.md) — 2026-07-02: dynamic colour wiring, LyneSeverity token, mrt_map_screen inverse-panel fix, + a local-SDK gotcha: Theme.SplashScreen/postSplashScreenTheme don't link on this machine's compileSdk 36
+- [ReorderableListView pattern](reorderable-list-pattern.md) — this SDK's onReorderItem pre-adjusts newIndex (don't double-adjust); codebase convention is id-list reorder methods on AppModel, not raw index

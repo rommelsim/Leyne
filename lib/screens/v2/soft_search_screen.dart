@@ -1,12 +1,15 @@
 // SoftSearchScreen — Leyne 2.0 Search (Material 3 Android variant).
 //
-// Input kind is AUTO-DETECTED — no filter chips, no mode selection.
-//   • 6-digit all-numeric query → postal geocode flow (OneMap → nearby stops).
-//   • All other queries         → Services section + Bus stops section together.
-// Mirrors SoftSearchView.swift's layout: large "Search" title, animated
-// Cancel button, prominent field (mic visual only), and a Recent searches
-// list. (The Browse example-tile grid was removed — it injected hard-coded
-// example queries that read as placeholder/mock data.)
+// Input kind is AUTO-DETECTED — no mode selection, just typing.
+//   • 6-digit all-numeric query → postal geocode flow (OneMap → nearby MRT
+//     + bus stops).
+//   • All other queries         → combined MRT stations / Services / Bus
+//     stops results, narrowable via the All · Bus · MRT · Stops chip row.
+// Content parity with WSSearchView.swift (not a visual clone): large
+// "Search" title, animated Cancel button, a prominent field (clear-X only,
+// no mic action), matched-query bolding in result titles, and a Recent
+// searches list. (The Browse example-tile grid was removed — it injected
+// hard-coded example queries that read as placeholder/mock data.)
 
 import 'package:flutter/material.dart';
 
@@ -16,6 +19,7 @@ import '../../data/models.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
 import '../../data/search_logic.dart';
+import '../../data/spell_suggest.dart';
 import '../../services/analytics_service.dart';
 import '../../services/geocode_service.dart';
 import '../../state/app_model.dart';
@@ -159,15 +163,10 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      // Search is a first-class tab (parity with iOS): keep the bottom tab bar
-      // visible so it reappears after the keyboard closes. Tapping another tab
-      // pops the search route via onTab.
-      bottomNavigationBar: SoftBottomBar(
-        selection: SoftTab.search,
-        onSelect: (tab) {
-          if (tab != SoftTab.search) widget.onTab(tab);
-        },
-      ),
+      // No bottom tab bar: Search is no longer a tab (it's reached from the
+      // Home search bar, iOS parity — WSSearchView is a sheet with no tab
+      // chrome). The bar also had nothing valid to highlight since the
+      // Search destination was removed from SoftTabBar.
       // Dismiss keyboard when tapping outside the field — mirrors iOS
       // `.onTapGesture { focused = false }` on the background view.
       body: GestureDetector(
@@ -271,7 +270,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
         onChanged: (_) => _onQueryChanged(),
         style: t.sans(15, weight: FontWeight.w500, color: t.fg),
         decoration: InputDecoration(
-          hintText: 'Search for stops, services or places',
+          hintText: 'Stop, bus, MRT or postal code',
           hintStyle: t.sans(15, color: t.dim),
           // Leading search icon — accent-coloured when text is present.
           prefixIcon: Padding(
@@ -286,7 +285,8 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
             minWidth: 44,
             minHeight: 44,
           ),
-          // Trailing: clear button OR mic icon (visual-only).
+          // Trailing: clear button when there's text, nothing otherwise — the
+          // old mic glyph was a dead tap target (no speech backend exists).
           suffixIcon: hasText
               ? IconButton(
                   icon: Icon(Icons.close_rounded, size: 18, color: t.dim),
@@ -296,16 +296,10 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
                   },
                   tooltip: 'Clear',
                 )
-              : Padding(
-                  padding: const EdgeInsets.only(right: 14),
-                  // Mic is an inert Icon, not a Button — no dead tap target.
-                  // Matches Swift: `Image(systemName: "mic")` with no action.
-                  child: Icon(Icons.mic, size: 20, color: t.faint),
-                ),
-          suffixIconConstraints: const BoxConstraints(
-            minWidth: 44,
-            minHeight: 44,
-          ),
+              : null,
+          suffixIconConstraints: hasText
+              ? const BoxConstraints(minWidth: 44, minHeight: 44)
+              : null,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(LyneRadius.md),
             borderSide: BorderSide(color: t.line),
@@ -505,12 +499,43 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     final stops = DataStore.shared.searchStops(q);
     final stations = MrtGeo.matching(q);
 
-    // Global empty — no filter control, just the catch-all hint.
+    // Global empty — offer a "Did you mean …?" correction over the transit
+    // vocabulary (stop names, road names, MRT stations) before the catch-all
+    // hint. Tapping fills the field, mirroring iOS's WSSpell row.
     if (services.isEmpty && stops.isEmpty && stations.isEmpty) {
-      return _emptyHint(
-        context,
-        'Nothing matches "$q"',
-        'Try a stop name, a 5-digit stop code, a 6-digit postal code, a bus number, or an MRT station.',
+      final suggestion = SpellSuggest.suggest(
+        q,
+        () => [
+          ...DataStore.shared.stopByCode.values.expand(
+            (s) => [s.description, s.roadName],
+          ),
+          ...MrtGeo.all.map((s) => s.name),
+        ],
+      );
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (suggestion != null) ...[
+                _didYouMeanRow(context, suggestion),
+                const SizedBox(height: 18),
+              ],
+              Text(
+                'Nothing matches "$q"',
+                style: context.t.sans(13, weight: FontWeight.w600, color: context.t.fg),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Try a stop name, a 5-digit stop code, a 6-digit postal code, a bus number, or an MRT station.',
+                style: context.t.sans(11, color: context.t.dim),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -534,15 +559,31 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     // Track whether any prior section was rendered (for inter-section spacing).
     var sectionRendered = false;
 
-    // Build children list so spacing between sections is correct.
+    // Build children list so spacing between sections is correct. Order is
+    // MRT stations → Services → Bus stops, matching WSSearchView.swift's
+    // `results` view.
     final items = <Widget>[];
+
+    if (showMrt) {
+      if (mrtEmpty) {
+        items.add(_filterEmptyHint(context, 'No stations match "$q"'));
+      } else if (stations.isNotEmpty) {
+        items.add(_sectionLabel(context, 'MRT stations'));
+        items.add(const SizedBox(height: 8));
+        for (int i = 0; i < stations.length; i++) {
+          items.add(_stationCard(context, stations[i]));
+          if (i < stations.length - 1) items.add(const SizedBox(height: 8));
+        }
+        sectionRendered = true;
+      }
+    }
 
     if (showBuses) {
       if (busesEmpty) {
-        items.add(
-          _filterEmptyHint(context, 'No buses match "$q"'),
-        );
+        if (sectionRendered) items.add(const SizedBox(height: 16));
+        items.add(_filterEmptyHint(context, 'No buses match "$q"'));
       } else if (services.isNotEmpty) {
+        if (sectionRendered) items.add(const SizedBox(height: 16));
         items.add(_sectionLabel(context, 'Services'));
         items.add(const SizedBox(height: 8));
         for (int i = 0; i < services.length; i++) {
@@ -559,27 +600,13 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
         items.add(_filterEmptyHint(context, 'No stops match "$q"'));
       } else if (stops.isNotEmpty) {
         if (sectionRendered) items.add(const SizedBox(height: 16));
-        items.add(_sectionLabel(context, 'Bus stops'));
+        items.add(
+          _sectionLabel(context, 'Bus stops', meta: '${stops.length}'),
+        );
         items.add(const SizedBox(height: 8));
         for (int i = 0; i < stops.length; i++) {
           items.add(_stopCard(context, stops[i]));
           if (i < stops.length - 1) items.add(const SizedBox(height: 8));
-        }
-        sectionRendered = true;
-      }
-    }
-
-    if (showMrt) {
-      if (mrtEmpty) {
-        if (sectionRendered) items.add(const SizedBox(height: 16));
-        items.add(_filterEmptyHint(context, 'No stations match "$q"'));
-      } else if (stations.isNotEmpty) {
-        if (sectionRendered) items.add(const SizedBox(height: 16));
-        items.add(_sectionLabel(context, 'MRT stations'));
-        items.add(const SizedBox(height: 8));
-        for (int i = 0; i < stations.length; i++) {
-          items.add(_stationCard(context, stations[i]));
-          if (i < stations.length - 1) items.add(const SizedBox(height: 8));
         }
       }
     }
@@ -610,9 +637,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       child: Row(
         children: [
           _searchFilterPill(context, 'All', _SearchFilter.all, t),
-          _searchFilterPill(context, 'Stops', _SearchFilter.stops, t),
-          _searchFilterPill(context, 'Buses', _SearchFilter.buses, t),
+          _searchFilterPill(context, 'Bus', _SearchFilter.buses, t),
           _searchFilterPill(context, 'MRT', _SearchFilter.mrt, t),
+          _searchFilterPill(context, 'Stops', _SearchFilter.stops, t),
         ],
       ),
     );
@@ -650,12 +677,16 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  Widget _sectionLabel(BuildContext context, String text) {
+  /// [meta], when given, appends a "· N" count — used on "Bus stops" so a
+  /// long result list previews its size before scrolling (WSSearchView.swift
+  /// passes the same count as the section header's `meta`).
+  Widget _sectionLabel(BuildContext context, String text, {String? meta}) {
     final t = context.t;
+    final label = meta == null ? text.toUpperCase() : '${text.toUpperCase()} · $meta';
     return Padding(
       padding: const EdgeInsets.only(left: 4, bottom: 2),
       child: Text(
-        text.toUpperCase(),
+        label,
         style: t
             .mono(10, weight: FontWeight.w600, color: t.dim)
             .copyWith(letterSpacing: 0.8),
@@ -665,11 +696,14 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
 
   Widget _serviceCard(BuildContext context, LtaBusService b) {
     final t = context.t;
-    final sub = [
-      b.operator_ ?? '',
-      if (b.category?.isNotEmpty == true)
-        b.category!.substring(0, 1).toUpperCase() + b.category!.substring(1),
-    ].where((s) => s.isNotEmpty).join(' · ');
+    // "To {destination}" replaces the old operator·category subline —
+    // destination via the same DTO the row already carries. Mirrors
+    // WSSearchView.swift's serviceRow (`dest.isEmpty ? "SERVICE" : "SERVICE
+    // · TO \(dest)"`, simplified here to match this card's one-line style).
+    final destCode = b.destinationCode;
+    final dest = (destCode == null || destCode.isEmpty)
+        ? ''
+        : DataStore.shared.stopName(destCode);
     return _card(
       context,
       onTap: () => _pickBus(b.serviceNo),
@@ -681,15 +715,16 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                _highlightMatch(
                   'Service ${b.serviceNo}',
+                  _ctrl.text.trim(),
                   style: t.sans(14, weight: FontWeight.w600, color: t.fg),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (sub.isNotEmpty)
+                if (dest.isNotEmpty)
                   Text(
-                    sub,
+                    'To $dest',
                     style: t.mono(11, color: t.dim),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -725,8 +760,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                _highlightMatch(
                   stop.description,
+                  _ctrl.text.trim(),
                   style: t.sans(14, weight: FontWeight.w600, color: t.fg),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -768,8 +804,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                _highlightMatch(
                   station.name,
+                  _ctrl.text.trim(),
                   style: t.sans(14, weight: FontWeight.w600, color: t.fg),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -835,7 +872,12 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     }
     final radius = AppModel.shared.searchRadiusM;
     final stops = DataStore.shared.stopsWithin(geo.lat, geo.lon, radius);
-    if (stops.isEmpty) {
+    // Nearest MRT stations to the postal point (≤ 3, within a ~20-min walk) —
+    // parity with iOS's "MRT near {postal}" section.
+    final mrtNear = MrtGeo.nearest(lat: geo.lat, lon: geo.lon, limit: 3)
+        .where((r) => r.distanceM <= 1600)
+        .toList();
+    if (stops.isEmpty && mrtNear.isEmpty) {
       // Empty-radius case: append Settings guidance (SoftSearchView.swift:234-236).
       return _emptyHint(
         context,
@@ -843,23 +885,110 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
         'Widen the search radius in Settings.',
       );
     }
-    return ListView.separated(
+    final children = <Widget>[
+      Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 4),
+        child: Text(
+          '${geo.label} · ${stops.length} stop'
+          '${stops.length == 1 ? "" : "s"} within ${_radiusLabel(radius)}',
+          style: t.mono(11, color: t.dim),
+        ),
+      ),
+    ];
+    // Two independent sections (not nested) — each shows its own "near {q}"
+    // header whenever it has results, regardless of whether the other
+    // section is empty. Mirrors WSSearchView.swift's postalResults, which
+    // renders "MRT near {trimmed}" and "Bus stops near {trimmed}" as
+    // separate `if`s rather than one gating the other.
+    if (mrtNear.isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(_sectionLabel(context, 'MRT near $q'));
+      children.add(const SizedBox(height: 8));
+      for (int i = 0; i < mrtNear.length; i++) {
+        children.add(_postalStationCard(context, mrtNear[i]));
+        children.add(const SizedBox(height: 8));
+      }
+    }
+    if (stops.isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(_sectionLabel(context, 'Bus stops near $q'));
+      children.add(const SizedBox(height: 8));
+      for (int i = 0; i < stops.length; i++) {
+        children.add(_postalCard(context, stops[i]));
+        if (i < stops.length - 1) children.add(const SizedBox(height: 8));
+      }
+    }
+    return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      itemCount: stops.length + 1,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, i) {
-        if (i == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 4),
-            child: Text(
-              '${geo.label} · ${stops.length} stop'
-              '${stops.length == 1 ? "" : "s"} within ${_radiusLabel(radius)}',
-              style: t.mono(11, color: t.dim),
+      children: children,
+    );
+  }
+
+  /// A postal-result MRT station card: distance/walk column (matching
+  /// _postalCard) + station name + coloured line pills.
+  Widget _postalStationCard(BuildContext context, MrtNearestResult r) {
+    final t = context.t;
+    return _card(
+      context,
+      onTap: () => _pickStation(r.station),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 52,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${r.distanceM} m',
+                  style: t.mono(14, weight: FontWeight.w600, color: t.fg),
+                ),
+                Text('${r.walkMin} min', style: t.mono(10, color: t.dim)),
+              ],
             ),
-          );
-        }
-        return _postalCard(context, stops[i - 1]);
-      },
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  r.station.name,
+                  style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: r.station.codes.map((code) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: lineColorFor(code),
+                        borderRadius: BorderRadius.circular(LyneRadius.full),
+                      ),
+                      child: Text(
+                        code,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, color: t.dim),
+        ],
+      ),
     );
   }
 
@@ -1005,6 +1134,28 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
 
   /// Two-line empty-results hint with title + subtitle, centred.
   /// Mirrors SoftSearchView.swift:521-530 (emptyHint).
+  /// Tappable "Did you mean Clementi?" chip — fills the search field with the
+  /// corrected query (same pattern as a recent-search tap).
+  Widget _didYouMeanRow(BuildContext context, String suggestion) {
+    final t = context.t;
+    return ActionChip(
+      avatar: Icon(Icons.auto_fix_high_rounded, size: 16, color: t.accent),
+      label: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(text: 'Did you mean ', style: t.sans(13, color: t.dim)),
+            TextSpan(
+              text: suggestion,
+              style: t.sans(13, weight: FontWeight.w700, color: t.fg),
+            ),
+            TextSpan(text: '?', style: t.sans(13, color: t.dim)),
+          ],
+        ),
+      ),
+      onPressed: () => setState(() => _ctrl.text = suggestion),
+    );
+  }
+
   Widget _emptyHint(BuildContext context, String title, String sub) {
     final t = context.t;
     return Center(
@@ -1055,4 +1206,37 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   String _radiusLabel(int m) => m < 1000
       ? '$m m'
       : '${(m / 1000).toStringAsFixed(m % 1000 == 0 ? 0 : 1)} km';
+}
+
+// ─── Query highlighting (bold the matched substring) ──────────────────────
+// Port of WSSearchView.swift's wsHighlightRaw/wsHighlight: finds the first
+// case-insensitive occurrence of [query] inside [text] and renders it in a
+// heavier weight, leaving the rest of the string at [style]'s own weight.
+Widget _highlightMatch(
+  String text,
+  String query, {
+  required TextStyle style,
+  int? maxLines,
+  TextOverflow? overflow,
+}) {
+  final q = query.trim();
+  final idx = q.isEmpty ? -1 : text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) {
+    return Text(text, style: style, maxLines: maxLines, overflow: overflow);
+  }
+  final pre = text.substring(0, idx);
+  final match = text.substring(idx, idx + q.length);
+  final post = text.substring(idx + q.length);
+  return Text.rich(
+    TextSpan(
+      style: style,
+      children: [
+        if (pre.isNotEmpty) TextSpan(text: pre),
+        TextSpan(text: match, style: const TextStyle(fontWeight: FontWeight.w800)),
+        if (post.isNotEmpty) TextSpan(text: post),
+      ],
+    ),
+    maxLines: maxLines,
+    overflow: overflow,
+  );
 }

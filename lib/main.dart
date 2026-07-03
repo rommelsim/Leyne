@@ -22,6 +22,7 @@ import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'data/mrt_geo.dart';
 import 'l10n/app_localizations.dart';
+import 'screens/launch_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/v2/soft_bus_screen.dart';
 import 'screens/v2/soft_root.dart';
@@ -243,7 +244,7 @@ class LyneApp extends StatelessWidget {
           listenable: AppModel.shared,
           builder: (context, _) {
             return MaterialApp(
-              title: 'Leyne',
+              title: 'WhereSia',
               debugShowCheckedModeBanner: false,
               themeMode: AppModel.shared.themeMode,
               theme: LyneTheme.light.materialTheme(dynamicScheme: lightDynamic),
@@ -266,48 +267,83 @@ class LyneApp extends StatelessWidget {
 /// persisted state. Listens to AppModel so the "Show again" entry in
 /// Settings can re-enter onboarding mid-session, and so dismissing What's
 /// New drops straight through to Home.
-class _AppRoot extends StatelessWidget {
+///
+/// Also owns the one-shot [LaunchScreen] overlay: a Stack layer shown only
+/// for a returning user (onboarding already done) on this cold start.
+/// First-run users go straight to OnboardingScreen — its own welcome step
+/// already carries the identical eyebrow/wordmark/line-capsule reveal, so
+/// layering the splash on top of it would just repeat the same beat twice.
+class _AppRoot extends StatefulWidget {
   const _AppRoot();
+
+  @override
+  State<_AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<_AppRoot> {
+  /// True until the launch screen finishes its reveal (or is tapped away).
+  /// Lives on this State — not AppModel — so it resets only on a real cold
+  /// start (a new `_AppRootState`), never on the ListenableBuilder rebuilds
+  /// below.
+  bool _launching = true;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: AppModel.shared,
       builder: (context, _) {
-        if (AppModel.shared.onboardingDone) {
+        final onboardingDone = AppModel.shared.onboardingDone;
+        final Widget body;
+        if (onboardingDone) {
           // A returning user who just updated into a build with release
           // notes sees them once before Home.
           final wn = AppModel.shared.whatsNewVersion;
           if (wn != null) {
-            return WhatsNewScreen(
+            body = WhatsNewScreen(
               version: wn,
               entry: kChangelog[wn]!,
               onDismiss: AppModel.shared.markWhatsNewSeen,
             );
+          } else {
+            body = const SoftRoot();
           }
-          return const SoftRoot();
+        } else {
+          body = OnboardingScreen(
+            onRequestLocation: () {
+              // Fire-and-forget: the OS dialog races with the step
+              // transition, matching the legacy iOS behaviour.
+              LocationService.shared.requestAndStart();
+            },
+            onRequestNotifications: () {
+              // Fire-and-forget like onRequestLocation — the step has
+              // already advanced; the OS prompt races with the
+              // transition. AppModel handles permission + scheduling.
+              AppModel.shared.setNotificationsEnabled(true);
+            },
+            onFinish: () async {
+              // UMP consent (Android only — no ATT), then MobileAds.initialize,
+              // then dismiss onboarding. AdConsent.gatherThenStart is a no-op
+              // for ATT on Android; the dedicated ATT primer view was removed.
+              await AdConsent.gatherThenStart(
+                testDeviceIdentifiers: kTestDeviceIdentifiers,
+              );
+              AppModel.shared.finishOnboarding();
+            },
+          );
         }
-        return OnboardingScreen(
-          onRequestLocation: () {
-            // Fire-and-forget: the OS dialog races with the step
-            // transition, matching the legacy iOS behaviour.
-            LocationService.shared.requestAndStart();
-          },
-          onRequestNotifications: () {
-            // Fire-and-forget like onRequestLocation — the step has
-            // already advanced; the OS prompt races with the
-            // transition. AppModel handles permission + scheduling.
-            AppModel.shared.setNotificationsEnabled(true);
-          },
-          onFinish: () async {
-            // UMP consent (Android only — no ATT), then MobileAds.initialize,
-            // then dismiss onboarding. AdConsent.gatherThenStart is a no-op
-            // for ATT on Android; the dedicated ATT primer view was removed.
-            await AdConsent.gatherThenStart(
-              testDeviceIdentifiers: kTestDeviceIdentifiers,
-            );
-            AppModel.shared.finishOnboarding();
-          },
+
+        return Stack(
+          children: [
+            body,
+            if (_launching && onboardingDone)
+              Positioned.fill(
+                child: LaunchScreen(
+                  onDone: () {
+                    if (mounted) setState(() => _launching = false);
+                  },
+                ),
+              ),
+          ],
         );
       },
     );

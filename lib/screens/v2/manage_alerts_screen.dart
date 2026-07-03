@@ -5,8 +5,15 @@
 //     arrivals store (the notification is imminent / armed off live data).
 //   • OTHER ALERTS  — everything else (armed, just not currently live).
 //
-// Edit mode reveals a delete affordance per row; swipe-to-delete works too.
-// Reachable from the confirmation sheet and from Settings.
+// Every row carries a Switch that pauses/resumes the alert in place — it
+// never deletes (mirrors iOS WSAlertsView / AppModel.setAlertEnabled, owner
+// decision 2026-07-02). A paused row dims to 55% and swaps its subtitle for
+// "Paused — flip on to resume".
+//
+// Edit mode reveals a delete affordance per row and switches each section to
+// a drag-to-reorder ReorderableListView (mirrors SoftFavouritesScreen's
+// pins/services/stations sections); swipe-to-delete works in the normal
+// (non-edit) list. Reachable from the confirmation sheet and from Settings.
 
 import 'package:flutter/material.dart';
 
@@ -15,6 +22,7 @@ import '../../data/data_store.dart';
 import '../../state/app_model.dart';
 import '../../state/bus_alert.dart';
 import '../../theme.dart';
+import '../../widgets/v2/soft_components.dart';
 
 class ManageAlertsScreen extends StatefulWidget {
   const ManageAlertsScreen({super.key});
@@ -57,13 +65,13 @@ class _ManageAlertsScreenState extends State<ManageAlertsScreen> {
                   if (active.isNotEmpty) ...[
                     _sectionLabel(context, t, 'ACTIVE ALERTS'),
                     const SizedBox(height: 8),
-                    _alertCard(context, t, active),
+                    _alertSection(context, t, active),
                     const SizedBox(height: 24),
                   ],
                   if (other.isNotEmpty) ...[
                     _sectionLabel(context, t, 'OTHER ALERTS'),
                     const SizedBox(height: 8),
-                    _alertCard(context, t, other),
+                    _alertSection(context, t, other),
                     const SizedBox(height: 24),
                   ],
                   _footerHint(context, t),
@@ -135,8 +143,100 @@ class _ManageAlertsScreenState extends State<ManageAlertsScreen> {
     );
   }
 
-  // ── Grouped card of alert rows ─────────────────────────────────────────
-  Widget _alertCard(BuildContext context, LyneTheme t, List<BusAlert> alerts) {
+  // ── Section of alert rows ────────────────────────────────────────────────
+  // Normal mode: a static list of standalone cards, each swipeable to delete.
+  // Edit mode: the same cards inside a ReorderableListView with an explicit
+  // drag handle (mirrors SoftFavouritesScreen's pins/services/stations
+  // sections) plus a delete button — swipe is disabled here so the drag
+  // gesture doesn't fight it.
+  Widget _alertSection(BuildContext context, LyneTheme t, List<BusAlert> alerts) {
+    if (_editing) {
+      return ReorderableListView(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        // Rows carry a Switch and a delete button, both tappable — restrict
+        // drag activation to the explicit handle instead of "long-press
+        // anywhere" so it can't steal those gestures.
+        buildDefaultDragHandles: false,
+        proxyDecorator: (child, index, animation) =>
+            Material(elevation: 0, color: Colors.transparent, child: child),
+        onReorderItem: (oldIndex, newIndex) {
+          final reordered = [...alerts];
+          final item = reordered.removeAt(oldIndex);
+          reordered.insert(newIndex, item);
+          AppModel.shared.reorderAlerts(reordered.map((a) => a.id).toList());
+        },
+        children: [
+          for (final a in alerts)
+            Padding(
+              key: ValueKey('reorder-alert-${a.id}'),
+              padding: EdgeInsets.only(bottom: a == alerts.last ? 0 : 10),
+              child: Row(
+                children: [
+                  Expanded(child: _alertCard(context, t, a)),
+                  ReorderableDragStartListener(
+                    index: alerts.indexOf(a),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.drag_handle_rounded,
+                        size: 22,
+                        color: t.dim,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        for (var i = 0; i < alerts.length; i++) ...[
+          if (i > 0) const SizedBox(height: 10),
+          _alertRow(context, t, alerts[i]),
+        ],
+      ],
+    );
+  }
+
+  // Swipe-to-delete wrapper used outside edit mode.
+  Widget _alertRow(BuildContext context, LyneTheme t, BusAlert a) {
+    return Dismissible(
+      key: ValueKey('alert-${a.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        decoration: BoxDecoration(
+          color: t.critBg,
+          borderRadius: BorderRadius.circular(LyneRadius.lg),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: Icon(Icons.delete_outline_rounded, color: t.crit),
+      ),
+      onDismissed: (_) => AppModel.shared.removeAlert(a.id),
+      child: _alertCard(context, t, a),
+    );
+  }
+
+  // Shared row visuals — a standalone card used both in the static list and
+  // as a reorderable drag item. Toggle pauses in place; edit mode adds the
+  // delete affordance. Paused alerts dim their icon/text (not the toggle).
+  Widget _alertCard(BuildContext context, LyneTheme t, BusAlert a) {
+    final isDest = a.kind == AlertKind.destination;
+    final title = isDest
+        ? (a.dest.isNotEmpty ? a.dest : a.stopName)
+        : a.stopName;
+    // Arrival alerts fire at fixed dual leads; destination keeps its lead copy.
+    final leadText = isDest
+        ? AlertTiming.leadRowSubtitle(a.leadMinutes)
+        : AlertTiming.arrivalRowSubtitle;
+    final subtitle = a.enabled
+        ? '${a.stopName} · $leadText'
+        : 'Paused — flip on to resume';
+
     return Material(
       color: t.surface,
       borderRadius: BorderRadius.circular(LyneRadius.lg),
@@ -146,122 +246,106 @@ class _ManageAlertsScreenState extends State<ManageAlertsScreen> {
           borderRadius: BorderRadius.circular(LyneRadius.lg),
           border: Border.all(color: t.line, width: 1),
         ),
-        child: Column(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        child: Row(
           children: [
-            for (var i = 0; i < alerts.length; i++) ...[
-              if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
-              _alertRow(context, t, alerts[i]),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _alertRow(BuildContext context, LyneTheme t, BusAlert a) {
-    final isDest = a.kind == AlertKind.destination;
-    final title = isDest
-        ? (a.dest.isNotEmpty ? a.dest : a.stopName)
-        : a.stopName;
-    // Arrival alerts fire at fixed dual leads; destination keeps its lead copy.
-    final leadText = isDest
-        ? AlertTiming.leadRowSubtitle(a.leadMinutes)
-        : AlertTiming.arrivalRowSubtitle;
-    final subtitle = '${a.stopName} · $leadText';
-
-    final row = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      child: Row(
-        children: [
-          // Leading icon.
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: t.soonBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              isDest ? Icons.flag_rounded : Icons.notifications_active_rounded,
-              size: 20,
-              color: t.soon,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+            Expanded(
+              child: Opacity(
+                opacity: a.enabled ? 1 : 0.55,
+                child: Row(
                   children: [
+                    // Leading icon.
                     Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: t.liveBg,
-                        borderRadius: BorderRadius.circular(6),
+                        color: t.soonBg,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Text(
-                        a.busNo,
-                        style: t.mono(11, weight: FontWeight.w700, color: t.fg),
+                      child: Icon(
+                        isDest
+                            ? Icons.flag_rounded
+                            : Icons.notifications_active_rounded,
+                        size: 20,
+                        color: t.soon,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        title,
-                        style:
-                            t.sans(15, weight: FontWeight.w600, color: t.fg),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: t.liveBg,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  a.busNo,
+                                  style: t.mono(
+                                    11,
+                                    weight: FontWeight.w700,
+                                    color: t.fg,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  title,
+                                  style: t.sans(
+                                    15,
+                                    weight: FontWeight.w600,
+                                    color: t.fg,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            style: t.sans(12, color: t.dim),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: t.sans(12, color: t.dim),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Semantics(
+              label: a.enabled ? 'Pause alert' : 'Resume alert',
+              child: SoftToggle(
+                value: a.enabled,
+                onChanged: (v) => AppModel.shared.setAlertEnabled(a.id, v),
+              ),
+            ),
+            if (_editing)
+              IconButton(
+                tooltip: 'Delete alert',
+                icon: Icon(
+                  Icons.remove_circle_outline_rounded,
+                  size: 22,
+                  color: t.crit,
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Trailing: delete (edit mode) or kind glyph.
-          if (_editing)
-            IconButton(
-              tooltip: 'Delete alert',
-              icon: Icon(Icons.remove_circle_outline_rounded,
-                  size: 22, color: t.crit),
-              onPressed: () => AppModel.shared.removeAlert(a.id),
-            )
-          else
-            Icon(
-              isDest
-                  ? Icons.flag_outlined
-                  : Icons.notifications_none_rounded,
-              size: 20,
-              color: t.faint,
-            ),
-        ],
+                onPressed: () => AppModel.shared.removeAlert(a.id),
+              ),
+          ],
+        ),
       ),
-    );
-
-    // Swipe-to-delete (works regardless of edit mode).
-    return Dismissible(
-      key: ValueKey(a.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        color: t.critBg,
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        child: Icon(Icons.delete_outline_rounded, color: t.crit),
-      ),
-      onDismissed: (_) => AppModel.shared.removeAlert(a.id),
-      child: row,
     );
   }
 

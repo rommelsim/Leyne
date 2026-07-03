@@ -668,6 +668,48 @@ class AppModel extends ChangeNotifier {
     required String stopCode,
   }) => removeAlert(BusAlert.makeId(kind, busNo, stopCode));
 
+  /// Pause or resume an alert in place — toggling off keeps the row in
+  /// Manage alerts and just stops it firing; it does NOT delete the alert.
+  /// Mirrors iOS AppModel.setAlertEnabled (owner decision 2026-07-02).
+  Future<void> setAlertEnabled(String id, bool on) async {
+    final idx = _alerts.indexWhere((a) => a.id == id);
+    if (idx < 0) return;
+    final alert = _alerts[idx].withEnabled(on);
+    _alerts[idx] = alert;
+    _persistAlerts();
+    if (!on) {
+      await NotificationsService.shared.cancelAlert(alert);
+    }
+    await rescheduleIfNeeded();
+    // Pausing the alert the ongoing tracker (Android's Live Activity analog)
+    // is currently following ends it; _autoTrackSoonestAlert re-points it at
+    // the next enabled alert on the following tick.
+    if (!on &&
+        alert.kind == AlertKind.arrival &&
+        _ongoingKey == _liveKey(alert.busNo, alert.stopCode)) {
+      await _stopOngoingTracker();
+    }
+    notifyListeners();
+  }
+
+  /// Reorder alerts to [newIds] (list of BusAlert.id), e.g. from a
+  /// ReorderableListView section in Manage alerts. Any alert not present in
+  /// [newIds] (a different section) keeps its relative order, appended after
+  /// the reordered ones. Mirrors reorderPins/reorderFavServices/
+  /// reorderSavedMrt. Persists immediately.
+  void reorderAlerts(List<String> newIds) {
+    final byId = {for (final a in _alerts) a.id: a};
+    final next = <BusAlert>[];
+    for (final id in newIds) {
+      final a = byId.remove(id);
+      if (a != null) next.add(a);
+    }
+    next.addAll(byId.values); // any not in newIds preserved
+    _alerts = next;
+    _persistAlerts();
+    notifyListeners();
+  }
+
   // ─── Pins / recents (persisted) ───────────────────────────
   List<Pin> _pins = const [];
   List<Pin> get pins => List.unmodifiable(_pins);
@@ -802,6 +844,11 @@ class AppModel extends ChangeNotifier {
     final p = _prefs;
     if (p == null) return;
     p.setString(_kPinsKey, jsonEncode(_pins.map((e) => e.toJson()).toList()));
+    // Single funnel for every pin mutation (add/remove/reorder/rename/track
+    // toggle) — see togglePin, addPin, rename, toggleTracked, setAllTracked,
+    // reorderPins, all of which call this. Keeps the Saved Stop widget in
+    // sync without a call-site addition at each mutation.
+    WidgetBridge.instance.pushPins();
   }
 
   /// One-time migration from legacy state → BusAlerts. Best-effort: preserves
@@ -891,7 +938,7 @@ class AppModel extends ChangeNotifier {
   void _buzzApproachingBuses() {
     if (!_hapticsEnabled) return;
     for (final a in _alerts) {
-      if (a.kind != AlertKind.arrival) continue;
+      if (a.kind != AlertKind.arrival || !a.enabled) continue;
       final matches = liveServices(a.stopCode, tracked: [a.busNo]);
       if (matches.isEmpty) continue; // not in the feed this tick — leave as-is
       final eta = matches.first.etaSec;
@@ -913,7 +960,7 @@ class AppModel extends ChangeNotifier {
   void _clearFulfilledArrivalAlerts() {
     final fulfilled = <String>[];
     for (final a in _alerts) {
-      if (a.kind != AlertKind.arrival) continue;
+      if (a.kind != AlertKind.arrival || !a.enabled) continue;
       final matches = liveServices(a.stopCode, tracked: [a.busNo]);
       if (matches.isEmpty) continue; // bus not in the feed this tick — wait
       if (matches.first.etaSec > 0) {
@@ -936,8 +983,9 @@ class AppModel extends ChangeNotifier {
     }
     // Keep every arrival-alert stop fresh (not just pinned ones) so the
     // scheduler and the one-shot clear below read current arrivalDates.
+    // Paused alerts are skipped — nothing reads their stop.
     for (final a in _alerts) {
-      if (a.kind == AlertKind.arrival) _ds.ensureArrivals(a.stopCode);
+      if (a.kind == AlertKind.arrival && a.enabled) _ds.ensureArrivals(a.stopCode);
     }
     // One-shot arrival alerts: once the tracked bus reaches the stop, the alert
     // has done its job — clear it (and its paired ongoing tracker, via
@@ -951,7 +999,10 @@ class AppModel extends ChangeNotifier {
     // fire times are absolute (zonedSchedule registers an exact alarm
     // with the system, which keeps firing regardless of app lifecycle).
     if (_notificationsEnabled && tick % 10 == 0) {
-      NotificationsService.shared.scheduleAlerts(_alerts, _ds.arrivals);
+      NotificationsService.shared.scheduleAlerts(
+        _alerts.where((a) => a.enabled).toList(),
+        _ds.arrivals,
+      );
     }
     // Pull MRT/LRT disruption alerts on a slow cadence. DataStore
     // enforces a 60 s gate internally so this call is cheap.
@@ -1184,7 +1235,10 @@ class AppModel extends ChangeNotifier {
   /// of waiting for the next tick. No-op when notifications are globally off.
   Future<void> rescheduleIfNeeded() async {
     if (!_notificationsEnabled) return;
-    await NotificationsService.shared.scheduleAlerts(_alerts, _ds.arrivals);
+    await NotificationsService.shared.scheduleAlerts(
+      _alerts.where((a) => a.enabled).toList(),
+      _ds.arrivals,
+    );
   }
 
   // ─── Ongoing "live tracking" notification (Android Live Activity analog)
@@ -1242,7 +1296,7 @@ class AppModel extends ChangeNotifier {
     BusAlert? soonest;
     var soonestEta = 1 << 30;
     for (final a in _alerts) {
-      if (a.kind != AlertKind.arrival) continue;
+      if (a.kind != AlertKind.arrival || !a.enabled) continue;
       final matches = liveServices(a.stopCode, tracked: [a.busNo]);
       if (matches.isEmpty) continue;
       final eta = matches.first.etaSec;

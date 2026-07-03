@@ -333,6 +333,16 @@ class DataStore extends ChangeNotifier {
   final Set<MRTLine> _forecastInflight = {};
   final Map<MRTLine, DateTime> _lastForecastFetch = {};
 
+  /// Raw (uncollapsed) forecast rows per line — the full ordered half-hour
+  /// interval list per station, alongside the single-value-per-station
+  /// [_forecastByLine] used by the crowd toggle elsewhere. Populated by the
+  /// same [refreshForecast] fetch (no extra network call) so callers that
+  /// need the full-day series — e.g. a per-station forecast chart — can read
+  /// it directly. Additive: does not change [forecastByLine]'s contract.
+  final Map<MRTLine, List<LtaStationForecast>> _forecastRawByLine = {};
+  Map<MRTLine, List<LtaStationForecast>> get forecastRawByLine =>
+      _forecastRawByLine;
+
   /// Tick from AppModel calls this once per second; the inner gate
   /// keeps us at one network hit per 60 s.
   void refreshTrainAlertsIfStale({bool force = false}) {
@@ -560,6 +570,7 @@ class DataStore extends ChangeNotifier {
     () async {
       try {
         final rows = await _api.stationForecast(_pcdLineCode(line));
+        _forecastRawByLine[line] = rows;
         final now = DateTime.now();
         final mapped = rows
             .map((forecast) {
@@ -590,6 +601,7 @@ class DataStore extends ChangeNotifier {
       } catch (_) {
         // On error: leave existing data intact; if nothing yet, mark empty.
         _forecastByLine.putIfAbsent(line, () => const []);
+        _forecastRawByLine.putIfAbsent(line, () => const []);
         notifyListeners();
       } finally {
         _forecastInflight.remove(line);
@@ -1199,6 +1211,39 @@ class DataStore extends ChangeNotifier {
       };
       if (first == null || last == null) return null;
       return (first: first, last: last);
+    }
+    return null;
+  }
+
+  /// First/last scheduled bus for `serviceNo` at `stopCode`, for every day
+  /// type at once (weekday / Saturday / Sunday-or-P.H.) — unlike [busTimings]
+  /// (which picks one day type based on `now`), this returns all three so a
+  /// "first & last bus" table can show every row together. Individual fields
+  /// are null when LTA didn't publish that day-type's times (service doesn't
+  /// run that day). The whole result is null until the BusRoutes dataset has
+  /// loaded (`ensureRoutes()`), or when there's no route row for this
+  /// (service, stop) pair.
+  ({
+    String? firstWd,
+    String? lastWd,
+    String? firstSat,
+    String? lastSat,
+    String? firstSun,
+    String? lastSun,
+  })?
+  operatingWindow({required String serviceNo, required String stopCode}) {
+    final routes = _routesAll;
+    if (routes == null) return null;
+    for (final r in routes) {
+      if (r.serviceNo != serviceNo || r.busStopCode != stopCode) continue;
+      return (
+        firstWd: r.wdFirstBus,
+        lastWd: r.wdLastBus,
+        firstSat: r.satFirstBus,
+        lastSat: r.satLastBus,
+        firstSun: r.sunFirstBus,
+        lastSun: r.sunLastBus,
+      );
     }
     return null;
   }

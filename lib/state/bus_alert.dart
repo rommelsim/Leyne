@@ -25,6 +25,7 @@ class BusAlert {
     required this.leadMinutes,
     this.dest = '',
     String? boardStopCode,
+    this.disabled,
   }) : boardStopCode = boardStopCode ?? stopCode;
 
   /// The alert kind — arrival (at your boarding stop) or destination (at your
@@ -52,6 +53,16 @@ class BusAlert {
   /// Lead time in minutes — fire this many minutes before the estimated arrival.
   final int leadMinutes;
 
+  /// Paused flag, stored inverted-and-optional so alerts persisted before
+  /// this field existed decode as active (missing key → null → enabled).
+  /// Toggling OFF pauses the alert in place; it does NOT delete it. Mirrors
+  /// iOS BusAlert.disabled exactly (ios-native/Leyne/BusAlert.swift).
+  final bool? disabled;
+
+  /// True unless explicitly paused. Old persisted alerts (no `disabled`
+  /// key) decode as enabled.
+  bool get enabled => !(disabled ?? false);
+
   /// Stable identity: `<kind>:<busNo>@<stopCode>`.
   static String makeId(AlertKind kind, String busNo, String stopCode) =>
       '${kind.name}:$busNo@$stopCode';
@@ -66,6 +77,7 @@ class BusAlert {
     String? dest,
     String? boardStopCode,
     int? leadMinutes,
+    bool? disabled,
   }) =>
       BusAlert(
         kind: kind ?? this.kind,
@@ -75,6 +87,23 @@ class BusAlert {
         dest: dest ?? this.dest,
         boardStopCode: boardStopCode ?? this.boardStopCode,
         leadMinutes: leadMinutes ?? this.leadMinutes,
+        disabled: disabled ?? this.disabled,
+      );
+
+  /// Returns a copy with [disabled] set to reflect `on`: null when resuming
+  /// (so a resumed alert is indistinguishable from one that was never
+  /// paused), `true` when pausing. [copyWith]'s `??` convention can't
+  /// express "clear back to null", so pause/resume goes through this
+  /// instead — see AppModel.setAlertEnabled.
+  BusAlert withEnabled(bool on) => BusAlert(
+        kind: kind,
+        busNo: busNo,
+        stopCode: stopCode,
+        stopName: stopName,
+        dest: dest,
+        boardStopCode: boardStopCode,
+        leadMinutes: leadMinutes,
+        disabled: on ? null : true,
       );
 
   Map<String, dynamic> toJson() => {
@@ -85,6 +114,7 @@ class BusAlert {
         'dest': dest,
         'boardStopCode': boardStopCode,
         'leadMinutes': leadMinutes,
+        if (disabled != null) 'disabled': disabled,
       };
 
   factory BusAlert.fromJson(Map<String, dynamic> j) => BusAlert(
@@ -98,6 +128,7 @@ class BusAlert {
         dest: (j['dest'] as String?) ?? '',
         boardStopCode: (j['boardStopCode'] as String?) ?? j['stopCode'] as String,
         leadMinutes: (j['leadMinutes'] as num?)?.toInt() ?? 1,
+        disabled: j['disabled'] as bool?,
       );
 
   @override

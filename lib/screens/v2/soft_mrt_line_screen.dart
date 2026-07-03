@@ -36,11 +36,16 @@ class SoftMrtLineScreen extends StatefulWidget {
     required this.line,
     required this.onTab,
     required this.tabSelection,
+    required this.onOpenStop,
   });
 
   final MRTLine line;
   final ValueChanged<SoftTab> onTab;
   final SoftTab tabSelection;
+
+  /// Opens a bus stop — threaded down from SoftMrtScreen, which passes
+  /// through the SoftRoot-owned callback. See SoftMrtScreen.onOpenStop.
+  final ValueChanged<String> onOpenStop;
 
   @override
   State<SoftMrtLineScreen> createState() => _SoftMrtLineScreenState();
@@ -72,6 +77,7 @@ class _SoftMrtLineScreenState extends State<SoftMrtLineScreen> {
           onBack: () => Navigator.of(context).pop(),
           onTab: widget.onTab,
           tabSelection: widget.tabSelection,
+          onOpenStop: widget.onOpenStop,
         ),
       ),
     );

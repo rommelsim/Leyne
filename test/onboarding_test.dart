@@ -66,9 +66,9 @@ void main() {
         ),
       );
       await tester.pump();
-      // Step 0 welcome: wordmark text + tagline visible.
-      expect(find.text('leyne'), findsOneWidget);
-      expect(find.textContaining('Singapore'), findsOneWidget);
+      // Step 0 welcome: wordmark text + eyebrow visible.
+      expect(find.text('WhereSia'), findsOneWidget);
+      expect(find.textContaining('SINGAPORE'), findsOneWidget);
       // Back button hidden on step 0 (opacity 0).
       final back = tester.widget<Opacity>(
         find
@@ -114,7 +114,7 @@ void main() {
         await tester.tap(find.text('Get started'));
         await tester.pump(const Duration(milliseconds: 500));
         // Step 1 shows the live-wedge kicker (rendered uppercase by _Kicker).
-        expect(find.textContaining('WHY LEYNE'), findsOneWidget);
+        expect(find.textContaining('WHY WHERESIA'), findsOneWidget);
         expect(locationCalls, 0);
         expect(notificationCalls, 0);
 
@@ -145,8 +145,8 @@ void main() {
         // Step 4: done screen.
         expect(find.textContaining('You\'re all set'), findsOneWidget);
 
-        // Step 4: "Enter Leyne" fires onFinish.
-        await tester.tap(find.text('Enter Leyne'));
+        // Step 4: "Enter WhereSia" fires onFinish.
+        await tester.tap(find.text('Enter WhereSia'));
         await tester.pump();
         expect(finishCalls, 1);
       },
@@ -217,7 +217,7 @@ void main() {
       // Back returns to step 0.
       await tester.tap(find.text('Back'));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('leyne'), findsOneWidget);
+      expect(find.text('WhereSia'), findsOneWidget);
     });
 
     testWidgets(

@@ -1,5 +1,5 @@
 // Smoke test for the app shell. Verifies:
-//   • The five navigation destinations are present and labeled correctly.
+//   • The four navigation destinations are present and labeled correctly.
 //   • Tapping a tab switches the visible screen.
 //
 // Doesn't drive DataStore.bootstrap (which would hit the real LTA API);
@@ -9,7 +9,8 @@
 // since bootstrap isn't invoked here).
 //
 // Onboarding is pre-completed (lyne.onboardingDone=true) so the app routes
-// straight to RootScaffold; the onboarding flow itself is exercised by
+// straight to RootScaffold (past the one-shot LaunchScreen splash — see
+// `_skipLaunchScreen` below); the onboarding flow itself is exercised by
 // test/onboarding_test.dart.
 
 import 'package:flutter/material.dart';
@@ -18,26 +19,54 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lyne/main.dart';
+import 'package:lyne/screens/launch_screen.dart';
 import 'package:lyne/state/app_model.dart';
+
+/// Dismisses the one-shot [LaunchScreen] overlay that now sits over the root
+/// shell on every cold start for a returning (onboardingDone) user — mirrors
+/// a user's tap-to-skip. Every test below pumps `LyneApp` with
+/// `lyne.onboardingDone: true`, so without this the splash's own full-screen
+/// GestureDetector would swallow every subsequent `tester.tap()`.
+Future<void> _skipLaunchScreen(WidgetTester tester) async {
+  await tester.tap(find.byType(LaunchScreen));
+  // A leading zero-duration pump lets the exit AnimationController's ticker
+  // fire its first callback — which is when it latches its internal
+  // start-time reference — BEFORE the clock jumps in the next pump. Skip
+  // this and the following duration-jump becomes the ticker's reference
+  // point instead, so the animation reads as having barely started rather
+  // than completed.
+  await tester.pump();
+  // Tap-to-skip's exit animation is 350ms; this pump advances past it and
+  // fires onDone(), which calls setState(_launching = false) in _AppRoot.
+  await tester.pump(const Duration(milliseconds: 400));
+  // One more pump lets that setState rebuild _AppRoot and unmount the (now
+  // fully transparent, but still hit-testable — Opacity doesn't gate
+  // hit-testing) LaunchScreen. Without this its opaque GestureDetector keeps
+  // swallowing taps for one more frame even though nothing is visible.
+  await tester.pump();
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('Root shell shows the five tabs and switches between them',
+  testWidgets('Root shell shows the four tabs and switches between them',
       (tester) async {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
+    await _skipLaunchScreen(tester);
 
-    // All five destinations are present in the bottom navigation
-    // (current order: Bus · MRT · Saved · Search · Alerts). Settings is no
-    // longer a tab — it opens as a gear sheet from the Alerts tab.
+    // All four destinations are present in the bottom navigation (current
+    // order: Bus · MRT · Saved · Alerts). Settings is no longer a tab — it
+    // opens as a gear sheet from the Alerts tab. Search is no longer a bar
+    // destination either — it's reached via the Home tab's own search entry
+    // point (see the "pops the nested stack" test below) and stays a pushed
+    // route (SoftTab.search).
     expect(find.text('Bus'), findsAtLeastNWidgets(1));
     expect(find.text('MRT'), findsAtLeastNWidgets(1));
     expect(find.text('Saved'), findsAtLeastNWidgets(1));
-    expect(find.text('Search'), findsAtLeastNWidgets(1));
     expect(find.text('Alerts'), findsAtLeastNWidgets(1));
 
     // The Bus (Home) tab is the initial tab — its empty-state copy is visible.
@@ -74,11 +103,15 @@ void main() {
 
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
+    await _skipLaunchScreen(tester);
     expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
 
-    // Open Search — SoftRoot PUSHES this onto the nested navigator (it is not a
-    // state-swap like the other tabs), so the nested stack now has 2 routes.
-    await tester.tap(find.byIcon(Icons.search_rounded));
+    // Open Search — no longer a bottom-bar destination, so this goes through
+    // the Home empty state's own "Search" button (onOpenSearch), same as a
+    // real user reaching it from Home's search bar. SoftRoot still PUSHES it
+    // onto the nested navigator (it is not a state-swap like the other
+    // tabs), so the nested stack now has 2 routes.
+    await tester.tap(find.text('Search'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300)); // fade-through
     expect(find.text('Find a stop, bus or place'), findsOneWidget);
@@ -114,6 +147,7 @@ void main() {
 
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
+    await _skipLaunchScreen(tester);
     expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
 
     // Switch to the Alerts tab (a setState swap — no nested route pushed).
@@ -155,6 +189,7 @@ void main() {
 
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
+    await _skipLaunchScreen(tester);
     expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
 
     // Home → MRT (a setState tab swap). The MRT destination becomes selected.
@@ -226,6 +261,7 @@ void main() {
 
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
+    await _skipLaunchScreen(tester);
     expect(find.text('No stops yet'), findsOneWidget); // Home (Bus) tab
 
     // At the Home root with nothing pushed, BACK should exit → the OS owns it,

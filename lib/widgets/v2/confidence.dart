@@ -428,21 +428,15 @@ class CrowdMeter extends StatelessWidget {
     return i < _fill ? _occupancyColor(load, t) : t.line;
   }
 
-  /// Crowd/occupancy colour — hardcoded green/amber/grey so these meters
-  /// stay coloured even after the 2.6.0 monochrome theme change (which
-  /// set t.soon/t.mid to white/black ink). Mirrors iOS CrowdMeter which
-  /// keeps colour via a dedicated occupancyColor helper independent of
-  /// the theme's soon/mid tokens.
-  ///   sea → green  (seats available)
-  ///   sda → amber  (standing available)
-  ///   lsd/null → t.dim (limited/unknown — neutral grey)
+  /// Crowd/occupancy colour — NEUTRAL ink (owner decision 2026-07-03,
+  /// matching the iOS WhereSia rule: crowd is NEVER colour-coded; the
+  /// level is carried by the fill COUNT + the word, not a hue).
   static Color _occupancyColor(Load? load, LyneTheme t) {
     switch (load) {
       case Load.sea:
-        return const Color(0xFF34C759); // system green
       case Load.sda:
-        return const Color(0xFFFF9500); // system orange/amber
       case Load.lsd:
+        return t.fg;
       case null:
         return t.dim;
     }

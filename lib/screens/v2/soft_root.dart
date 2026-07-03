@@ -254,6 +254,7 @@ class _SoftRootState extends State<SoftRoot> {
           onBack: () => _navKey.currentState?.pop(),
           onTab: _handleTab,
           tabSelection: _tab,
+          onOpenStop: _pushStop,
         ),
       ),
     );
@@ -426,6 +427,7 @@ class _SoftRootState extends State<SoftRoot> {
         return SoftMrtScreen(
           onTab: _handleTab,
           onOpenStation: _pushMrtStation,
+          onOpenStop: _pushStop,
         );
       case SoftTab.alerts:
         return SoftAlertsScreen(

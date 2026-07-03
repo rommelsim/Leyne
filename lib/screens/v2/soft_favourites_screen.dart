@@ -56,6 +56,87 @@ int _distanceMFromLocation(String code) {
   return haversine(here.lat, here.lon, stop.latitude, stop.longitude).round();
 }
 
+// ─── Freshness helper ──────────────────────────────────────────────────────
+
+/// "Updated h:mm" from the newest successful arrivals fetch among [pins]'
+/// stop codes, or null when none have loaded yet (freshness unknown — the
+/// header simply omits the meta rather than showing a stale/fake time).
+String? _newestUpdatedLabel(List<Pin> pins) {
+  DateTime? newest;
+  for (final pin in pins) {
+    final ts = DataStore.shared.lastRefresh(pin.code);
+    if (ts != null && (newest == null || ts.isAfter(newest))) newest = ts;
+  }
+  if (newest == null) return null;
+  final hhmm =
+      '${newest.hour.toString().padLeft(2, '0')}${newest.minute.toString().padLeft(2, '0')}';
+  return 'Updated ${fmtClock(hhmm, use24h: AppModel.shared.use24h)}';
+}
+
+// ─── MRT crowd helpers ─────────────────────────────────────────────────────
+// Passive lookups only — this screen doesn't trigger its own crowd fetch
+// (that's warmed by the MRT tab / station screen via `wsWarmCrowd`-style
+// prefetch in initState), so these read whatever DataStore already has
+// cached. Mirrors soft_home_screen.dart's `_lineFromCode`/`_crowdFor`.
+
+/// Best-effort MRTLine for a station's code prefix ("EW23" → ew). LRT
+/// prefixes (PE/PW/SW/SE/BP) return null — crowd isn't reported per LRT
+/// station.
+MRTLine? _lineFromCode(String code) {
+  if (code.length < 2) return null;
+  switch (code.substring(0, 2).toUpperCase()) {
+    case 'EW':
+    case 'CG':
+      return MRTLine.ew;
+    case 'NS':
+      return MRTLine.ns;
+    case 'NE':
+      return MRTLine.ne;
+    case 'CC':
+    case 'CE':
+      return MRTLine.cc;
+    case 'DT':
+      return MRTLine.dt;
+    case 'TE':
+      return MRTLine.te;
+    default:
+      return null;
+  }
+}
+
+/// This station's cached crowd reading, if any line's feed has already
+/// loaded one for it.
+StationCrowd? _crowdFor(MrtGeoStation station) {
+  for (final code in station.codes) {
+    final line = _lineFromCode(code);
+    final list = line == null ? null : DataStore.shared.crowdByLine[line];
+    if (list == null) continue;
+    for (final c in list) {
+      if (c.code.toUpperCase() == code.toUpperCase()) return c;
+    }
+  }
+  return null;
+}
+
+/// Crowd dot colour — NEUTRAL ink (owner decision 2026-07-03, iOS WhereSia
+/// rule: crowd is never colour-coded; the word carries the level).
+Color _crowdColor(CrowdLevel level, LyneTheme t) {
+  return level == CrowdLevel.unknown ? t.faint : t.fg;
+}
+
+String _crowdWord(CrowdLevel level) {
+  switch (level) {
+    case CrowdLevel.low:
+      return 'Low';
+    case CrowdLevel.moderate:
+      return 'Moderate';
+    case CrowdLevel.high:
+      return 'High';
+    case CrowdLevel.unknown:
+      return 'Unknown';
+  }
+}
+
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 class SoftFavouritesScreen extends StatefulWidget {
@@ -352,6 +433,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       );
     }
 
+    final updatedLabel = _newestUpdatedLabel(pins);
     final sectionHeader = _segment == _Segment.all
         ? Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -363,6 +445,9 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                   'Saved stops',
                   style: t.sans(15, weight: FontWeight.w600, color: t.dim),
                 ),
+                const Spacer(),
+                if (updatedLabel != null)
+                  Text(updatedLabel, style: t.mono(11, color: t.faint)),
               ],
             ),
           )
@@ -881,6 +966,11 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
   Widget _stationCard(BuildContext context, MrtGeoStation station) {
     final t = context.t;
+    // Live crowd dot/label when a cached reading exists for this station.
+    // Mirrors WSSavedView.swift:185-187 — an unknown reading is withheld
+    // rather than shown as a hollow "Unknown" chip.
+    final crowd = _crowdFor(station);
+    final showCrowd = crowd != null && crowd.level != CrowdLevel.unknown;
     return Material(
       color: t.surface,
       borderRadius: BorderRadius.circular(LyneRadius.md),
@@ -941,6 +1031,10 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                   ],
                 ),
               ),
+              if (showCrowd) ...[
+                const SizedBox(width: 8),
+                _CrowdDotChip(level: crowd.level, t: t),
+              ],
               const SizedBox(width: 8),
               Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
             ],
@@ -1165,17 +1259,102 @@ class _ColoredBadge extends StatelessWidget {
   }
 }
 
+// ─── Crowd dot chip (saved MRT station rows) ───────────────────────────────
+
+/// Small trailing "● Low"-style chip for a saved station's live crowd
+/// reading. Mirrors WSSavedView.swift's WSChip(gauge:text:) at 185-187.
+class _CrowdDotChip extends StatelessWidget {
+  const _CrowdDotChip({required this.level, required this.t});
+
+  final CrowdLevel level;
+  final LyneTheme t;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: t.surfaceHi,
+        borderRadius: BorderRadius.circular(LyneRadius.full),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: _crowdColor(level, t),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            _crowdWord(level),
+            style: t.mono(10.5, weight: FontWeight.w600, color: t.dim),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Service chip row ───────────────────────────────────────────────────────
+
+/// Row of a stop's service-number chips, capped with a trailing "+N"
+/// overflow chip. Mirrors WSSavedView.swift's TileRow (134-167).
+class _ServiceChipRow extends StatelessWidget {
+  const _ServiceChipRow({required this.services, required this.t});
+
+  final List<String> services;
+  final LyneTheme t;
+
+  /// Chips shown before overflowing into a trailing "+N" chip.
+  static const int _max = 6;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = services.take(_max).toList();
+    final overflow = services.length - shown.length;
+    return Wrap(
+      spacing: 5,
+      runSpacing: 5,
+      children: [
+        for (final no in shown) _chip(no),
+        if (overflow > 0) _chip('+$overflow'),
+      ],
+    );
+  }
+
+  Widget _chip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: t.surfaceHi,
+        borderRadius: BorderRadius.circular(LyneRadius.full),
+      ),
+      child: Text(
+        label,
+        style: t.mono(10.5, weight: FontWeight.w600, color: t.fg),
+      ),
+    );
+  }
+}
+
 // ─── Favourite stop card ─────────────────────────────────────────────────────
 
 /// Compact card matching iOS FavStopCard in SoftFavouritesView.swift:
 ///   46×46 pin tile · name (sans 17 w600) · "Stop {code} · road" (mono 12.5 dim)
-///   · single compact meta line (walk + soonest arrival with "~" whisper)
-///   · trailing chevron.
+///   · service-number chip row (capped, "+N" overflow) · compact meta line
+///   (walk + soonest arrival, its live crowd meter, "~" whisper) · trailing
+///   chevron.
 ///
-/// No divider, no mini-chip bus row (removed for parity with iOS). The whole
-/// card taps to open the full stop view. `pin.nickname` and `pin.tracked`
-/// handling is in the caller (_pinCard); the card just renders the resolved
-/// name/desc and services it receives.
+/// The chip row and per-arrival crowd meter (parity audit, 2026-07-03) mirror
+/// WSSavedView.swift:134-167 — an earlier 2.4.0 pass had dropped both for a
+/// tighter card; they're back to close that gap. No divider. The whole card
+/// taps to open the full stop view. `pin.nickname` and `pin.tracked` handling
+/// is in the caller (_pinCard); the card just renders the resolved name/desc
+/// and services it receives.
 class _FavStopCard extends StatelessWidget {
   const _FavStopCard({
     required this.name,
@@ -1254,6 +1433,13 @@ class _FavStopCard extends StatelessWidget {
 
   Widget _identityText(BuildContext context, LyneTheme t) {
     final subtitle = road.isEmpty ? 'Stop $code' : 'Stop $code · $road';
+    // Full route list at the stop (static BusRoutes dataset), falling back
+    // to whatever's in the live-loaded (possibly tracked-filtered) services
+    // when routes haven't resolved yet. Mirrors WSSavedView.swift's `tiles`.
+    final routeNos = DataStore.shared.servicesAtStop(code);
+    final chips = routeNos.isNotEmpty
+        ? routeNos
+        : services.map((s) => s.no).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1270,14 +1456,20 @@ class _FavStopCard extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
+        if (chips.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _ServiceChipRow(services: chips, t: t),
+        ],
         const SizedBox(height: 3),
         _compactMeta(t),
       ],
     );
   }
 
-  /// Single merged meta line: walk time + soonest arrival with "~" whisper.
-  /// Mirrors iOS FavStopCard.compactMeta — no chip row, no divider.
+  /// Compact meta: walk time, soonest arrival with "~" whisper, and (when
+  /// the soonest arrival is a real live/GPS reading, not a schedule-only
+  /// estimate) its crowd meter + load word. Wraps rather than overflowing
+  /// on narrow widths. Mirrors iOS FavStopCard.compactMeta.
   Widget _compactMeta(LyneTheme t) {
     final now = DateTime.now();
     final sorted = [...services]..sort(_compareEta);
@@ -1296,30 +1488,47 @@ class _FavStopCard extends StatelessWidget {
           : 'next in ${eta.big} ${eta.small}';
     }
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    // Wrap (not Row) so the crowd meter/word — the widest addition here —
+    // flows to a second line on narrow widths instead of overflowing.
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 5,
+      runSpacing: 3,
       children: [
         if (hasLocation) ...[
-          Icon(Icons.directions_walk_rounded, size: 12, color: t.soon),
-          const SizedBox(width: 3),
-          Text(
-            '${walkMin < 1 ? 1 : walkMin} min',
-            style: t.mono(12, weight: FontWeight.w500, color: t.soon),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.directions_walk_rounded, size: 12, color: t.soon),
+              const SizedBox(width: 3),
+              Text(
+                '${walkMin < 1 ? 1 : walkMin} min',
+                style: t.mono(12, weight: FontWeight.w500, color: t.soon),
+              ),
+            ],
           ),
-          if (soonest != null) ...[
-            const SizedBox(width: 5),
-            Text('·', style: t.mono(12, color: t.faint)),
-            const SizedBox(width: 5),
-          ],
+          if (soonest != null) Text('·', style: t.mono(12, color: t.faint)),
         ],
-        if (soonest != null && whenText != null) ...[
-          Icon(Icons.directions_bus_outlined, size: 11, color: t.dim),
-          const SizedBox(width: 3),
-          Text(
-            whenText,
-            style: t.mono(12, weight: FontWeight.w500, color: t.fg),
+        if (soonest != null && whenText != null)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.directions_bus_outlined, size: 11, color: t.dim),
+              const SizedBox(width: 3),
+              Text(
+                whenText,
+                style: t.mono(12, weight: FontWeight.w500, color: t.fg),
+              ),
+              // Soonest bus's crowd — only for a real live/GPS arrival, not
+              // a schedule-only estimate (crowd data doesn't apply to those).
+              if (soonest.monitored) ...[
+                const SizedBox(width: 5),
+                Text('·', style: t.mono(12, color: t.faint)),
+                const SizedBox(width: 5),
+                CrowdMeter(load: soonest.load),
+              ],
+            ],
           ),
-        ],
       ],
     );
   }

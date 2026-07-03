@@ -9,6 +9,8 @@
 // All existing logic preserved: sort state, data loading, pin/save sheet,
 // per-bus bell alerts, notification banner, showAll/onSeeAll, refresh.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 
@@ -16,6 +18,8 @@ import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
 import '../../data/geo.dart';
 import '../../data/models.dart';
+import '../../data/mrt_geo.dart';
+import '../../data/mrt_stations.dart';
 import '../../services/analytics_service.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
@@ -24,6 +28,7 @@ import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
+import 'soft_mrt_station_screen.dart';
 
 class SoftStopScreen extends StatefulWidget {
   const SoftStopScreen({
@@ -52,7 +57,8 @@ class SoftStopScreen extends StatefulWidget {
   State<SoftStopScreen> createState() => _SoftStopScreenState();
 }
 
-class _SoftStopScreenState extends State<SoftStopScreen> {
+class _SoftStopScreenState extends State<SoftStopScreen>
+    with WidgetsBindingObserver {
   // Default to bus-number order so a stop's services read like a roster
   // (2, 10, 53, 53M, 98A, NR7) rather than reshuffling on every ETA tick.
   // Matches iOS SoftStopView. ETA / distance remain in the sort menu.
@@ -65,13 +71,40 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
   /// Services shown before the "Show more" expander kicks in.
   static const int _collapsedCount = 6;
 
+  /// Keeps THIS stop's arrivals live while the screen is open. The global
+  /// tick only refreshes pinned/alerted stops, so an open unpinned stop was
+  /// never re-fetched (stale until pull-to-refresh — owner-reported on iOS;
+  /// same gap here). ensureArrivals is freshness-gated (~25s) and deduped
+  /// internally, so a 5s cadence is cheap.
+  Timer? _refreshTimer;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DataStore.shared.ensureArrivals(widget.stopCode);
     });
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      DataStore.shared.ensureArrivals(widget.stopCode);
+    });
     AnalyticsService.stopViewed(code: widget.stopCode, kind: StopKind.bus);
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Returning from background: timers were suspended with the isolate, so
+    // the arrivals can be minutes old — refetch immediately.
+    if (state == AppLifecycleState.resumed) {
+      DataStore.shared.refreshArrivals(widget.stopCode);
+    }
   }
 
   @override
@@ -111,6 +144,8 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                   // ── Title block ─────────────────────────────────────────
                   _titleBlock(context),
                   const SizedBox(height: 20),
+                  // ── MRT interchange card (stops at a station) ──────────
+                  ..._interchangeCard(context),
                   // ── Arrivals section ────────────────────────────────────
                   _arrivalSection(context, state, sorted, isPinned),
                   // ── Inline 300×250 MREC ─────────────────────────────────
@@ -125,6 +160,198 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         ),
       ),
     );
+  }
+
+  // ── MRT interchange card ────────────────────────────────────────────────
+  // When the stop's name resolves to an MRT station ("Farrer Rd Stn Exit A"
+  // → Farrer Road), a compact card links straight into that station's detail
+  // (crowd, forecast, disruptions). Feature parity with iOS's interchange
+  // card on the WhereSia Bus Stop screen.
+
+  List<Widget> _interchangeCard(BuildContext context) {
+    final t = context.t;
+    final stopName = DataStore.shared.stopName(widget.stopCode);
+    final resolved = resolveMrtStation(stopName);
+    if (resolved == null) return const [];
+    // The detail screen needs the geo record (lat/lon for its nearby-stops
+    // section) — match the resolved display name against the geo dataset.
+    final geoMatches = MrtGeo.all.where(
+      (s) => s.name.toLowerCase() == resolved.name.toLowerCase(),
+    );
+    if (geoMatches.isEmpty) return const [];
+    final station = geoMatches.first;
+    final crowd = _interchangeCrowd(station, resolved.codes);
+    return [
+      Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SoftMrtStationScreen(
+                  station: station,
+                  onBack: () => Navigator.of(context).pop(),
+                  onTab: widget.onTab ?? (_) {},
+                  tabSelection: widget.tabSelection ?? SoftTab.home,
+                  onOpenStop: (code) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => SoftStopScreen(
+                          stopCode: code,
+                          onBack: () => Navigator.of(context).pop(),
+                          onOpenBus: widget.onOpenBus,
+                          onSeeAll: () {},
+                          onTab: widget.onTab,
+                          tabSelection: widget.tabSelection,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Wrap(
+                  spacing: 4,
+                  children: resolved.codes.take(3).map((c) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: c.color,
+                        borderRadius: BorderRadius.circular(LyneRadius.full),
+                      ),
+                      child: Text(
+                        c.code,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        resolved.name,
+                        style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'MRT at this stop',
+                        style: t.mono(10, color: t.dim),
+                      ),
+                    ],
+                  ),
+                ),
+                if (crowd != null) ...[
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: _crowdDotColor(crowd.level, t),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    _crowdLevelLabel(crowd.level),
+                    style: t.mono(11, weight: FontWeight.w600, color: t.fg),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                Icon(Icons.chevron_right_rounded, color: t.dim),
+              ],
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 16),
+    ];
+  }
+
+  /// This station's live crowd reading, looked up from [DataStore.crowdByLine]
+  /// via the interchange's first line code — mirrors iOS SoftStopView's
+  /// `store.wsCrowd(for: station)`. Null when the line isn't tracked or no
+  /// reading has landed yet; the `.unknown` level is also treated as "no
+  /// reading" (iOS excludes it from the chip too).
+  StationCrowd? _interchangeCrowd(MrtGeoStation station, List<MrtCode> codes) {
+    if (codes.isEmpty) return null;
+    final line = _lineFromStationCode(codes.first.code);
+    if (line == null) return null;
+    final list = DataStore.shared.crowdByLine[line];
+    if (list == null) return null;
+    StationCrowd? match;
+    for (final entry in list) {
+      for (final code in station.codes) {
+        if (entry.code.toUpperCase() == code.toUpperCase()) {
+          match = entry;
+          break;
+        }
+      }
+      if (match != null) break;
+    }
+    if (match == null || match.level == CrowdLevel.unknown) return null;
+    return match;
+  }
+
+  /// Two-letter station-code prefix → [MRTLine]. Mirrors the private
+  /// `_lineFromCode` in SoftMrtStationScreen (kept local since that one
+  /// isn't exported).
+  static MRTLine? _lineFromStationCode(String code) {
+    if (code.length < 2) return null;
+    switch (code.substring(0, 2).toUpperCase()) {
+      case 'EW':
+      case 'CG':
+        return MRTLine.ew;
+      case 'NS':
+        return MRTLine.ns;
+      case 'NE':
+        return MRTLine.ne;
+      case 'CC':
+      case 'CE':
+        return MRTLine.cc;
+      case 'DT':
+        return MRTLine.dt;
+      case 'TE':
+        return MRTLine.te;
+      default:
+        return null;
+    }
+  }
+
+  /// Crowd dot colour — NEUTRAL ink (owner decision 2026-07-03, iOS
+  /// WhereSia rule: crowd is never colour-coded; the word carries it).
+  Color _crowdDotColor(CrowdLevel level, LyneTheme t) {
+    return level == CrowdLevel.unknown ? t.faint : t.fg;
+  }
+
+  String _crowdLevelLabel(CrowdLevel level) {
+    switch (level) {
+      case CrowdLevel.low:
+        return 'Low';
+      case CrowdLevel.moderate:
+        return 'Moderate';
+      case CrowdLevel.high:
+        return 'High';
+      case CrowdLevel.unknown:
+        return 'Unknown';
+    }
   }
 
   // ── Top bar ──────────────────────────────────────────────────────────────
@@ -560,8 +787,6 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           ] else
             _arrivalsCard(context, shown,
                 canCollapse: canCollapse, total: sorted.length),
-          const SizedBox(height: 16),
-          _footer(context),
         ],
       ),
     );
@@ -615,6 +840,13 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
         Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
     final conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed);
     final etas = _arrivalTimes(bus, now);
+    final leadSec = etas.first;
+    final later = etas.skip(1).map((s) => fmtEta(s).big).toList();
+    // The blue "pulling in" mark — reserved for a GPS-confirmed arrival
+    // under a minute out. Static (no pulsing — owner-flagged as distracting
+    // on iOS; the capsule + row wash carry it instead).
+    final arrivingNow =
+        fmtEta(leadSec).big == 'Arr' && conf == ArrivalConfidence.live;
 
     return Semantics(
       label: 'Bus ${bus.no} to ${bus.dest}',
@@ -622,8 +854,20 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
       button: true,
       child: InkWell(
         onTap: () => widget.onOpenBus(bus.no),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Container(
+          // Margin + padding together always sum to the original 16/14 inset
+          // so non-arriving rows stay pixel-identical; only the fill colour
+          // changes. Keeps every row the same height (no divider jitter) and
+          // keeps the highlight inset from the card's own rounded edges
+          // rather than bleeding full-width (owner-flagged on iOS).
+          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          decoration: BoxDecoration(
+            color: arrivingNow
+                ? t.accent.withValues(alpha: 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
           child: Row(
             children: [
               // Badge keeps its standard look — proximity is not colour-coded.
@@ -631,7 +875,7 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
               const SizedBox(width: 12),
               // Destination is the flexible element: it wraps to two lines
               // before truncating so "To Kampong Bahru Ter" reads in full.
-              // The badge, time columns and bell keep their intrinsic width.
+              // The badge and lead ETA keep their intrinsic width.
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -643,22 +887,108 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    // WAB / deck indicators — only shown when arrival data is
-                    // confirmed live or stale (not for timetable-only ghosts).
-                    if (_showServiceAttrs(conf) &&
-                        (bus.wab || bus.deck != Deck.sd)) ...[
-                      const SizedBox(height: 3),
-                      _serviceAttrs(t, bus, conf),
-                    ],
+                    _secondLine(t, bus, conf, later),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              _etaColumns(t, etas, conf),
+              // ONE big next-bus ETA (iOS parity) instead of the old
+              // three-column ETA wall; later arrivals move to the quiet
+              // "then …" line above. Arriving swaps in a solid capsule.
+              if (arrivingNow)
+                _arrivingCapsule(t)
+              else
+                _leadEta(t, leadSec, conf),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// Second line under the destination: WAB/deck attrs · "then 12 · 24 min"
+  /// (later arrivals, omitted when there are none) · crowd meter trailing.
+  /// Omitted entirely when there's nothing to show, so schedule-only ghost
+  /// rows stay single-line.
+  Widget _secondLine(
+    LyneTheme t,
+    Service bus,
+    ArrivalConfidence conf,
+    List<String> later,
+  ) {
+    final showAttrs =
+        _showServiceAttrs(conf) && (bus.wab || bus.deck != Deck.sd);
+    final showThen = later.isNotEmpty;
+    // Crowd only for a confirmed (non-schedule-only) arrival — mirrors iOS
+    // SoftStopView's `!sched` gate on the crowd gauge.
+    final showCrowd = bus.monitored;
+    if (!showAttrs && !showThen && !showCrowd) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        children: [
+          if (showAttrs) _serviceAttrs(t, bus, conf),
+          if (showAttrs && showThen) const SizedBox(width: 8),
+          if (showThen)
+            Flexible(
+              child: Text(
+                'then ${later.join(' · ')} min',
+                style: t.mono(11, color: t.dim),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          const Spacer(),
+          if (showCrowd) CrowdMeter(load: bus.load),
+        ],
+      ),
+    );
+  }
+
+  /// Solid accent "ARRIVING" capsule — the sanctioned live-accent exception,
+  /// shown in place of the big ETA when the lead bus is under a minute out
+  /// with a live GPS fix.
+  Widget _arrivingCapsule(LyneTheme t) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: t.accent,
+        borderRadius: BorderRadius.circular(100),
+      ),
+      child: Text(
+        'ARRIVING',
+        style: t
+            .mono(11, weight: FontWeight.w700, color: Colors.white)
+            .copyWith(letterSpacing: 0.8),
+      ),
+    );
+  }
+
+  /// The one big next-bus ETA. Scheduled/aged arrivals carry the
+  /// whisper-quiet "~" prefix; the numeral itself always stays full-ink
+  /// (timeliness is the promise — see feedback_timely_over_honest).
+  Widget _leadEta(LyneTheme t, int sec, ArrivalConfidence conf) {
+    final eta = fmtEta(sec);
+    final arriving = eta.big == 'Arr';
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            if (!arriving && conf != ArrivalConfidence.live)
+              Text('~', style: t.mono(14, color: t.dim)),
+            Text(
+              arriving ? 'Arr' : eta.big,
+              style: t.mono(20, weight: FontWeight.w600, color: t.fg),
+            ),
+          ],
+        ),
+        Text(arriving ? 'now' : eta.small, style: t.mono(10, color: t.dim)),
+      ],
     );
   }
 
@@ -692,9 +1022,10 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  /// Wrap a bus row so swiping it RIGHT reveals a Notify/Stop action (replaces
-  /// the old side bell). Tapping the row still opens the bus; the swipe arms or
-  /// removes the arrival alert in one gesture, with an Undo snackbar.
+  /// Wrap a bus row so swiping it RIGHT reveals Notify/Stop + Save actions
+  /// (replaces the old side bell). Tapping the row still opens the bus; the
+  /// swipe arms/removes the arrival alert or favourites the service at this
+  /// stop in one gesture, with an Undo snackbar for the alert.
   Widget _swipeNotify(BuildContext context, Service bus, Widget child) {
     final t = context.t;
     final on = AppModel.shared.alertFor(
@@ -703,12 +1034,14 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
           stopCode: widget.stopCode,
         ) !=
         null;
+    final favOn =
+        AppModel.shared.isFavService(no: bus.no, stop: widget.stopCode);
     return Slidable(
       key: ValueKey('notify-${bus.no}'),
       groupTag: 'arrivals',
       endActionPane: ActionPane(
         motion: const DrawerMotion(),
-        extentRatio: 0.3,
+        extentRatio: 0.55,
         children: [
           SlidableAction(
             onPressed: (_) => toggleArrivalAlert(
@@ -722,68 +1055,17 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
             icon: on ? Icons.visibility_off : Icons.visibility_rounded,
             label: on ? 'Stop' : 'Notify',
           ),
+          SlidableAction(
+            onPressed: (_) => AppModel.shared
+                .toggleFavService(no: bus.no, stop: widget.stopCode),
+            backgroundColor: favOn ? t.surfaceHi : t.accent,
+            foregroundColor: favOn ? t.fg : t.onAccent,
+            icon: favOn ? Icons.star_rounded : Icons.star_outline_rounded,
+            label: favOn ? 'Saved' : 'Save',
+          ),
         ],
       ),
       child: child,
-    );
-  }
-
-  /// Up to three arrival columns ("Arr · 13 · 24 min") split by hairlines. ETA
-  /// ink is uniform — soon-ness is not colour-coded; scheduled/ghost times read
-  /// faint (the honesty whisper), everything else standard ink.
-  Widget _etaColumns(LyneTheme t, List<int> etas, ArrivalConfidence conf) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < etas.length; i++) ...[
-          if (i > 0) ...[
-            const SizedBox(width: 6),
-            Container(width: 1, height: 30, color: t.line),
-            const SizedBox(width: 6),
-          ],
-          _etaColumn(t, etas[i], lead: i == 0, conf: conf),
-        ],
-      ],
-    );
-  }
-
-  Widget _etaColumn(LyneTheme t, int sec,
-      {required bool lead, required ArrivalConfidence conf}) {
-    final eta = fmtEta(sec);
-    final arriving = eta.big == 'Arr';
-    final color = (arriving && conf == ArrivalConfidence.live) ? t.accent : t.fg;
-
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 30),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                arriving ? 'Arr' : eta.big,
-                style: t.mono(20, weight: FontWeight.w600, color: color),
-              ),
-              if (lead && arriving && conf == ArrivalConfidence.live) ...[
-                const SizedBox(width: 1),
-                ExcludeSemantics(
-                  child: Transform.translate(
-                    offset: const Offset(0, -7),
-                    child: Icon(Icons.sensors, size: 9, color: t.soon),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          Text(
-            arriving ? 'now' : eta.small,
-            style: t.mono(10, color: t.dim),
-          ),
-        ],
-      ),
     );
   }
 
@@ -883,25 +1165,10 @@ class _SoftStopScreenState extends State<SoftStopScreen> {
     );
   }
 
-  // ── Footer ────────────────────────────────────────────────────────────────
-
-  Widget _footer(BuildContext context) {
-    final t = context.t;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(Icons.info_outline_rounded, size: 11, color: t.faint),
-        const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            'Bus arrival times are estimates from LTA and may vary.',
-            style: t.sans(11, color: t.faint),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ],
-    );
-  }
+  // No footer: the title block's LIVE/"Updated" freshness label already
+  // carries provenance, and users don't care where the data comes from
+  // (owner, 2026-07-02) — matches iOS SoftStopView, which dropped its
+  // legend/disclaimer for the same reason.
 
   // ── Sort & distance helpers (unchanged logic) ─────────────────────────────
 

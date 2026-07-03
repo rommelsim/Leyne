@@ -21,6 +21,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ReviewPrompt {
   ReviewPrompt._();
 
+  /// MASTER SWITCH — OFF (owner request 2026-07-03, parity with iOS
+  /// PromptCenter.promptsEnabled): the review ask was landing on top of
+  /// notification-tap navigation. Flip back to `true` only after the ask is
+  /// re-designed to never fire on a launch that came from a deep link.
+  static const bool enabled = false;
+
   static const _kValueMomentsKey = 'lyne.review.valueMoments';
   static const _kRequestedKey = 'lyne.review.requested';
 
@@ -32,6 +38,7 @@ class ReviewPrompt {
   /// is reached, request a Play Store review exactly once per install. Safe to
   /// call from anywhere; fully self-contained and fire-and-forget.
   static Future<void> recordValueMomentAndMaybeAsk() async {
+    if (!enabled) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getBool(_kRequestedKey) ?? false) return;

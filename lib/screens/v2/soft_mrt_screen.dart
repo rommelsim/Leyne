@@ -41,6 +41,7 @@ class SoftMrtScreen extends StatefulWidget {
     super.key,
     required this.onTab,
     required this.onOpenStation,
+    required this.onOpenStop,
   });
 
   final ValueChanged<SoftTab> onTab;
@@ -51,6 +52,12 @@ class SoftMrtScreen extends StatefulWidget {
   /// station-open path.
   final void Function(MrtGeoStation station, int distanceM, int walkMin)
   onOpenStation;
+
+  /// Opens a bus stop (SoftRoot owns the actual push, incl. its onOpenBus /
+  /// onSeeAll wiring). Threaded straight through to the line + station detail
+  /// screens pushed below so their "bus stops here" rows don't need to
+  /// duplicate that wiring locally.
+  final ValueChanged<String> onOpenStop;
 
   @override
   State<SoftMrtScreen> createState() => _SoftMrtScreenState();
@@ -113,6 +120,7 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
           line: line,
           onTab: widget.onTab,
           tabSelection: SoftTab.mrt,
+          onOpenStop: widget.onOpenStop,
         ),
       ),
     );
@@ -128,6 +136,7 @@ class _SoftMrtScreenState extends State<SoftMrtScreen> {
           tabSelection: SoftTab.mrt,
           distanceM: distanceM,
           walkMin: walkMin,
+          onOpenStop: widget.onOpenStop,
         ),
       ),
     );
