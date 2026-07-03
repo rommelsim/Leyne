@@ -638,46 +638,45 @@ class _BusStopsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 10),
-          child: Text(
-            'BUS STOPS AT THIS STATION',
-            style: t
-                .mono(10, weight: FontWeight.w600, color: t.dim)
-                .copyWith(letterSpacing: 0.8),
+    return Container(
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header now lives inside the panel (owner decision 2026-07-03,
+          // matching WSCard's title-inside-panel layout) — was previously a
+          // separate label rendered above the card.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Text(
+              'BUS STOPS AT THIS STATION',
+              style: t
+                  .mono(10, weight: FontWeight.w600, color: t.dim)
+                  .copyWith(letterSpacing: 0.8),
+            ),
           ),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: t.surface,
-            borderRadius: BorderRadius.circular(LyneRadius.lg),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              for (var i = 0; i < stops.length; i++) ...[
-                _BusStopRow(
-                  stop: stops[i],
-                  arrival: arrivals[stops[i].stopCode],
-                  onOpenStop: onOpenStop,
-                  t: t,
-                ),
-                if (i < stops.length - 1)
-                  Divider(
-                    color: t.line,
-                    height: 1,
-                    thickness: 1,
-                    indent: 16,
-                    endIndent: 16,
-                  ),
-              ],
-            ],
-          ),
-        ),
-      ],
+          for (var i = 0; i < stops.length; i++) ...[
+            _BusStopRow(
+              stop: stops[i],
+              arrival: arrivals[stops[i].stopCode],
+              onOpenStop: onOpenStop,
+              t: t,
+            ),
+            if (i < stops.length - 1)
+              Divider(
+                color: t.line,
+                height: 1,
+                thickness: 1,
+                indent: 16,
+                endIndent: 16,
+              ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -815,6 +814,42 @@ class _EtaLabel extends StatelessWidget {
 // independently gates its own duplicate "current reading" row to
 // interchanges only, per that same source's interchange check.
 
+/// Small "live data" indicator — dot + LIVE — mirroring WSLiveBadge in
+/// ios-native/Leyne/WhereSia/WSComponents.swift. No shared widget has been
+/// extracted for this yet; soft_stop_screen.dart / soft_bus_screen.dart each
+/// hand-roll the same dot(t.soon) + mono "LIVE"(t.soon) convention inline —
+/// this mirrors that existing style rather than inventing a new one.
+class _LiveBadge extends StatelessWidget {
+  const _LiveBadge({required this.t});
+
+  final LyneTheme t;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Live data',
+      excludeSemantics: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'LIVE',
+            style: t
+                .mono(10, weight: FontWeight.w700, color: t.soon)
+                .copyWith(letterSpacing: 0.8),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StationCrowdHeadlineCard extends StatelessWidget {
   const _StationCrowdHeadlineCard({
     required this.station,
@@ -872,65 +907,82 @@ class _StationCrowdHeadlineCard extends StatelessWidget {
     }
     final level = loaded ? (worst ?? CrowdLevel.unknown) : null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 10),
-          child: Text(
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header now lives inside the panel (owner decision 2026-07-03,
+          // matching WSCard's title-inside-panel layout in
+          // WSMrtStationView.swift) — was previously a separate label
+          // rendered above the card.
+          Text(
             'STATION CROWD · NOW',
             style: t
                 .mono(10, weight: FontWeight.w600, color: t.dim)
                 .copyWith(letterSpacing: 0.8),
           ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: t.surface,
-            borderRadius: BorderRadius.circular(LyneRadius.lg),
-          ),
-          child: level == null
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 13,
-                      height: 13,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        color: t.dim,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Loading…',
-                      style: TextStyle(fontSize: 13, color: t.dim),
-                    ),
-                  ],
-                )
-              : Column(
+          const SizedBox(height: 10),
+          if (level == null)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: t.dim,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text('Loading…', style: TextStyle(fontSize: 13, color: t.dim)),
+              ],
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _crowdLabel(level),
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: t.fg,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _crowdLabel(level),
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: t.fg,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _crowdHeadlineHint(level),
+                            style: t.mono(11, color: t.dim),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _crowdHeadlineHint(level),
-                      style: t.mono(11, color: t.dim),
-                    ),
-                    const SizedBox(height: 10),
-                    _CrowdMeterBar(level: level, t: t),
+                    // LIVE badge — mirrors WSMrtStationView.swift's
+                    // crowdCard (`if crowdNow != .unknown { WSLiveBadge() }`):
+                    // top-aligned with the crowd word, hidden while loading
+                    // or when the reading is unknown.
+                    if (level != CrowdLevel.unknown) _LiveBadge(t: t),
                   ],
                 ),
-        ),
-      ],
+                const SizedBox(height: 10),
+                _CrowdMeterBar(level: level, t: t),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1214,36 +1266,38 @@ class _ForecastCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final intervals = _stationIntervals(forecastRawByLine[line], station);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 10),
-          child: Text(
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header now lives inside the panel (owner decision 2026-07-03,
+          // matching WSCard's title-inside-panel layout) — was previously a
+          // separate label rendered above the card.
+          Text(
             'CROWD FORECAST · TODAY',
             style: t
                 .mono(10, weight: FontWeight.w600, color: t.dim)
                 .copyWith(letterSpacing: 0.8),
           ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: t.surface,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: intervals.isNotEmpty
-              ? _ForecastChart(intervals: intervals, t: t)
-              : Text(
-                  'Forecast unavailable right now.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: t.dim,
-                  ),
-                ),
-        ),
-      ],
+          const SizedBox(height: 10),
+          if (intervals.isNotEmpty)
+            _ForecastChart(intervals: intervals, t: t)
+          else
+            Text(
+              'Forecast unavailable right now.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: t.dim,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
