@@ -38,6 +38,14 @@ enum AppPrompt: String, Identifiable {
 final class PromptCenter: ObservableObject {
     static let shared = PromptCenter()
 
+    /// MASTER SWITCH — OFF (owner request 2026-07-03): the review card was
+    /// surfacing over deep-link navigation (a Live Activity tap landed on
+    /// Track Bus only to have this sheet cover it) and still carried the old
+    /// SG Transit branding. Flip back to `true` only after the prompt is
+    /// redesigned: WhereSia copy, and NEVER on a launch that came from a
+    /// deep link / notification tap.
+    static let promptsEnabled = false
+
     /// Drives the sheet in `RootView`. Set to present; cleared on dismiss/action.
     @Published var active: AppPrompt?
 
@@ -85,6 +93,7 @@ final class PromptCenter: ObservableObject {
     // MARK: - Decision
 
     private func evaluate(opens: Int, afterJourney: Bool) {
+        guard Self.promptsEnabled else { return }
         guard active == nil, !shownThisSession else { return }
         guard opens >= minOpensBeforeAnyPrompt else { return }
         if let last = lastPromptDate, daysSince(last) < Double(minDaysBetweenPrompts) { return }

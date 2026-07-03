@@ -278,10 +278,20 @@ struct WSTrackBusView: View {
                 Rectangle().fill(ws.rule).frame(width: 3)
             }
             .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Bus en route").font(ws.sans(12, weight: .bold)).foregroundStyle(ws.text)
-                Text("between stops · \(service?.load.wsWord.lowercased() ?? "on the way")")
-                    .font(ws.mono(11)).foregroundStyle(ws.dim)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Bus \(serviceNo) is here").font(ws.sans(12, weight: .bold)).foregroundStyle(ws.text)
+                // Its live GPS position sits between the two stops above and
+                // below this marker; the gauge + word is the onboard crowd
+                // (same idiom as everywhere else — a bare lowercase "seats"
+                // read as a mystery, owner question 2026-07-03).
+                HStack(spacing: 6) {
+                    Text("between these stops").font(ws.mono(11)).foregroundStyle(ws.dim)
+                    if let load = service?.load {
+                        Text("·").font(ws.mono(11)).foregroundStyle(ws.faint)
+                        CrowdGauge(fraction: load.wsFraction, width: 22)
+                        Text(load.wsWord).font(ws.mono(11)).foregroundStyle(ws.dim)
+                    }
+                }
             }
             .padding(.top, 5).padding(.bottom, 13)
         }
