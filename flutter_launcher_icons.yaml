@@ -1,16 +1,16 @@
-# Android launcher icon — generated from the iOS AppIcon artwork (source of
-# truth: ios-native/Leyne/Assets.xcassets/AppIcon.appiconset/AppIcon-Light.png,
-# the light/universal 1024px variant — white Inter-ExtraBold "W" on an
-# azure→deep-blue gradient with a radial highlight). Android has no
-# light/dark app-icon concept the way iOS 18 does, so only the light
-# artwork is used.
+# Android launcher icon — generated from the same "pin-clock" artwork as the
+# iOS AppIcon (source of truth: ios-native/Leyne/Assets.xcassets/
+# AppIcon.appiconset/AppIcon-Light.png, the light/universal 1024px variant —
+# white map pin whose head is a clock face with a green countdown arc, on a
+# coral→red diagonal gradient). Android has no light/dark app-icon concept
+# the way iOS 18 does, so only the light artwork is used.
 #
 # Run with: dart run flutter_launcher_icons -f flutter_launcher_icons.yaml
 #
 # android: true overwrites the existing mipmap-*/ic_launcher.png set in
 # place (not a parallel/new icon name) — this IS the replacement.
-# ios: false — this file is Android-only (Section G scope); the iOS icon is
-# owned by ios-native/ and must not be touched by this generator.
+# ios: false — this file is Android-only; the iOS icon is owned by
+# ios-native/ and must not be touched by this generator.
 flutter_launcher_icons:
   android: true
   ios: false
@@ -19,29 +19,23 @@ flutter_launcher_icons:
   # untouched — same asset Apple uses for the App Store icon.
   image_path: "assets/icon/leyne_icon.png"
 
-  # Adaptive icon (Android 8+): background is a flat fill sampled directly
-  # from the artwork's own deep-blue edge (bottom of the gradient reads a
-  # flat, unvarying rgb(0,82,180) at every corner/edge sampled) — not a new
-  # design colour. Foreground is the same full artwork; the W's bounding box
-  # fills ~61% of the canvas width / ~44% of its height, with its "shoulder"
-  # corners the closest point to the frame. Checked the tool's default 16%
-  # inset (content scaled to the centre 68% via the generated <inset> XML)
-  # against Android's documented 66dp/108dp safe-zone circle: the shoulders
-  # land ~5dp inside that circle (comfortable margin, confirmed by rendering
-  # the composite against the safe-zone circle and clipping to it — nothing
-  # is lost), so the tool's default did NOT need overriding. Left implicit
-  # rather than pinning `adaptive_icon_foreground_inset` to a number that
-  # would silently stop being "verified" the next time the artwork changes.
-  adaptive_icon_background: "#0052B4"
-  adaptive_icon_foreground: "assets/icon/leyne_icon.png"
+  # Adaptive icon (Android 8+): unlike the previous artwork (whose edges were
+  # a flat colour that a solid-fill background could match invisibly), the
+  # pin-clock background is a corner-to-corner gradient, so a flat colour
+  # behind an inset full-square foreground would show a visible seam. The
+  # layers are therefore split properly: background = the gradient alone
+  # (leyne_icon_bg.png), foreground = just the pin-clock glyph on
+  # transparency (leyne_icon_fg.png). The glyph is 708px tall on the 1024
+  # canvas (~69%); through the tool's default 16% inset that lands at ~70%
+  # of the visible tile — inside the 66/108dp safe-zone circle and matching
+  # the glyph's optical size on the iOS icon.
+  adaptive_icon_background: "assets/icon/leyne_icon_bg.png"
+  adaptive_icon_foreground: "assets/icon/leyne_icon_fg.png"
 
   # Android 13+ themed (monochrome) icon: the OS recolours this layer to a
   # single system-wallpaper-derived tone and discards RGB, so it must be
-  # JUST the glyph's alpha shape — not the full gradient square (that would
-  # tint as a solid block with no visible "W"). Generated from the same
-  # 1024 artwork by keying out the gradient (alpha ramped off the pixel's
-  # min(r,g,b) — the background blue never exceeds r≈91, so anything
-  # whiter than that is glyph, not background) onto a transparent canvas,
-  # same proportions as the foreground so it sits identically once the OS
-  # applies its own inset.
+  # JUST the glyph's alpha shape. This is the pin silhouette with the clock
+  # face punched out (transparent) and the hands/arc/centre dot kept solid,
+  # so the clock still reads once the OS tints it. Same geometry as the
+  # foreground layer, so it sits identically under the same inset.
   adaptive_icon_monochrome: "assets/icon/leyne_icon_monochrome.png"

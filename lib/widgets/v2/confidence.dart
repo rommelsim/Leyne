@@ -354,6 +354,7 @@ class CrowdMeter extends StatelessWidget {
     required this.load,
     this.showLabel = true,
     this.compact = false,
+    this.showGlyphs = true,
   });
 
   final Load? load; // null → unknown
@@ -364,6 +365,17 @@ class CrowdMeter extends StatelessWidget {
   /// `Load.wsWord` — for tight trailing columns (Home/Saved when-columns)
   /// where the full phrasing crushed the leading title (owner-reported).
   final bool compact;
+
+  /// Word-only mode: skip the three person glyphs and render just the label.
+  /// The glyphs alone cost ~42dp (3×13px icons + gaps) — in an already
+  /// width-capped host (a Home/Saved when-column sharing the row with a
+  /// stop-name title) that's often the single biggest contributor to title
+  /// truncation, since the level is already legible from the word alone in
+  /// that compact context. Other call sites (Bus/Stop screens, timeline)
+  /// default to `true` and are unaffected — this is opt-out, not a behavior
+  /// change. See soft_home_screen.dart `_whenColumn` (owner-reported
+  /// 2026-07-03: "Farrer Rd St…" titles crushed to ~105dp).
+  final bool showGlyphs;
 
   int get _fill {
     switch (load) {
@@ -415,23 +427,25 @@ class CrowdMeter extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < 3; i++) ...[
-                if (i > 0) const SizedBox(width: 1.5),
-                Icon(
-                  (load != null && i < _fill)
-                      ? Icons.person_rounded
-                      : Icons.person_outline_rounded,
-                  size: 13,
-                  color: _personColor(i, t),
-                ),
+          if (showGlyphs) ...[
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < 3; i++) ...[
+                  if (i > 0) const SizedBox(width: 1.5),
+                  Icon(
+                    (load != null && i < _fill)
+                        ? Icons.person_rounded
+                        : Icons.person_outline_rounded,
+                    size: 13,
+                    color: _personColor(i, t),
+                  ),
+                ],
               ],
-            ],
-          ),
-          if (showLabel) ...[
-            const SizedBox(width: 5),
+            ),
+            if (showLabel) const SizedBox(width: 5),
+          ],
+          if (showLabel)
             // maxLines+ellipsis so a width-capped host (Home/Saved
             // when-columns) truncates the word instead of overflowing.
             // No Flexible here — most call sites put the meter in an
@@ -446,7 +460,6 @@ class CrowdMeter extends StatelessWidget {
                 color: load == null ? t.faint : _occupancyColor(load, t),
               ),
             ),
-          ],
         ],
       ),
     );

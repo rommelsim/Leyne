@@ -167,7 +167,7 @@ struct SettingsView: View {
                                 .opacity(0.0)  // placeholder if image asset isn't usable
                         )
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Leyne").font(t.sans(15, weight: .semibold))
+                        Text("Departly").font(t.sans(15, weight: .semibold))
                             .foregroundStyle(t.fg)
                         Text(versionLabel)
                             .font(t.mono(11))
@@ -435,7 +435,7 @@ struct NotificationsView: View {
                 Text("Notifications blocked in iOS Settings")
                     .font(t.sans(13, weight: .semibold))
                     .foregroundStyle(t.fg)
-                Text("Leyne needs notification permission to alert you when a bus is nearly here. Re-enable it from the iOS Settings app.")
+                Text("Departly needs notification permission to alert you when a bus is nearly here. Re-enable it from the iOS Settings app.")
                     .font(t.mono(11)).foregroundStyle(t.dim)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
@@ -525,7 +525,7 @@ struct AboutView: View {
                         .foregroundStyle(t.contrastFg)
                 )
             VStack(alignment: .leading, spacing: 3) {
-                Text("Leyne").font(t.sans(22, weight: .semibold)).foregroundStyle(t.fg)
+                Text("Departly").font(t.sans(22, weight: .semibold)).foregroundStyle(t.fg)
                 Text(versionLabel).font(t.mono(12)).foregroundStyle(t.dim).tracking(0.4)
             }
             Spacer()

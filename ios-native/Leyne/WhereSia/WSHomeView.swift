@@ -59,6 +59,11 @@ struct WSHomeView: View {
         .onChange(of: m.tick) { _, _ in store.prefetchNearbyArrivals() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                // A launch-time bootstrap failure shouldn't outlive a trip
+                // to the background — retry quietly on return.
+                if case .error = store.referenceState {
+                    Task { await store.bootstrap() }
+                }
                 store.prefetchNearbyArrivals()
                 store.wsWarmCrowd(for: nearbyStations.map(\.station))
             }
@@ -66,6 +71,10 @@ struct WSHomeView: View {
     }
 
     private func bootstrap() {
+        // Returning to Home after a failed launch bootstrap retries it.
+        if case .error = store.referenceState {
+            Task { await store.bootstrap() }
+        }
         location.start()
         // Home renders UNDERNEATH the onboarding overlay (RootView ZStack), so
         // its onAppear runs on first launch too — requesting here fired the
@@ -144,11 +153,30 @@ struct WSHomeView: View {
 
     @ViewBuilder private var busList: some View {
         if busStops.isEmpty {
-            emptyHint(coord == nil ? "Turn on location to see stops near you."
-                                   : "Finding stops near you…")
+            if coord == nil {
+                emptyHint("Turn on location to see stops near you.")
+            } else if case .error = store.referenceState {
+                // The stop directory failed to load (LTA flake) — the old
+                // copy claimed we were still "finding" forever. Stay quiet,
+                // be accurate, offer the way back. Foreground/appear also
+                // auto-retry, so the tap is a shortcut, not a chore.
+                Button {
+                    Task { await store.bootstrap() }
+                } label: {
+                    emptyHint("Stops aren’t loading right now — tap to retry.")
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                emptyHint("Finding stops near you…")
+            }
         } else {
+            // Android's Home splits this list into "Closest to you" (green
+            // outlined card) / "Other nearby stops". Same information here,
+            // in this board's own idiom: a whisper-quiet tag on the first
+            // row — nearby is distance-sorted, so first IS the closest.
             ForEach(busStops) { stop in
-                StopRow(stop: stop)
+                StopRow(stop: stop, tag: stop.id == busStops.first?.id ? "CLOSEST STOP" : nil)
                 WSRowDivider().padding(.horizontal, 22)
             }
         }

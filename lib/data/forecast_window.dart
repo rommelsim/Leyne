@@ -50,9 +50,14 @@ abstract class ForecastWindow {
 
   /// Builds the visible window from a station's raw forecast intervals,
   /// anchored on [now]: one slot back from the first upcoming interval
-  /// (`Start >= now`) through the next [windowSize] - 1 slots. Falls back to
-  /// the tail of the series when every interval is already in the past, so
-  /// there's always something to show rather than an empty chart.
+  /// (`Start >= now`) through the next [windowSize] - 1 slots.
+  ///
+  /// Returns an EMPTY window once [now] is past the end of the final slot
+  /// (start + 30 min) — the service day is over, and the previous "always
+  /// show the tail" fallback flagged the last slot as "now" on a closed
+  /// station (owner-reported on iOS, 2026-07-04; fixed on both platforms).
+  /// While [now] is still inside the final slot, that slot anchors the
+  /// window as before.
   static List<ForecastWindowPoint> build(
     List<LtaStationForecastInterval> intervals, {
     required DateTime now,
@@ -62,7 +67,14 @@ abstract class ForecastWindow {
     final sorted = [...intervals]..sort((a, b) => a.start.compareTo(b.start));
 
     var upcomingIdx = sorted.indexWhere((iv) => !iv.start.isBefore(now));
-    if (upcomingIdx == -1) upcomingIdx = sorted.length - 1;
+    if (upcomingIdx == -1) {
+      // Whole series is in the past. Anchor on the final slot only while
+      // its half-hour window still covers `now`; afterwards the station is
+      // closed (or about to be) — show nothing rather than a stale tail.
+      final lastEnd = sorted.last.start.add(const Duration(minutes: 30));
+      if (!now.isBefore(lastEnd)) return const [];
+      upcomingIdx = sorted.length - 1;
+    }
     final start = (upcomingIdx - 1).clamp(0, sorted.length - 1);
     final end = (start + windowSize).clamp(start, sorted.length);
 

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- pin ring: outer head circle with the clock face punched out -->
+  <path fill-rule="evenodd" fill="#FFFFFF"
+        d="M 764 436 A 252 252 0 1 0 260 436 A 252 252 0 1 0 764 436 Z
+           M 688 436 A 176 176 0 1 1 336 436 A 176 176 0 1 1 688 436 Z"/>
+  <polygon points="368,636 656,636 512,892" fill="#FFFFFF"/>
+  <path d="M 512 300 A 136 136 0 0 1 630 504" fill="none" stroke="#FFFFFF" stroke-width="34" stroke-linecap="round"/>
+  <path d="M 512 436 L 512 330" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round"/>
+  <path d="M 512 436 L 590 482" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="512" cy="436" r="22" fill="#FFFFFF"/>
+</svg>

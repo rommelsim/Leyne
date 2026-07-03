@@ -141,7 +141,7 @@ struct OnboardingView: View {
                 Text("SINGAPORE · BUS & MRT")
                     .font(ws.sans(11, weight: .heavy)).tracking(2.2)
                     .foregroundStyle(ws.dim)
-                Text("WhereSia")
+                Text("Departly")
                     .font(ws.sans(40, weight: .heavy))
                     .foregroundStyle(ws.text)
                 HStack(spacing: 6) {
@@ -181,7 +181,7 @@ struct OnboardingView: View {
     private var live: some View {
         stepScaffold(dotsIndex: -1) {
             VStack(alignment: .leading, spacing: 0) {
-                kicker("Why WhereSia")
+                kicker("Why Departly")
                 Text("Always up to the minute.")
                     .font(ws.sans(26, weight: .heavy))
                     .foregroundStyle(ws.text)
@@ -240,7 +240,7 @@ struct OnboardingView: View {
     private var locationPrimer: some View {
         primer(dotsIndex: 0, glyph: .location, kicker: "Permission 1 of \(permCount)",
                title: "Find stops around you",
-               body: "WhereSia uses your location to surface the nearest stops and place your bus, you and your stop on the map.",
+               body: "Departly uses your location to surface the nearest stops and place your bus, you and your stop on the map.",
                points: [(.scope, "Nearest stops, sorted by distance"),
                         (.busSingle, "See exactly where your stop is")],
                // Guideline 5.1.1(iv): neutral button wording ("Continue", not
@@ -268,8 +268,8 @@ struct OnboardingView: View {
 
     private var attPrimer: some View {
         primer(dotsIndex: 2, glyph: .info, kicker: "Permission 3 of 3",
-               title: "Keep WhereSia free",
-               body: "WhereSia runs a few ads to stay free. Allowing tracking makes them more relevant — but it’s entirely your call, and WhereSia works fully either way.",
+               title: "Keep Departly free",
+               body: "Departly runs a few ads to stay free. Allowing tracking makes them more relevant — but it’s entirely your call, and Departly works fully either way.",
                points: [(.close, "Decline and nothing changes for you")],
                primary: "Continue", onPrimary: {
                    guard !trackingTapped else { return }
@@ -293,7 +293,7 @@ struct OnboardingView: View {
                 .font(ws.sans(26, weight: .heavy))
                 .foregroundStyle(ws.text)
                 .padding(.top, 26)
-            Text("WhereSia is ready. Your nearest stops are already loading.")
+            Text("Departly is ready. Your nearest stops are already loading.")
                 .font(ws.sans(14, weight: .medium))
                 .foregroundStyle(ws.dim)
                 .multilineTextAlignment(.center)
@@ -307,7 +307,7 @@ struct OnboardingView: View {
             }
             .padding(.top, 24)
             Spacer()
-            primaryButton("Enter WhereSia") { onFinish() }
+            primaryButton("Enter Departly") { onFinish() }
         }
         .padding(.horizontal, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

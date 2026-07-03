@@ -36,7 +36,7 @@ struct LaunchScreenView: View {
                         .foregroundStyle(ws.dim)
                         .opacity(eyebrowIn ? 1 : 0)
                         .offset(y: eyebrowIn || reduceMotion ? 0 : 8)
-                    Text("WhereSia")
+                    Text("Departly")
                         .font(ws.sans(38, weight: .heavy))
                         .foregroundStyle(ws.text)
                         .opacity(wordmarkIn ? 1 : 0)

@@ -170,7 +170,7 @@ struct NearbyView: View {
             }
             Text("See stops near you")
                 .font(t.sans(17, weight: .semibold)).foregroundStyle(t.fg)
-            Text("Leyne uses your location only to find bus stops within walking distance. It stays on your device.")
+            Text("Departly uses your location only to find bus stops within walking distance. It stays on your device.")
                 .font(t.sans(13)).foregroundStyle(t.dim)
                 .multilineTextAlignment(.center)
             Button {

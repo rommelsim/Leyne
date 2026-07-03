@@ -337,6 +337,16 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
               .mono(11, weight: FontWeight.w600, color: t.dim)
               .copyWith(letterSpacing: 0.4),
         ),
+        const SizedBox(height: 3),
+        // Standard network-wide hours (owner decision 2026-07-03) — the app
+        // carries no per-station timetable, so every station shows the same
+        // window. Mirrors WSMrtStationView.swift's hoursLine.
+        Text(
+          'OPEN DAILY · 5:30 am – 12:00 am',
+          style: t
+              .mono(11, weight: FontWeight.w500, color: t.faint)
+              .copyWith(letterSpacing: 0.4),
+        ),
         const SizedBox(height: 6),
         // Line code pills + optional walk/distance.
         Row(
@@ -1266,6 +1276,12 @@ class _ForecastCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final intervals = _stationIntervals(forecastRawByLine[line], station);
+    // Data exists but the window is empty ⇒ the service day is over (see
+    // ForecastWindow.build's closed gate) — say so instead of the generic
+    // "unavailable", which would read as a data failure.
+    final ended =
+        intervals.isNotEmpty &&
+        ForecastWindow.build(intervals, now: DateTime.now()).isEmpty;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1285,11 +1301,13 @@ class _ForecastCard extends StatelessWidget {
                 .copyWith(letterSpacing: 0.8),
           ),
           const SizedBox(height: 10),
-          if (intervals.isNotEmpty)
+          if (intervals.isNotEmpty && !ended)
             _ForecastChart(intervals: intervals, t: t)
           else
             Text(
-              'Forecast unavailable right now.',
+              ended
+                  ? 'Service has ended for today — forecast returns in the morning.'
+                  : 'Forecast unavailable right now.',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,

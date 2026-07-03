@@ -59,15 +59,15 @@ void main() {
       await tester.pumpWidget(
         _host(
           OnboardingScreen(
-            onRequestNotifications: () {},
-            onRequestLocation: () {},
+            onRequestNotifications: () async {},
+            onRequestLocation: () async {},
             onFinish: () {},
           ),
         ),
       );
       await tester.pump();
       // Step 0 welcome: wordmark text + eyebrow visible.
-      expect(find.text('WhereSia'), findsOneWidget);
+      expect(find.text('Departly'), findsOneWidget);
       expect(find.textContaining('SINGAPORE'), findsOneWidget);
       // Back button hidden on step 0 (opacity 0).
       final back = tester.widget<Opacity>(
@@ -82,8 +82,8 @@ void main() {
       await tester.pumpWidget(
         _host(
           OnboardingScreen(
-            onRequestNotifications: () {},
-            onRequestLocation: () {},
+            onRequestNotifications: () async {},
+            onRequestLocation: () async {},
             onFinish: () {},
           ),
         ),
@@ -102,8 +102,8 @@ void main() {
         await tester.pumpWidget(
           _host(
             OnboardingScreen(
-              onRequestLocation: () => locationCalls++,
-              onRequestNotifications: () => notificationCalls++,
+              onRequestLocation: () async => locationCalls++,
+              onRequestNotifications: () async => notificationCalls++,
               onFinish: () => finishCalls++,
             ),
           ),
@@ -114,7 +114,7 @@ void main() {
         await tester.tap(find.text('Get started'));
         await tester.pump(const Duration(milliseconds: 500));
         // Step 1 shows the live-wedge kicker (rendered uppercase by _Kicker).
-        expect(find.textContaining('WHY WHERESIA'), findsOneWidget);
+        expect(find.textContaining('WHY DEPARTLY'), findsOneWidget);
         expect(locationCalls, 0);
         expect(notificationCalls, 0);
 
@@ -145,8 +145,8 @@ void main() {
         // Step 4: done screen.
         expect(find.textContaining('You\'re all set'), findsOneWidget);
 
-        // Step 4: "Enter WhereSia" fires onFinish.
-        await tester.tap(find.text('Enter WhereSia'));
+        // Step 4: "Enter Departly" fires onFinish.
+        await tester.tap(find.text('Enter Departly'));
         await tester.pump();
         expect(finishCalls, 1);
       },
@@ -161,8 +161,8 @@ void main() {
         await tester.pumpWidget(
           _host(
             OnboardingScreen(
-              onRequestLocation: () {},
-              onRequestNotifications: () => notificationCalls++,
+              onRequestLocation: () async {},
+              onRequestNotifications: () async => notificationCalls++,
               onFinish: () {},
             ),
           ),
@@ -201,8 +201,8 @@ void main() {
       await tester.pumpWidget(
         _host(
           OnboardingScreen(
-            onRequestNotifications: () {},
-            onRequestLocation: () {},
+            onRequestNotifications: () async {},
+            onRequestLocation: () async {},
             onFinish: () {},
           ),
         ),
@@ -217,7 +217,7 @@ void main() {
       // Back returns to step 0.
       await tester.tap(find.text('Back'));
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('WhereSia'), findsOneWidget);
+      expect(find.text('Departly'), findsOneWidget);
     });
 
     testWidgets(
@@ -229,8 +229,8 @@ void main() {
         await tester.pumpWidget(
           _host(
             OnboardingScreen(
-              onRequestNotifications: () => notificationCalls++,
-              onRequestLocation: () => locationCalls++,
+              onRequestNotifications: () async => notificationCalls++,
+              onRequestLocation: () async => locationCalls++,
               onFinish: () {},
             ),
           ),

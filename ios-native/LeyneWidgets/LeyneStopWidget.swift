@@ -325,7 +325,7 @@ private struct EmptyStopView: View {
             Image(systemName: "bookmark.slash")
                 .font(.system(size: 18))
                 .foregroundStyle(wDim)
-            Text("Save a stop in WhereSia")
+            Text("Save a stop in Departly")
                 .font(wSans(12, .semibold))
                 .foregroundStyle(wFg)
             Text("Long-press the widget to choose one")
@@ -369,7 +369,7 @@ struct LeyneStopWidget: Widget {
             StopWidgetView(entry: entry)
         }
         .configurationDisplayName("Saved Stop")
-        .description("Live arrivals for a stop you saved in WhereSia. Large size shows two stops.")
+        .description("Live arrivals for a stop you saved in Departly. Large size shows two stops.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }

@@ -105,18 +105,30 @@ void main() {
       expect(points, hasLength(6));
     });
 
-    test('falls back to the tail of the series when every slot is in the '
-        'past', () {
+    test('still anchors the final slot while now is inside its half-hour '
+        'window', () {
+      final base = DateTime(2026, 7, 3, 6, 0);
+      final intervals = [
+        for (var i = 0; i < 4; i++)
+          _iv(base.add(Duration(minutes: 30 * i)), 'l'),
+      ];
+      // 10 minutes into the last slot (07:30–08:00) — service still running.
+      final now = base.add(const Duration(minutes: 30 * 3 + 10));
+      final points = ForecastWindow.build(intervals, now: now);
+      expect(points, isNotEmpty);
+      expect(points.last.localStart, intervals.last.start);
+      expect(points.last.isNow, isTrue);
+    });
+
+    test('yields an EMPTY window once now is past the final slot\'s end — a '
+        'closed station must not show a stale tail flagged "now"', () {
       final base = DateTime(2026, 7, 3, 6, 0);
       final intervals = [
         for (var i = 0; i < 4; i++)
           _iv(base.add(Duration(minutes: 30 * i)), 'l'),
       ];
       final now = base.add(const Duration(hours: 5)); // well past the series
-      final points = ForecastWindow.build(intervals, now: now);
-      expect(points, isNotEmpty);
-      // Last known slot should still be present so the chart isn't empty.
-      expect(points.last.localStart, intervals.last.start);
+      expect(ForecastWindow.build(intervals, now: now), isEmpty);
     });
 
     test('empty intervals yields an empty window', () {

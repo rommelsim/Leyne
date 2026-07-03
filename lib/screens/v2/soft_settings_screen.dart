@@ -239,7 +239,7 @@ class _SoftSettingsScreenState extends State<SoftSettingsScreen> {
 
                 // ── Footer ────────────────────────────────────────────────
                 Text(
-                  'Leyne v$_version · Data from LTA DataMall.',
+                  'Departly v$_version · Data from LTA DataMall.',
                   style: t.mono(10, color: t.faint),
                 ),
               ],

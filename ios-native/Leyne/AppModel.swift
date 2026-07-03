@@ -174,7 +174,7 @@ let kChangelog: [String: WhatsNewEntry] = [
             WhatsNewItem(
                 icon: "circle.lefthalf.filled",
                 title: "A calmer, monochrome look",
-                body: "Leyne is now clean black-and-white throughout, so arrival "
+                body: "Departly is now clean black-and-white throughout, so arrival "
                     + "times and the bus you're after stay front and centre. "
                     + "(Colour returns when trains arrive.)"
             ),
@@ -342,7 +342,7 @@ let kChangelog: [String: WhatsNewEntry] = [
             WhatsNewItem(
                 icon: "sparkles",
                 title: "A cleaner, calmer design",
-                body: "Leyne's been redrawn around a soft, focused look that "
+                body: "Departly's been redrawn around a soft, focused look that "
                     + "puts your next arrival front and centre — less clutter, "
                     + "easier to read at a glance on the move."
             ),

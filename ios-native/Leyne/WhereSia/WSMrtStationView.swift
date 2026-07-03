@@ -20,6 +20,12 @@ struct WSMrtStationView: View {
     @Environment(\.wsPush) private var push
 
     @State private var forecast: [ForecastPoint] = []
+    /// True when today's series exists but is entirely spent (now past the
+    /// final slot's end) — the station is closed for the night. Renders a
+    /// quiet "service has ended" line instead of the stale tail the old
+    /// windowing showed, whose last slot got flagged "now" and produced
+    /// "Busiest around now" on a closed station (owner-reported 2026-07-04).
+    @State private var forecastEnded = false
     @State private var titleCollapsed = false
 
     struct ForecastPoint: Identifiable {
@@ -44,6 +50,13 @@ struct WSMrtStationView: View {
     }
 
     private var crowdNow: CrowdLevel { store.wsCrowd(for: station) ?? .unknown }
+
+    /// Standard network-wide hours (owner decision 2026-07-03) — the app
+    /// carries no per-station timetable, so every station shows the same
+    /// window. Mirrored on Android in soft_mrt_station_screen.dart.
+    private var hoursLine: String {
+        m.use24h ? "OPEN DAILY · 05:30 – 00:00" : "OPEN DAILY · 5:30 AM – 12:00 AM"
+    }
 
     var body: some View {
         // titleRow's "UPD h:mm" stamp is `WSFmt.upd(Date(), ...)` — a live
@@ -96,6 +109,8 @@ struct WSMrtStationView: View {
                 Text(station.name).font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
                 Text("\(status) · \(WSFmt.upd(Date(), use24h: m.use24h))")
                     .font(ws.mono(11)).tracking(0.3).foregroundStyle(ws.dim)
+                Text(hoursLine)
+                    .font(ws.mono(11)).tracking(0.3).foregroundStyle(ws.faint)
             }
             Spacer()
             HStack(spacing: 5) {
@@ -198,7 +213,9 @@ struct WSMrtStationView: View {
         WSCard(title: "Crowd forecast · today") {
             VStack(alignment: .leading, spacing: 6) {
                 if forecast.isEmpty {
-                    Text("Forecast unavailable right now.")
+                    Text(forecastEnded
+                         ? "Service has ended for today — forecast returns in the morning."
+                         : "Forecast unavailable right now.")
                         .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
                         .padding(.vertical, 12)
                 } else {
@@ -226,6 +243,10 @@ struct WSMrtStationView: View {
 
     private var busiestNote: String? {
         guard let peak = forecast.max(by: { $0.fraction < $1.fraction }), peak.fraction > 0 else { return nil }
+        // A flat window has no meaningful "busiest" — suppress the note
+        // rather than crown an arbitrary slot (Android `_peakOf` parity).
+        let known = forecast.filter { $0.level != .unknown }
+        guard !known.allSatisfy({ $0.level == known.first?.level }) else { return nil }
         return peak.isNow ? "now" : peak.time
     }
 
@@ -239,6 +260,13 @@ struct WSMrtStationView: View {
             let mine = intervals
                 .filter { $0.station == code }
                 .sorted { $0.start < $1.start }
+            // Service day over? (now past the final slot's start + 30 min.)
+            // Show the closed line instead of a stale tail — mirrors
+            // ForecastWindow.build's closed gate on Android.
+            if let last = mine.last, now >= last.start.addingTimeInterval(30 * 60) {
+                await MainActor.run { forecast = []; forecastEnded = true }
+                return
+            }
             // Take the upcoming window (from the last past interval through the
             // next five), so "now" anchors the chart.
             let upcomingIdx = mine.firstIndex { $0.start >= now } ?? max(0, mine.count - 1)
@@ -251,7 +279,7 @@ struct WSMrtStationView: View {
                     time: isNow ? "now" : WSFmt.clock(iv.start, use24h: m.use24h),
                     fraction: level.wsFraction, isNow: isNow, level: level)
             }
-            await MainActor.run { forecast = pts }
+            await MainActor.run { forecast = pts; forecastEnded = false }
         }
     }
 }

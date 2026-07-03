@@ -42,15 +42,18 @@ class OnboardingScreen extends StatefulWidget {
   });
 
   /// Location-primer "Allow location" tap. Implementations should call
-  /// LocationService.requestAndStart() and return — the step advances on its
-  /// own; the OS dialog races with the transition, matching iOS behaviour.
-  final VoidCallback onRequestLocation;
+  /// LocationService.requestAndStart(); the returned future must settle when
+  /// the OS dialog does. The step only advances AFTER that — on Android the
+  /// permission dialog pauses the activity, so a transition started in the
+  /// same frame froze half-rendered behind the dialog (owner-reported: step
+  /// objects "not rendering" until the dialog was dismissed).
+  final Future<void> Function() onRequestLocation;
 
   /// Notifications-primer "Enable notifications" tap. Implementations should
   /// call AppModel.setNotificationsEnabled(true), which fires the Android 13+
-  /// POST_NOTIFICATIONS prompt before scheduling alerts. Same fire-and-forget
-  /// shape as onRequestLocation.
-  final VoidCallback onRequestNotifications;
+  /// POST_NOTIFICATIONS prompt before scheduling alerts. Same await-then-
+  /// advance shape as onRequestLocation.
+  final Future<void> Function() onRequestNotifications;
 
   /// Done step "Enter WhereSia" tap. Implementations should run UMP consent
   /// (AdConsent.gatherThenStart — a no-op on Android for ATT) then call
@@ -104,16 +107,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  // Primary action on permission primers: fires the callback THEN advances.
-  // The callback is fire-and-forget; the OS dialog races with the transition.
-  void _primePrimary(VoidCallback permissionCallback) {
+  // Primary action on permission primers: fires the callback, AWAITS the OS
+  // dialog, then advances. Advancing in the same frame as the dialog froze
+  // the transition mid-flight (Android pauses the activity, halting frames)
+  // — the next step sat near-invisible behind the dialog and snapped in on
+  // resume. Holding the current step until the dialog settles keeps every
+  // transition fully rendered. _busy guards re-taps while the dialog is up.
+  Future<void> _primePrimary(
+    Future<void> Function() permissionCallback,
+  ) async {
     if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await permissionCallback();
+    } catch (_) {/* a failed prompt still advances — primer shown once */}
+    if (!mounted) return;
     setState(() {
-      _busy = true;
       _direction = 1;
       _step += 1;
     });
-    permissionCallback();
     _unlockAfterTransition();
   }
 
@@ -168,14 +180,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             (_step > 0 && _step < _kStepCount - 1 && !_busy)
                             ? _back
                             : null,
+                        // Quiet grey, not accent — mirrors iOS's ws.dim Back.
                         icon: Icon(
                           Icons.chevron_left,
                           size: 18,
-                          color: t.accent,
+                          color: t.dim,
                         ),
                         label: Text(
                           'Back',
-                          style: t.sans(15).copyWith(color: t.accent),
+                          style: t.sans(15).copyWith(color: t.dim),
                         ),
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
@@ -186,6 +199,37 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ),
                     const Spacer(),
                   ],
+                ),
+              ),
+
+              // ── Page dots — permission progress only (2 dots), top-centre
+              // directly under the Back row: iOS parity (OnboardingView's
+              // stepScaffold `dots`; owner-flagged mismatch 2026-07-04 — they
+              // used to sit at the bottom counting ALL steps). Outside the
+              // switcher so they morph in place; invisible but
+              // space-preserving on non-permission steps, like iOS's
+              // opacity-0 dots.
+              AnimatedOpacity(
+                duration: _anim,
+                opacity: (_step == 2 || _step == 3) ? 1 : 0,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < 2; i++)
+                        AnimatedContainer(
+                          duration: _anim,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          width: i == _step - 2 ? 18 : 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: i == _step - 2 ? t.accent : t.line,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
 
@@ -246,28 +290,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
 
-              // ── Page dots ─────────────────────────────────────────────
-              // Outside the switcher so they don't animate — they update
-              // in place via AnimatedContainer, matching iOS behaviour.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < _kStepCount; i++)
-                      AnimatedContainer(
-                        duration: _anim,
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        width: i == _step ? 20 : 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: i == _step ? t.accent : t.line,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -298,13 +320,15 @@ class _StepBody extends StatelessWidget {
   final bool busy;
   final VoidCallback onNext;
 
-  /// Fires the OS permission callback then advances. Used by primer primaries.
-  final void Function(VoidCallback permissionCallback) onPrimePrimary;
+  /// Fires the OS permission callback, awaits it, then advances. Used by
+  /// primer primaries.
+  final void Function(Future<void> Function() permissionCallback)
+  onPrimePrimary;
 
   /// Advances silently without a permission prompt. Used by primer secondaries.
   final VoidCallback onPrimeSecondary;
-  final VoidCallback onRequestLocation;
-  final VoidCallback onRequestNotifications;
+  final Future<void> Function() onRequestLocation;
+  final Future<void> Function() onRequestNotifications;
   final LyneTheme t;
 
   @override
@@ -321,11 +345,13 @@ class _StepBody extends StatelessWidget {
         t: t,
         busy: busy,
         onPrimaryTap: () => onPrimePrimary(onRequestLocation),
-        icon: Icons.location_on_rounded,
+        // Outline glyphs, not filled — iOS's primer tiles use thin outlined
+        // icons (navigation arrow / bell) in quiet ink.
+        icon: Icons.near_me_outlined,
         kicker: 'Permission 1 of 2',
         title: 'Find stops around you',
         body:
-            'WhereSia uses your location to surface the nearest stops and place your bus, you and your stop on the map.',
+            'Departly uses your location to surface the nearest stops and place your bus, you and your stop on the map.',
         points: const [
           (Icons.my_location_rounded, 'Nearest stops, sorted by distance'),
           (Icons.map_outlined, 'See exactly where your stop is'),
@@ -337,7 +363,7 @@ class _StepBody extends StatelessWidget {
         busy: busy,
         onPrimaryTap: () => onPrimePrimary(onRequestNotifications),
         onSecondaryTap: onPrimeSecondary,
-        icon: Icons.notifications_rounded,
+        icon: Icons.notifications_none_rounded,
         kicker: 'Permission 2 of 2',
         title: 'Never miss your bus',
         body:
@@ -397,7 +423,7 @@ class _WelcomeStep extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'WhereSia',
+            'Departly',
             textAlign: TextAlign.center,
             style: t.sans(40, weight: FontWeight.w800),
           ),
@@ -466,7 +492,7 @@ class _LiveStep extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 16),
-                  _Kicker(label: 'Why WhereSia', t: t),
+                  _Kicker(label: 'Why Departly', t: t),
                   const SizedBox(height: 8),
                   Text(
                     'Always up to the minute.',
@@ -536,24 +562,29 @@ class _PrimerStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 16),
-                  // Icon card — matches iOS's surface-backed ZStack icon.
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: t.surface,
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: t.line),
+            // Center: the icon/copy block sits vertically centred between
+            // the dots and the CTA (iOS stepScaffold parity — content used
+            // to hug the top, owner-flagged mismatch 2026-07-04). The scroll
+            // view still takes over when the block outgrows the viewport.
+            child: Center(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Icon card — matches iOS's surface-backed ZStack icon:
+                    // quiet ink glyph, not accent-tinted.
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: t.surface,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: t.line),
+                      ),
+                      child: SizedBox(
+                        width: 76,
+                        height: 76,
+                        child: Icon(icon, size: 34, color: t.fg),
+                      ),
                     ),
-                    child: SizedBox(
-                      width: 76,
-                      height: 76,
-                      child: Icon(icon, size: 34, color: t.accent),
-                    ),
-                  ),
                   const SizedBox(height: 26),
                   _Kicker(label: kicker, t: t),
                   const SizedBox(height: 8),
@@ -570,6 +601,7 @@ class _PrimerStep extends StatelessWidget {
                     const SizedBox(height: 11),
                   ],
                 ],
+                ),
               ),
             ),
           ),
@@ -664,7 +696,7 @@ class _DoneStep extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'WhereSia is ready. Your nearest stops are already loading.',
+                'Departly is ready. Your nearest stops are already loading.',
                 textAlign: TextAlign.center,
                 style: t.sans(14).copyWith(color: t.dim, height: 1.5),
               ),
@@ -678,7 +710,7 @@ class _DoneStep extends StatelessWidget {
               _GrantRow(label: 'Notifications', state: _notifGrant, t: t),
               const Spacer(),
               _PrimaryButton(
-                label: 'Enter WhereSia',
+                label: 'Enter Departly',
                 t: t,
                 busy: busy,
                 onTap: onNext,
@@ -701,11 +733,12 @@ class _Kicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Dim grey, not accent — mirrors iOS's ws.dim kicker.
     return Text(
       label.toUpperCase(),
       style: t
           .mono(11, weight: FontWeight.w700)
-          .copyWith(color: t.accent, letterSpacing: 1.2),
+          .copyWith(color: t.dim, letterSpacing: 1.2),
     );
   }
 }
@@ -795,9 +828,11 @@ class _GrantRow extends StatelessWidget {
 
 /// Primary action button — shared by all steps.
 ///
-/// Uses `t.accent` background and `t.onAccent` foreground so dark-mode
-/// (accent = white) renders correctly: white background, dark text.
-/// The previous `Colors.white` foreground caused white-on-white in dark mode.
+/// Ink pill (`t.fg` background, `t.bg` text): mirrors iOS onboarding's ink
+/// CTA. Was `t.accent`, but at runtime that resolves to the Material You
+/// dynamic colour, which made the CTA read wallpaper-tinted while iOS's is
+/// black — owner-flagged mismatch 2026-07-04. Ink flips correctly in dark
+/// mode (near-white pill, dark text), same as iOS.
 class _PrimaryButton extends StatelessWidget {
   const _PrimaryButton({
     required this.label,
@@ -818,12 +853,12 @@ class _PrimaryButton extends StatelessWidget {
       child: FilledButton(
         onPressed: busy ? null : onTap,
         style: FilledButton.styleFrom(
-          backgroundColor: t.accent,
-          foregroundColor: t.onAccent,
+          backgroundColor: t.fg,
+          foregroundColor: t.bg,
           // Keep the button visually identical while the multi-tap guard is
           // engaged — a grey flicker between steps would be noticeable.
-          disabledBackgroundColor: t.accent,
-          disabledForegroundColor: t.onAccent,
+          disabledBackgroundColor: t.fg,
+          disabledForegroundColor: t.bg,
           padding: const EdgeInsets.symmetric(vertical: 15),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -833,7 +868,7 @@ class _PrimaryButton extends StatelessWidget {
           label,
           style: t
               .sans(16, weight: FontWeight.w600)
-              .copyWith(color: t.onAccent),
+              .copyWith(color: t.bg),
         ),
       ),
     );

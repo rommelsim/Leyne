@@ -826,6 +826,12 @@ class DataStore extends ChangeNotifier {
         // Reference data (stop names + coords) just resolved — re-publish the
         // home-screen widgets so names fill in.
         WidgetBridge.instance.pushAll();
+        // Warm the BusRoutes dataset now (fire-and-forget), AFTER the two
+        // bootstrap fetches above have finished so it doesn't contend for
+        // LTA's 4-request burst budget. Without this, the ~52-page crawl
+        // only started when the user first opened a Bus view — the reported
+        // "route takes a while to load".
+        ensureRoutes();
         return;
       } on LtaException catch (e) {
         lastErr = e;
@@ -993,6 +999,30 @@ class DataStore extends ChangeNotifier {
     await _fetchArrivals(code);
   }
 
+  /// What a stop view shows when live arrivals can't be fetched right now.
+  /// Deliberately not the underlying error ("LTA returned HTTP 502") —
+  /// uncertainty stays whisper-quiet. Mirrors iOS
+  /// `DataStore.arrivalsFlakeMessage`.
+  static const String arrivalsFlakeMessage =
+      'Live arrivals are taking a moment. Retrying…';
+
+  /// busArrival with quiet retries: LTA DataMall occasionally returns a
+  /// transient 5xx (flakes, plus spike-arrest rejections when a tap lands
+  /// mid-prefetch-burst). Two retries with short backoff absorb those before
+  /// anything reaches the UI; 4xx (auth-shaped) rethrows immediately.
+  Future<LtaArrivalResponse> _busArrivalWithRetry(String code) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await _api.busArrival(code);
+      } on LtaException catch (e) {
+        final s = e.statusCode;
+        final retryable = s == null || s >= 500;
+        if (!retryable || attempt >= 2) rethrow;
+      }
+      await Future.delayed(Duration(milliseconds: 800 * (attempt + 1)));
+    }
+  }
+
   /// Shared network body for [ensureArrivals] / [refreshArrivals]. The caller
   /// owns the `_inflight` add; this clears it in `finally`. On error an
   /// existing `.loaded` result is preserved (we don’t blank good data).
@@ -1001,7 +1031,7 @@ class DataStore extends ChangeNotifier {
     // can compare "what the UI last saw" against "what just came in".
     final prevState = _arrivals[code];
     try {
-      final resp = await _api.busArrival(code);
+      final resp = await _busArrivalWithRetry(code);
       final mapped =
           resp.services
               .where((s) => s.nextBus.hasData)
@@ -1016,15 +1046,13 @@ class DataStore extends ChangeNotifier {
           ? ArrivalState.empty()
           : ArrivalState.loaded(mapped);
       _lastFetched[code] = DateTime.now();
-    } on LtaException catch (e) {
-      final prev = _arrivals[code];
-      if (prev == null || prev.kind == ArrivalStateKind.loading) {
-        _arrivals[code] = ArrivalState.error(e.message);
-      }
     } catch (_) {
+      // Quiet, human copy — never the raw failure ("LTA returned HTTP 502").
+      // Callers keep re-polling on their refresh cadence, so "retrying" is
+      // true. Mirrors iOS DataStore.arrivalsFlakeMessage.
       final prev = _arrivals[code];
       if (prev == null || prev.kind == ArrivalStateKind.loading) {
-        _arrivals[code] = ArrivalState.error('Couldn’t reach LTA');
+        _arrivals[code] = ArrivalState.error(arrivalsFlakeMessage);
       }
     } finally {
       _inflight.remove(code);
@@ -1088,9 +1116,21 @@ class DataStore extends ChangeNotifier {
   /// in-flight/fresh requests so repeat calls are cheap. Fired whenever
   /// `_nearby` is (re)populated — see `updateNearby` and `bootstrap`.
   void prefetchNearbyArrivals() {
-    for (final s in _nearby) {
-      ensureArrivals(s.stopCode, silent: true);
-    }
+    // Waves of 4, not the whole list at once: LTA's spike-arrest policy
+    // rejects any 5th+ request in a burst window with a 5xx (see
+    // lta_service.dart `_pageWindow`). Bursting all ~12 nearby stops made a
+    // user-tapped stop's own request the violation. 400ms between waves
+    // keeps warm-up brisk while leaving burst headroom for taps that land
+    // mid-prefetch. Mirrors iOS `DataStore.prefetchNearbyArrivals`.
+    final codes = _nearby.map((s) => s.stopCode).toList(growable: false);
+    unawaited(() async {
+      for (var i = 0; i < codes.length; i++) {
+        if (i > 0 && i % 4 == 0) {
+          await Future.delayed(const Duration(milliseconds: 400));
+        }
+        ensureArrivals(codes[i], silent: true);
+      }
+    }());
   }
 
   // ─── Search (Buses + Stops, both live) ─────────────────────
@@ -1151,8 +1191,19 @@ class DataStore extends ChangeNotifier {
 
   // ─── Routes (lazy, big dataset, disk-cached) ───────────────
 
-  Future<List<LtaBusRoute>?> _loadRoutes() async {
-    if (_routesAll != null) return _routesAll;
+  // In-flight memo so concurrent callers (e.g. Search warming routes while
+  // the user opens a Bus view) share ONE paginated fetch — before this, each
+  // caller started its own ~52-page BusRoutes crawl, and the duplicates
+  // contended for LTA's 4-request burst budget, slowing both down.
+  Future<List<LtaBusRoute>?>? _routesInFlight;
+
+  Future<List<LtaBusRoute>?> _loadRoutes() {
+    final loaded = _routesAll;
+    if (loaded != null) return Future.value(loaded);
+    return _routesInFlight ??= _doLoadRoutes();
+  }
+
+  Future<List<LtaBusRoute>?> _doLoadRoutes() async {
     try {
       final r = await _api.busRoutes();
       _routesAll = r;
@@ -1162,6 +1213,10 @@ class DataStore extends ChangeNotifier {
       return r;
     } catch (_) {
       return null;
+    } finally {
+      // Clear even on success (callers hit the _routesAll fast path) so a
+      // failed fetch can be retried by the next caller.
+      _routesInFlight = null;
     }
   }
 

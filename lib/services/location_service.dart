@@ -71,11 +71,28 @@ class LocationService extends ChangeNotifier {
       if (last != null) _ingest(last);
     } catch (_) {/* ignore */}
     _sub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.medium,
-        distanceFilter: 50,
-      ),
+      locationSettings: _settings,
     ).listen(_ingest, onError: (_) {/* keep last */});
+  }
+
+  /// Debug builds on Android bypass the fused provider: it never surfaces
+  /// the emulator's `adb emu geo fix` injections, which makes Nearby
+  /// untestable on an emulator. Release builds keep fused (better accuracy
+  /// and battery on real devices).
+  static LocationSettings get _settings {
+    if (kDebugMode && defaultTargetPlatform == TargetPlatform.android) {
+      // `high` (not medium) so LocationManager picks the GPS provider —
+      // `geo fix` feeds only GPS; the network provider never updates.
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 50,
+        forceLocationManager: true,
+      );
+    }
+    return const LocationSettings(
+      accuracy: LocationAccuracy.medium,
+      distanceFilter: 50,
+    );
   }
 
   void _ingest(Position p) {

@@ -31,7 +31,7 @@ class WhatsNewItem {
 
 const Map<String, WhatsNewEntry> kChangelog = {
   '2.9.0': WhatsNewEntry(
-    headline: 'Leyne, right on your Home Screen.',
+    headline: 'Departly, right on your Home Screen.',
     items: [
       WhatsNewItem(
         icon: Icons.widgets_rounded,
@@ -109,7 +109,7 @@ const Map<String, WhatsNewEntry> kChangelog = {
         icon: Icons.warning_amber_rounded,
         title: 'Know the moment a line goes down',
         body:
-            'Leyne now notifies you when a new train disruption appears, '
+            'Departly now notifies you when a new train disruption appears, '
             'even in the background, so you can reroute before you reach '
             'the platform.',
       ),
@@ -149,7 +149,7 @@ const Map<String, WhatsNewEntry> kChangelog = {
         icon: Icons.circle_outlined,
         title: 'A calmer, monochrome look',
         body:
-            'Leyne is now clean black-and-white throughout, so arrival '
+            'Departly is now clean black-and-white throughout, so arrival '
             'times and the bus you\'re after stay front and centre. '
             '(Colour returns when trains arrive.)',
       ),

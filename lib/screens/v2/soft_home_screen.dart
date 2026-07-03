@@ -2,9 +2,12 @@
 //
 // Layout (content parity with iOS WSHomeView.swift — not a visual clone):
 //   header (live date eyebrow + "Nearby" title)
-//   → live row (LIVE/LOCATION OFF · Updated h:mm)
 //   → MRT strip (nearest stations, always visible when located)
-//   → "Closest to you" section (1 highlighted card)
+//   → "Closest to you" section (1 highlighted card; its eyebrow carries the
+//     ● LIVE badge + right-aligned "Updated h:mm", like iOS's BUS STOPS
+//     section header — owner flagged the old standalone live row under the
+//     search bar as a design mismatch, 2026-07-04)
+//   → "Other nearby stops" section (up to 11 cards)
 //   → "Other nearby stops" section (up to 11 cards)
 //   → hidden-stops restore footer (when any nearby stop is hidden)
 //   → empty state (when no nearby stops)
@@ -65,7 +68,6 @@ class _HeaderItem extends _Item {}
 /// search screen via `onOpenSearch`, same as iOS's `Button(action: onSearch)`.
 class _SearchBarItem extends _Item {}
 
-class _LiveRowItem extends _Item {}
 
 class _GapItem extends _Item {
   _GapItem(this.height);
@@ -73,8 +75,13 @@ class _GapItem extends _Item {
 }
 
 class _EyebrowItem extends _Item {
-  _EyebrowItem(this.label);
+  _EyebrowItem(this.label, {this.updated});
   final String label;
+
+  /// Freshness meta ("h:mm"). When set, the eyebrow renders as a full
+  /// section-header row: label + ● LIVE badge, "Updated h:mm" right-aligned —
+  /// mirroring iOS's BUS STOPS section header (WSSectionHeader).
+  final String? updated;
 }
 
 class _NearbyCardItem extends _Item {
@@ -159,6 +166,11 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       // from before the background gap (iOS SoftHomeView/WSHomeView refresh
       // the same way on scenePhase → .active / onAppear).
       DataStore.shared.prefetchNearbyArrivals();
+      // A launch-time bootstrap failure (LTA flake) shouldn't outlive a trip
+      // to the background — retry quietly on return (iOS parity).
+      if (DataStore.shared.referenceState.state == LoadState.error) {
+        DataStore.shared.bootstrap();
+      }
     }
   }
 
@@ -306,6 +318,10 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
           tabSelection: SoftTab.home,
           distanceM: distanceM,
           walkMin: walkMin,
+          // Without this, the station's "Bus stops at this station" rows
+          // render inert (no chevron, no tap) when the station is entered
+          // from Home — every other call site forwards it.
+          onOpenStop: widget.onOpenStop,
         ),
       ),
     );
@@ -460,8 +476,6 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     items.add(_HeaderItem());
     items.add(_GapItem(14));
     items.add(_SearchBarItem());
-    items.add(_GapItem(16));
-    items.add(_LiveRowItem());
 
     // MRT — nearby stations strip. Its own small section above the bus stop
     // list, independent of whether there are nearby BUS stops (only needs a
@@ -482,7 +496,14 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         // still answers "when's my bus?". The first saved stop is the hero
         // ("Your stop"); the rest follow. Mirrors iOS SoftHomeView.
         items.add(_GapItem(16));
-        items.add(_EyebrowItem('Your stops'));
+        items.add(
+          _EyebrowItem(
+            'Your stops',
+            updated: _updatedLabel(
+              [for (final p in pins) _savedStop(p.code)],
+            ),
+          ),
+        );
         items.add(_GapItem(10));
         items.add(
           _NearbyCardItem(
@@ -522,9 +543,10 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       return items;
     }
 
-    // "Closest to you" — the single nearest stop.
+    // "Closest to you" — the single nearest stop. Carries the LIVE badge +
+    // freshness meta (the first bus-stop section is where iOS puts them).
     items.add(_GapItem(16));
-    items.add(_EyebrowItem('Closest to you'));
+    items.add(_EyebrowItem('Closest to you', updated: _updatedLabel(nearby)));
     items.add(_GapItem(10));
     items.add(_NearbyCardItem(nearby.first, highlight: true));
 
@@ -608,9 +630,9 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       _WeatherItem() => const WeatherHeader(),
       _HeaderItem() => _header(context),
       _SearchBarItem() => _searchBar(context),
-      _LiveRowItem() => _liveRow(context),
       _GapItem(:final height) => SizedBox(height: height),
-      _EyebrowItem(:final label) => Eyebrow(label),
+      _EyebrowItem(:final label, :final updated) =>
+        updated == null ? Eyebrow(label) : _sectionHeaderRow(context, label, updated),
       _NearbyCardItem(:final stop, :final highlight, :final badgeText) =>
         RepaintBoundary(
           child: _NearbyCard(
@@ -633,6 +655,13 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       ),
       _NativeAdItem() => const NativeAdCard(),
       _LocationNudgeItem() => _locationNudge(context),
+      // When the stop directory itself failed to load (LTA flake at launch),
+      // "No stops yet · turn on location" is the wrong story — location is
+      // fine, the data isn't. Show the honest card with a retry instead
+      // (mirrors WSHomeView's referenceState-error empty state).
+      _EmptyItem()
+          when DataStore.shared.referenceState.state == LoadState.error =>
+        _ReferenceRetryCard(onRetry: () => DataStore.shared.bootstrap()),
       _EmptyItem() => _EmptyState(
         onNearby: () async {
           await LocationService.shared.requestAndStart();
@@ -710,58 +739,41 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     );
   }
 
-  Widget _liveRow(BuildContext context) {
+  /// Section-header row for the first bus-stop section: eyebrow label +
+  /// ● LIVE badge, freshness meta right-aligned. This is where iOS keeps the
+  /// live/updated info (WSSectionHeader on "Bus stops") — the old standalone
+  /// live row under the search bar read as a floating orphan next to it
+  /// (owner-flagged mismatch). Badge follows this platform's established
+  /// convention (soft_mrt_station_screen.dart): dot + mono "LIVE", both t.soon.
+  Widget _sectionHeaderRow(BuildContext context, String label, String updated) {
     final t = context.t;
-    final located = LocationService.shared.lastLocation != null;
-    final updated = _updatedLabel(_nearbyStops());
     return Row(
       children: [
-        Icon(
-          located ? Icons.location_on_rounded : Icons.location_off,
-          size: 13,
-          color: located ? LyneSignal.meBlue : t.dim,
+        Eyebrow(label),
+        const SizedBox(width: 8),
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
         ),
         const SizedBox(width: 5),
-        // Match iOS SoftHomeView.liveRow exactly: blue location glyph, then
-        // a green dot + dim "LIVE" when located, or dim "LOCATION OFF" when not.
-        // (No redundant "NEAR YOU" string — the section title already says it.)
-        if (located) ...[
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 5),
-          // 10 → 11: legibility floor (owner directive — Android type must
-          // never go below 11, even where the size otherwise mirrors the
-          // WSLiveBadge word iOS sets at 9.5).
-          Text(
-            'LIVE',
-            style: t
-                .mono(11, weight: FontWeight.w700, color: t.dim)
-                .copyWith(letterSpacing: 0.8),
-          ),
-        ] else
-          Text(
-            'LOCATION OFF',
-            style: t
-                .mono(11, weight: FontWeight.w700, color: t.dim)
-                .copyWith(letterSpacing: 0.8),
-          ),
-        // Freshness meta — newest of the visible nearby stops' last refresh.
-        // Mirrors WSHomeView.swift's `WSFmt.upd(...)` section-header meta
-        // (ws.mono(11) — matches Android's floor here exactly).
-        if (updated != null) ...[
-          const SizedBox(width: 5),
-          Text('·', style: t.mono(11, color: t.faint)),
-          const SizedBox(width: 5),
-          Text(
-            'UPDATED $updated',
-            style: t
-                .mono(11, weight: FontWeight.w500, color: t.faint)
-                .copyWith(letterSpacing: 0.8),
-          ),
-        ],
+        // 11 not 9.5: legibility floor (owner directive — Android type must
+        // never go below 11, even where iOS's WSLiveBadge word is smaller).
+        Text(
+          'LIVE',
+          style: t
+              .mono(11, weight: FontWeight.w700, color: t.soon)
+              .copyWith(letterSpacing: 0.8),
+        ),
+        const Spacer(),
+        // Newest of the visible stops' last refresh — mirrors iOS's
+        // right-aligned `WSFmt.upd(...)` section-header meta.
+        Text(
+          'UPDATED $updated',
+          style: t
+              .mono(11, weight: FontWeight.w500, color: t.faint)
+              .copyWith(letterSpacing: 0.8),
+        ),
       ],
     );
   }
@@ -916,9 +928,10 @@ class _NearbyCard extends StatelessWidget {
     );
   }
 
-  /// Identity row: pin tile · (name + subtitle + compact meta) · chevron.
-  /// Matches iOS SoftNearbyStopCard which shows only the header row — no
-  /// per-service arrivals list, no divider, no footer.
+  /// Identity row: (name + subtitle + compact meta) · chevron. No leading
+  /// icon tile — matches iOS SoftNearbyStopCard/StopRow, which shows only
+  /// the header row (no per-service arrivals list, no divider, no footer,
+  /// no pin glyph).
   Widget _identityRow(BuildContext context, LyneTheme t) {
     final code = stop.stopCode;
     final name = stop.stopName.isEmpty ? code : stop.stopName;
@@ -944,18 +957,11 @@ class _NearbyCard extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Leading 46×46 rounded pin tile.
-        Container(
-          width: 46,
-          height: 46,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: t.surfaceHi,
-            borderRadius: BorderRadius.circular(LyneRadius.md),
-          ),
-          child: Icon(Icons.location_on_rounded, size: 20, color: t.fg),
-        ),
-        const SizedBox(width: 12),
+        // No leading pin tile (iOS parity — WSHomeView.swift's StopRow has
+        // none). It was decorative (same glyph on every card, zero
+        // information) and, at 46+12dp, the single biggest width thief
+        // pushing stop names into ellipsis (owner-reported 2026-07-03:
+        // "Farrer Rd St…", "Empress Rd…").
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -989,9 +995,14 @@ class _NearbyCard extends StatelessWidget {
         // crowd quiet underneath — replaces the old bottom meta line.
         // Width-capped so the quiet line can never crush the title column —
         // uncapped, "Bus 93 · Seats available" squeezed titles to ~6 chars
-        // and stacked the route chips vertically (owner-reported).
+        // and stacked the route chips vertically (owner-reported). Lowered
+        // 150→130 2026-07-03 alongside dropping CrowdMeter's glyphs here
+        // (see _whenColumn): word-only quiet lines only need ~85–125dp, so
+        // 130 is now a tight backstop for pathological input (a 4-char
+        // service number + "Standing") rather than the effective width —
+        // this guarantees the title Expanded below always keeps its share.
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 150),
+          constraints: const BoxConstraints(maxWidth: 130),
           child: _whenColumn(t, code),
         ),
         const SizedBox(width: 6),
@@ -1067,10 +1078,21 @@ class _NearbyCard extends StatelessWidget {
             // 10 → 11: legibility floor (iOS's own value here is 10).
             Text('Bus ${soonest.no} ·', style: t.mono(11, color: t.dim)),
             const SizedBox(width: 5),
-            // Compact word (iOS wsWord parity: Seats/Standing/Limited) in a
-            // Flexible so the width-capped column ellipsizes the word rather
-            // than overflowing. Safe here: the host ConstrainedBox bounds us.
-            Flexible(child: CrowdMeter(load: soonest.load, compact: true)),
+            // Compact word (iOS wsWord parity: Seats/Standing/Limited), no
+            // glyphs — the three person icons alone cost ~42dp and, inside
+            // this already width-capped column, were the biggest single
+            // contributor to crushing the stop-name title down to ~105dp
+            // (owner-reported 2026-07-03). The word carries the crowd level
+            // on its own in this compact context. Flexible so the
+            // width-capped column ellipsizes the word rather than
+            // overflowing. Safe here: the host ConstrainedBox bounds us.
+            Flexible(
+              child: CrowdMeter(
+                load: soonest.load,
+                compact: true,
+                showGlyphs: false,
+              ),
+            ),
           ],
         ),
       ],
@@ -1517,6 +1539,60 @@ class _EmptyState extends StatelessWidget {
               const SizedBox(width: 8),
               OutlinedButton(onPressed: onSearch, child: const Text('Search')),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown instead of [_EmptyState] when the LTA stop directory failed to load
+/// — location is on and working, so "turn on location" would mislead. Quiet
+/// copy per the timely-over-loud rule; resume also auto-retries.
+class _ReferenceRetryCard extends StatelessWidget {
+  const _ReferenceRetryCard({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: t.liveBg,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(Icons.refresh_rounded, size: 28, color: t.accent),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Stops aren’t loading right now',
+            style: t.sans(20, weight: FontWeight.w600, color: t.fg),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'A retry usually fixes this.',
+            style: t.sans(13, color: t.dim),
+          ),
+          const SizedBox(height: 14),
+          FilledButton(
+            onPressed: onRetry,
+            style: FilledButton.styleFrom(
+              backgroundColor: t.accent,
+              foregroundColor: t.onAccent,
+            ),
+            child: const Text('Retry'),
           ),
         ],
       ),

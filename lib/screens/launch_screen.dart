@@ -157,7 +157,7 @@ class _LaunchScreenState extends State<LaunchScreen>
                         end: 0.60,
                         offset: 14,
                         child: Text(
-                          'WhereSia',
+                          'Departly',
                           style: t.sans(38, weight: FontWeight.w800),
                         ),
                       ),

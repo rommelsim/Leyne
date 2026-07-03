@@ -167,7 +167,7 @@ private struct NearestWidgetView: View {
             Image(systemName: "mappin.slash")
                 .font(.system(size: 20))
                 .foregroundStyle(wDim)
-            Text("Open WhereSia to find stops near you")
+            Text("Open Departly to find stops near you")
                 .font(wSans(11, .semibold))
                 .foregroundStyle(wFg)
                 .multilineTextAlignment(.center)

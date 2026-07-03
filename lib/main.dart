@@ -242,7 +242,7 @@ class LyneApp extends StatelessWidget {
           listenable: AppModel.shared,
           builder: (context, _) {
             return MaterialApp(
-              title: 'WhereSia',
+              title: 'Departly',
               debugShowCheckedModeBanner: false,
               themeMode: AppModel.shared.themeMode,
               theme: LyneTheme.light.materialTheme(dynamicScheme: lightDynamic),
@@ -321,17 +321,14 @@ class _AppRootState extends State<_AppRoot> {
           }
         } else {
           body = OnboardingScreen(
-            onRequestLocation: () {
-              // Fire-and-forget: the OS dialog races with the step
-              // transition, matching the legacy iOS behaviour.
-              LocationService.shared.requestAndStart();
-            },
-            onRequestNotifications: () {
-              // Fire-and-forget like onRequestLocation — the step has
-              // already advanced; the OS prompt races with the
-              // transition. AppModel handles permission + scheduling.
-              AppModel.shared.setNotificationsEnabled(true);
-            },
+            // Awaited by the primer: the step advances only after the OS
+            // dialog settles, so the transition never runs (and freezes)
+            // underneath it — see OnboardingScreen.onRequestLocation.
+            onRequestLocation: () => LocationService.shared.requestAndStart(),
+            // AppModel handles the Android 13+ POST_NOTIFICATIONS prompt +
+            // alert scheduling; same await-then-advance shape as location.
+            onRequestNotifications: () =>
+                AppModel.shared.setNotificationsEnabled(true),
             onFinish: () async {
               // UMP consent (Android only — no ATT), then MobileAds.initialize,
               // then dismiss onboarding. AdConsent.gatherThenStart is a no-op

@@ -301,6 +301,16 @@ class LyneTheme {
       brightness: scheme.brightness,
       colorScheme: scheme,
       scaffoldBackgroundColor: scaffoldBg,
+      // Visible push for detail routes (stop / bus / MRT station). The M3
+      // default (subtle zoom) reads as "no animation" next to iOS's
+      // NavigationStack slide — owner-flagged on the MRT station push,
+      // 2026-07-04. FadeForwards is the current Android-native forward
+      // motion (slide + fade, Android 15 activity spec), not an iOS bleed.
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+        },
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: scaffoldBg,
         foregroundColor: fg,

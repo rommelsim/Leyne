@@ -927,18 +927,30 @@ class _ServiceChipRow extends StatelessWidget {
     );
   }
 
+  // NOTE: no bare `alignment:` on this Container — alignment set with no
+  // explicit width makes a Container EXPAND to fill the incoming max width,
+  // which is exactly what stretched every tile to the card's full width and
+  // stacked them one-per-line (owner-reported "route chips stacked
+  // vertically" — screenshot showed 7/61/75/+4 as full-width pills). Wrapping
+  // in IntrinsicWidth keeps the pill hugging its label while minWidth still
+  // enforces a floor for short codes. Same bug/fix already shipped for
+  // Home's _RouteChipsRow._tile (see soft_home_screen.dart's NOTE there).
   Widget _tile(String label, {required bool dim}) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 26, minHeight: 21),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(color: t.line, width: 1),
-      ),
-      child: Text(
-        label,
-        style: t.mono(10.5, weight: FontWeight.w700, color: dim ? t.dim : t.fg),
+    return IntrinsicWidth(
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 26, minHeight: 21),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: t.line, width: 1),
+        ),
+        child: Text(
+          label,
+          // 10.5 → 11: clears the branch's 11pt legibility floor (matches
+          // Home's equivalent tile).
+          style: t.mono(11, weight: FontWeight.w700, color: dim ? t.dim : t.fg),
+        ),
       ),
     );
   }
@@ -1036,8 +1048,14 @@ class _StopCard extends StatelessWidget {
                 // service-tile Wrap into a single vertical stack (owner-
                 // reported "ETAs render vertically"). Same bug/fix as Home's
                 // when-column (see soft_home_screen.dart `_identityRow`).
+                // Lowered 150→130 2026-07-03 alongside dropping CrowdMeter's
+                // glyphs in _SoonestColumn below — same width-crush finding
+                // as Home's `_whenColumn`: the word-only quiet line only
+                // needs ~85-125dp, so 130 is a tight backstop rather than
+                // the effective width, guaranteeing the stop-name column
+                // keeps its share.
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 150),
+                  constraints: const BoxConstraints(maxWidth: 130),
                   child: ListenableBuilder(
                     listenable: AppModel.shared,
                     builder: (context, _) => _SoonestColumn(services: services),
@@ -1072,23 +1090,27 @@ class _SoonestColumn extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              arriving ? eta.small : eta.big,
-              style: t.mono(19, weight: FontWeight.w700, color: t.fg),
-            ),
-            if (!arriving) ...[
-              const SizedBox(width: 2),
-              Text(
-                eta.small,
-                style: t.mono(12, weight: FontWeight.w600, color: t.dim),
+        // iOS parity fix (owner-reported "ETA is not the correct format
+        // as iOS" — screenshot showed lowercase "now" as the big headline):
+        // `eta.big` ("Arr" or the minute number) is ALWAYS the headline;
+        // `eta.small` ("now"/"min") never renders as the big text. Mirrors
+        // WSSavedView.swift's savedStopRow:
+        // `Text(eta.big) + Text(eta.big == "Arr" ? "" : " min")`, and matches
+        // Home's own working `_whenColumn` pattern in soft_home_screen.dart.
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: eta.big,
+                style: t.mono(19, weight: FontWeight.w700, color: t.fg),
               ),
+              if (!arriving)
+                TextSpan(
+                  text: ' min',
+                  style: t.mono(11, weight: FontWeight.w600, color: t.dim),
+                ),
             ],
-          ],
+          ),
         ),
         if (soonest.monitored) ...[
           const SizedBox(height: 4),
@@ -1096,15 +1118,27 @@ class _SoonestColumn extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               // 10pt matches WSSavedView's `ws.mono(10)` for this prefix —
-              // also keeps this row's fixed-width portion (prefix + 3 crowd
-              // glyphs) under the 150 cap above with room for the crowd
-              // word, avoiding a fresh RenderFlex overflow at the width cap.
+              // also keeps this row's fixed-width portion under the 130 cap
+              // above with room for the crowd word, avoiding a RenderFlex
+              // overflow at the width cap.
               Text('Bus ${soonest.no} · ', style: t.mono(10, color: t.dim)),
-              // Flexible so the compact word ellipsizes instead of
-              // overflowing when the 150-wide host is tight — safe here
-              // specifically because the host is bounded (see CrowdMeter's
-              // own "No Flexible here" note for unbounded call sites).
-              Flexible(child: CrowdMeter(load: soonest.load, compact: true)),
+              // No glyphs (2026-07-03, coordinator/Home parity finding): the
+              // three person icons alone cost ~42dp and, inside this
+              // already width-capped column, were the biggest single
+              // contributor to crushing the stop-name title (owner-reported
+              // "route chips stacked vertically" traced back to the same
+              // width starvation as Home's). The word alone carries the
+              // crowd level in this compact context — matches Home's
+              // `_whenColumn` CrowdMeter call. Flexible so the compact word
+              // ellipsizes instead of overflowing when the 130-wide host is
+              // tight — safe here specifically because the host is bounded.
+              Flexible(
+                child: CrowdMeter(
+                  load: soonest.load,
+                  compact: true,
+                  showGlyphs: false,
+                ),
+              ),
             ],
           ),
         ],
@@ -1268,23 +1302,27 @@ class _LineEtaColumn extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              arriving ? eta.small : eta.big,
-              style: t.mono(17, weight: FontWeight.w700, color: t.fg),
-            ),
-            if (!arriving) ...[
-              const SizedBox(width: 2),
-              Text(
-                eta.small,
-                style: t.mono(11, weight: FontWeight.w600, color: t.dim),
+        // iOS parity fix — same "Arr" headline bug as _SoonestColumn above:
+        // `eta.big` is always the headline, never `eta.small` ("now"/"min").
+        // Mirrors WSSavedView.swift's lineRow:
+        // `Text(eta.big) + Text(eta.big == "Arr" ? "" : "m")` — note the
+        // bare "m" suffix here (not " min") matches iOS's more compact
+        // Lines-section readout.
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: eta.big,
+                style: t.mono(17, weight: FontWeight.w700, color: t.fg),
               ),
+              if (!arriving)
+                // 10 → 11: legibility floor (iOS's own value here is 10pt).
+                TextSpan(
+                  text: 'm',
+                  style: t.mono(11, color: t.dim),
+                ),
             ],
-          ],
+          ),
         ),
         const SizedBox(height: 4),
         CrowdMeter(load: svc.load, compact: true),
