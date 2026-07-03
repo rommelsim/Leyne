@@ -1,5 +1,5 @@
 // Smoke test for the app shell. Verifies:
-//   • The four navigation destinations are present and labeled correctly.
+//   • The three navigation destinations are present and labeled correctly.
 //   • Tapping a tab switches the visible screen.
 //
 // Doesn't drive DataStore.bootstrap (which would hit the real LTA API);
@@ -49,8 +49,9 @@ Future<void> _skipLaunchScreen(WidgetTester tester) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('Root shell shows the four tabs and switches between them',
-      (tester) async {
+  testWidgets('Root shell shows the three tabs and switches between them', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
@@ -58,16 +59,17 @@ void main() {
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
 
-    // All four destinations are present in the bottom navigation (current
-    // order: Bus · MRT · Saved · Alerts). Settings is no longer a tab — it
-    // opens as a gear sheet from the Alerts tab. Search is no longer a bar
-    // destination either — it's reached via the Home tab's own search entry
-    // point (see the "pops the nested stack" test below) and stays a pushed
-    // route (SoftTab.search).
-    expect(find.text('Bus'), findsAtLeastNWidgets(1));
-    expect(find.text('MRT'), findsAtLeastNWidgets(1));
+    // All three destinations are present in the bottom navigation (current
+    // order: Home · Saved · Alerts, mirroring iOS WSTab). Settings is no
+    // longer a tab — it opens as a gear sheet from the Alerts tab. Search is
+    // not a bar destination either — it's reached via the Home tab's own
+    // search entry point (see the "pops the nested stack" test below) and
+    // stays a pushed route (SoftTab.search). MRT lost its destination in the
+    // owner walkthrough (2026-07-03): stations open from Home's strip/Search.
+    expect(find.text('Home'), findsAtLeastNWidgets(1));
     expect(find.text('Saved'), findsAtLeastNWidgets(1));
     expect(find.text('Alerts'), findsAtLeastNWidgets(1));
+    expect(find.text('MRT'), findsNothing);
 
     // The Bus (Home) tab is the initial tab — its empty-state copy is visible.
     expect(find.text('No stops yet'), findsOneWidget);
@@ -77,8 +79,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     // The Alerts screen header carries its subtitle unconditionally.
-    expect(
-        find.text('Service status & your notifications'), findsOneWidget);
+    expect(find.text('Service status & your notifications'), findsOneWidget);
 
     // Drain the bounded App-Open-ad preload poll (15 × 800 ms chained timers
     // scheduled from SoftRoot.initState) so no timer is left pending at
@@ -96,8 +97,9 @@ void main() {
   // intercepts it: while the nested stack can pop, it pops that instead.
   // The predictive-back gesture was unaffected and already worked; this guards
   // the button path that did not.
-  testWidgets('System back button pops the nested stack instead of exiting',
-      (tester) async {
+  testWidgets('System back button pops the nested stack instead of exiting', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
@@ -140,8 +142,9 @@ void main() {
   // to pop on a non-Home tab, so BACK fell through to the OS and the app exited
   // from any tab. SoftRoot's PopScope now falls back to returning to the Home
   // tab when nothing is pushed; only Home-with-nothing-pushed exits.
-  testWidgets('System back from a non-Home tab returns to Home, not exit',
-      (tester) async {
+  testWidgets('System back from a non-Home tab returns to Home, not exit', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
@@ -177,13 +180,16 @@ void main() {
   });
 
   // Regression (2.8.2, build 43): BACK must retrace the tab history — return to the
-  // PREVIOUS tab — not collapse straight to Home. Path Home → MRT → Alerts:
-  // the first BACK must land on MRT (the previous tab), not Home. The earlier
+  // PREVIOUS tab — not collapse straight to Home. Path Home → Saved → Alerts:
+  // the first BACK must land on Saved (the previous tab), not Home. The earlier
   // "return to Home" fix jumped to Home from any tab "no matter what", losing
   // the middle of the path; SoftRoot._tabHistory now records each tab swap so
   // BACK steps back through them one at a time before exiting from Home.
-  testWidgets('System back retraces tab history, not straight to Home',
-      (tester) async {
+  // (The middle tab was MRT until the 3-tab walkthrough change; Saved plays
+  // the same role now.)
+  testWidgets('System back retraces tab history, not straight to Home', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
@@ -192,28 +198,35 @@ void main() {
     await _skipLaunchScreen(tester);
     expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
 
-    // Home → MRT (a setState tab swap). The MRT destination becomes selected.
-    await tester.tap(find.byIcon(Icons.train_outlined));
+    // Home → Saved (a setState tab swap). The Saved destination becomes
+    // selected (filled bookmark).
+    await tester.tap(find.byIcon(Icons.bookmark_outline_rounded));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400)); // fade-through
-    expect(find.byIcon(Icons.train_rounded), findsAtLeastNWidgets(1)); // on MRT
+    expect(
+      find.byIcon(Icons.bookmark_rounded),
+      findsAtLeastNWidgets(1),
+    ); // Saved
     expect(find.text('No stops yet'), findsNothing); // Home not shown
 
-    // MRT → Alerts (another tab swap).
+    // Saved → Alerts (another tab swap).
     await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Service status & your notifications'), findsOneWidget);
 
-    // BACK #1 must retrace to MRT — NOT jump to Home.
+    // BACK #1 must retrace to Saved — NOT jump to Home.
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Service status & your notifications'), findsNothing);
-    expect(find.byIcon(Icons.train_rounded), findsAtLeastNWidgets(1)); // on MRT
+    expect(
+      find.byIcon(Icons.bookmark_rounded),
+      findsAtLeastNWidgets(1),
+    ); // Saved
     expect(find.text('No stops yet'), findsNothing); // crucially NOT Home
 
-    // BACK #2 retraces to Home (Bus).
+    // BACK #2 retraces to Home.
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
@@ -241,8 +254,9 @@ void main() {
   // This test asserts the SIGNAL itself: Flutter must own BACK off the Home root
   // and relinquish it at the Home root. It fails on the old code (which never
   // forced the flag) and passes once SoftRoot drives it from `canExit`.
-  testWidgets('BACK ownership (setFrameworkHandlesBack) tracks navigation depth',
-      (tester) async {
+  testWidgets('BACK ownership (setFrameworkHandlesBack) tracks navigation depth', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({'lyne.onboardingDone': true});
     await AppModel.shared.load();
 
@@ -266,10 +280,16 @@ void main() {
 
     // At the Home root with nothing pushed, BACK should exit → the OS owns it,
     // so the framework must have announced it does NOT handle back.
-    expect(handlesBack, isNotEmpty,
-        reason: 'SoftRoot must announce BACK ownership to the engine');
-    expect(handlesBack.last, isFalse,
-        reason: 'At the Home root the OS owns BACK (app exits)');
+    expect(
+      handlesBack,
+      isNotEmpty,
+      reason: 'SoftRoot must announce BACK ownership to the engine',
+    );
+    expect(
+      handlesBack.last,
+      isFalse,
+      reason: 'At the Home root the OS owns BACK (app exits)',
+    );
 
     // Switch to a non-Home tab (a setState swap — no nested route pushed). BACK
     // must now be consumed in-app (retrace to Home), so Flutter MUST claim it —
@@ -278,23 +298,32 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Service status & your notifications'), findsOneWidget);
-    expect(handlesBack.last, isTrue,
-        reason: 'Off the Home root Flutter must own BACK so Android does not '
-            'finish the activity (the 2.8.x exit-on-back regression)');
+    expect(
+      handlesBack.last,
+      isTrue,
+      reason:
+          'Off the Home root Flutter must own BACK so Android does not '
+          'finish the activity (the 2.8.x exit-on-back regression)',
+    );
 
     // Returning to Home hands BACK ownership back to the OS.
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('No stops yet'), findsOneWidget); // back on Home
-    expect(handlesBack.last, isFalse,
-        reason: 'Back at the Home root the OS owns BACK again');
+    expect(
+      handlesBack.last,
+      isFalse,
+      reason: 'Back at the Home root the OS owns BACK again',
+    );
 
     // Drain the bounded App-Open-ad preload poll (see note above) so no timer
     // is left pending at teardown.
     await tester.pump(const Duration(seconds: 13));
 
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform, null);
+      SystemChannels.platform,
+      null,
+    );
   });
 }

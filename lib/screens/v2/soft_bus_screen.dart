@@ -1,16 +1,26 @@
 // SoftBusScreen — Leyne bus tracking (Material 3 Android).
 //
-// No-scroll glanceable dashboard (Android variant of iOS SoftBusView 2.5.0).
+// Mirrors iOS WSTrackBusView (ios-native/Leyne/WhereSia/WSTrackBusView.swift)
+// structurally: a live card, then the route, then a single pinned CTA.
 // Android intentionally has NO map — see memory "android-no-map": the map is
-// iOS-only (native MapKit); Android shows the route, not a map. Layout:
-//   1. Top bar — back · bell (boarding alert) · save · ⋯ (manage alerts/share)
+// iOS-only (native MapKit); the route timeline is the substitute, not a
+// secondary affordance behind a tap. Layout:
+//   1. Top bar — back · info · more (save/manage alerts/share — an
+//      Android-only overflow; WSTrackBusView itself carries neither, since
+//      this screen is reached only after the user already picked a service).
 //   2. Title   — "Bus {svc}" + "Towards {dest}" + LIVE
-//   3. Hero    — ETA + stops-away + crowd meter, then deck/wheelchair + next two
-//   4. Live    — compact vertical mini-timeline (origin → bus → upcoming stops
-//                → your stop → terminus) inside the card. Connector line is
-//                t.soon up to the bus, t.line after. Tap to open the full-
-//                route card (RouteTimeline sheet).
-//   5. Footer  — first / last bus today
+//   3. Hero    — ETA (a bare "—" when there's no live bus yet) + approach
+//      context + crowd, then deck/wheelchair + next two (Android-only
+//      enrichment — WSTrackBusView doesn't surface these on this screen).
+//   4. Route   — "ROUTE · N stops" header + the full collapsible route
+//      timeline (shared RouteTimeline widget), inline in the scroll — no
+//      "tap to see the full route" modal step, matching iOS's single-scroll
+//      structure.
+//   5. CTA     — "Alert me 1 stop before" pinned above the ad banner, the
+//      one primary action on this screen (iOS parity).
+//
+// First/last bus times live in Service Info (the info button's destination)
+// only, matching iOS's WSServiceInfoView — not duplicated here.
 //
 // "Stops away" / the bus position come from the estimated bus index (live GPS
 // snapped to the nearest route stop, else an ETA estimate) — no map rendering.
@@ -24,7 +34,6 @@ import '../../data/alert_timing.dart';
 import '../../data/bus_progress.dart';
 import '../../data/data_store.dart';
 import '../../data/models.dart';
-import '../../data/mrt_stations.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/alert_actions.dart';
@@ -55,9 +64,9 @@ class SoftBusScreen extends StatefulWidget {
   /// instead of the narrow approach window used when arriving at a real stop.
   final bool fullRoute;
 
-  /// When provided, the tab bar (with its ad banner) stays visible on this
-  /// pushed detail page. [tabSelection] is the tab it was opened from. Null for
-  /// deep-link contexts.
+  /// Kept for callers that chain further pushes (e.g. [_openStop] re-opening
+  /// a [SoftStopScreen]) — this screen's own bottom slot is always the
+  /// pushed-detail ad banner (see [SoftDetailBottomBar]), not a tab bar.
   final ValueChanged<SoftTab>? onTab;
   final SoftTab? tabSelection;
 
@@ -65,13 +74,14 @@ class SoftBusScreen extends StatefulWidget {
   State<SoftBusScreen> createState() => _SoftBusScreenState();
 }
 
-class _SoftBusScreenState extends State<SoftBusScreen> {
+class _SoftBusScreenState extends State<SoftBusScreen>
+    with WidgetsBindingObserver {
   // ── Route data ──────────────────────────────────────────────────────
   RouteInfo? _route;
   ServiceRoute? _serviceRoute;
-  // False until the (deferred) route fetch resolves — drives the live module's
-  // loading state so we never show the "see the full route" hint over a blank
-  // route, or open an empty route sheet, before the data lands.
+  // False until the (deferred) route fetch resolves — drives the route
+  // section's loading state so we never show "Route unavailable" over data
+  // that just hasn't landed yet.
   bool _routeLoaded = false;
   int _dirIndex = 0;
 
@@ -87,6 +97,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DataStore.shared.ensureArrivals(widget.stopCode);
       // Defer the heavy route-data fetch until the push-transition animation
@@ -125,7 +136,20 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   void dispose() {
     _ticker?.cancel();
     _toastTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Returning from background: the ticker was suspended along with the
+    // isolate, so arrivals can be minutes old by the time the user is back
+    // looking at this screen — refetch immediately instead of waiting for
+    // the next tick or a manual pull-to-refresh (iOS WSTrackBusView parity:
+    // onChange(of: scenePhase) forces the same refetch, commit 5c52c74).
+    if (state == AppLifecycleState.resumed) {
+      DataStore.shared.ensureArrivals(widget.stopCode, force: true);
+    }
   }
 
   // ── Route loading ────────────────────────────────────────────────────
@@ -181,6 +205,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     final seg = showFull ? r.stops : r.stops.sublist(lead);
     final canMarkBoard =
         !widget.fullRoute && (dir == null || dir.anchorPresent);
+    // The tracked bus's onboard crowd, attached only to the stop it's
+    // currently snapped to (state == here) — mirrors iOS WSTrackBusView's
+    // vehicle-row crowd gauge (RouteTimeline renders it next to "BUS HERE
+    // NOW").
+    final liveLoad = _liveService()?.load;
     return seg.map((stop) {
       final idx = r.stops.indexWhere((s) => s.code == stop.code);
       final state = BusProgress.stopState(
@@ -189,7 +218,12 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
         youIndex: youSeq,
         canMarkBoard: canMarkBoard,
       );
-      return SoftRouteStop(id: stop.code, name: stop.name, state: state);
+      return SoftRouteStop(
+        id: stop.code,
+        name: stop.name,
+        state: state,
+        load: state == SoftRouteStopState.here ? liveLoad : null,
+      );
     }).toList();
   }
 
@@ -250,13 +284,6 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     return s.etaSec;
   }
 
-  /// "~4 min" / "Arriving now" — the tracked bus's live ETA at your stop,
-  /// shown on the mini-timeline's your-stop node (iOS WSTrackBusView parity).
-  String _fmtYouEta(int etaSec) {
-    final e = fmtEta(etaSec);
-    return e.big == 'Arr' ? 'Arriving now' : '~${e.big} min';
-  }
-
   // ─────────────────────────────────────────────────────────────────────
   // BUILD
   // ─────────────────────────────────────────────────────────────────────
@@ -264,15 +291,13 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: context.t.bg,
-      bottomNavigationBar: (widget.onTab != null && widget.tabSelection != null)
-          ? SoftBottomBar(
-              selection: widget.tabSelection!,
-              onSelect: widget.onTab!,
-            )
-          : null,
+      // Pushed detail screen: ad banner only, no tab bar — iOS hides its
+      // floating tab bar on pushed routes (WSRoot.swift) because it covered
+      // Track Bus's pinned CTA; Android mirrors that here.
+      bottomNavigationBar: const SoftDetailBottomBar(),
       // OUTER listener: DataStore only — rebuilds only when arrivals data
-      // changes from a network fetch. The heavy route-progress/timeline
-      // subtree lives here and is therefore NOT rebuilt every second.
+      // changes from a network fetch. The route-progress/timeline subtree
+      // lives here and is therefore NOT rebuilt every second.
       body: ListenableBuilder(
         listenable: DataStore.shared,
         builder: (context, _) {
@@ -285,87 +310,83 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildTopBar(t),
-                    // Fill-or-scroll: content hugs its natural height and the
-                    // first/last footer pins to the bottom when there's room;
-                    // when the mini-timeline is taller than the viewport the
-                    // whole area scrolls instead of overflowing.
+                    // Fill-or-scroll: content hugs its natural height when
+                    // short; a long route makes the whole area scroll
+                    // instead of overflowing. Pull-to-refresh re-fetches
+                    // arrivals AND the route (iOS WSTrackBusView parity:
+                    // .refreshable does both).
                     Expanded(
-                      child: LayoutBuilder(
-                        builder: (ctx, c) => SingleChildScrollView(
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(minHeight: c.maxHeight),
-                            child: IntrinsicHeight(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      2,
-                                      16,
-                                      0,
+                      child: RefreshIndicator(
+                        color: t.accent,
+                        onRefresh: () async {
+                          await DataStore.shared.refreshArrivals(
+                            widget.stopCode,
+                          );
+                          await _loadRoute();
+                        },
+                        child: LayoutBuilder(
+                          builder: (ctx, c) => SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: c.maxHeight,
+                              ),
+                              child: IntrinsicHeight(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        2,
+                                        16,
+                                        0,
+                                      ),
+                                      child: _buildTitleBlock(
+                                        context,
+                                        t,
+                                        _liveService(),
+                                      ),
                                     ),
-                                    child: _buildTitleBlock(
-                                      context,
-                                      t,
-                                      _liveService(),
+                                    const SizedBox(height: 14),
+                                    // INNER listener: AppModel only —
+                                    // rebuilds every second so the ETA
+                                    // countdown ticks. Only _buildHeroCard
+                                    // (which reads DateTime.now()) is inside
+                                    // it; everything else stays in the outer
+                                    // DataStore scope.
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      child: ListenableBuilder(
+                                        listenable: AppModel.shared,
+                                        builder: (context, _) =>
+                                            _buildHeroCard(t),
+                                      ),
                                     ),
-                                  ),
-                                  // First/last bus rides directly under the
-                                  // title — "have I missed the last bus?" at a
-                                  // glance, matching iOS SoftBusView.
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      8,
-                                      16,
-                                      0,
+                                    const SizedBox(height: 12),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      child: _buildRouteSection(t),
                                     ),
-                                    child: _buildFirstLastFooter(t),
-                                  ),
-                                  const SizedBox(height: 14),
-                                  // Labeled action row (Track arrival · Save
-                                  // service · More) — mirrors iOS SoftBusView.
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    child: ListenableBuilder(
-                                      listenable: AppModel.shared,
-                                      builder: (context, _) =>
-                                          _buildActionButtons(t),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  // INNER listener: AppModel only — rebuilds
-                                  // every second so the ETA countdown ticks.
-                                  // Only _buildHeroCard (which reads
-                                  // DateTime.now()) is inside it; everything
-                                  // else stays in the outer DataStore scope.
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    child: ListenableBuilder(
-                                      listenable: AppModel.shared,
-                                      builder: (context, _) =>
-                                          _buildHeroCard(t),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    child: _buildLiveModule(t),
-                                  ),
-                                  const Spacer(),
-                                ],
+                                    const Spacer(),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
+                    ),
+                    // The one primary action on this screen (iOS
+                    // WSTrackBusView parity) — its own AppModel listener so
+                    // the label/icon flips the instant the alert toggles.
+                    ListenableBuilder(
+                      listenable: AppModel.shared,
+                      builder: (context, _) => _buildAlertCta(t),
                     ),
                   ],
                 ),
@@ -378,8 +399,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  // ── 1. Top bar — back · info (the save/alert toggles live in the labeled
-  //    action row below the title, matching iOS SoftBusView). ──────────────
+  // ── 1. Top bar — back · info · more (save/manage alerts/share). The
+  //    boarding-alert toggle lives at the bottom as the single primary CTA
+  //    (iOS WSTrackBusView parity: the header carries only back + info). ───
   Widget _buildTopBar(LyneTheme t) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -395,6 +417,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
             onTap: _openServiceInfo,
             semanticsLabel: 'Bus ${widget.svc} service info',
             child: Icon(Icons.info_outline_rounded, size: 20, color: t.fg),
+          ),
+          const SizedBox(width: 8),
+          ListenableBuilder(
+            listenable: AppModel.shared,
+            builder: (context, _) => _moreButton(t),
           ),
         ],
       ),
@@ -416,98 +443,15 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  // ── Action row — three labeled buttons (Track arrival · Save service ·
-  //    More), mirroring iOS. Self-describing labels + larger tap targets
-  //    replace the old cryptic icon-only top-bar toggles. ──────────────────
-  Widget _buildActionButtons(LyneTheme t) {
-    final boardingOn = _boardingAlertOn;
+  /// Save service · manage alerts · share, folded into one overflow button so
+  /// the header stays a clean back + info + more — matching iOS's minimal bar
+  /// while keeping the save/share affordances the Android app already offers.
+  /// (WSTrackBusView itself has no save/share on this screen — this is a
+  /// deliberate Android addition, not something being mirrored from iOS.)
+  Widget _moreButton(LyneTheme t) {
     final saved =
         AppModel.shared.isFavService(no: widget.svc, stop: widget.stopCode) ||
         AppModel.shared.isFavService(no: widget.svc, stop: null);
-    return Row(
-      children: [
-        Expanded(
-          child: _actionPill(
-            t,
-            icon: boardingOn
-                ? Icons.notifications_active_rounded
-                : Icons.notifications_outlined,
-            label: 'Track arrival',
-            active: boardingOn,
-            onTap: _toggleBoardingAlert,
-            semantics: boardingOn
-                ? 'Arrival tracking on for bus ${widget.svc}. Tap to cancel.'
-                : 'Track arrival of bus ${widget.svc}',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _actionPill(
-            t,
-            icon: saved ? Icons.star_rounded : Icons.star_outline_rounded,
-            label: 'Save service',
-            active: saved,
-            onTap: _toggleServiceSaved,
-            semantics: saved
-                ? 'Bus ${widget.svc} saved. Tap to remove.'
-                : 'Save bus ${widget.svc}',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: _moreActionPill(t)),
-      ],
-    );
-  }
-
-  /// A single labeled action pill (icon + label) used in the action row.
-  Widget _actionPill(
-    LyneTheme t, {
-    required IconData icon,
-    required String label,
-    required bool active,
-    required VoidCallback onTap,
-    required String semantics,
-  }) {
-    final fg = active ? t.soon : t.fg;
-    return Semantics(
-      button: true,
-      label: semantics,
-      child: Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Container(
-            height: 48,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: active ? t.soon : t.line, width: 1),
-            ),
-            alignment: Alignment.center,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 18, color: fg),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.sans(13, weight: FontWeight.w600, color: fg),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// The "More" action pill — manage alerts + share, via a popup menu.
-  Widget _moreActionPill(LyneTheme t) {
     return PopupMenuButton<String>(
       tooltip: 'More options',
       padding: EdgeInsets.zero,
@@ -516,7 +460,9 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
         borderRadius: BorderRadius.circular(LyneRadius.md),
       ),
       onSelected: (v) {
-        if (v == 'manage') {
+        if (v == 'save') {
+          _toggleServiceSaved();
+        } else if (v == 'manage') {
           Navigator.of(
             context,
           ).push(MaterialPageRoute(builder: (_) => const ManageAlertsScreen()));
@@ -525,6 +471,23 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
         }
       },
       itemBuilder: (_) => [
+        PopupMenuItem(
+          value: 'save',
+          child: Row(
+            children: [
+              Icon(
+                saved ? Icons.star_rounded : Icons.star_outline_rounded,
+                size: 18,
+                color: t.dim,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                saved ? 'Remove from saved' : 'Save bus ${widget.svc}',
+                style: t.sans(14, color: t.fg),
+              ),
+            ],
+          ),
+        ),
         PopupMenuItem(
           value: 'manage',
           child: Row(
@@ -546,24 +509,24 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           ),
         ),
       ],
-      child: Container(
-        height: 48,
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.line, width: 1),
-        ),
-        alignment: Alignment.center,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.more_horiz, size: 18, color: t.fg),
-            const SizedBox(width: 6),
-            Text(
-              'More',
-              style: t.sans(13, weight: FontWeight.w600, color: t.fg),
+      child: Semantics(
+        button: true,
+        label: 'More options for bus ${widget.svc}',
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: Center(
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: t.line, width: 1),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.more_vert_rounded, size: 20, color: t.fg),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -576,7 +539,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     _showToast(Icons.check_rounded, 'Bus ${widget.svc} link copied');
   }
 
-  // ── Boarding-alert + save toggles (with toast feedback) ───────────────
+  // ── Boarding-alert + save toggles (with toast/snackbar feedback) ───────
   bool get _boardingAlertOn =>
       AppModel.shared.alertFor(
         kind: AlertKind.arrival,
@@ -765,7 +728,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
               ),
               if (s != null) ...[
                 const SizedBox(width: 12),
-                CrowdMeter(load: s.load),
+                // Compact word (Seats/Standing/Limited) — matches iOS
+                // WSTrackBusView's live-card crowd word (`Load.wsWord`)
+                // rather than the fuller "Seats available" phrasing used
+                // elsewhere in the app.
+                CrowdMeter(load: s.load, compact: true),
               ],
             ],
           ),
@@ -782,9 +749,12 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
 
   Widget _heroEtaRow(LyneTheme t, Service? s, DateTime now) {
     if (s == null) {
+      // No live bus yet — an honest dash, not a decorated headline; the
+      // caption below ("Waiting for the next N") carries the message (iOS
+      // WSTrackBusView parity: the liveCard's ETA slot is a bare "—").
       return Text(
-        'No live arrival',
-        style: t.sans(20, weight: FontWeight.w700, color: t.dim),
+        '—',
+        style: t.mono(34, weight: FontWeight.w700, color: t.faint),
       );
     }
     final eta = fmtEta(_liveEtaSec(s, now));
@@ -884,76 +854,86 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     return stopsPart;
   }
 
-  // ── 4. Live module — compact vertical mini-timeline (no map on Android) ─
-  Widget _buildLiveModule(LyneTheme t) {
-    final dir = _currentDir;
-    final remaining = _stopsRemaining();
-
-    // Resolve timeline content only when live bus position is available.
-    final resolvedDir =
-        (dir != null && _estimatedBusIndex() != null && dir.stops.isNotEmpty)
-        ? dir
-        : null;
-    final upcoming = resolvedDir != null
-        ? _upcomingStops(resolvedDir)
-        : const <({String code, String name})>[];
-    final between = resolvedDir != null ? _betweenCaption(resolvedDir) : null;
-
-    // The route data is ready once _routeLoaded is true AND a route came back.
-    final hasRoute = _routeLoaded && _serviceRoute != null;
-    // Only let the user open the full-route sheet once there's actually a route
-    // to show — otherwise the sheet opens empty while the fetch is in flight.
-    final tappable = hasRoute;
+  // ── 4. Route — full-route timeline (no map on Android; this timeline IS
+  //    the route-progress affordance). Always inline, matching iOS
+  //    WSTrackBusView's single-scroll structure — no "tap to see the full
+  //    route" modal step. ───────────────────────────────────────────────
+  Widget _buildRouteSection(LyneTheme t) {
+    final hasRoute =
+        _routeLoaded &&
+        _serviceRoute != null &&
+        (_route?.stops.isNotEmpty ?? false);
+    final dirs = _serviceRoute?.directions.length ?? 0;
 
     final Widget body;
-    if (resolvedDir != null) {
-      // Loaded + live bus position resolved → the rich mini-timeline.
-      body = _buildMiniTimeline(t, resolvedDir, upcoming, between, remaining);
-    } else if (!_routeLoaded) {
-      // Still fetching the route — show a loading state, not the (misleading)
-      // "see the full route" hint over a blank route.
+    if (!_routeLoaded) {
+      // Still fetching the route — a loading state, not an empty timeline.
       body = _routeLoadingState(t);
-    } else if (hasRoute) {
-      // Route is ready but we can't place the live bus yet — the static route
-      // is still viewable, so keep the tappable placeholder.
-      body = _routePlaceholder(t);
-    } else {
+    } else if (!hasRoute) {
       // Fetch finished but returned no route (unavailable for this service).
       body = _routeUnavailableState(t);
+    } else {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _routeSectionHeader(t, _route!.stops.length),
+          if (dirs > 1) ...[
+            const SizedBox(height: 10),
+            _routeDirectionToggle(t),
+          ],
+          const SizedBox(height: 12),
+          RouteTimeline(
+            svc: widget.svc,
+            stops: _timelineStops(),
+            alightId: null,
+            onAlight: (_) {},
+            selectable: false,
+            embedded: true,
+            // Every stop row opens that stop's own arrivals (iOS
+            // RouteTimeline parity: any row, not just the upcoming ones).
+            onOpenStop: _openStop,
+          ),
+        ],
+      );
     }
 
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: tappable ? _openRouteCard : null,
-        child: Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: t.line, width: 1),
-          ),
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              body,
-              // The "VIEW FULL ROUTE" affordance only makes sense once a route
-              // is actually available to open.
-              if (hasRoute) ...[
-                const SizedBox(height: 10),
-                _viewFullRouteHint(t),
-              ],
-            ],
-          ),
-        ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.line, width: 1),
       ),
+      child: body,
     );
   }
 
-  /// Shown while the route fetch is in flight — a spinner + label instead of
-  /// the "see the full route" hint sitting over an empty route.
+  /// "ROUTE ───── N stops" — mirrors iOS's WSSectionHeader recipe (uppercase
+  /// heavy label · hairline rule · mono meta) inside Android's own card
+  /// chrome.
+  Widget _routeSectionHeader(LyneTheme t, int count) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'ROUTE',
+          style: t
+              .sans(11, weight: FontWeight.w800, color: t.dim)
+              .copyWith(letterSpacing: 1.4),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Container(height: 1, color: t.line)),
+        const SizedBox(width: 10),
+        Text(
+          '$count stop${count == 1 ? '' : 's'}',
+          style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.5),
+        ),
+      ],
+    );
+  }
+
+  /// Shown while the route fetch is in flight.
   Widget _routeLoadingState(LyneTheme t) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -981,420 +961,11 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  // Maximum upcoming stops shown inline before collapsing to "+N more".
-  static const int _maxInlineStops = 4;
-
-  /// Compact vertical mini-timeline: origin → bus → [upcoming stops] →
-  /// your stop → terminus, all inline in a single Column.
-  Widget _buildMiniTimeline(
-    LyneTheme t,
-    RouteDirection dir,
-    List<({String code, String name})> upcoming,
-    String? between,
-    int? remaining,
-  ) {
-    final stops = dir.stops;
-    final busIdx0 = _estimatedBusIndex()!;
-    final youIdx = dir.youIndex.clamp(0, stops.length - 1);
-    final busIdx = busIdx0.clamp(0, youIdx);
-
-    final showOrigin = busIdx > 0;
-    final showDest = youIdx < stops.length - 1;
-
-    // Bus subtitle: prefer "between A–B" when available, else "now here".
-    final busSub = between != null
-        ? between.replaceFirst('Between ', '').replaceFirst(' and ', ' – ')
-        : 'now here';
-
-    // Upcoming stops: cap at _maxInlineStops, show overflow as "+N more".
-    final shownUpcoming = upcoming.take(_maxInlineStops).toList();
-    final extraUpcoming = upcoming.length - shownUpcoming.length;
-
-    // Remaining label for your-stop node.
-    final youSub = remaining == null
-        ? null
-        : remaining == 0
-        ? 'Arriving'
-        : '$remaining stop${remaining == 1 ? '' : 's'} away';
-
-    // Live ETA for the tracked bus at your stop ("~4 min" / "Arriving now"),
-    // and — when your stop sits at an MRT/LRT station — its line-code pills.
-    final liveSvc = _liveService();
-    final youEta = liveSvc == null
-        ? null
-        : _fmtYouEta(_liveEtaSec(liveSvc, DateTime.now()));
-    final youMrt = resolveMrtStation(stops[youIdx].name);
-    final youSubParts = [?youSub, ?youEta].join(' · ');
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Origin ──────────────────────────────────────────────────────
-        // Tappable — opens that stop's own arrivals (iOS RouteTimeline parity).
-        if (showOrigin) ...[
-          _timelineRow(
-            t,
-            dot: _dotOrigin(t),
-            lineAbove: false,
-            lineBelow: true,
-            lineAboveColor: t.soon,
-            lineBelowColor: t.soon,
-            onTap: () => _openStop(stops.first.code),
-            child: Text(
-              stops.first.name,
-              style: t.sans(12, color: t.dim),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-
-        // ── Bus node ─────────────────────────────────────────────────────
-        _timelineRow(
-          t,
-          dot: _dotBus(t),
-          lineAbove: showOrigin,
-          lineBelow: true,
-          lineAboveColor: t.soon,
-          lineBelowColor: t.line,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Bus ${widget.svc}',
-                style: t.sans(13, weight: FontWeight.w600, color: t.soon),
-              ),
-              Text(busSub, style: t.sans(11, color: t.dim)),
-            ],
-          ),
-        ),
-
-        // ── Upcoming stops (inline) ───────────────────────────────────────
-        // Tappable — opens that stop's own arrivals (iOS RouteTimeline parity).
-        for (final s in shownUpcoming)
-          _timelineRow(
-            t,
-            dot: _dotIntermediate(t),
-            lineAbove: true,
-            lineBelow: true,
-            lineAboveColor: t.line,
-            lineBelowColor: t.line,
-            onTap: () => _openStop(s.code),
-            child: Text(
-              s.name,
-              style: t.sans(12, color: t.dim),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-
-        // "+N more stops" overflow row
-        if (extraUpcoming > 0)
-          _timelineRow(
-            t,
-            dot: _dotIntermediate(t),
-            lineAbove: true,
-            lineBelow: true,
-            lineAboveColor: t.line,
-            lineBelowColor: t.line,
-            child: Text(
-              '+$extraUpcoming more stop${extraUpcoming == 1 ? '' : 's'}',
-              style: t.sans(12, color: t.faint),
-            ),
-          ),
-
-        // ── Your stop ────────────────────────────────────────────────────
-        _timelineRow(
-          t,
-          dot: _dotYou(t),
-          lineAbove: true,
-          lineBelow: showDest,
-          lineAboveColor: t.line,
-          lineBelowColor: t.line,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Your stop',
-                style: t.sans(13, weight: FontWeight.w600, color: t.fg),
-              ),
-              if (youSubParts.isNotEmpty)
-                Text(youSubParts, style: t.sans(11, color: t.soon)),
-              // Your stop sits at an MRT/LRT station — surface the lines you
-              // can change onto (iOS WSTrackBusView "CHANGE FOR" parity).
-              if (youMrt != null) _changeForChip(t, youMrt),
-            ],
-          ),
-        ),
-
-        // ── Terminus ─────────────────────────────────────────────────────
-        // Tappable — opens that stop's own arrivals (iOS RouteTimeline parity).
-        if (showDest)
-          _timelineRow(
-            t,
-            dot: _dotDest(t),
-            lineAbove: true,
-            lineBelow: false,
-            lineAboveColor: t.line,
-            lineBelowColor: t.line,
-            onTap: () => _openStop(stops.last.code),
-            child: Text(
-              stops.last.name,
-              style: t.sans(12, color: t.dim),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-      ],
-    );
-  }
-
-  /// "CHANGE FOR" chip — the icon + label + line-code pills shown on the
-  /// your-stop node when it resolves to an MRT/LRT station. Only codes (no
-  /// station name, already shown as the stop name above) so the row stays
-  /// narrow. Mirrors iOS WSTrackBusView.interchangeFlag.
-  Widget _changeForChip(LyneTheme t, MrtStation mrt) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.train_rounded, size: 12, color: t.dim),
-          const SizedBox(width: 4),
-          Text(
-            'CHANGE FOR',
-            style: t
-                .mono(9, weight: FontWeight.w600, color: t.dim)
-                .copyWith(letterSpacing: 0.6),
-          ),
-          const SizedBox(width: 5),
-          Wrap(
-            spacing: 4,
-            children: [
-              for (final code in mrt.codes.take(3)) _mrtCodeChip(code),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _mrtCodeChip(MrtCode code) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: code.color,
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Text(
-        code.code,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 9.5,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
-        ),
-      ),
-    );
-  }
-
-  /// A single row in the vertical mini-timeline. The connector lines are drawn
-  /// as thin containers that sit in the fixed-width dot column, above/below the
-  /// dot itself, so they form a continuous vertical bar across nodes. When
-  /// [onTap] is given the whole row (rail + label) is the tap target and gets
-  /// a Material ripple — used for stop rows that open that stop's arrivals.
-  Widget _timelineRow(
-    LyneTheme t, {
-    required Widget dot,
-    required bool lineAbove,
-    required bool lineBelow,
-    required Color lineAboveColor,
-    required Color lineBelowColor,
-    required Widget child,
-    VoidCallback? onTap,
-  }) {
-    const dotColW = 32.0; // fixed width for the dot + connector column
-    const connW = 2.0; // connector bar width
-    const dotRowH = 28.0; // height of the dot zone
-    const connSegH = 8.0; // connector segment above/below dot zone
-
-    final row = Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        SizedBox(
-          width: dotColW,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Connector above dot
-              SizedBox(
-                height: connSegH,
-                child: Center(
-                  child: Container(
-                    width: connW,
-                    color: lineAbove ? lineAboveColor : Colors.transparent,
-                  ),
-                ),
-              ),
-              // Dot zone
-              SizedBox(
-                height: dotRowH,
-                child: Center(child: dot),
-              ),
-              // Connector below dot
-              SizedBox(
-                height: connSegH,
-                child: Center(
-                  child: Container(
-                    width: connW,
-                    color: lineBelow ? lineBelowColor : Colors.transparent,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(child: child),
-      ],
-    );
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: onTap == null
-          ? row
-          : Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: onTap,
-                child: row,
-              ),
-            ),
-    );
-  }
-
-  // ── Node dot builders ─────────────────────────────────────────────────
-
-  /// Origin: filled `t.soon` circle with a check icon (bus has passed).
-  Widget _dotOrigin(LyneTheme t) => Container(
-    width: 16,
-    height: 16,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(color: t.soon, shape: BoxShape.circle),
-    child: Icon(Icons.check_rounded, size: 10, color: t.contrastFg),
-  );
-
-  /// Bus: filled `t.soon` circle with a halo ring and bus icon.
-  Widget _dotBus(LyneTheme t) => Stack(
-    alignment: Alignment.center,
-    children: [
-      Container(
-        width: 26,
-        height: 26,
-        decoration: BoxDecoration(
-          color: t.soon.withValues(alpha: 0.22),
-          shape: BoxShape.circle,
-        ),
-      ),
-      Container(
-        width: 22,
-        height: 22,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: t.soon,
-          shape: BoxShape.circle,
-          border: Border.all(color: t.surface, width: 2),
-        ),
-        child: Icon(
-          Icons.directions_bus_rounded,
-          size: 11,
-          color: t.contrastFg,
-        ),
-      ),
-    ],
-  );
-
-  /// Intermediate upcoming stop: small grey-filled dot.
-  Widget _dotIntermediate(LyneTheme t) => Container(
-    width: 7,
-    height: 7,
-    decoration: BoxDecoration(color: t.line, shape: BoxShape.circle),
-  );
-
-  /// Your stop: hollow ring with `t.soon` border.
-  Widget _dotYou(LyneTheme t) => Container(
-    width: 16,
-    height: 16,
-    decoration: BoxDecoration(
-      color: t.surface,
-      shape: BoxShape.circle,
-      border: Border.all(color: t.soon, width: 3),
-    ),
-  );
-
-  /// Terminus: small dim hollow ring.
-  Widget _dotDest(LyneTheme t) => Container(
-    width: 13,
-    height: 13,
-    decoration: BoxDecoration(
-      color: t.surface,
-      shape: BoxShape.circle,
-      border: Border.all(color: t.dim, width: 1.5),
-    ),
-  );
-
-  Widget _viewFullRouteHint(LyneTheme t) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          'VIEW FULL ROUTE',
-          style: t
-              .mono(9, weight: FontWeight.w600, color: t.faint)
-              .copyWith(letterSpacing: 0.8),
-        ),
-        const SizedBox(width: 3),
-        Icon(Icons.keyboard_arrow_up_rounded, size: 13, color: t.faint),
-      ],
-    );
-  }
-
-  Widget _routePlaceholder(LyneTheme t) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.route_rounded, size: 30, color: t.faint),
-        const SizedBox(height: 10),
-        Text('See the full route', style: t.sans(14, color: t.dim)),
-      ],
-    );
-  }
-
-  // ── Data helpers (used by mini-timeline) ─────────────────────────────
-
-  /// Stops the bus still passes before reaching yours (in order), each with
-  /// its code so the row can push that stop's own arrivals when tapped.
-  List<({String code, String name})> _upcomingStops(RouteDirection dir) {
-    final busIdx0 = _estimatedBusIndex();
-    if (busIdx0 == null) return const [];
-    final youIdx = dir.youIndex.clamp(0, dir.stops.length - 1);
-    final busIdx = busIdx0.clamp(0, youIdx);
-    final out = <({String code, String name})>[];
-    for (var i = busIdx + 1; i < youIdx; i++) {
-      out.add((code: dir.stops[i].code, name: dir.stops[i].name));
-    }
-    return out;
-  }
-
-  /// Opens another stop's own arrivals from a tapped mini-timeline / route-
-  /// sheet row (iOS RouteTimeline parity: every non-"your stop" row pushes
-  /// that stop). `onOpenBus` re-enters this same screen for whichever bus the
-  /// user picks there, mirroring the self-referential push SoftStopScreen
-  /// already does for its own "nearby station's bus stop" rows.
+  /// Opens another stop's own arrivals from a tapped route-timeline row (iOS
+  /// RouteTimeline parity: every non-"your stop" row pushes that stop).
+  /// `onOpenBus` re-enters this same screen for whichever bus the user picks
+  /// there, mirroring the self-referential push SoftStopScreen already does
+  /// for its own "nearby station's bus stop" rows.
   void _openStop(String code) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -1418,122 +989,7 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
     );
   }
 
-  String? _betweenCaption(RouteDirection dir) {
-    final busIdx0 = _estimatedBusIndex();
-    if (busIdx0 == null || dir.stops.isEmpty) return null;
-    final busIdx = busIdx0.clamp(0, dir.stops.length - 1);
-    final nextIdx = (busIdx + 1).clamp(0, dir.stops.length - 1);
-    if (nextIdx == busIdx) return null;
-    return 'Between ${dir.stops[busIdx].name} and ${dir.stops[nextIdx].name}';
-  }
-
-  // ── Route card (bottom sheet — full route) ─────────────────────────────
-  void _openRouteCard() {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheet) {
-            final t = ctx.t;
-            final dest =
-                _liveService()?.dest ?? _currentDir?.destinationName ?? '';
-            final stops = _timelineStops();
-            final dirs = _serviceRoute?.directions.length ?? 0;
-            return Container(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
-              ),
-              decoration: BoxDecoration(
-                color: t.bg,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8, bottom: 4),
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: t.line,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      // Pad the bottom by the system navigation-bar inset so the
-                      // last route rows (esp. once "show all stops" is expanded)
-                      // clear the OS nav bar instead of rendering under it. The
-                      // sheet itself stays edge-to-edge (bg fills to the screen
-                      // bottom); only the scrollable content is inset. `ctx`
-                      // carries the device viewPadding inside the modal route.
-                      padding: EdgeInsets.fromLTRB(
-                        16,
-                        8,
-                        16,
-                        28 + MediaQuery.viewPaddingOf(ctx).bottom,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Bus ${widget.svc}',
-                            style: t.sans(
-                              22,
-                              weight: FontWeight.w700,
-                              color: t.fg,
-                            ),
-                          ),
-                          if (dest.isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Text(
-                              'Towards $dest',
-                              style: t.sans(14, color: t.dim),
-                            ),
-                          ],
-                          if (dirs > 1) ...[
-                            const SizedBox(height: 14),
-                            _routeCardDirectionToggle(t, setSheet),
-                          ],
-                          const SizedBox(height: 14),
-                          RouteTimeline(
-                            svc: widget.svc,
-                            stops: stops,
-                            alightId: null,
-                            onAlight: (_) {},
-                            selectable: false,
-                            embedded: true,
-                            // Every stop row opens that stop's own arrivals —
-                            // close the sheet first, then push (iOS
-                            // RouteTimeline parity).
-                            onOpenStop: (code) {
-                              Navigator.of(ctx).pop();
-                              _openStop(code);
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _routeCardDirectionToggle(
-    LyneTheme t,
-    void Function(void Function()) setSheet,
-  ) {
+  Widget _routeDirectionToggle(LyneTheme t) {
     final sr = _serviceRoute!;
     return SegmentedButton<int>(
       showSelectedIcon: false,
@@ -1569,7 +1025,6 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
           _dirIndex = newIdx;
           _route = _routeFromDir(sr.directions[newIdx]);
         });
-        setSheet(() {});
       },
     );
   }
@@ -1577,29 +1032,57 @@ class _SoftBusScreenState extends State<SoftBusScreen> {
   static String _truncate(String s, int max) =>
       s.length <= max ? s : '${s.substring(0, max - 1)}…';
 
-  // ── 5. First / last bus footer ─────────────────────────────────────────
-  Widget _buildFirstLastFooter(LyneTheme t) {
-    final tt = DataStore.shared.busTimings(
-      serviceNo: widget.svc,
-      stopCode: widget.stopCode,
-    );
-    if (tt == null) return const SizedBox.shrink();
-    final use24 = AppModel.shared.use24h;
-    final first = fmtClock(tt.first, use24h: use24);
-    final last = fmtClock(tt.last, use24h: use24);
-    return Row(
-      children: [
-        Icon(Icons.schedule_rounded, size: 12, color: t.faint),
-        const SizedBox(width: 7),
-        Flexible(
-          child: Text(
-            'First $first  ·  Last $last',
-            style: t.sans(12, weight: FontWeight.w500, color: t.dim),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+  // ── 5. CTA — the single primary action, pinned above the ad banner (iOS
+  //    WSTrackBusView parity: "Alert me 1 stop before" is the one button on
+  //    this screen). ────────────────────────────────────────────────────
+  Widget _buildAlertCta(LyneTheme t) {
+    final alerted = _boardingAlertOn;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: Semantics(
+        button: true,
+        label: alerted
+            ? 'Arrival tracking on for bus ${widget.svc}. Tap to cancel.'
+            : 'Track arrival of bus ${widget.svc}',
+        child: SizedBox(
+          width: double.infinity,
+          height: 54,
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: t.contrast,
+              foregroundColor: t.contrastFg,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            onPressed: _toggleBoardingAlert,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  alerted
+                      ? Icons.notifications_active_rounded
+                      : Icons.notifications_outlined,
+                  size: 19,
+                  color: t.contrastFg,
+                ),
+                const SizedBox(width: 9),
+                Text(
+                  alerted
+                      ? 'Alert set · tap to cancel'
+                      : 'Alert me 1 stop before',
+                  style: t.sans(
+                    15,
+                    weight: FontWeight.w800,
+                    color: t.contrastFg,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ],
+      ),
     );
   }
 }

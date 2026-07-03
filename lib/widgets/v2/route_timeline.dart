@@ -3,8 +3,10 @@
 
 import 'package:flutter/material.dart';
 import '../../data/bus_progress.dart';
+import '../../data/models.dart';
 import '../../data/mrt_stations.dart';
 import '../../theme.dart';
+import 'confidence.dart';
 
 enum SoftRouteStopState { past, here, board, next, alight }
 
@@ -27,11 +29,19 @@ class SoftRouteStop {
     required this.name,
     required this.state,
     this.etaMin,
+    this.load,
   });
   final String id;
   final String name;
   final SoftRouteStopState state;
   final int? etaMin;
+
+  /// The tracked bus's onboard crowd, attached only to the `here` stop (the
+  /// bus's current GPS-snapped position) — mirrors iOS WSTrackBusView's
+  /// vehicle-row crowd gauge (commit 5c52c74: a bare lowercase "seats" read
+  /// as a mystery; the standard gauge+word idiom fixes that here too). Null
+  /// on every other stop.
+  final Load? load;
 }
 
 class RouteTimeline extends StatefulWidget {
@@ -505,7 +515,7 @@ class _RouteTimelineState extends State<RouteTimeline> {
                         ),
                         const SizedBox(height: 2),
                         if (resolved == SoftRouteStopState.here)
-                          _chip(t, 'BUS HERE NOW', filled: true),
+                          _hereRow(t, stop.load),
                         if (resolved == SoftRouteStopState.alight)
                           _alightChip(t),
                       ],
@@ -684,6 +694,23 @@ class _RouteTimelineState extends State<RouteTimeline> {
           letterSpacing: 0.2,
         ),
       ),
+    );
+  }
+
+  /// "BUS HERE NOW" chip + the onboard crowd (compact gauge + short word) —
+  /// the bus's live GPS position is snapped to this stop, so its crowd is the
+  /// best read of what's actually approaching. Mirrors iOS WSTrackBusView's
+  /// vehicle-row crowd gauge.
+  Widget _hereRow(LyneTheme t, Load? load) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _chip(t, 'BUS HERE NOW', filled: true),
+        if (load != null) ...[
+          const SizedBox(width: 8),
+          CrowdMeter(load: load, compact: true),
+        ],
+      ],
     );
   }
 

@@ -1,83 +1,134 @@
-// SoftFavouritesScreen — Leyne 2.4.0 "Saved" tab (Material 3 Android).
+// SoftFavouritesScreen — Leyne "Saved" tab (Material 3 Android).
 //
-// DESIGN (2.4.0 restyle — mirrors SoftFavouritesView.swift):
-//   • Large bold title "Saved" (matches bottom-tab label).
-//   • Three-segment filter: All | Stops | Buses.
-//       All   = pinned stops first (section "Saved stops"), then saved bus
-//               services (section "Buses").
-//       Stops = only AppModel.shared.pins.
-//       Buses = only AppModel.shared.favServices.
-//   • Stop cards: 46×46 pin tile with gold star, stop name,
-//     "Stop {code} · road" (mono), walk/distance, mini-chip bus row.
-//   • Swipe gestures (Dismissible) — endToStart only (LEFT swipe = delete):
-//       Pinned stop    → swipe LEFT → unpin via togglePin; confirmDismiss
-//                        returns false so Dismissible never removes the widget.
-//       Saved service  → swipe LEFT → removeFavService; same false return.
-//   • Empty state: when pins AND favServices are both empty.
-//   • "+ Add stop" row at the bottom, always visible (outside empty state).
+// DESIGN (2026-07-03 parity pass — mirrors WSSavedView.swift exactly in
+// structure/content; Material idioms for chrome):
+//   • Eyebrow "YOUR PLACES" + big title "Saved", trailing hairline-capsule
+//     EDIT/DONE button (no filter tabs — WSSavedView has none; the earlier
+//     All/Stops/Buses/MRT segmented control was an Android-only addition
+//     that made the screen look structurally different from iOS and has
+//     been removed).
+//   • ONE continuous "Stops" section — pinned stops followed directly by
+//     saved MRT stations, no sub-header between them (mirrors WSSavedView's
+//     `list`, where both ForEach blocks sit under a single "Stops" header).
+//     Right-aligned section meta is always "Updated h:mm" (or "Updated —"
+//     before the first successful fetch) — never omitted, mirrors
+//     `WSFmt.upd`.
+//   • "Lines" section (saved bus services) — only rendered when non-empty,
+//     mirrors WSSavedView's `if !m.favServices.isEmpty`.
+//   • No "+ Add stop" row — WSSavedView has none; adding happens via the
+//     global search entry point (`onOpenSearch`, pushed from elsewhere),
+//     not from this screen.
+//   • Stop card: name + "code · ROAD" subline (mono, uppercased road, no
+//     "Stop" prefix) + capped service-tile row (3 + "+N" overflow) + a
+//     trailing soonest-arrival column (big ETA, and — only for a real
+//     live/GPS reading, not a schedule-only estimate — "Bus {no} ·" plus
+//     CrowdMeter(compact:true) for the short Seats/Standing/Limited word).
+//     No leading icon tile and no walk/distance line — WSSavedView's
+//     `savedStopRow` has neither.
+//   • Station card: name + line-names subline (e.g. "EAST WEST / DOWNTOWN")
+//     + up to 3 coloured line-code chips (Android's own established pill
+//     style, kept) + a trailing crowd dot-chip when a live reading exists.
+//   • Line (bus) card: ServiceBadge (Android's shared bus-number tile,
+//     standing in for iOS's neutral RouteTile) + destination + "at {stop}"/
+//     "Anywhere near you" + trailing ETA and CrowdMeter(compact:true).
+//   • Swipe gestures (Dismissible) — endToStart only (LEFT swipe = delete),
+//     mirroring WSSavedView's `.onDelete`:
+//       Pinned stop    → swipe LEFT → unpin via togglePin.
+//       Saved station  → swipe LEFT → removeMrtSaved.
+//       Saved service  → swipe LEFT → removeFavService.
+//     confirmDismiss always returns false — AppModel mutation +
+//     ListenableBuilder rebuilds the list; Dismissible never removes the
+//     widget itself.
+//   • EDIT mode reorders via ReorderableListView (Android's idiomatic
+//     equivalent of WSSavedView's `.onMove`/`EditMode`).
+//   • Empty state: centred glyph + "Nothing saved yet" + one line of body
+//     copy, no CTA — mirrors WSSavedView's `emptyState` (no button there
+//     either).
 //   • SoftTab.favourites is used internally (bottom bar label is "Saved"
 //     via SoftBottomBar — no change needed here).
 
 import 'package:flutter/material.dart';
 
 import '../../data/data_store.dart';
-import '../../data/geo.dart';
 import '../../data/models.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
-import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/confidence.dart';
-import '../../widgets/v2/proximity.dart';
+import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
-
-// ─── Segment enum ─────────────────────────────────────────────────────────────
-
-enum _Segment { all, stops, buses, mrt }
-
-// ─── Distance helpers ─────────────────────────────────────────────────────────
-
-int _walkMinFromLocation(String code) {
-  final here = LocationService.shared.lastLocation;
-  if (here == null) return 0;
-  final stop = DataStore.shared.stopByCode[code];
-  if (stop == null) return 0;
-  final d = haversine(here.lat, here.lon, stop.latitude, stop.longitude);
-  final m = walkMinutesFor(d);
-  return m < 1 ? 1 : m;
-}
-
-int _distanceMFromLocation(String code) {
-  final here = LocationService.shared.lastLocation;
-  if (here == null) return 0;
-  final stop = DataStore.shared.stopByCode[code];
-  if (stop == null) return 0;
-  return haversine(here.lat, here.lon, stop.latitude, stop.longitude).round();
-}
 
 // ─── Freshness helper ──────────────────────────────────────────────────────
 
 /// "Updated h:mm" from the newest successful arrivals fetch among [pins]'
-/// stop codes, or null when none have loaded yet (freshness unknown — the
-/// header simply omits the meta rather than showing a stale/fake time).
-String? _newestUpdatedLabel(List<Pin> pins) {
+/// stop codes, or "Updated —" when none have loaded yet. Always rendered —
+/// mirrors `WSFmt.upd`'s em-dash fallback rather than omitting the meta.
+String _updatedLabel(List<Pin> pins) {
   DateTime? newest;
   for (final pin in pins) {
     final ts = DataStore.shared.lastRefresh(pin.code);
     if (ts != null && (newest == null || ts.isAfter(newest))) newest = ts;
   }
-  if (newest == null) return null;
+  if (newest == null) return 'Updated —';
   final hhmm =
       '${newest.hour.toString().padLeft(2, '0')}${newest.minute.toString().padLeft(2, '0')}';
   return 'Updated ${fmtClock(hhmm, use24h: AppModel.shared.use24h)}';
 }
 
-// ─── MRT crowd helpers ─────────────────────────────────────────────────────
-// Passive lookups only — this screen doesn't trigger its own crowd fetch
-// (that's warmed by the MRT tab / station screen via `wsWarmCrowd`-style
-// prefetch in initState), so these read whatever DataStore already has
-// cached. Mirrors soft_home_screen.dart's `_lineFromCode`/`_crowdFor`.
+// ─── Soonest-arrival resolution (mirrors WSData.swift wsSoonest/wsLiveETASec) ─
+
+/// Live seconds-to-arrival, recomputed from the LTA timestamp against now
+/// (so the countdown ticks smoothly), falling back to the fetched etaSec.
+int _liveEtaSec(Service s, DateTime now) => s.arrivalDate != null
+    ? s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
+    : s.etaSec;
+
+/// The soonest service among [services] by live ETA, or null. Considers
+/// every service regardless of `monitored` — matches iOS `wsSoonest`, which
+/// doesn't filter by monitored either (only the crowd line below it does).
+Service? _soonestOf(List<Service> services) {
+  if (services.isEmpty) return null;
+  final now = DateTime.now();
+  Service? best;
+  int? bestSec;
+  for (final s in services) {
+    final sec = _liveEtaSec(s, now);
+    if (bestSec == null || sec < bestSec) {
+      bestSec = sec;
+      best = s;
+    }
+  }
+  return best;
+}
+
+// ─── MRT line-name + crowd helpers ─────────────────────────────────────────
+// Passive lookups only — this screen doesn't own its own crowd fetch beyond
+// the one-shot warm-up in initState (mirrors `store.wsWarmCrowd` in
+// WSSavedView.onAppear), so these read whatever DataStore already has cached.
+
+const Map<String, String> _mrtLineNames = {
+  'NS': 'North South',
+  'EW': 'East West',
+  'CG': 'East West',
+  'NE': 'North East',
+  'CC': 'Circle',
+  'CE': 'Circle',
+  'DT': 'Downtown',
+  'TE': 'Thomson–East Coast',
+};
+
+/// Distinct human line names from a station's codes, e.g. "North South /
+/// Circle". Mirrors WSHomeView.swift's `wsLineNames`.
+String _lineNames(List<String> codes) {
+  final names = <String>[];
+  for (final c in codes) {
+    final prefix = (c.length >= 2 ? c.substring(0, 2) : c).toUpperCase();
+    final name = _mrtLineNames[prefix] ?? 'LRT';
+    if (!names.contains(name)) names.add(name);
+  }
+  return names.join(' / ');
+}
 
 /// Best-effort MRTLine for a station's code prefix ("EW23" → ew). LRT
 /// prefixes (PE/PW/SW/SE/BP) return null — crowd isn't reported per LRT
@@ -153,6 +204,11 @@ class SoftFavouritesScreen extends StatefulWidget {
   final ValueChanged<String> onOpenStop;
   final void Function(String stopCode, String svc) onOpenBus;
   final void Function(MrtGeoStation station) onOpenStation;
+
+  /// Kept for signature parity with soft_root.dart's uniform call site
+  /// across Home/Saved/etc. WSSavedView has no "add" affordance of its own
+  /// (adding happens via the global search entry point elsewhere), so this
+  /// screen doesn't currently wire it to anything — see the file header.
   final VoidCallback onOpenSearch;
 
   @override
@@ -160,13 +216,16 @@ class SoftFavouritesScreen extends StatefulWidget {
 }
 
 class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
-  _Segment _segment = _Segment.all;
   bool _editing = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _warmArrivals());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _warmArrivals();
+      DataStore.shared.ensureRoutes();
+      _warmCrowd();
+    });
   }
 
   void _warmArrivals() {
@@ -177,6 +236,22 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       if (fav.stop != null) {
         DataStore.shared.ensureArrivals(fav.stop!);
       }
+    }
+  }
+
+  /// One-shot crowd warm-up for every line touched by a saved station, so
+  /// the trailing crowd chip has data without requiring a visit to the MRT
+  /// tab first. Mirrors WSSavedView.onAppear's `store.wsWarmCrowd(...)`.
+  void _warmCrowd() {
+    final lines = <MRTLine>{};
+    for (final st in AppModel.shared.savedMrtStations) {
+      for (final code in st.codes) {
+        final line = _lineFromCode(code);
+        if (line != null) lines.add(line);
+      }
+    }
+    for (final line in lines) {
+      DataStore.shared.refreshCrowd(line);
     }
   }
 
@@ -193,47 +268,12 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     await Future.wait(futures);
   }
 
-  // ── Derived lists ───────────────────────────────────────────────────────
-
-  List<Pin> get _visiblePins {
-    switch (_segment) {
-      case _Segment.all:
-      case _Segment.stops:
-        return AppModel.shared.pins;
-      case _Segment.buses:
-      case _Segment.mrt:
-        return const [];
-    }
-  }
-
-  List<FavService> get _visibleServices {
-    switch (_segment) {
-      case _Segment.all:
-      case _Segment.buses:
-        return AppModel.shared.favServices;
-      case _Segment.stops:
-      case _Segment.mrt:
-        return const [];
-    }
-  }
-
-  List<MrtGeoStation> get _visibleStations {
-    switch (_segment) {
-      case _Segment.all:
-      case _Segment.mrt:
-        return AppModel.shared.savedMrtStations;
-      case _Segment.stops:
-      case _Segment.buses:
-        return const [];
-    }
-  }
-
   bool get _isEmpty =>
       AppModel.shared.pins.isEmpty &&
       AppModel.shared.favServices.isEmpty &&
       AppModel.shared.savedMrtStations.isEmpty;
 
-  // ── Arrival resolution for services section ─────────────────────────────
+  // ── Arrival resolution for the Lines section ────────────────────────────
 
   _Resolved? _atStopArrival(FavService fav) {
     final code = fav.stop!;
@@ -265,11 +305,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       ),
       body: SafeArea(
         child: ListenableBuilder(
-          listenable: Listenable.merge([
-            AppModel.shared,
-            DataStore.shared,
-            LocationService.shared,
-          ]),
+          listenable: Listenable.merge([AppModel.shared, DataStore.shared]),
           builder: (context, _) {
             // Auto-exit edit mode when the list becomes empty.
             if (_editing && _isEmpty) {
@@ -283,31 +319,18 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
               onRefresh: _editing ? () async {} : _refreshAll,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 children: [
                   _header(context),
-                  const SizedBox(height: 14),
-                  _segmentedControl(context),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   if (_isEmpty)
                     _emptyState(context)
                   else ...[
-                    _stopsArea(context),
-                    if (_visibleServices.isNotEmpty) ...[
+                    _stopsSection(context),
+                    if (AppModel.shared.favServices.isNotEmpty) ...[
                       const SizedBox(height: 20),
-                      _servicesSection(context),
+                      _linesSection(context),
                     ],
-                    // Saved MRT stations. In the MRT segment, show a hint when
-                    // none are saved (the segment is otherwise empty); in All,
-                    // only render the section when there are stations.
-                    if (_segment == _Segment.mrt && _visibleStations.isEmpty)
-                      _mrtEmptyHint(context)
-                    else if (_visibleStations.isNotEmpty) ...[
-                      if (_segment == _Segment.all) const SizedBox(height: 20),
-                      _stationsSection(context),
-                    ],
-                    const SizedBox(height: 16),
-                    _addStopRow(context),
                   ],
                 ],
               ),
@@ -322,194 +345,120 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
   Widget _header(BuildContext context) {
     final t = context.t;
-    final canEdit = !_isEmpty;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Expanded(
-          child: Text(
-            'Saved',
-            style: t.sans(29, weight: FontWeight.w700, color: t.fg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'YOUR PLACES',
+                style: t
+                    .sans(11, weight: FontWeight.w800, color: t.dim)
+                    .copyWith(letterSpacing: 1.4),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Saved',
+                style: t.sans(26, weight: FontWeight.w800, color: t.fg),
+              ),
+            ],
           ),
         ),
-        if (canEdit)
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => _editing = !_editing),
-            child: Padding(
-              // Expand tap target without shifting layout.
-              padding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
-              child: AnimatedSwitcher(
-                duration: LyneMotion.short,
-                child: Text(
-                  _editing ? 'Done' : 'Edit',
-                  key: ValueKey(_editing),
-                  style: t.sans(
-                    16,
-                    weight: _editing ? FontWeight.w600 : FontWeight.w400,
-                    color: t.accent,
-                  ),
-                ),
-              ),
-            ),
-          ),
+        if (!_isEmpty) _editButton(context),
       ],
     );
   }
 
-  // ─── Segmented control ────────────────────────────────────────────────────
-
-  Widget _segmentedControl(BuildContext context) {
+  Widget _editButton(BuildContext context) {
     final t = context.t;
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-      ),
-      child: Row(
-        children: [
-          _segmentPill(context, 'All', _Segment.all, t),
-          _segmentPill(context, 'Stops', _Segment.stops, t),
-          _segmentPill(context, 'Buses', _Segment.buses, t),
-          _segmentPill(context, 'MRT', _Segment.mrt, t),
-        ],
-      ),
-    );
-  }
-
-  Widget _segmentPill(
-    BuildContext context,
-    String label,
-    _Segment value,
-    LyneTheme t,
-  ) {
-    final active = _segment == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _segment = value),
-        child: AnimatedContainer(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _editing = !_editing),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(LyneRadius.full),
+          border: Border.all(color: t.line, width: 1),
+        ),
+        child: AnimatedSwitcher(
           duration: LyneMotion.short,
-          curve: LyneMotion.standardCurve,
-          padding: const EdgeInsets.symmetric(vertical: 7),
-          decoration: BoxDecoration(
-            color: active ? t.soon : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          alignment: Alignment.center,
           child: Text(
-            label,
-            style: t.sans(
-              13,
-              weight: FontWeight.w600,
-              color: active ? t.contrastFg : t.dim,
-            ),
+            _editing ? 'DONE' : 'EDIT',
+            key: ValueKey(_editing),
+            style: t
+                .mono(11, weight: FontWeight.w700, color: t.fg)
+                .copyWith(letterSpacing: 0.8),
           ),
         ),
       ),
     );
   }
 
-  // ─── Stops area ──────────────────────────────────────────────────────────
+  // ─── Shared section header (label · hairline rule · optional meta) ────────
+  // Mirrors WSSectionHeader: uppercase label, a hairline rule that stretches
+  // to fill the remaining row width, and an optional right-aligned meta.
 
-  Widget _stopsArea(BuildContext context) {
+  Widget _sectionHeader(
+    BuildContext context, {
+    required String label,
+    String? meta,
+  }) {
     final t = context.t;
-    final pins = _visiblePins;
-
-    // In the "all" segment, show the section header above stops.
-    // In "stops" segment the section is self-evident — omit.
-    // In "buses"/"mrt" segments there are no pins to render.
-    if (_segment == _Segment.buses || _segment == _Segment.mrt) {
-      return const SizedBox.shrink();
-    }
-
-    if (pins.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(left: 2),
-        child: Text(
-          'Pin a stop to see all its arrivals here.',
-          style: t.sans(13, color: t.faint),
+    return Row(
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: t
+              .sans(11, weight: FontWeight.w800, color: t.dim)
+              .copyWith(letterSpacing: 1.4),
         ),
-      );
-    }
-
-    final updatedLabel = _newestUpdatedLabel(pins);
-    final sectionHeader = _segment == _Segment.all
-        ? Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              children: [
-                Icon(Icons.star_rounded, size: 14, color: t.soon),
-                const SizedBox(width: 6),
-                Text(
-                  'Saved stops',
-                  style: t.sans(15, weight: FontWeight.w600, color: t.dim),
-                ),
-                const Spacer(),
-                if (updatedLabel != null)
-                  Text(updatedLabel, style: t.mono(11, color: t.faint)),
-              ],
-            ),
-          )
-        : null;
-
-    if (_editing) {
-      // ReorderableListView requires a fixed height when used inline inside a
-      // ListView. We use shrinkWrap + NeverScrollableScrollPhysics so it
-      // expands to its natural content height and delegates scrolling to the
-      // outer ListView.
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ?sectionHeader,
-          ReorderableListView(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            // Remove the default drag elevation / Material shadow.
-            proxyDecorator: (child, index, animation) =>
-                Material(elevation: 0, color: Colors.transparent, child: child),
-            onReorderItem: (oldIndex, newIndex) {
-              final reordered = [...pins];
-              final item = reordered.removeAt(oldIndex);
-              reordered.insert(newIndex, item);
-              AppModel.shared.reorderPins(
-                reordered.map((p) => p.code).toList(),
-              );
-            },
-            children: [
-              for (final pin in pins)
-                Padding(
-                  key: ValueKey('reorder-pin-${pin.code}'),
-                  padding: EdgeInsets.only(bottom: pin == pins.last ? 0 : 10),
-                  child: Row(
-                    children: [
-                      Expanded(child: _pinCard(context, pin)),
-                      const SizedBox(width: 8),
-                      ReorderableDragStartListener(
-                        index: pins.indexOf(pin),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Icon(
-                            Icons.drag_handle_rounded,
-                            size: 22,
-                            color: context.t.dim,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
+        const SizedBox(width: 10),
+        Expanded(child: Container(height: 1, color: t.line)),
+        if (meta != null) ...[
+          const SizedBox(width: 10),
+          Text(
+            meta,
+            style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.5),
           ),
         ],
-      );
-    }
+      ],
+    );
+  }
 
-    // Normal (non-edit) mode — Dismissible swipe-to-delete.
+  // ─── Stops section (pins + saved MRT stations, one continuous section) ────
+  // Mirrors WSSavedView.list: both ForEach blocks sit directly under a
+  // single "Stops" header with no sub-header between them.
+
+  Widget _stopsSection(BuildContext context) {
+    final pins = AppModel.shared.pins;
+    final stations = AppModel.shared.savedMrtStations;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ?sectionHeader,
+        _sectionHeader(context, label: 'Stops', meta: _updatedLabel(pins)),
+        if (pins.isNotEmpty || stations.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          if (pins.isNotEmpty)
+            _editing
+                ? _reorderablePins(context, pins)
+                : _staticPins(context, pins),
+          if (pins.isNotEmpty && stations.isNotEmpty)
+            const SizedBox(height: 10),
+          if (stations.isNotEmpty)
+            _editing
+                ? _reorderableStations(context, stations)
+                : _staticStations(context, stations),
+        ],
+      ],
+    );
+  }
+
+  Widget _staticPins(BuildContext context, List<Pin> pins) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         for (var i = 0; i < pins.length; i++) ...[
           if (i > 0) const SizedBox(height: 10),
           _pinRow(context, pins[i]),
@@ -518,10 +467,54 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
+  Widget _reorderablePins(BuildContext context, List<Pin> pins) {
+    return ReorderableListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      // Remove the default drag elevation / Material shadow.
+      proxyDecorator: (child, index, animation) =>
+          Material(elevation: 0, color: Colors.transparent, child: child),
+      onReorderItem: (oldIndex, newIndex) {
+        final reordered = [...pins];
+        final item = reordered.removeAt(oldIndex);
+        reordered.insert(newIndex, item);
+        AppModel.shared.reorderPins(reordered.map((p) => p.code).toList());
+      },
+      children: [
+        for (final pin in pins)
+          Padding(
+            key: ValueKey('reorder-pin-${pin.code}'),
+            padding: EdgeInsets.only(bottom: pin == pins.last ? 0 : 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _StopCard(
+                    pin: pin,
+                    onTap: () => widget.onOpenStop(pin.code),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ReorderableDragStartListener(
+                  index: pins.indexOf(pin),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      size: 22,
+                      color: context.t.dim,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _pinRow(BuildContext context, Pin pin) {
     final t = context.t;
     final code = pin.code;
-
     return Dismissible(
       key: ValueKey('fav-$code'),
       direction: DismissDirection.endToStart,
@@ -540,404 +533,62 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         // the list; we never let Dismissible remove the widget itself.
         return false;
       },
-      child: _pinCard(context, pin),
+      child: _StopCard(pin: pin, onTap: () => widget.onOpenStop(code)),
     );
   }
 
-  Widget _pinCard(BuildContext context, Pin pin) {
-    final code = pin.code;
-    final dsName = DataStore.shared.stopName(code);
-    final stopName = dsName.isEmpty ? code : dsName;
-    final road = DataStore.shared.roadName(code);
-
-    // If pin has a nickname, show it as title and stopName as desc.
-    final nick = pin.nickname.trim();
-    final hasNick =
-        nick.isNotEmpty && nick.toLowerCase() != stopName.toLowerCase();
-    final displayName = hasNick ? nick : stopName;
-    final desc = hasNick ? stopName : (road.isEmpty ? null : road);
-
-    // Service list — respects tracked subset.
-    final allSvcs = DataStore.shared.servicesFor(code);
-    final tracked = pin.tracked;
-    final services = (tracked != null && tracked.isNotEmpty)
-        ? allSvcs.where((s) => tracked.contains(s.no)).toList()
-        : allSvcs;
-
-    final walkMin = _walkMinFromLocation(code);
-    final distM = _distanceMFromLocation(code);
-
-    return _FavStopCard(
-      name: displayName,
-      code: code,
-      desc: desc,
-      road: road,
-      walkMin: walkMin,
-      distanceM: distM,
-      services: services,
-      feed: Freshness.from(DataStore.shared.lastRefresh(code)),
-      onTap: () => widget.onOpenStop(code),
-    );
-  }
-
-  // ─── Saved services section ───────────────────────────────────────────────
-
-  Widget _servicesSection(BuildContext context) {
-    final t = context.t;
-    final items = _visibleServices;
-
-    final sectionHeader = Row(
-      children: [
-        Icon(Icons.directions_bus_rounded, size: 14, color: t.soon),
-        const SizedBox(width: 6),
-        Text(
-          'Buses',
-          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
-        ),
-      ],
-    );
-
-    if (_editing) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          sectionHeader,
-          const SizedBox(height: 10),
-          ReorderableListView(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            proxyDecorator: (child, index, animation) =>
-                Material(elevation: 0, color: Colors.transparent, child: child),
-            onReorderItem: (oldIndex, newIndex) {
-              final reordered = [...items];
-              final item = reordered.removeAt(oldIndex);
-              reordered.insert(newIndex, item);
-              AppModel.shared.reorderFavServices(
-                reordered.map((f) => f.id).toList(),
-              );
-            },
-            children: [
-              for (final fav in items)
-                Padding(
-                  key: ValueKey('reorder-svc-${fav.id}'),
-                  padding: EdgeInsets.only(bottom: fav == items.last ? 0 : 8),
-                  child: Row(
-                    children: [
-                      Expanded(child: _serviceCard(context, fav)),
-                      const SizedBox(width: 8),
-                      ReorderableDragStartListener(
-                        index: items.indexOf(fav),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Icon(
-                            Icons.drag_handle_rounded,
-                            size: 22,
-                            color: t.dim,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ],
-      );
-    }
-
-    // Normal (non-edit) mode — Dismissible swipe-to-delete.
+  Widget _staticStations(BuildContext context, List<MrtGeoStation> items) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        sectionHeader,
-        const SizedBox(height: 10),
         for (var i = 0; i < items.length; i++) ...[
-          if (i > 0) const SizedBox(height: 8),
-          _serviceRow(context, items[i]),
-        ],
-      ],
-    );
-  }
-
-  Widget _serviceRow(BuildContext context, FavService fav) {
-    final t = context.t;
-
-    return Dismissible(
-      key: ValueKey('fav-${fav.id}'),
-      direction: DismissDirection.endToStart,
-      background: const SizedBox.shrink(),
-      secondaryBackground: _dismissBackground(
-        context: context,
-        color: t.crit,
-        icon: Icons.delete_rounded,
-        label: 'Delete',
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-      ),
-      confirmDismiss: (_) async {
-        AppModel.shared.removeFavService(fav);
-        return false;
-      },
-      child: _serviceCard(context, fav),
-    );
-  }
-
-  Widget _serviceCard(BuildContext context, FavService fav) {
-    final t = context.t;
-    final resolved = _resolve(fav);
-    final svc = resolved?.svc;
-    final stopCode = resolved?.stopCode ?? fav.stop;
-
-    final conf = svc != null
-        ? ArrivalConfidence.of(
-            monitored: svc.monitored,
-            feed: Freshness.from(
-              DataStore.shared.lastRefresh(resolved!.stopCode),
-            ),
-          )
-        : ArrivalConfidence.none;
-
-    final whereName =
-        resolved?.stopName ??
-        (fav.isAnywhere
-            ? 'No nearby arrivals'
-            : DataStore.shared.stopName(fav.stop ?? ''));
-
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: stopCode != null
-            ? () => widget.onOpenBus(stopCode, fav.no)
-            : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              // Badge keeps its standard look — proximity is not colour-coded.
-              _ColoredBadge(no: fav.no, fill: t.accent, fg: t.onAccent),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    RichText(
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      text: TextSpan(
-                        children: [
-                          TextSpan(
-                            text: fav.no,
-                            style: t.sans(
-                              15,
-                              weight: FontWeight.w700,
-                              color: t.fg,
-                            ),
-                          ),
-                          if (svc != null)
-                            TextSpan(
-                              text: '  Towards ${svc.dest}',
-                              style: t.sans(14, color: t.fg),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Icon(
-                          fav.isAnywhere
-                              ? Icons.location_on_rounded
-                              : Icons.location_on_outlined,
-                          size: 11,
-                          color: t.dim,
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            fav.isAnywhere
-                                ? 'Near you · $whereName'
-                                : whereName,
-                            style: t.mono(11, color: t.dim),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              ListenableBuilder(
-                listenable: AppModel.shared,
-                builder: (context, _) => _serviceEtas(context, svc, conf),
-              ),
-              const SizedBox(width: 6),
-              Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _serviceEtas(
-    BuildContext context,
-    Service? svc,
-    ArrivalConfidence conf,
-  ) {
-    final t = context.t;
-    if (svc == null) {
-      return Text(
-        '—',
-        style: t.mono(16, weight: FontWeight.w600, color: t.faint),
-      );
-    }
-    final now = DateTime.now();
-    final liveSec = svc.arrivalDate != null
-        ? svc.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
-        : svc.etaSec;
-    final eta = fmtEta(liveSec);
-    final color = etaColor(etaSec: liveSec, confidence: conf, t: t);
-    final arriving = eta.big == 'Arr';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              arriving ? 'Arr' : eta.big,
-              style: t.mono(18, weight: FontWeight.w700, color: color),
-            ),
-            if (!arriving) ...[
-              const SizedBox(width: 2),
-              Text(
-                eta.small,
-                style: t.mono(
-                  12,
-                  weight: FontWeight.w600,
-                  color: color.withValues(alpha: 0.85),
-                ),
-              ),
-            ],
-          ],
-        ),
-        if (!arriving && svc.followingSec > 0) ...[
-          const SizedBox(height: 1),
-          _followingLabel(context, svc),
-        ],
-      ],
-    );
-  }
-
-  Widget _followingLabel(BuildContext context, Service svc) {
-    final t = context.t;
-    final followEta = fmtEta(svc.followingSec);
-    if (followEta.big.isEmpty || followEta.big == 'Arr') {
-      return const SizedBox.shrink();
-    }
-    final now = DateTime.now();
-    final parts = <String>[followEta.big];
-    if (svc.thirdDate != null) {
-      final thirdSec = svc.thirdDate!
-          .difference(now)
-          .inSeconds
-          .clamp(0, 1 << 30);
-      final third = fmtEta(thirdSec);
-      if (third.big.isNotEmpty && third.big != 'Arr') {
-        parts.add(third.big);
-      }
-    }
-    return Text(
-      '${parts.join(' · ')} min',
-      style: t.mono(11, weight: FontWeight.w500, color: t.dim),
-    );
-  }
-
-  // ─── Saved MRT stations section ───────────────────────────────────────────
-
-  Widget _stationsSection(BuildContext context) {
-    final t = context.t;
-    final items = _visibleStations;
-
-    final sectionHeader = Row(
-      children: [
-        Icon(Icons.train_rounded, size: 14, color: t.soon),
-        const SizedBox(width: 6),
-        Text(
-          'Saved stations',
-          style: t.sans(15, weight: FontWeight.w600, color: t.dim),
-        ),
-      ],
-    );
-
-    if (_editing) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          sectionHeader,
-          const SizedBox(height: 10),
-          ReorderableListView(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            proxyDecorator: (child, index, animation) =>
-                Material(elevation: 0, color: Colors.transparent, child: child),
-            onReorderItem: (oldIndex, newIndex) {
-              final reordered = [...items];
-              final item = reordered.removeAt(oldIndex);
-              reordered.insert(newIndex, item);
-              AppModel.shared.reorderSavedMrt(
-                reordered.map((s) => s.id).toList(),
-              );
-            },
-            children: [
-              for (final station in items)
-                Padding(
-                  key: ValueKey('reorder-mrt-${station.id}'),
-                  padding: EdgeInsets.only(
-                    bottom: station == items.last ? 0 : 8,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(child: _stationCard(context, station)),
-                      const SizedBox(width: 8),
-                      ReorderableDragStartListener(
-                        index: items.indexOf(station),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Icon(
-                            Icons.drag_handle_rounded,
-                            size: 22,
-                            color: t.dim,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ],
-      );
-    }
-
-    // Normal (non-edit) mode — Dismissible swipe-to-delete.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        sectionHeader,
-        const SizedBox(height: 10),
-        for (var i = 0; i < items.length; i++) ...[
-          if (i > 0) const SizedBox(height: 8),
+          if (i > 0) const SizedBox(height: 10),
           _stationRow(context, items[i]),
         ],
+      ],
+    );
+  }
+
+  Widget _reorderableStations(BuildContext context, List<MrtGeoStation> items) {
+    return ReorderableListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      proxyDecorator: (child, index, animation) =>
+          Material(elevation: 0, color: Colors.transparent, child: child),
+      onReorderItem: (oldIndex, newIndex) {
+        final reordered = [...items];
+        final item = reordered.removeAt(oldIndex);
+        reordered.insert(newIndex, item);
+        AppModel.shared.reorderSavedMrt(reordered.map((s) => s.id).toList());
+      },
+      children: [
+        for (final station in items)
+          Padding(
+            key: ValueKey('reorder-mrt-${station.id}'),
+            padding: EdgeInsets.only(bottom: station == items.last ? 0 : 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _StationCard(
+                    station: station,
+                    onTap: () => widget.onOpenStation(station),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ReorderableDragStartListener(
+                  index: items.indexOf(station),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      size: 22,
+                      color: context.t.dim,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -960,158 +611,111 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         AppModel.shared.removeMrtSaved(station);
         return false;
       },
-      child: _stationCard(context, station),
-    );
-  }
-
-  Widget _stationCard(BuildContext context, MrtGeoStation station) {
-    final t = context.t;
-    // Live crowd dot/label when a cached reading exists for this station.
-    // Mirrors WSSavedView.swift:185-187 — an unknown reading is withheld
-    // rather than shown as a hollow "Unknown" chip.
-    final crowd = _crowdFor(station);
-    final showCrowd = crowd != null && crowd.level != CrowdLevel.unknown;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
+      child: _StationCard(
+        station: station,
         onTap: () => widget.onOpenStation(station),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: t.surfaceHi,
-                  borderRadius: BorderRadius.circular(LyneRadius.md),
-                ),
-                child: Icon(Icons.train_rounded, size: 20, color: t.fg),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      station.name,
-                      style: t.sans(16, weight: FontWeight.w600, color: t.fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 5),
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 4,
-                      children: station.codes.map((code) {
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: lineColorFor(code),
-                            borderRadius: BorderRadius.circular(LyneRadius.full),
-                          ),
-                          child: Text(
-                            code,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-              ),
-              if (showCrowd) ...[
-                const SizedBox(width: 8),
-                _CrowdDotChip(level: crowd.level, t: t),
-              ],
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
-            ],
-          ),
-        ),
       ),
     );
   }
 
-  /// Hint shown in the MRT segment when no stations are saved yet (mirrors iOS
-  /// hint "Save an MRT station to track it here.").
-  Widget _mrtEmptyHint(BuildContext context) {
-    final t = context.t;
-    return Padding(
-      padding: const EdgeInsets.only(left: 2),
-      child: Text(
-        'Save an MRT station to see it here.',
-        style: t.sans(13, color: t.faint),
-      ),
+  // ─── Lines section (saved bus services) ────────────────────────────────
+  // Only rendered when non-empty — mirrors `if !m.favServices.isEmpty`.
+
+  Widget _linesSection(BuildContext context) {
+    final items = AppModel.shared.favServices;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(context, label: 'Lines'),
+        const SizedBox(height: 10),
+        if (_editing)
+          _reorderableLines(context, items)
+        else
+          _staticLines(context, items),
+      ],
     );
   }
 
-  // ─── Add stop row ─────────────────────────────────────────────────────────
+  Widget _staticLines(BuildContext context, List<FavService> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(height: 10),
+          _lineRow(context, items[i]),
+        ],
+      ],
+    );
+  }
 
-  Widget _addStopRow(BuildContext context) {
-    final t = context.t;
-    // The Buses segment lists saved services, so the add row adds a bus there;
-    // otherwise it adds a stop. Search finds both either way — only the label
-    // follows the section the user is looking at.
-    final isBuses = _segment == _Segment.buses;
-    final isMrt = _segment == _Segment.mrt;
-    final addLabel = isBuses
-        ? 'Add bus'
-        : isMrt
-        ? 'Add station'
-        : 'Add stop';
-    return Semantics(
-      label: isBuses
-          ? 'Add a bus to favourites'
-          : isMrt
-          ? 'Add an MRT station to favourites'
-          : 'Add a stop to favourites',
-      button: true,
-      child: Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.lg),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: widget.onOpenSearch,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  Widget _reorderableLines(BuildContext context, List<FavService> items) {
+    return ReorderableListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      proxyDecorator: (child, index, animation) =>
+          Material(elevation: 0, color: Colors.transparent, child: child),
+      onReorderItem: (oldIndex, newIndex) {
+        final reordered = [...items];
+        final item = reordered.removeAt(oldIndex);
+        reordered.insert(newIndex, item);
+        AppModel.shared.reorderFavServices(reordered.map((f) => f.id).toList());
+      },
+      children: [
+        for (final fav in items)
+          Padding(
+            key: ValueKey('reorder-svc-${fav.id}'),
+            padding: EdgeInsets.only(bottom: fav == items.last ? 0 : 10),
             child: Row(
               children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: t.surfaceHi,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(Icons.add_rounded, size: 18, color: LyneSignal.meBlue),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  addLabel,
-                  style: t.sans(
-                    15,
-                    weight: FontWeight.w600,
-                    color: LyneSignal.meBlue,
+                Expanded(child: _lineCard(context, fav)),
+                const SizedBox(width: 8),
+                ReorderableDragStartListener(
+                  index: items.indexOf(fav),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(
+                      Icons.drag_handle_rounded,
+                      size: 22,
+                      color: context.t.dim,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        ),
+      ],
+    );
+  }
+
+  Widget _lineRow(BuildContext context, FavService fav) {
+    final t = context.t;
+    return Dismissible(
+      key: ValueKey('fav-${fav.id}'),
+      direction: DismissDirection.endToStart,
+      background: const SizedBox.shrink(),
+      secondaryBackground: _dismissBackground(
+        context: context,
+        color: t.crit,
+        icon: Icons.delete_rounded,
+        label: 'Delete',
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
       ),
+      confirmDismiss: (_) async {
+        AppModel.shared.removeFavService(fav);
+        return false;
+      },
+      child: _lineCard(context, fav),
+    );
+  }
+
+  Widget _lineCard(BuildContext context, FavService fav) {
+    final resolved = _resolve(fav);
+    final stopCode = resolved?.stopCode ?? fav.stop;
+    return _LineCard(
+      fav: fav,
+      resolved: resolved,
+      onTap: stopCode != null ? () => widget.onOpenBus(stopCode, fav.no) : null,
     );
   }
 
@@ -1158,57 +762,26 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   }
 
   // ─── Empty state ──────────────────────────────────────────────────────────
+  // Mirrors WSSavedView.emptyState: centred glyph + title + one line of body
+  // copy, no CTA button — WSSavedView doesn't have one either.
 
   Widget _emptyState(BuildContext context) {
     final t = context.t;
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.lg),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 64),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 64,
-            height: 64,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: t.surfaceHi,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Icon(
-              Icons.star_outline_rounded,
-              size: 28,
-              color: LyneSignal.meBlue,
-            ),
-          ),
-          const SizedBox(height: 16),
+          Icon(Icons.bookmark_outline_rounded, size: 30, color: t.faint),
+          const SizedBox(height: 10),
           Text(
-            'No favourites yet',
-            style: t.sans(20, weight: FontWeight.w600, color: t.fg),
+            'Nothing saved yet',
+            style: t.sans(15.5, weight: FontWeight.w700, color: t.fg),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
-            'Pin the stops and buses you use most — '
-            "tap the pin on any stop or bus — and they'll show up here.",
-            style: t.sans(13, color: t.dim),
-          ),
-          const SizedBox(height: 16),
-          GestureDetector(
-            onTap: widget.onOpenSearch,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: t.accent,
-                borderRadius: BorderRadius.circular(LyneRadius.full),
-              ),
-              child: Text(
-                'Find a stop',
-                style: t.sans(14, weight: FontWeight.w600, color: t.onAccent),
-              ),
-            ),
+            'Save a stop, station or bus to keep it\none tap away.',
+            textAlign: TextAlign.center,
+            style: t.sans(13, weight: FontWeight.w500, color: t.dim),
           ),
         ],
       ),
@@ -1227,36 +800,6 @@ class _Resolved {
   final Service svc;
   final String stopName;
   final String stopCode;
-}
-
-// ─── Service badge ───────────────────────────────────────────────────────────
-
-/// 48dp service-number badge — standard accent fill (proximity is not
-/// colour-coded; soon-ness reads from the ETA ink, not the badge).
-class _ColoredBadge extends StatelessWidget {
-  const _ColoredBadge({required this.no, required this.fill, required this.fg});
-
-  final String no;
-  final Color fill;
-  final Color fg;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.t;
-    return Container(
-      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Text(
-        no,
-        style: t.sans(18, weight: FontWeight.w600, color: fg),
-      ),
-    );
-  }
 }
 
 // ─── Crowd dot chip (saved MRT station rows) ───────────────────────────────
@@ -1299,130 +842,163 @@ class _CrowdDotChip extends StatelessWidget {
   }
 }
 
-// ─── Service chip row ───────────────────────────────────────────────────────
+/// A single coloured MRT line-code chip (established Android idiom, used
+/// consistently across search/home/mrt screens — kept as-is rather than
+/// switched to iOS's neutral hard-corner LineBullet).
+Widget _lineCodeChip(String code) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: lineColorFor(code),
+      borderRadius: BorderRadius.circular(LyneRadius.full),
+    ),
+    child: Text(
+      code,
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: Colors.white,
+        fontFeatures: [FontFeature.tabularFigures()],
+      ),
+    ),
+  );
+}
 
-/// Row of a stop's service-number chips, capped with a trailing "+N"
-/// overflow chip. Mirrors WSSavedView.swift's TileRow (134-167).
+// ─── Service tile row ───────────────────────────────────────────────────────
+
+/// Row of a stop's service-number tiles, capped at 3 with a trailing "+N"
+/// overflow tile. Mirrors WSSavedView.swift's TileRow (134-167) / RouteTile /
+/// OverflowTile — a hairline-bordered tile rather than Android's older solid
+/// pill chip.
 class _ServiceChipRow extends StatelessWidget {
   const _ServiceChipRow({required this.services, required this.t});
 
   final List<String> services;
   final LyneTheme t;
 
-  /// Chips shown before overflowing into a trailing "+N" chip.
-  static const int _max = 6;
+  /// Tiles shown before overflowing into a trailing "+N" tile — matches
+  /// iOS TileRow's `cap: 3`.
+  static const int _cap = 3;
 
   @override
   Widget build(BuildContext context) {
-    final shown = services.take(_max).toList();
+    final shown = services.take(_cap).toList();
     final overflow = services.length - shown.length;
     return Wrap(
       spacing: 5,
       runSpacing: 5,
       children: [
-        for (final no in shown) _chip(no),
-        if (overflow > 0) _chip('+$overflow'),
+        for (final no in shown) _tile(no, dim: false),
+        if (overflow > 0) _tile('+$overflow', dim: true),
       ],
     );
   }
 
-  Widget _chip(String label) {
+  Widget _tile(String label, {required bool dim}) {
     return Container(
+      constraints: const BoxConstraints(minWidth: 26, minHeight: 21),
+      alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(LyneRadius.full),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: t.line, width: 1),
       ),
       child: Text(
         label,
-        style: t.mono(10.5, weight: FontWeight.w600, color: t.fg),
+        style: t.mono(10.5, weight: FontWeight.w700, color: dim ? t.dim : t.fg),
       ),
     );
   }
 }
 
-// ─── Favourite stop card ─────────────────────────────────────────────────────
+// ─── Saved stop card ─────────────────────────────────────────────────────────
 
-/// Compact card matching iOS FavStopCard in SoftFavouritesView.swift:
-///   46×46 pin tile · name (sans 17 w600) · "Stop {code} · road" (mono 12.5 dim)
-///   · service-number chip row (capped, "+N" overflow) · compact meta line
-///   (walk + soonest arrival, its live crowd meter, "~" whisper) · trailing
-///   chevron.
-///
-/// The chip row and per-arrival crowd meter (parity audit, 2026-07-03) mirror
-/// WSSavedView.swift:134-167 — an earlier 2.4.0 pass had dropped both for a
-/// tighter card; they're back to close that gap. No divider. The whole card
-/// taps to open the full stop view. `pin.nickname` and `pin.tracked` handling
-/// is in the caller (_pinCard); the card just renders the resolved name/desc
-/// and services it receives.
-class _FavStopCard extends StatelessWidget {
-  const _FavStopCard({
-    required this.name,
-    required this.code,
-    required this.desc,
-    required this.road,
-    required this.walkMin,
-    required this.distanceM,
-    required this.services,
-    required this.feed,
-    required this.onTap,
-  });
+/// Mirrors WSSavedView.swift's `savedStopRow`: name · "code · ROAD" subline ·
+/// capped service-tile row · a trailing soonest-arrival column. No leading
+/// icon tile and no walk/distance line — iOS shows neither here. A nickname
+/// (HOME/WORK/etc.) renders as a small label above the name via the shared
+/// `LabelPill`, matching iOS's small-caps label rather than swapping title
+/// and subtitle.
+class _StopCard extends StatelessWidget {
+  const _StopCard({required this.pin, required this.onTap});
 
-  final String name;
-  final String code;
-  final String? desc;
-  final String road;
-  final int walkMin;
-  final int distanceM;
-  final List<Service> services;
-  final Freshness feed;
+  final Pin pin;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = context.t;
+    final code = pin.code;
+    final stopName = DataStore.shared.stopName(code);
+    final road = DataStore.shared.roadName(code);
+    final subtitle = road.isEmpty ? code : '$code · ${road.toUpperCase()}';
+
+    // Service list — respects a pin's tracked subset when set (Android-only
+    // per-pin bus selection; iOS's Saved view always shows every service at
+    // the stop, but narrowing to what the user actually pinned buses for is
+    // a deliberate existing Android feature, not a parity bug — kept as-is).
+    final allSvcs = DataStore.shared.servicesFor(code);
+    final tracked = pin.tracked;
+    final services = (tracked != null && tracked.isNotEmpty)
+        ? allSvcs.where((s) => tracked.contains(s.no)).toList()
+        : allSvcs;
+
+    final routeNos = DataStore.shared.servicesAtStop(code);
+    final tiles = routeNos.isNotEmpty
+        ? routeNos
+        : services.map((s) => s.no).toList();
+    final nickname = pin.nickname.trim();
 
     return Semantics(
       button: true,
-      label: 'Open $name',
+      label: 'Open $stopName',
       child: Material(
         color: t.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(LyneRadius.md),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
           onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: t.line, width: 1),
-            ),
+          child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 46×46 place tile — location glyph. Star badge removed:
-                // everything in this tab is already saved, so the badge adds
-                // noise without info.
-                Container(
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: t.surfaceHi,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.location_on_rounded, size: 20, color: t.fg),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: ListenableBuilder(
-                    listenable: AppModel.shared,
-                    builder: (context, _) => _identityText(context, t),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (nickname.isNotEmpty) ...[
+                        LabelPill(
+                          text: nickname,
+                          variant: LabelPillVariant.tinted,
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      Text(
+                        stopName,
+                        style: t.sans(17, weight: FontWeight.w600, color: t.fg),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: t.mono(12.5, color: t.dim),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (tiles.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        _ServiceChipRow(services: tiles, t: t),
+                      ],
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
+                const SizedBox(width: 10),
+                ListenableBuilder(
+                  listenable: AppModel.shared,
+                  builder: (context, _) => _SoonestColumn(services: services),
+                ),
               ],
             ),
           ),
@@ -1430,108 +1006,237 @@ class _FavStopCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _identityText(BuildContext context, LyneTheme t) {
-    final subtitle = road.isEmpty ? 'Stop $code' : 'Stop $code · $road';
-    // Full route list at the stop (static BusRoutes dataset), falling back
-    // to whatever's in the live-loaded (possibly tracked-filtered) services
-    // when routes haven't resolved yet. Mirrors WSSavedView.swift's `tiles`.
-    final routeNos = DataStore.shared.servicesAtStop(code);
-    final chips = routeNos.isNotEmpty
-        ? routeNos
-        : services.map((s) => s.no).toList();
+/// Trailing soonest-arrival column for a saved stop: a big ETA number, and —
+/// only when the soonest bus is a real live/GPS reading, not a schedule-only
+/// estimate — "Bus {no} ·" plus the compact CrowdMeter word. Mirrors
+/// WSSavedView's trailing VStack (eta + "Bus {no} ·" + CrowdGauge + word).
+class _SoonestColumn extends StatelessWidget {
+  const _SoonestColumn({required this.services});
+
+  final List<Service> services;
+
+  @override
+  Widget build(BuildContext context) {
+    final soonest = _soonestOf(services);
+    if (soonest == null) return const SizedBox.shrink();
+    final t = context.t;
+    final eta = fmtEta(_liveEtaSec(soonest, DateTime.now()));
+    final arriving = eta.big == 'Arr';
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          name,
-          style: t.sans(17, weight: FontWeight.w600, color: t.fg),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              arriving ? eta.small : eta.big,
+              style: t.mono(19, weight: FontWeight.w700, color: t.fg),
+            ),
+            if (!arriving) ...[
+              const SizedBox(width: 2),
+              Text(
+                eta.small,
+                style: t.mono(12, weight: FontWeight.w600, color: t.dim),
+              ),
+            ],
+          ],
         ),
-        const SizedBox(height: 2),
-        Text(
-          subtitle,
-          style: t.mono(12.5, color: t.dim),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        if (chips.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          _ServiceChipRow(services: chips, t: t),
+        if (soonest.monitored) ...[
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Bus ${soonest.no} · ', style: t.mono(10.5, color: t.dim)),
+              CrowdMeter(load: soonest.load, compact: true),
+            ],
+          ),
         ],
-        const SizedBox(height: 3),
-        _compactMeta(t),
       ],
     );
   }
+}
 
-  /// Compact meta: walk time, soonest arrival with "~" whisper, and (when
-  /// the soonest arrival is a real live/GPS reading, not a schedule-only
-  /// estimate) its crowd meter + load word. Wraps rather than overflowing
-  /// on narrow widths. Mirrors iOS FavStopCard.compactMeta.
-  Widget _compactMeta(LyneTheme t) {
-    final now = DateTime.now();
-    final sorted = [...services]..sort(_compareEta);
-    final soonest = sorted.isEmpty ? null : sorted.first;
-    final hasLocation = walkMin > 0 || distanceM > 0;
-    if (!hasLocation && soonest == null) return const SizedBox.shrink();
+// ─── Saved MRT station card ──────────────────────────────────────────────────
 
-    String? whenText;
-    if (soonest != null) {
-      final sec = soonest.arrivalDate != null
-          ? soonest.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
-          : soonest.etaSec;
-      final eta = fmtEta(sec);
-      whenText = eta.big == 'Arr'
-          ? 'next now'
-          : 'next in ${eta.big} ${eta.small}';
-    }
+/// Mirrors WSSavedView.swift's `savedStationRow`: name · line-names subline
+/// (uppercased) · up to 3 coloured line-code chips · a trailing crowd chip
+/// when a live reading exists. No leading icon tile, matching iOS.
+class _StationCard extends StatelessWidget {
+  const _StationCard({required this.station, required this.onTap});
 
-    // Wrap (not Row) so the crowd meter/word — the widest addition here —
-    // flows to a second line on narrow widths instead of overflowing.
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 5,
-      runSpacing: 3,
-      children: [
-        if (hasLocation) ...[
-          Row(
-            mainAxisSize: MainAxisSize.min,
+  final MrtGeoStation station;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    final crowd = _crowdFor(station);
+    final showCrowd = crowd != null && crowd.level != CrowdLevel.unknown;
+    final codes = station.codes.take(3).toList();
+
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.directions_walk_rounded, size: 12, color: t.soon),
-              const SizedBox(width: 3),
-              Text(
-                '${walkMin < 1 ? 1 : walkMin} min',
-                style: t.mono(12, weight: FontWeight.w500, color: t.soon),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      station.name,
+                      style: t.sans(17, weight: FontWeight.w600, color: t.fg),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _lineNames(station.codes).toUpperCase(),
+                      style: t.mono(12.5, color: t.dim),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 5,
+                      children: codes.map(_lineCodeChip).toList(),
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
-          if (soonest != null) Text('·', style: t.mono(12, color: t.faint)),
-        ],
-        if (soonest != null && whenText != null)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.directions_bus_outlined, size: 11, color: t.dim),
-              const SizedBox(width: 3),
-              Text(
-                whenText,
-                style: t.mono(12, weight: FontWeight.w500, color: t.fg),
-              ),
-              // Soonest bus's crowd — only for a real live/GPS arrival, not
-              // a schedule-only estimate (crowd data doesn't apply to those).
-              if (soonest.monitored) ...[
-                const SizedBox(width: 5),
-                Text('·', style: t.mono(12, color: t.faint)),
-                const SizedBox(width: 5),
-                CrowdMeter(load: soonest.load),
+              if (showCrowd) ...[
+                const SizedBox(width: 8),
+                _CrowdDotChip(level: crowd.level, t: t),
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Saved line (bus) card ───────────────────────────────────────────────────
+
+/// Mirrors WSSavedView.swift's `lineRow`: a bus-number tile (Android's
+/// shared `ServiceBadge`, standing in for iOS's neutral RouteTile) ·
+/// destination · "at {stop}" / "Anywhere near you" · a trailing ETA +
+/// CrowdMeter(compact:true) column.
+class _LineCard extends StatelessWidget {
+  const _LineCard({required this.fav, required this.resolved, this.onTap});
+
+  final FavService fav;
+  final _Resolved? resolved;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    final svc = resolved?.svc;
+    final destText = svc?.dest ?? 'Bus ${fav.no}';
+    final whereText = fav.stop != null
+        ? 'at ${resolved?.stopName ?? DataStore.shared.stopName(fav.stop!)}'
+        : 'Anywhere near you';
+
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              ServiceBadge(svc: fav.no),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      destText,
+                      style: t.sans(15, weight: FontWeight.w700, color: t.fg),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      whereText,
+                      style: t.mono(11, color: t.dim),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ListenableBuilder(
+                listenable: AppModel.shared,
+                builder: (context, _) => _LineEtaColumn(svc: svc),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LineEtaColumn extends StatelessWidget {
+  const _LineEtaColumn({required this.svc});
+
+  final Service? svc;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    final svc = this.svc;
+    if (svc == null) {
+      return Text(
+        '—',
+        style: t.mono(16, weight: FontWeight.w600, color: t.faint),
+      );
+    }
+    final eta = fmtEta(_liveEtaSec(svc, DateTime.now()));
+    final arriving = eta.big == 'Arr';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              arriving ? eta.small : eta.big,
+              style: t.mono(17, weight: FontWeight.w700, color: t.fg),
+            ),
+            if (!arriving) ...[
+              const SizedBox(width: 2),
+              Text(
+                eta.small,
+                style: t.mono(11, weight: FontWeight.w600, color: t.dim),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 4),
+        CrowdMeter(load: svc.load, compact: true),
       ],
     );
   }
-
-  static int _compareEta(Service a, Service b) => a.etaSec.compareTo(b.etaSec);
 }

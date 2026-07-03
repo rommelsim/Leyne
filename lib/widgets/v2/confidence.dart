@@ -349,10 +349,21 @@ class ConfidenceStatusPill extends StatelessWidget {
 /// Matches ios-native/Leyne/V2/Confidence.swift CrowdMeter exactly.
 /// Unknown shows three faint outline persons, honestly rather than hidden.
 class CrowdMeter extends StatelessWidget {
-  const CrowdMeter({super.key, required this.load, this.showLabel = true});
+  const CrowdMeter({
+    super.key,
+    required this.load,
+    this.showLabel = true,
+    this.compact = false,
+  });
 
   final Load? load; // null → unknown
+
   final bool showLabel;
+
+  /// Short single-word label (Seats · Standing · Limited) matching iOS
+  /// `Load.wsWord` — for tight trailing columns (Home/Saved when-columns)
+  /// where the full phrasing crushed the leading title (owner-reported).
+  final bool compact;
 
   int get _fill {
     switch (load) {
@@ -378,6 +389,20 @@ class CrowdMeter extends StatelessWidget {
         return 'Limited standing';
       case null:
         return 'Crowd unknown';
+    }
+  }
+
+  /// Compact word — mirrors iOS WSFormat.swift `Load.wsWord`.
+  String get _compactLabel {
+    switch (load) {
+      case Load.sea:
+        return 'Seats';
+      case Load.sda:
+        return 'Standing';
+      case Load.lsd:
+        return 'Limited';
+      case null:
+        return '—';
     }
   }
 
@@ -407,8 +432,14 @@ class CrowdMeter extends StatelessWidget {
           ),
           if (showLabel) ...[
             const SizedBox(width: 5),
+            // maxLines+ellipsis so a width-capped host (Home/Saved
+            // when-columns) truncates the word instead of overflowing.
+            // No Flexible here — most call sites put the meter in an
+            // unbounded Row, where a nested flex child would throw.
             Text(
-              _label,
+              compact ? _compactLabel : _label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: t.mono(
                 10,
                 weight: FontWeight.w500,

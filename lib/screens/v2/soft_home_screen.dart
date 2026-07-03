@@ -919,7 +919,13 @@ class _NearbyCard extends StatelessWidget {
         const SizedBox(width: 10),
         // Trailing when-column (iOS parity): soonest arrival BIG, the bus +
         // crowd quiet underneath — replaces the old bottom meta line.
-        _whenColumn(t, code),
+        // Width-capped so the quiet line can never crush the title column —
+        // uncapped, "Bus 93 · Seats available" squeezed titles to ~6 chars
+        // and stacked the route chips vertically (owner-reported).
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 150),
+          child: _whenColumn(t, code),
+        ),
         const SizedBox(width: 6),
         Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
       ],
@@ -982,7 +988,10 @@ class _NearbyCard extends StatelessWidget {
           children: [
             Text('Bus ${soonest.no} ·', style: t.mono(10, color: t.dim)),
             const SizedBox(width: 5),
-            CrowdMeter(load: soonest.load),
+            // Compact word (iOS wsWord parity: Seats/Standing/Limited) in a
+            // Flexible so the width-capped column ellipsizes the word rather
+            // than overflowing. Safe here: the host ConstrainedBox bounds us.
+            Flexible(child: CrowdMeter(load: soonest.load, compact: true)),
           ],
         ),
       ],

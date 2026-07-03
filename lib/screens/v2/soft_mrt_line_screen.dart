@@ -112,10 +112,9 @@ class _SoftMrtLineScreenState extends State<SoftMrtLineScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      bottomNavigationBar: SoftBottomBar(
-        selection: widget.tabSelection,
-        onSelect: widget.onTab,
-      ),
+      // Pushed detail screen: banner only, no tab bar (iOS parity — WSRoot
+      // hides the floating bar on pushed routes).
+      bottomNavigationBar: const SoftDetailBottomBar(),
       body: ListenableBuilder(
         listenable: DataStore.shared,
         builder: (context, _) {

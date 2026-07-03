@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/data_store.dart';
+import '../../data/forecast_window.dart' show ForecastWindow;
 import '../../data/lta_models.dart'
     show LtaStationForecast, LtaStationForecastInterval;
 import '../../data/models.dart' show NearbyStop, Service, fmtClock, fmtEta;
@@ -166,10 +167,13 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
     final t = context.t;
     return Scaffold(
       backgroundColor: t.bg,
-      bottomNavigationBar: SoftBottomBar(
-        selection: widget.tabSelection,
-        onSelect: widget.onTab,
-      ),
+      // Pushed detail screen — iOS hides its floating tab bar on pushed
+      // routes (WSRoot.swift); Android mirrors that via SoftDetailBottomBar
+      // (AdBanner only, no tab bar), matching soft_mrt_line_screen.dart /
+      // soft_settings_screen.dart. widget.onTab/tabSelection stay as ctor
+      // params — still threaded through when this screen itself pushes
+      // another (e.g. from SoftMrtLineScreen._openStation).
+      bottomNavigationBar: const SoftDetailBottomBar(),
       body: ListenableBuilder(
         listenable: DataStore.shared,
         builder: (context, _) {
@@ -563,7 +567,11 @@ class _StationLiftCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.build_rounded, size: 14, color: LyneSeverity.warning.color),
+              Icon(
+                Icons.build_rounded,
+                size: 14,
+                color: LyneSeverity.warning.color,
+              ),
               const SizedBox(width: 8),
               Text(
                 'Lift maintenance',
@@ -1279,39 +1287,29 @@ class _ForecastChart extends StatelessWidget {
   final LyneTheme t;
 
   /// Builds the ~6-bar upcoming window: one slot back from "now" (so the
-  /// active slot anchors the chart) through the next several. Mirrors
-  /// WSMrtStationView.swift loadForecast()'s windowing exactly.
+  /// active slot anchors the chart) through the next several. Windowing +
+  /// the timezone-safe local start time now live in [ForecastWindow] (data
+  /// layer, unit-tested) — see that file for why `.toLocal()` matters here.
   List<_ForecastPoint> _window(BuildContext context) {
-    final sorted = [...intervals]
-      ..sort((a, b) => a.start.compareTo(b.start));
-    if (sorted.isEmpty) return const [];
     final now = DateTime.now();
-
-    var upcomingIdx = sorted.indexWhere((iv) => !iv.start.isBefore(now));
-    if (upcomingIdx == -1) upcomingIdx = sorted.length - 1;
-    final start = (upcomingIdx - 1).clamp(0, sorted.length - 1);
-    final end = (start + 6).clamp(start, sorted.length);
-
     final use24h = MediaQuery.of(context).alwaysUse24HourFormat;
-    final points = <_ForecastPoint>[];
-    for (var i = start; i < end; i++) {
-      final iv = sorted[i];
-      final nextStart = i + 1 < sorted.length ? sorted[i + 1].start : null;
-      final isNow =
-          !iv.start.isAfter(now) && (nextStart == null || nextStart.isAfter(now));
-      points.add(
+    return [
+      for (final p in ForecastWindow.build(intervals, now: now))
         _ForecastPoint(
-          time: isNow ? 'now' : _clockLabel(iv.start, use24h, context),
-          level: StationCrowd.levelFrom(iv.crowdLevel),
-          isNow: isNow,
+          time: p.isNow ? 'now' : _clockLabel(p.localStart, use24h, context),
+          level: p.level,
+          isNow: p.isNow,
         ),
-      );
-    }
-    return points;
+    ];
   }
 
+  /// [dt] is expected to already be local (see [ForecastWindow]); `.toLocal()`
+  /// here is a defensive no-op belt-and-braces against a future caller
+  /// passing a raw UTC-flagged parse result — see forecast_window.dart for
+  /// the bug class this guards against.
   static String _clockLabel(DateTime dt, bool use24h, BuildContext context) {
-    final tod = TimeOfDay(hour: dt.hour, minute: dt.minute);
+    final local = dt.toLocal();
+    final tod = TimeOfDay(hour: local.hour, minute: local.minute);
     if (use24h) {
       final h = tod.hour.toString().padLeft(2, '0');
       final m = tod.minute.toString().padLeft(2, '0');
@@ -1348,7 +1346,9 @@ class _ForecastChart extends StatelessWidget {
           children: [
             for (var i = 0; i < points.length; i++) ...[
               if (i > 0) const SizedBox(width: 6),
-              Expanded(child: _ForecastBar(point: points[i], t: t)),
+              Expanded(
+                child: _ForecastBar(point: points[i], t: t),
+              ),
             ],
           ],
         ),
