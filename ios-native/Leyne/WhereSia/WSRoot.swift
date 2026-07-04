@@ -21,6 +21,7 @@ enum WSRoute: Hashable {
     case mrtStation(MrtGeoStation)
     case serviceInfo(no: String, fromStop: String?)
     case trackBus(stopCode: String, no: String)
+    case map
 }
 
 /// Environment-injected "push a route onto the current tab's stack".
@@ -155,6 +156,8 @@ struct WSRoot: View {
             WSServiceInfoView(serviceNo: no, fromStop: fromStop, onBack: back)
         case .trackBus(let stopCode, let no):
             WSTrackBusView(stopCode: stopCode, serviceNo: no, onBack: back)
+        case .map:
+            WSMapView(onBack: back)
         }
     }
 }

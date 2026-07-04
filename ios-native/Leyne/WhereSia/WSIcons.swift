@@ -18,7 +18,7 @@ enum WSGlyph {
     case home, saved, alerts, me
     // Chrome
     case search, scope, location, back, chevron, chevronDown, close, edit, share
-    case gear, sun, textSize, info, database, lift, filters, clock, bellRing
+    case gear, sun, textSize, info, database, lift, filters, clock, bellRing, map
 
     var systemName: String {
         switch self {
@@ -56,6 +56,7 @@ enum WSGlyph {
         case .filters:        return "line.3.horizontal.decrease"
         case .clock:          return "clock"
         case .bellRing:       return "bell.badge"
+        case .map:            return "map"
         }
     }
 }

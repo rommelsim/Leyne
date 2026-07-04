@@ -102,12 +102,24 @@ struct WSHomeView: View {
     }()
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(Self.dateEyebrow.string(from: Date()).uppercased())
-                .font(ws.sans(11, weight: .heavy)).tracking(1.4).foregroundStyle(ws.dim)
-            Text("Nearby").font(ws.sans(26, weight: .heavy)).foregroundStyle(ws.text)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(Self.dateEyebrow.string(from: Date()).uppercased())
+                    .font(ws.sans(11, weight: .heavy)).tracking(1.4).foregroundStyle(ws.dim)
+                Text("Nearby").font(ws.sans(26, weight: .heavy)).foregroundStyle(ws.text)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Map — browse every stop and station around you (iOS-only feature).
+            Button { push(.map) } label: {
+                WSIcon(glyph: .map, size: 18)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(ws.panel))
+                    .overlay(Circle().stroke(ws.rule, lineWidth: 1))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Nearby map")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 22).padding(.top, 10)
     }
 
