@@ -8,11 +8,13 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Departly 3.0.0 · Android (51) · 2026-07-04
+## Departly 3.0.0 · Android (55) · 2026-07-04
 
-**2026-07-04 — Android AAB (3.0.0, build 51):** Major release — the public
+**2026-07-04 — Android AAB (3.0.0, build 55):** Major release — the public
 rename to **Departly** plus the new app icon ship in this build. versionName
-`3.0.0`, versionCode `51`. Built from `design-remake`. Artifact:
+`3.0.0`, versionCode `55` (52–54 skipped; Play rejected 51 as already used —
+another burned code not in git history, like 47 before it). Built from
+`design-remake`. Artifact:
 `build/app/outputs/bundle/release/app-release.aab`. User-facing What's New
 entry added under `3.0.0` in `lib/data/changelog.dart`.
 
