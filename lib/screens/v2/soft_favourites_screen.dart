@@ -59,6 +59,7 @@ import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
+import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -350,6 +351,14 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                           SliverToBoxAdapter(child: _emptyState(context))
                         else ...[
                           ..._stopsSectionSlivers(context),
+                          // One native ad per screen, between the stops and
+                          // Lines sections (iOS parity: WSSavedView). Zero-size
+                          // until a creative loads — padding applies only then.
+                          const SliverToBoxAdapter(
+                            child: NativeAdCard(
+                              padding: EdgeInsets.only(top: 20),
+                            ),
+                          ),
                           if (AppModel.shared.favServices.isNotEmpty) ...[
                             const SliverToBoxAdapter(
                               child: SizedBox(height: 20),

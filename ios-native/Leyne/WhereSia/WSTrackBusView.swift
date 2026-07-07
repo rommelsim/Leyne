@@ -95,6 +95,7 @@ struct WSTrackBusView: View {
             cta
                 .wsEntrance(delay: 0.08)
         }
+        .wsDetailAdBanner()
         .background(ws.bg)
         // The bar names the bus itself — "TRACK BUS" told the user nothing.
         .wsHeaderBar(eyebrow: "Track bus", title: "Bus \(serviceNo)",

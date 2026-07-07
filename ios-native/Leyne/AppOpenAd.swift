@@ -39,7 +39,7 @@ enum AppOpenAdConfig {
     #else
     static let unitID = AdConfig.forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/5575463023"   // Google test
-        : "ca-app-pub-5864511655536507/4093216883"   // leyne-acct prod App Open
+        : "ca-app-pub-5864511655536507/2901040206"   // leyne-acct prod App Open (ios-appopen, 2026-07-07)
     #endif
 
     /// Cold-launch App Open ad gate.
@@ -55,6 +55,12 @@ enum AppOpenAdConfig {
 
     /// App Open creatives expire 4h after load (AdMob). Drop + reload past this.
     static let maxCacheAge: TimeInterval = 4 * 60 * 60
+
+    /// Warm-resume ads only fire after the app spent at least this long in the
+    /// background. Mid-commute app switches (check a message, back to Departly)
+    /// stay ad-free — a rushing commuter re-checking a departure must never be
+    /// blocked. Owner decision 2026-07-07 after user complaints about launch ads.
+    static let minBackgroundDuration: TimeInterval = 30 * 60
 }
 
 @MainActor
@@ -67,6 +73,7 @@ final class AppOpenAdManager: NSObject {
     private var isShowing = false
     private var suppressUntil: Date = .distantPast
     private var wasBackgrounded = false
+    private var backgroundedAt: Date = .distantPast
     private let lastShownKey = "leyne.appOpenAd.lastShown"
     /// Set true after the first launch into the main UI, so the cold-launch ad
     /// never greets a brand-new user on their very first open (AdMob guidance).
@@ -107,6 +114,7 @@ final class AppOpenAdManager: NSObject {
     /// Also preloads so an ad is ready for the return-to-foreground.
     func noteBackgrounded() {
         wasBackgrounded = true
+        backgroundedAt = Date()
         preload()
     }
 
@@ -116,6 +124,12 @@ final class AppOpenAdManager: NSObject {
     func showIfReturningToForeground(model: AppModel) {
         guard wasBackgrounded else { return }
         wasBackgrounded = false
+        // Short background stints stay ad-free (see minBackgroundDuration).
+        guard Date().timeIntervalSince(backgroundedAt)
+                >= AppOpenAdConfig.minBackgroundDuration else {
+            aoaLog.notice("App Open skip: background stint too short")
+            return
+        }
         showIfReady(model: model)
     }
 

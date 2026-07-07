@@ -31,11 +31,10 @@ enum AdConfig {
     ///   • `MobileAds.shared.start()` initializes the SDK
     ///   • Onboarding's "Ads" step is shown (see OnboardingView)
     ///
-    /// OFF for now — owner request 2026-07-02 during the WhereSia redesign
-    /// test cycle (no ads while verifying the new UI). Flip back to `true`
-    /// to restore every placement + the consent flow + the ATT onboarding
-    /// step in one move.
-    static let adsEnabled = false
+    /// ON — re-enabled 2026-07-07 with fresh ad units (previous units were
+    /// deleted in the AdMob console). Required for the ATT prompt to appear
+    /// (App Review, Guideline 2.1, submission 35f891d7).
+    static let adsEnabled = true
 
     // ╔══════════════════════════════════════════════════════════════╗
     // ║ TESTFLIGHT TOGGLE — Force test ad unit in a Release Archive. ║
@@ -73,7 +72,7 @@ enum AdConfig {
     #else
     static let bannerUnitID = forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/2934735716"  // Google test unit
-        : "ca-app-pub-5864511655536507/9782205994"  // leyne-acct prod
+        : "ca-app-pub-5864511655536507/2821149156"  // leyne-acct prod (ios-banner-tabbar, 2026-07-07)
     #endif
 
     // 300×250 medium rectangle (MREC), used for the inline Stop-screen
@@ -89,7 +88,7 @@ enum AdConfig {
     #else
     static let mrecUnitID = forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/2934735716"  // Google test unit
-        : "ca-app-pub-5864511655536507/9782205994"  // leyne-acct prod (shared)
+        : "ca-app-pub-5864511655536507/2821149156"  // leyne-acct prod (shared with banner)
     #endif
 
     // Native ad unit — used by the inline Home-screen placement (NativeAdCard).
@@ -101,7 +100,7 @@ enum AdConfig {
     #else
     static let nativeUnitID = forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/3986624511"  // Google iOS native test unit
-        : "ca-app-pub-5864511655536507/2734244623"  // leyne-acct prod native
+        : "ca-app-pub-5864511655536507/8344938576"  // leyne-acct prod native (ios-native-board, 2026-07-07)
     #endif
 
     /// Extra devices to force into TEST ads even in a RELEASE build (rarely
@@ -656,6 +655,24 @@ extension View {
             }
         } else {
             overlayAdBanner(t)
+        }
+    }
+
+    /// WhereSia detail screens (Bus stop / Track bus / MRT station): anchored
+    /// adaptive banner in the bottom gutter. These screens hide the floating
+    /// tab bar (WSRoot's inset is root-only), so they need their own mount.
+    /// AdBanner collapses to zero height until a creative loads, so screens
+    /// with a pinned CTA (Track Bus) lose no space on no-fill.
+    @ViewBuilder
+    func wsDetailAdBanner() -> some View {
+        if AdConfig.adsSuppressed {
+            self
+        } else {
+            safeAreaInset(edge: .bottom, spacing: 0) {
+                AdBanner()
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 2)
+            }
         }
     }
 

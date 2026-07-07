@@ -33,6 +33,7 @@ import '../../data/data_store.dart';
 import '../../state/app_model.dart';
 import '../../state/bus_alert.dart';
 import '../../theme.dart';
+import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
@@ -120,6 +121,10 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                   _advisoriesSection(context, trainAlerts),
                   const SizedBox(height: 20),
                   _liftSection(context, liftItems),
+                  // One native ad per screen, between the system sections and
+                  // the user's own alerts (iOS parity: WSAlertsView).
+                  // Zero-size until a creative loads — padding applies only then.
+                  const NativeAdCard(padding: EdgeInsets.only(top: 20)),
                   const SizedBox(height: 20),
                   _yourAlertsSection(context, busAlerts),
                 ],

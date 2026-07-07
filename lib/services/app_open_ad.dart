@@ -15,10 +15,10 @@
 //   • Never stacks with the Interstitial (shared FullScreenAdGate) — AdMob
 //     disallows an ad immediately before/after an app-open ad.
 //
-// Fires on BOTH a cold launch ([showOnColdLaunch], for returning users — never
-// the very first launch) and warm foreground (AppLifecycleListener onResume).
-// The 24h cap means brief in-and-out app-switching won't trigger one; only a
-// genuine new session (a return after a long break) can, at most once a day.
+// Cold launch is DISABLED ([_coldLaunchEnabled]); only a warm foreground
+// (AppLifecycleListener onResume) can show one, and only after the app spent
+// ≥[_minBackgroundDuration] in the background — brief in-and-out app switches
+// never trigger one. Mirrors iOS AppOpenAdManager (2026-07-07).
 
 import 'dart:async';
 
@@ -43,7 +43,7 @@ class AppOpenAdManager {
   //     matching the Android app id …~5685985257).
   static const String _testUnit = 'ca-app-pub-3940256099942544/9257395921';
   static const String _prodUnit =
-      'ca-app-pub-5864511655536507/1467053541'; // leyne-acct prod App Open
+      'ca-app-pub-5864511655536507/9928914764'; // leyne-acct prod App Open
 
   String get _unitId => (kDebugMode || kLyneAdsTest) ? _testUnit : _prodUnit;
 
@@ -55,13 +55,18 @@ class AppOpenAdManager {
   /// restore cold-launch presentation.
   static const bool _coldLaunchEnabled = false;
 
-  /// Frequency cap — at most one App Open ad per this window. Raised 4h → 6h →
-  /// 24h as tester feedback kept flagging the warm-return launch ad as annoying
-  /// (a bus app is opened many times a day; an ad on re-entry interrupts exactly
-  /// when the user wants arrivals). At 24h it shows at most once per day, on a
-  /// genuine new session after a long break. Cold-launch stays disabled
-  /// ([_coldLaunchEnabled]); banners + the interstitial-on-exit carry the rest.
-  static const Duration _minInterval = Duration(hours: 24);
+  /// Frequency cap — at most one App Open ad per this window. History: raised
+  /// 4h → 6h → 24h on tester feedback, then aligned back to iOS's 6h on
+  /// 2026-07-07 when the [_minBackgroundDuration] guard was added — the
+  /// background-duration guard is the annoyance fix (quick app switches never
+  /// show one), so the cap can match iOS for parity.
+  static const Duration _minInterval = Duration(hours: 6);
+
+  /// Warm-resume ads only fire after the app spent at least this long in the
+  /// background. Mid-commute app switches (check a message, back to Departly)
+  /// stay ad-free — a rushing commuter re-checking a departure must never be
+  /// blocked. Mirrors iOS AppOpenAdConfig.minBackgroundDuration (2026-07-07).
+  static const Duration _minBackgroundDuration = Duration(minutes: 30);
 
   /// App Open creatives expire 4h after load (AdMob). Drop + reload past this.
   static const Duration _maxCacheAge = Duration(hours: 4);
@@ -77,6 +82,15 @@ class AppOpenAdManager {
   bool _isLoading = false;
   bool _isShowing = false;
   DateTime _suppressUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime? _backgroundedAt;
+
+  /// Called when the app goes to the background (SoftRoot's lifecycle
+  /// listener) — stamps the time for the [_minBackgroundDuration] guard and
+  /// preloads so a creative is ready if the return does qualify.
+  void noteBackgrounded() {
+    _backgroundedAt = DateTime.now();
+    preload();
+  }
 
   /// Called by the notification-tap and deep-link handlers so the App Open ad
   /// is skipped on the foreground they triggered (short TTL covers the race
@@ -91,7 +105,9 @@ class AppOpenAdManager {
   /// Load a single ad ahead of time if we don't already have a fresh one.
   void preload() {
     if (!kLyneAdsEnabled || kLyneScreenshotMode) return;
-    if (!AdConsent.started) return; // consent + MobileAds.initialize must be done
+    if (!AdConsent.started) {
+      return; // consent + MobileAds.initialize must be done
+    }
     if (_isLoading || (_ad != null && !_isExpired)) return;
     _isLoading = true;
     AppOpenAd.load(
@@ -171,6 +187,13 @@ class AppOpenAdManager {
     if (!AppModel.shared.onboardingDone) return;
     // A notification / deep link brought us here — show content, not an ad.
     if (DateTime.now().isBefore(_suppressUntil)) return;
+    // Short background stints stay ad-free (see [_minBackgroundDuration]).
+    // No recorded backgrounding at all (cold launch path) also never shows.
+    final bgAt = _backgroundedAt;
+    if (bgAt == null ||
+        DateTime.now().difference(bgAt) < _minBackgroundDuration) {
+      return;
+    }
 
     // Frequency cap.
     final prefs = await SharedPreferences.getInstance();

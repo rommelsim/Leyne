@@ -60,6 +60,7 @@ struct WSBusStopView: View {
         } action: { _, isPast in
             titleCollapsed = isPast
         }
+        .wsDetailAdBanner()
         .wsEntrance()
         .background(ws.bg)
         .wsHeaderBar(eyebrow: "Bus stop", title: store.stopName(code),

@@ -80,6 +80,7 @@ struct WSMrtStationView: View {
         } action: { _, isPast in
             titleCollapsed = isPast
         }
+        .wsDetailAdBanner()
         .wsEntrance()
         .background(ws.bg)
         .wsHeaderBar(eyebrow: "MRT station", title: station.name,

@@ -187,9 +187,18 @@ struct WSHomeView: View {
             // outlined card) / "Other nearby stops". Same information here,
             // in this board's own idiom: a whisper-quiet tag on the first
             // row — nearby is distance-sorted, so first IS the closest.
-            ForEach(busStops) { stop in
+            ForEach(Array(busStops.enumerated()), id: \.element.id) { index, stop in
                 StopRow(stop: stop, tag: stop.id == busStops.first?.id ? "CLOSEST STOP" : nil)
                 WSRowDivider().padding(.horizontal, 22)
+                // One native ad per board, after the third stop (or after the
+                // last one on short lists). NativeAdCard renders nothing until
+                // a creative loads, so the board rhythm is undisturbed on
+                // no-fill. Padded to the board's 22 pt gutter.
+                if index == min(2, busStops.count - 1) {
+                    NativeAdCard()
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 6)
+                }
             }
         }
         // The way back from the long-press "Hide from Nearby" action — without

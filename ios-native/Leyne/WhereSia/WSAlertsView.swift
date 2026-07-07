@@ -24,6 +24,11 @@ struct WSAlertsView: View {
                 trainSection
                 headerRow(WSSectionHeader(label: "Stations"))
                 stationsSection
+                // One native ad per screen, between the system sections and
+                // the user's own alerts. Renders nothing until a creative
+                // loads; pinned out of edit mode.
+                NativeAdCard()
+                    .deleteDisabled(true).moveDisabled(true)
                 headerRow(WSSectionHeader(label: "Your alerts"))
                 yourSection
                 Color.clear.frame(height: 12)

@@ -118,10 +118,11 @@ class SoftDetailBottomBar extends StatelessWidget {
   }
 }
 
-/// Bottom composite for tabbed views: AdBanner on top, SoftTabBar
-/// below. The banner widget self-suppresses (zero-size SizedBox) when
-/// ads are disabled or in screenshot mode, so the tab bar sits flush
-/// in those builds.
+/// Bottom composite for tabbed views: the SoftTabBar only. Root tabs are
+/// native-ad-only (one NativeAdCard inline in each tab's list) — no banner
+/// in the tab gutter. The anchored banner lives on pushed detail screens
+/// instead ([SoftDetailBottomBar]), where dwell time makes its 30–60 s
+/// refresh earn. Mirrors iOS (WSRoot), owner decision 2026-07-07.
 class SoftBottomBar extends StatelessWidget {
   const SoftBottomBar({
     super.key,
@@ -141,7 +142,6 @@ class SoftBottomBar extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const AdBanner(),
         SoftTabBar(
           selection: selection,
           onSelect: onSelect,

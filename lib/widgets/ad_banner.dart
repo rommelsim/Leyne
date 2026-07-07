@@ -72,10 +72,10 @@ const bool kLyneScreenshotMode = bool.fromEnvironment(
 /// to an empty SizedBox, no SDK request is ever made, and AdConsent stays
 /// a no-op.
 ///
-/// OFF for now — owner request 2026-07-03: ads are disabled PRODUCT-WIDE
-/// during the WhereSia redesign test cycle (iOS's AdConfig.adsEnabled is
-/// off too). Flip both back together before the next revenue release.
-const bool kLyneAdsEnabled = false;
+/// ON — re-enabled 2026-07-07 together with iOS (AdConfig.adsEnabled), with
+/// the placement redesign: native-only on root tabs, anchored banner on
+/// pushed detail screens, App Open warm-resume-only, interstitial disabled.
+const bool kLyneAdsEnabled = true;
 
 /// Resolve the banner ad unit ID at runtime. Flutter powers the Android
 /// build only — iOS ships via the SwiftUI app at `ios-native/`.
@@ -86,7 +86,7 @@ String _bannerUnitId() {
   if (kDebugMode || kLyneAdsTest) {
     return 'ca-app-pub-3940256099942544/6300978111';
   }
-  return 'ca-app-pub-5864511655536507/6513878972';
+  return 'ca-app-pub-5864511655536507/1447789518';
 }
 
 /// Resolve the 300×250 MREC ad unit ID. Same gating as the banner.
@@ -101,7 +101,7 @@ String _mrecUnitId() {
   if (kDebugMode || kLyneAdsTest) {
     return 'ca-app-pub-3940256099942544/6300978111';
   }
-  return 'ca-app-pub-5864511655536507/6513878972';
+  return 'ca-app-pub-5864511655536507/1447789518';
 }
 
 class AdBanner extends StatefulWidget {
@@ -245,11 +245,7 @@ String _nativeUnitId() {
   if (kDebugMode || kLyneAdsTest) {
     return 'ca-app-pub-3940256099942544/2247696110';
   }
-  // "Native Ad Unit" (Native advanced) in the Leyne AdMob account
-  // (pub-5864511655536507). The previous value (…/3213886079) did not match any
-  // unit in the account and always returned NO_FILL — confirmed against the
-  // AdMob console on 2026-06-16.
-  return 'ca-app-pub-5864511655536507/8207836651';
+  return 'ca-app-pub-5864511655536507/9132662241';
 }
 
 /// Inline native ad card using NativeTemplateStyle (TemplateType.medium).
@@ -283,7 +279,12 @@ String _nativeUnitId() {
 ///     platform view and native memory.
 ///   • Master switch (kLyneAdsEnabled) and screenshot mode are respected.
 class NativeAdCard extends StatefulWidget {
-  const NativeAdCard({super.key});
+  const NativeAdCard({super.key, this.padding});
+
+  /// Outer padding applied ONLY once a creative has loaded — lets callers add
+  /// section spacing around the card without leaving a stray gap on no-fill
+  /// (the widget is zero-size until then).
+  final EdgeInsetsGeometry? padding;
 
   @override
   State<NativeAdCard> createState() => _NativeAdCardState();
@@ -418,7 +419,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
     // Outer frame mirrors _NearbyCard: Material surface + 1 pt line border +
     // 18 pt corner radius + antiAlias clip so the SDK platform view is
     // contained inside the rounded rect.
-    return Material(
+    final card = Material(
       color: t.surface,
       borderRadius: BorderRadius.circular(_cardRadius),
       clipBehavior: Clip.antiAlias,
@@ -434,6 +435,8 @@ class _NativeAdCardState extends State<NativeAdCard> {
         child: AdWidget(ad: _ad!),
       ),
     );
+    final pad = widget.padding;
+    return pad == null ? card : Padding(padding: pad, child: card);
   }
 }
 

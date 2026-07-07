@@ -31,7 +31,6 @@ import '../../data/mrt_stations.dart';
 import '../../services/analytics_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
-import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -150,11 +149,10 @@ class _SoftStopScreenState extends State<SoftStopScreen>
                   ..._interchangeCard(context),
                   // ── Arrivals section ────────────────────────────────────
                   _arrivalSection(context, state, sorted, isPinned),
-                  // ── Inline 300×250 MREC ─────────────────────────────────
-                  // Normal view: a single ad at the end of the content. The
-                  // full "See all" view instead drops one ad mid-list (in
-                  // _arrivalsList) so the long list carries exactly one ad too.
-                  if (!widget.showAll) const MediumRectAd(),
+                  // No inline MREC any more — the Stop screen's single ad is
+                  // the anchored banner in [SoftDetailBottomBar], mirroring
+                  // iOS's wsDetailAdBanner (owner placement redesign
+                  // 2026-07-07: banner on high-dwell detail screens).
                 ],
               ),
             );
@@ -688,11 +686,8 @@ class _SoftStopScreenState extends State<SoftStopScreen>
         ? sorted
         : sorted.take(_collapsedCount).toList();
 
-    // Full "See all" view: drop ONE inline ad at the list's midpoint so it
-    // rides along with content the user is actively scrolling, rather than
-    // stacking another at the bottom. Only worth splitting once there are
-    // enough rows. The normal view keeps its single bottom MREC instead.
-    final injectAd = widget.showAll && shown.length >= 6;
+    // No mid-list MREC any more — this screen's single ad is the anchored
+    // banner in [SoftDetailBottomBar] (owner placement redesign 2026-07-07).
 
     // SlidableAutoCloseBehavior: opening one row's Notify action closes any
     // other open one (shared 'arrivals' group tag).
@@ -700,28 +695,12 @@ class _SoftStopScreenState extends State<SoftStopScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (injectAd) ...[
-            _arrivalsCard(
-              context,
-              shown.sublist(0, shown.length ~/ 2),
-              canCollapse: false,
-              total: sorted.length,
-            ),
-            const MediumRectAd(),
-            const SizedBox(height: 16),
-            _arrivalsCard(
-              context,
-              shown.sublist(shown.length ~/ 2),
-              canCollapse: canCollapse,
-              total: sorted.length,
-            ),
-          ] else
-            _arrivalsCard(
-              context,
-              shown,
-              canCollapse: canCollapse,
-              total: sorted.length,
-            ),
+          _arrivalsCard(
+            context,
+            shown,
+            canCollapse: canCollapse,
+            total: sorted.length,
+          ),
         ],
       ),
     );

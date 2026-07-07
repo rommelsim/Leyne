@@ -89,6 +89,11 @@ struct WSSavedView: View {
             .onDelete { m.savedMrtStations.remove(atOffsets: $0) }
             .onMove { m.savedMrtStations.move(fromOffsets: $0, toOffset: $1) }
 
+            // One native ad per screen, between the stops and Lines sections.
+            // Renders nothing until a creative loads; pinned out of edit mode.
+            NativeAdCard()
+                .deleteDisabled(true).moveDisabled(true)
+
             if !m.favServices.isEmpty {
                 headerRow(WSSectionHeader(label: "Lines"))
                 ForEach(m.favServices) { fav in

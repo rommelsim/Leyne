@@ -85,6 +85,11 @@ struct WSRoot: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             ZStack {
                 if activePath.isEmpty {
+                    // Root tabs are native-ad-only (one NativeAdCard inline in
+                    // each tab's list) — no banner in the tab-bar gutter. The
+                    // anchored banner lives on the high-dwell detail screens
+                    // instead (`wsDetailAdBanner`), where its 30–60 s refresh
+                    // actually earns. Owner decision 2026-07-07.
                     WSTabBar(tab: $tab, alertCount: m.unseenAlertCount)
                         .transition(reduceMotion ? .opacity :
                             .move(edge: .bottom).combined(with: .opacity))
@@ -147,15 +152,24 @@ struct WSRoot: View {
     @ViewBuilder
     private func destination(_ route: WSRoute, path: Binding<[WSRoute]>) -> some View {
         let back = { if !path.wrappedValue.isEmpty { path.wrappedValue.removeLast() } }
+        // Exit interstitial hook — a back-out of a dwell screen (stop / station /
+        // track bus) is the app's natural break. The manager owns every guard
+        // (frequency cap, exit count, cross-format gap, deep-link suppression),
+        // so this is safe to call on every pop. Map and Service Info stay
+        // hook-free: short-dwell, task-critical surfaces.
+        let backWithAd = { [weak m] in
+            back()
+            if let m { InterstitialAdManager.shared.maybeShowOnExit(model: m) }
+        }
         switch route {
         case .busStop(let code):
-            WSBusStopView(code: code, onBack: back)
+            WSBusStopView(code: code, onBack: backWithAd)
         case .mrtStation(let station):
-            WSMrtStationView(station: station, onBack: back)
+            WSMrtStationView(station: station, onBack: backWithAd)
         case .serviceInfo(let no, let fromStop):
             WSServiceInfoView(serviceNo: no, fromStop: fromStop, onBack: back)
         case .trackBus(let stopCode, let no):
-            WSTrackBusView(stopCode: stopCode, serviceNo: no, onBack: back)
+            WSTrackBusView(stopCode: stopCode, serviceNo: no, onBack: backWithAd)
         case .map:
             WSMapView(onBack: back)
         }

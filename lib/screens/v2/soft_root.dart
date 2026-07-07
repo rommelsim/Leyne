@@ -101,8 +101,9 @@ class _SoftRootState extends State<SoftRoot> {
   /// true root (Home, empty history, nothing pushed) does BACK exit the app.
   /// Kept in sync by [_stackObserver].
   bool _nestedHasDetail = false;
-  late final _StackChangeObserver _stackObserver =
-      _StackChangeObserver(_syncNestedStack);
+  late final _StackChangeObserver _stackObserver = _StackChangeObserver(
+    _syncNestedStack,
+  );
 
   /// Last value pushed to [SystemNavigator.setFrameworkHandlesBack], so we only
   /// hit the platform channel when it actually flips. See [build].
@@ -141,6 +142,9 @@ class _SoftRootState extends State<SoftRoot> {
     // Stop / Bus detail (the navigator observer fires the show attempt).
     InterstitialAdManager.instance.preloadWhenReady();
     _lifecycle = AppLifecycleListener(
+      // Stamp backgrounding time — warm-return App Open ads only qualify
+      // after ≥30 min in the background (manager's _minBackgroundDuration).
+      onPause: () => AppOpenAdManager.instance.noteBackgrounded(),
       onResume: () => AppOpenAdManager.instance.showIfAvailable(),
     );
   }
@@ -372,13 +376,14 @@ class _SoftRootState extends State<SoftRoot> {
     return ListenableBuilder(
       listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
       builder: (context, _) {
-        final badgeCount =
-            AppModel.shared.unseenAlertCount(_currentAlertIds());
+        final badgeCount = AppModel.shared.unseenAlertCount(_currentAlertIds());
         // When the Alerts tab is open and fresh data lands, mark it seen
         // immediately so the badge never increments while the user is there.
         if (_tab == SoftTab.alerts && badgeCount > 0) {
           // Schedule post-frame so we don't mutate state during build.
-          WidgetsBinding.instance.addPostFrameCallback((_) => _markAlertsSeen());
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _markAlertsSeen(),
+          );
         }
         // Material 3 "fade-through" — the standard tab-swap transition.
         // AnimatedSwitcher cross-fades; child keying on _tab + badgeCount

@@ -32,6 +32,12 @@ enum InterstitialAdConfig {
     /// place; flip this to `true` to enable. The back-exit placement is
     /// intentionally policy-aligned (AdMob caps interstitials at one per two
     /// user actions, back press included).
+    ///
+    /// OFF — owner decision 2026-07-07, same day it was enabled: a test hit a
+    /// full-screen creative whose App Store page stranded the user with no way
+    /// back to the app. Highest-earning format, but not worth that failure
+    /// mode. The unit (ios-interstitial-exit …/2162673607) and all wiring
+    /// stay in place; flip to `true` to re-enable.
     static let enabled = false
 
     // Ad unit selection mirrors AdConfig.bannerUnitID:
@@ -47,7 +53,7 @@ enum InterstitialAdConfig {
     #else
     static let unitID = AdConfig.forceTestUnitForRelease
         ? "ca-app-pub-3940256099942544/4411468910"   // Google test
-        : "ca-app-pub-5864511655536507/8576751750"   // leyne-acct prod Interstitial
+        : "ca-app-pub-5864511655536507/2162673607"   // leyne-acct prod Interstitial (ios-interstitial-exit, 2026-07-07)
     #endif
 
     /// Interstitial-specific frequency cap — at most one per this window. Longer
