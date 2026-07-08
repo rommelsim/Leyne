@@ -12,6 +12,7 @@ import 'soft_favourites_screen.dart';
 import 'soft_home_screen.dart';
 import 'soft_mrt_screen.dart';
 import 'soft_mrt_station_screen.dart';
+import 'soft_nearby_screen.dart';
 import 'soft_search_screen.dart';
 import 'soft_stop_screen.dart';
 import '../../data/data_store.dart';
@@ -264,6 +265,24 @@ class _SoftRootState extends State<SoftRoot> {
     );
   }
 
+  /// Pushes the Nearby screen — the door card on Home's minimal 2026-07-07
+  /// layout ("All stops & stations"). Carries the full nearby stop list, MRT
+  /// strip and hidden-stops footer that used to live on Home.
+  void _pushNearby() {
+    _navKey.currentState?.push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: _kDetailRouteName),
+        builder: (_) => SoftNearbyScreen(
+          onBack: () => _navKey.currentState?.pop(),
+          onOpenStop: _pushStop,
+          onOpenStation: _pushMrtStation,
+          onTab: _handleTab,
+          tabSelection: _tab,
+        ),
+      ),
+    );
+  }
+
   void _pushStop(String code) {
     _navKey.currentState?.push(
       MaterialPageRoute(
@@ -418,7 +437,9 @@ class _SoftRootState extends State<SoftRoot> {
         return SoftHomeScreen(
           onTab: _handleTab,
           onOpenStop: _pushStop,
+          onOpenBus: (stopCode, svc) => _pushBus(stopCode, svc),
           onOpenSearch: () => _handleTab(SoftTab.search),
+          onOpenNearby: _pushNearby,
         );
       case SoftTab.favourites:
         return SoftFavouritesScreen(
@@ -445,7 +466,9 @@ class _SoftRootState extends State<SoftRoot> {
         return SoftHomeScreen(
           onTab: _handleTab,
           onOpenStop: _pushStop,
+          onOpenBus: (stopCode, svc) => _pushBus(stopCode, svc),
           onOpenSearch: () => _handleTab(SoftTab.search),
+          onOpenNearby: _pushNearby,
         );
     }
   }

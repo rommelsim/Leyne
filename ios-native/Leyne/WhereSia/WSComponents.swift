@@ -134,7 +134,9 @@ struct RouteTile: View {
     }
 }
 
-/// Dashed `+N` overflow chip for stops with more services than fit.
+/// Quiet `+N` overflow chip for stops with more services than fit. Solid
+/// hairline, not dashed — a dashed border is an empty-state / "add" idiom,
+/// and this chip holds real content (owner walkthrough 2026-07-07).
 struct OverflowTile: View {
     let count: Int
     @Environment(\.ws) private var ws
@@ -146,10 +148,7 @@ struct OverflowTile: View {
             .fixedSize()
             .padding(.horizontal, 6)
             .frame(minWidth: 26, minHeight: 21)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(ws.rule, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-            )
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(ws.rule, lineWidth: 1))
     }
 }
 

@@ -43,6 +43,13 @@ struct WSTheme: Equatable {
     /// Brighter blue tint for thin marks / text / dots on a surface where the
     /// solid `accent` would read too dark (the near-black board especially).
     let accentSoft: Color
+    /// The "now" green — reserved EXCLUSIVELY for a bus that is arriving this
+    /// minute (Home hero card border/glow, "Now" chips). Never identity, never
+    /// crowd. When nothing is arriving, no green appears anywhere.
+    let now: Color
+    /// Container tint behind a "Now" chip (solid, pre-blended — no opacity
+    /// stacking over panels).
+    let nowFill: Color
 
     // ── DARK (default) ───────────────────────────────────────────────
     static let dark = WSTheme(
@@ -57,7 +64,9 @@ struct WSTheme: Equatable {
         rule:   Color(wsHex: "242A33"),
         tabbar: Color(wsHex: "12161B"),
         accent:     Color(wsHex: "005EC4"),
-        accentSoft: Color(wsHex: "3B9EFF")
+        accentSoft: Color(wsHex: "3B9EFF"),
+        now:        Color(wsHex: "30D158"),
+        nowFill:    Color(wsHex: "17301F")
     )
 
     // ── LIGHT (body.light) ───────────────────────────────────────────
@@ -73,7 +82,9 @@ struct WSTheme: Equatable {
         rule:   Color(wsHex: "E6E8EC"),
         tabbar: Color(wsHex: "FFFFFF"),
         accent:     Color(wsHex: "005EC4"),
-        accentSoft: Color(wsHex: "1F6FE0")
+        accentSoft: Color(wsHex: "1F6FE0"),
+        now:        Color(wsHex: "1E9245"),
+        nowFill:    Color(wsHex: "E7F6EC")
     )
 
     static func resolve(dark: Bool) -> WSTheme { dark ? .dark : .light }
