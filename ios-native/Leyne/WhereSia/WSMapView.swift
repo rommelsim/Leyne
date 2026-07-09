@@ -338,7 +338,7 @@ private struct WSMapStopCard: View {
                         .font(ws.sans(16, weight: .bold)).foregroundStyle(ws.text)
                         .lineLimit(1)
                     Text(subline)
-                        .font(ws.mono(11, weight: .medium)).tracking(0.2)
+                        .font(ws.sans(12.5, weight: .medium))
                         .foregroundStyle(ws.dim)
                 }
                 Spacer(minLength: 8)
@@ -365,19 +365,51 @@ private struct WSMapStopCard: View {
                         .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
                         .padding(.vertical, 14)
                 } else {
+                    // Mini departure rows in the board grammar (green plate +
+                    // white number while arriving, seat dot, "Now"/"N min") —
+                    // the old RouteTile + ArrivalPill row was the pre-2026-07-08
+                    // design and read as a different app (owner 2026-07-09).
                     VStack(spacing: 0) {
                         ForEach(Array(soonest)) { s in
+                            let sec = wsLiveETASec(s)
+                            let now = sec < 60
                             HStack(spacing: 10) {
-                                RouteTile(text: s.no)
-                                Text(s.dest)
-                                    .font(ws.sans(13, weight: .semibold))
-                                    .foregroundStyle(ws.dim).lineLimit(1)
+                                Text(s.no)
+                                    .font(ws.mono(s.no.count > 3 ? 12 : 14, weight: .bold))
+                                    .foregroundStyle(now ? .white : ws.text)
+                                    .frame(width: 46, height: 32)
+                                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(now ? ws.now : ws.panel2))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(s.dest)
+                                        .font(ws.sans(13.5, weight: .semibold))
+                                        .foregroundStyle(ws.text).lineLimit(1)
+                                    HStack(spacing: 5) {
+                                        Circle().fill(s.load.wsDotColor)
+                                            .frame(width: 6, height: 6)
+                                        Text(s.load.wsSeatPhrase)
+                                            .font(ws.sans(11.5, weight: .medium))
+                                            .foregroundStyle(ws.dim)
+                                            .lineLimit(1).allowsTightening(true)
+                                    }
+                                }
                                 Spacer(minLength: 8)
-                                ArrivalPill(eta: fmtETA(wsLiveETASec(s)),
-                                            load: s.load,
-                                            scheduled: !s.monitored)
+                                Group {
+                                    if now {
+                                        Text("Now")
+                                            .font(ws.sans(15, weight: .heavy)).foregroundStyle(ws.text)
+                                    } else {
+                                        (Text(s.monitored ? "" : "~")
+                                            .font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim)
+                                         + Text("\(max(1, sec / 60))")
+                                            .font(ws.sans(15, weight: .heavy)).foregroundStyle(ws.text)
+                                         + Text(" min")
+                                            .font(ws.sans(11, weight: .semibold)).foregroundStyle(ws.dim))
+                                    }
+                                }
+                                .contentTransition(.numericText(countsDown: true))
                             }
-                            .padding(.vertical, 7)
+                            .padding(.vertical, 6)
                         }
                     }
                     .padding(.vertical, 6)
@@ -404,7 +436,7 @@ private struct WSMapStopCard: View {
     private var subline: String {
         var parts = [code]
         let road = store.roadName(code)
-        if !road.isEmpty { parts.append(road.uppercased()) }
+        if !road.isEmpty { parts.append(road) }
         if let here = location.location?.coordinate, let s = store.stopByCode[code] {
             let d = haversine(here.latitude, here.longitude, s.Latitude, s.Longitude)
             parts.append(fmtDistance(Int(d.rounded())))
@@ -441,14 +473,14 @@ private struct WSMapMrtCard: View {
                         if let crowd = store.wsCrowd(for: station), crowd != .unknown {
                             CrowdGauge(fraction: crowd.wsFraction, width: 22)
                             Text(crowd.wsWord)
-                                .font(ws.mono(10, weight: .bold)).foregroundStyle(ws.dim)
+                                .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
                         }
                     }
                     Text(station.name)
                         .font(ws.sans(16, weight: .bold)).foregroundStyle(ws.text)
                         .lineLimit(1)
                     Text(subline)
-                        .font(ws.mono(11, weight: .medium)).tracking(0.2)
+                        .font(ws.sans(12.5, weight: .medium))
                         .foregroundStyle(ws.dim)
                 }
                 Spacer(minLength: 8)
@@ -479,7 +511,7 @@ private struct WSMapMrtCard: View {
     }
 
     private var subline: String {
-        var parts = [wsLineNames(from: station.codes).uppercased()]
+        var parts = [wsLineNames(from: station.codes)]
         if let here = location.location?.coordinate {
             let d = haversine(here.latitude, here.longitude, station.lat, station.lon)
             parts.append(fmtDistance(Int(d.rounded())))

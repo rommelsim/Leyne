@@ -67,10 +67,12 @@ struct WSMrtStationView: View {
         let _ = m.tick
         ScrollView {
             VStack(spacing: 12) {
-                titleRow.padding(.top, 12)
-                crowdCard
-                busCard
-                forecastCard
+                // Staggered launch sequence (anim spec): head → cards, 60ms
+                // steps, fade + 12pt rise.
+                titleRow.padding(.top, 12).wsEntrance(delay: 0)
+                crowdCard.wsEntrance(delay: 0.06)
+                busCard.wsEntrance(delay: 0.12)
+                forecastCard.wsEntrance(delay: 0.18)
                 Color.clear.frame(height: 12)
             }
             .padding(.bottom, 8)
@@ -104,32 +106,53 @@ struct WSMrtStationView: View {
             .filter { $0.distanceM <= 400 }
     }
 
+    /// Card-grammar head (owner spec 2026-07-08): name + line bullets on one
+    /// line, quiet status/hours meta under it — same voice as Home's cards.
     private var titleRow: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(station.name).font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
-                Text("\(status) · \(WSFmt.upd(Date(), use24h: m.use24h))")
-                    .font(ws.mono(11)).tracking(0.3).foregroundStyle(ws.dim)
-                Text(hoursLine)
-                    .font(ws.mono(11)).tracking(0.3).foregroundStyle(ws.faint)
-            }
-            Spacer()
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Text(station.name)
+                    .font(ws.sans(25, weight: .heavy)).foregroundStyle(ws.text)
+                    .lineLimit(1)
                 ForEach(station.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
+                Spacer(minLength: 0)
             }
+            Text("\(statusLine) · \(WSFmt.upd(Date(), use24h: m.use24h))")
+                .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                .padding(.top, 8)
+            Text(hoursDisplay)
+                .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.faint)
+                .padding(.top, 3)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 22)
+    }
+
+    private func sentenceCase(_ s: String) -> String {
+        let lower = s.lowercased()
+        return lower.prefix(1).uppercased() + lower.dropFirst()
+    }
+
+    private var statusLine: String {
+        status == "NORMAL SERVICE" ? "Normal service" : "Service disrupted"
+    }
+    private var hoursDisplay: String {
+        m.use24h ? "Open daily  ·  05:30 – 00:00" : "Open daily  ·  5:30 AM – 12:00 AM"
     }
 
     // MARK: station crowd (headline + per-platform rows for interchanges)
 
     private var crowdCard: some View {
-        WSCard(title: "Station crowd · now") {
+        WSCard(title: "Station crowd now", glyph: .train) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(crowdNow.wsWord).font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.text)
-                        Text(crowdNow.wsHint).font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
+                        // Sentence case — the card grammar speaks quietly now
+                        // (the shared wsHint strings stay caps for Android/mono
+                        // call sites).
+                        Text(sentenceCase(crowdNow.wsHint))
+                            .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
                     }
                     Spacer()
                     if crowdNow != .unknown { WSLiveBadge() }
@@ -174,32 +197,67 @@ struct WSMrtStationView: View {
     @ViewBuilder private var busCard: some View {
         let near = nearbyStops
         if !near.isEmpty {
-            WSCard(title: "Bus stops at this station") {
+            WSCard(title: "Bus stops at this station", glyph: .busSingle) {
                 VStack(spacing: 0) {
                     ForEach(near.indices, id: \.self) { i in
                         let item = near[i]
-                        Button { push(.busStop(code: item.stop.BusStopCode)) } label: {
+                        Button {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            push(.busStop(code: item.stop.BusStopCode))
+                        } label: {
                             HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 2) {
+                                VStack(alignment: .leading, spacing: 4) {
                                     Text(item.stop.Description)
-                                        .font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
+                                        .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.text)
                                         .lineLimit(1)
-                                    Text("\(item.stop.BusStopCode) · \(fmtDistance(item.distanceM).uppercased())")
-                                        .font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
+                                    Text("\(item.stop.BusStopCode)  ·  \(fmtDistance(item.distanceM))")
+                                        .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
+                                        // Distance updates crossfade only —
+                                        // no slide, no pulse (anim spec).
+                                        .contentTransition(.opacity)
                                 }
                                 Spacer(minLength: 8)
                                 if let s = wsSoonest(store.servicesFor(item.stop.BusStopCode)) {
-                                    let eta = fmtETA(wsLiveETASec(s))
-                                    (Text(eta.big).font(ws.mono(15, weight: .bold)).foregroundStyle(ws.text)
-                                     + Text(eta.big == "Arr" ? "" : " min")
-                                        .font(ws.mono(10)).foregroundStyle(ws.dim))
+                                    let sec = wsLiveETASec(s)
+                                    let minutes = max(1, sec / 60)
+                                    Group {
+                                        if sec < 60 {
+                                            Text("Now").font(ws.sans(17, weight: .heavy))
+                                                .foregroundStyle(ws.text)
+                                        } else {
+                                            (Text("\(minutes)")
+                                                .font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.text)
+                                             + Text(" min")
+                                                .font(ws.sans(11, weight: .semibold)).foregroundStyle(ws.dim))
+                                        }
+                                    }
+                                    .contentTransition(.numericText(countsDown: true))
+                                    // The number needs an animation keyed to
+                                    // its value for numericText to fire —
+                                    // only the digits move, never the row.
+                                    .animation(.snappy(duration: 0.28), value: minutes)
+                                    .animation(.snappy(duration: 0.28), value: sec < 60)
                                 }
-                                WSIcon(glyph: .chevron, size: 15, color: ws.faint)
+                                WSIcon(glyph: .chevron, size: 12, color: ws.faint)
                             }
-                            .padding(.vertical, 11)
+                            .padding(.vertical, 12)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WSCompressStyle())
+                        // Long-press: act on the stop without leaving the
+                        // station screen (anim spec: lift + blur + menu are
+                        // the system's own 250ms spring).
+                        .contextMenu {
+                            Button { toggleStopPin(item.stop.BusStopCode) } label: {
+                                Label(isStopPinned(item.stop.BusStopCode)
+                                          ? "Remove from Saved" : "Save stop",
+                                      systemImage: isStopPinned(item.stop.BusStopCode)
+                                          ? "bookmark.slash" : "bookmark")
+                            }
+                            ShareLink(item: "\(item.stop.Description) — bus stop \(item.stop.BusStopCode)") {
+                                Label("Share stop", systemImage: "square.and.arrow.up")
+                            }
+                        }
                         if i < near.count - 1 { WSRowDivider() }
                     }
                 }
@@ -211,7 +269,7 @@ struct WSMrtStationView: View {
     // MARK: forecast
 
     private var forecastCard: some View {
-        WSCard(title: "Crowd forecast · today") {
+        WSCard(title: "Crowd forecast today", glyph: .clock) {
             VStack(alignment: .leading, spacing: 6) {
                 if forecast.isEmpty {
                     Text(forecastEnded
@@ -240,6 +298,14 @@ struct WSMrtStationView: View {
             }
         }
         .padding(.horizontal, 22)
+    }
+
+    private func isStopPinned(_ code: String) -> Bool {
+        m.pins.contains { $0.code == code }
+    }
+    private func toggleStopPin(_ code: String) {
+        if let i = m.pins.firstIndex(where: { $0.code == code }) { m.pins.remove(at: i) }
+        else { m.pins.append(Pin(code: code, nickname: "")) }
     }
 
     private var busiestNote: String? {

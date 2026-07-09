@@ -33,6 +33,25 @@ extension Load {
         case .lsd: return "Full"
         }
     }
+
+    // Owner spec 2026-07-08 ("Nearby transport" reference): on the departure
+    // rows crowd is a coloured dot + plain words, superseding the
+    // neutral-gauge-only rule for those rows. The dot itself never animates —
+    // only its colour crossfades (200ms).
+    var wsDotColor: Color {
+        switch self {
+        case .sea: return Color(wsHex: "1E9245")   // green
+        case .sda: return Color(wsHex: "E8890C")   // orange
+        case .lsd: return Color(wsHex: "E1251B")   // red
+        }
+    }
+    var wsSeatPhrase: String {
+        switch self {
+        case .sea: return "Seats available"
+        case .sda: return "Standing room"
+        case .lsd: return "Limited standing"
+        }
+    }
 }
 
 // MARK: - Station crowd level

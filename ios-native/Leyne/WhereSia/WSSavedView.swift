@@ -56,8 +56,8 @@ struct WSSavedView: View {
                         editMode = editMode == .active ? .inactive : .active
                     }
                 } label: {
-                    Text(editMode == .active ? "DONE" : "EDIT")
-                        .font(ws.mono(11, weight: .bold)).tracking(0.8)
+                    Text(editMode == .active ? "Done" : "Edit")
+                        .font(ws.sans(13, weight: .bold))
                         .foregroundStyle(ws.text)
                         .padding(.horizontal, 13).padding(.vertical, 7)
                         .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
@@ -143,24 +143,28 @@ struct WSSavedView: View {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     if !pin.nickname.isEmpty {
-                        Text(pin.nickname.uppercased()).font(ws.mono(10)).tracking(1.2).foregroundStyle(ws.dim)
+                        Text(pin.nickname.uppercased())
+                            .font(ws.sans(10.5, weight: .heavy)).tracking(1.2).foregroundStyle(ws.dim)
                             .padding(.bottom, 3)
                     }
                     Text(store.stopName(pin.code)).font(ws.sans(15.5, weight: .bold)).foregroundStyle(ws.text)
                     Text(stopSubline(pin.code))
-                        .font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
+                        .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
                     if !tiles.isEmpty { TileRow(services: tiles).padding(.top, 8) }
                 }
                 Spacer(minLength: 8)
                 if let soonest = wsSoonest(services) {
-                    let eta = fmtETA(wsLiveETASec(soonest))
-                    VStack(alignment: .trailing, spacing: 5) {
-                        (Text(eta.big).font(ws.mono(19, weight: .bold)).foregroundStyle(ws.text)
-                         + Text(eta.big == "Arr" ? "" : " min").font(ws.mono(11, weight: .semibold)).foregroundStyle(ws.dim))
+                    let sec = wsLiveETASec(soonest)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        etaText(sec)
                         HStack(spacing: 6) {
-                            Text("Bus \(soonest.no) ·").font(ws.mono(10)).foregroundStyle(ws.dim)
-                            CrowdGauge(fraction: soonest.load.wsFraction, width: 24)
-                            Text(soonest.load.wsWord).font(ws.mono(10)).foregroundStyle(ws.dim)
+                            Text("Bus \(soonest.no)")
+                                .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
+                            Circle()
+                                .fill(soonest.load.wsDotColor)
+                                .frame(width: 6, height: 6)
+                            Text(soonest.load.wsWord)
+                                .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
                         }
                     }
                 }
@@ -169,11 +173,27 @@ struct WSSavedView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .wsZoomSource(id: wsStopZoomID(pin.code))
+    }
+
+    /// The right-hand ETA in the departure-row grammar: "Now" or "N min".
+    private func etaText(_ sec: Int) -> some View {
+        Group {
+            if sec < 60 {
+                Text("Now").font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.text)
+            } else {
+                (Text("\(max(1, sec / 60))")
+                    .font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.text)
+                 + Text(" min")
+                    .font(ws.sans(11, weight: .semibold)).foregroundStyle(ws.dim))
+            }
+        }
+        .contentTransition(.numericText(countsDown: true))
     }
 
     private func stopSubline(_ code: String) -> String {
         let road = store.roadName(code)
-        return road.isEmpty ? code : "\(code) · \(road.uppercased())"
+        return road.isEmpty ? code : "\(code)  ·  \(road)"
     }
 
     private func savedStationRow(_ st: MrtGeoStation) -> some View {
@@ -181,20 +201,26 @@ struct WSSavedView: View {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(st.name).font(ws.sans(15.5, weight: .bold)).foregroundStyle(ws.text)
-                    Text(wsLineNames(from: st.codes).uppercased())
-                        .font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
+                    Text(wsLineNames(from: st.codes))
+                        .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
                     HStack(spacing: 5) { ForEach(st.codes.prefix(3), id: \.self) { LineBullet(code: $0) } }
                         .padding(.top, 6)
                 }
                 Spacer(minLength: 8)
                 if let crowd = store.wsCrowd(for: st), crowd != .unknown {
-                    WSChip(gauge: crowd.wsFraction, text: crowd.wsWord)
+                    HStack(spacing: 6) {
+                        CrowdGauge(fraction: crowd.wsFraction, width: 22)
+                        Text(crowd.wsWord)
+                            .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
+                    }
                 }
             }
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Zoom source for the station screen (anim spec: matched geometry).
+        .wsZoomSource(id: wsMrtZoomID(st))
     }
 
     private func lineRow(_ fav: FavService) -> some View {
@@ -208,17 +234,19 @@ struct WSSavedView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(svc?.dest ?? "Bus \(fav.no)").font(ws.sans(15.5, weight: .bold)).foregroundStyle(ws.text)
                     Text(fav.stop.map { "at \(store.stopName($0))" } ?? "Anywhere near you")
-                        .font(ws.mono(11)).foregroundStyle(ws.dim)
+                        .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
                 }
                 Spacer()
                 if let svc {
-                    let eta = fmtETA(wsLiveETASec(svc))
-                    VStack(alignment: .trailing, spacing: 5) {
-                        (Text(eta.big).font(ws.mono(17, weight: .bold)).foregroundStyle(ws.text)
-                         + Text(eta.big == "Arr" ? "" : "m").font(ws.mono(10)).foregroundStyle(ws.dim))
-                        HStack(spacing: 5) {
-                            CrowdGauge(fraction: svc.load.wsFraction, width: 24)
-                            Text(svc.load.wsWord).font(ws.mono(10)).foregroundStyle(ws.dim)
+                    let sec = wsLiveETASec(svc)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        etaText(sec)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(svc.load.wsDotColor)
+                                .frame(width: 6, height: 6)
+                            Text(svc.load.wsWord)
+                                .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
                         }
                     }
                 }
@@ -227,6 +255,7 @@ struct WSSavedView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .wsZoomSource(id: fav.stop.map { wsBusZoomID(stopCode: $0, no: fav.no) } ?? "line-\(fav.no)")
     }
 
     // MARK: empty state

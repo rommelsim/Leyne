@@ -1,16 +1,24 @@
-// WhereSia — Home · Nearby (screen 1).
+// WhereSia — Home · Nearby transport (screen 1).
 //
-// Date eyebrow + title, search bar, then one scroll in answer-first order:
-// the CLOSEST STOP hero card (stop name, walk line, live ETA chips — the
-// next five minutes at that stop), a horizontal strip of nearby MRT
-// stations, then the remaining nearby bus stops. Hero chips carry live
-// times ("48 · Now", "93 · 4 min", soonest first) with a width-computed +N
-// overflow; green is reserved for a bus arriving this minute (fully neutral
-// card otherwise) — owner spec 2026-07-07 (home-hero-redesign).
+// Owner spec 2026-07-08 ("Nearby transport" reference + Leyne Animation
+// Specification v1.0): a NEARBY chip + search button top row, "Nearby
+// transport" title, an "Updated just now" freshness line, then three cards —
+// the closest Bus stop (name, walk line, plated departure rows with seat
+// dots and stacked ETAs, "View all buses" in-place expansion), the Nearest
+// MRT (name + line bullets, walk line), and a "Browse nearby transport"
+// door to the map. Motion per the spec: staggered 60ms launch sequence,
+// numeric-only ETA transitions, springing row reorder, 98% tap compress,
+// shimmer skeletons, inline error banner, calm springs throughout — all
+// gated behind Reduce Motion.
 
 import SwiftUI
 import CoreLocation
-import MapKit
+
+// Seat-dot vocabulary lives in WSFormat (Load.wsDotColor / wsSeatPhrase);
+// the row itself is the shared WSDepartureRow, and the 98%/80ms tap compress
+// is WSCompressStyle — all in WSComponents, shared with the Bus stop screen.
+
+// MARK: - Home
 
 struct WSHomeView: View {
     var onSearch: () -> Void
@@ -21,6 +29,12 @@ struct WSHomeView: View {
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Freshness line state: idle ↔ refreshing crossfade (150ms per spec).
+    @State private var refreshing = false
+    /// Inline "Unable to refresh" banner (slides from top, self-dismisses).
+    @State private var showErrorBanner = false
 
     private var coord: CLLocationCoordinate2D? { location.location?.coordinate }
 
@@ -29,33 +43,54 @@ struct WSHomeView: View {
         return MrtGeo.nearestStations(to: c, limit: 4)
     }
 
+    private var busStops: [NearbyStop] {
+        store.nearby.filter { !m.hiddenNearby.contains($0.stopCode) }
+    }
+
     var body: some View {
         let _ = m.tick   // per-second live countdown refresh
-        VStack(spacing: 0) {
-            header
-            searchBar
+        ScrollView {
+            VStack(spacing: 0) {
+                // Launch sequence (spec): header 0ms → bus card 60ms →
+                // MRT card 120ms → browse 180ms. Fade + 12pt rise, ease out.
+                header
+                    .wsEntrance(delay: 0)
 
-            ScrollView {
-                // Minimal, answer-first Home (owner decision 2026-07-07):
-                // ONLY the closest stop, the nearest station, and the map
-                // door. Everything else nearby lives behind the map.
-                LazyVStack(spacing: 0) {
-                    heroSection
-                    nearestMrtSection
-                    mapCard
-                    // One native ad per board — below the door card, so the
-                    // minimal screen keeps its Home impression. Renders
-                    // nothing until a creative loads.
-                    NativeAdCard()
-                        .padding(.horizontal, 22)
-                        .padding(.top, 14)
-                    emptyStateOrFooter
-                    Color.clear.frame(height: 24)
+                if let closest = busStops.first {
+                    BusStopCard(stop: closest)
+                        .padding(.horizontal, 22).padding(.top, 18)
+                        .wsEntrance(delay: 0.06)
+                } else {
+                    loadingOrEmpty
+                        .padding(.horizontal, 22).padding(.top, 18)
+                        .wsEntrance(delay: 0.06)
                 }
+
+                if let item = nearbyStations.first {
+                    NearestMrtCard(station: item.station, distanceM: item.distanceM,
+                                   walkMin: item.walkMin)
+                        .padding(.horizontal, 22).padding(.top, 14)
+                        .wsEntrance(delay: 0.12)
+                }
+
+                browseCard
+                    .padding(.horizontal, 22).padding(.top, 14)
+                    .wsEntrance(delay: 0.18)
+
+                // One native ad per board — below the door card (placement
+                // per ads-reenabled-2026-07; renders nothing until a
+                // creative loads).
+                NativeAdCard()
+                    .padding(.horizontal, 22)
+                    .padding(.top, 14)
+
+                hiddenFooter
+                Color.clear.frame(height: 24)
             }
-            .wsEntrance()
         }
+        .refreshable { await refresh() }
         .background(ws.bg)
+        .overlay(alignment: .top) { if showErrorBanner { errorBanner } }
         .onAppear(perform: bootstrap)
         .onChange(of: location.location) { _, loc in
             if let loc { store.updateNearby(loc); store.prefetchNearbyArrivals() }
@@ -67,8 +102,6 @@ struct WSHomeView: View {
         .onChange(of: m.tick) { _, _ in store.prefetchNearbyArrivals() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                // A launch-time bootstrap failure shouldn't outlive a trip
-                // to the background — retry quietly on return.
                 if case .error = store.referenceState {
                     Task { await store.bootstrap() }
                 }
@@ -79,16 +112,13 @@ struct WSHomeView: View {
     }
 
     private func bootstrap() {
-        // Returning to Home after a failed launch bootstrap retries it.
         if case .error = store.referenceState {
             Task { await store.bootstrap() }
         }
         location.start()
         // Home renders UNDERNEATH the onboarding overlay (RootView ZStack), so
-        // its onAppear runs on first launch too — requesting here fired the
-        // system location dialog over the WELCOME step, before the primer
-        // (owner-reported; also an App Store 5.1.1(iv) risk). During
-        // onboarding, the location primer owns the request.
+        // its onAppear runs on first launch too — during onboarding, the
+        // location primer owns the permission request (App Store 5.1.1(iv)).
         if location.status == .notDetermined && !m.showOnboarding {
             location.requestPermission()
         }
@@ -98,143 +128,148 @@ struct WSHomeView: View {
         store.wsWarmCrowd(for: nearbyStations.map(\.station))
     }
 
+    /// Pull-to-refresh: freshness line crossfades to "Refreshing…", each
+    /// changed ETA animates independently (numericText on the rows — the
+    /// card itself is never rebuilt), then back to "Updated just now".
+    private func refresh() async {
+        withAnimation(.easeInOut(duration: 0.15)) { refreshing = true }
+        let before = store.newestRefresh(amongst: busStops.map(\.stopCode))
+        for stop in busStops.prefix(3) {
+            await store.refreshArrivals(stop: stop.stopCode)
+        }
+        store.wsWarmCrowd(for: nearbyStations.map(\.station))
+        let after = store.newestRefresh(amongst: busStops.map(\.stopCode))
+        withAnimation(.easeInOut(duration: 0.15)) { refreshing = false }
+        if !busStops.isEmpty && after == before {
+            // Nothing landed — surface the inline banner (spec: no popups).
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showErrorBanner = true
+            }
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation(.easeOut(duration: 0.25)) { showErrorBanner = false }
+        } else {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
+    }
+
     // MARK: header
 
-    /// Departure-board eyebrow: the live date, not a brand lockup — the brand
-    /// lives on the app icon; this line earns its place by being useful.
-    private static let dateEyebrow: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_SG")
-        f.dateFormat = "EEEE · d MMM"
-        return f
-    }()
-
     private var header: some View {
+        // No headline at all (owner 2026-07-08): the cards' own "Nearest bus
+        // stop" / "Nearest MRT" eyebrows carry the message, so the top row is
+        // just the quiet freshness line and the search button — content
+        // starts immediately.
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(Self.dateEyebrow.string(from: Date()).uppercased())
-                    .font(ws.sans(11, weight: .heavy)).tracking(1.4).foregroundStyle(ws.dim)
-                Text("Departures").font(ws.sans(26, weight: .heavy)).foregroundStyle(ws.text)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // Map — browse every stop and station around you (iOS-only feature).
-            Button { push(.map) } label: {
-                WSIcon(glyph: .map, size: 18)
+            freshnessLine
+            Button(action: onSearch) {
+                WSIcon(glyph: .search, size: 17, color: ws.text)
                     .frame(width: 44, height: 44)
                     .background(Circle().fill(ws.panel))
-                    .overlay(Circle().stroke(ws.rule, lineWidth: 1))
                     .contentShape(Circle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Nearby map")
+            .buttonStyle(WSCompressStyle())
+            .accessibilityLabel("Search")
         }
         .padding(.horizontal, 22).padding(.top, 10)
     }
 
-    private var searchBar: some View {
-        Button(action: onSearch) {
-            HStack(spacing: 11) {
-                WSIcon(glyph: .search, size: 19, color: ws.dim)
-                Text("Stop, bus, MRT or postal code")
-                    .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.dim)
-                Spacer()
-            }
-            .padding(.horizontal, 15).frame(height: 50)
-            .background(ws.input)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(ws.rule, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+    /// "Updated just now" ↔ "Refreshing…" — a 150ms crossfade, with the
+    /// refresh glyph rotating while a fetch is in flight.
+    private var freshnessLine: some View {
+        HStack(spacing: 8) {
+            WSIcon(glyph: .refresh, size: 13, weight: .regular, color: ws.dim)
+                .rotationEffect(.degrees(refreshing && !reduceMotion ? 180 : 0))
+                .animation(refreshing ? .easeInOut(duration: 0.6).repeatForever(autoreverses: false)
+                                      : .easeOut(duration: 0.25),
+                           value: refreshing)
+            Text(refreshing ? "Refreshing…" : updatedText)
+                .font(ws.sans(14, weight: .medium)).foregroundStyle(ws.dim)
+                .contentTransition(.opacity)
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 22).padding(.top, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.15), value: refreshing)
     }
 
-    // MARK: list content
-
-    /// The answer card: the closest stop with live ETA chips. First thing
-    /// under search because it's the reason the app was opened.
-    @ViewBuilder private var heroSection: some View {
-        if let closest = busStops.first {
-            ClosestStopCard(stop: closest)
-                .padding(.horizontal, 22).padding(.top, 20)
+    private var updatedText: String {
+        guard let d = store.newestRefresh(amongst: busStops.map(\.stopCode)) else {
+            return "Updated —"
         }
+        return Date().timeIntervalSince(d) < 60
+            ? "Updated just now"
+            : WSFmt.upd(d, use24h: m.use24h)
     }
 
-    /// The nearest station only, promoted to a full-width card — Home's
-    /// second answer ("how's the train"). The other stations live on the map.
-    @ViewBuilder private var nearestMrtSection: some View {
-        if let item = nearbyStations.first {
-            MrtCard(station: item.station, distanceM: item.distanceM,
-                    walkMin: item.walkMin, fullWidth: true)
-                .padding(.horizontal, 22).padding(.top, 14)
-        }
-    }
+    // MARK: browse door
 
-    /// The door to everything else nearby: a live map preview around the
-    /// user, captioned — a preview self-explains in a way an icon never did
-    /// (the old ghost-circle map button read as decoration).
-    private var mapCard: some View {
-        Button { push(.map) } label: {
-            ZStack(alignment: .bottomLeading) {
-                if let coord {
-                    Map(initialPosition: .region(MKCoordinateRegion(
-                            center: coord,
-                            span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006))),
-                        interactionModes: [])
-                        .mapStyle(.standard(pointsOfInterest: .excludingAll))
-                        .allowsHitTesting(false)
-                } else {
-                    ws.panel2
-                    WSIcon(glyph: .map, size: 26, color: ws.faint)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private var browseCard: some View {
+        Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            push(.map)
+        } label: {
+            HStack(spacing: 14) {
+                WSIcon(glyph: .pin, size: 18, weight: .medium, color: ws.text)
+                    .frame(width: 46, height: 46)
+                    .background(Circle().fill(ws.bg == Color(wsHex: "FFFFFF") ? .white : ws.panel2))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Browse nearby transport")
+                        .font(ws.sans(15, weight: .bold)).foregroundStyle(ws.text)
+                    Text(browseCounts)
+                        .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
                 }
-                HStack(spacing: 8) {
-                    WSIcon(glyph: .map, size: 14, color: ws.text)
-                    Text("All stops & stations")
-                        .font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.text)
-                    Spacer(minLength: 0)
-                    WSIcon(glyph: .chevron, size: 12, color: ws.dim)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(.thinMaterial)
+                Spacer(minLength: 8)
+                WSIcon(glyph: .chevron, size: 13, color: ws.dim)
             }
-            .frame(height: 148)
-            .frame(maxWidth: .infinity)
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(ws.rule, lineWidth: 1))
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ws.panel)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .contentShape(Rectangle())
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 22).padding(.top, 14)
-        .accessibilityLabel("Map — all stops and stations nearby")
+        .buttonStyle(WSCompressStyle())
+        .wsZoomSource(id: wsMapZoomID)
+        .accessibilityLabel("Browse nearby transport — all stops and stations on the map")
     }
 
-    private var busStops: [NearbyStop] {
-        store.nearby.filter { !m.hiddenNearby.contains($0.stopCode) }
+    private var browseCounts: String {
+        let b = busStops.count, s = nearbyStations.count
+        var parts: [String] = []
+        if b > 0 { parts.append("\(b) bus \(b == 1 ? "stop" : "stops")") }
+        if s > 0 { parts.append("\(s) MRT \(s == 1 ? "station" : "stations")") }
+        return parts.isEmpty ? "All stops & stations" : parts.joined(separator: "  ·  ")
     }
 
-    /// Empty-state hints (Home still owns "nothing nearby") plus the way back
-    /// from the long-press "Hide from Nearby" action.
-    @ViewBuilder private var emptyStateOrFooter: some View {
-        if busStops.isEmpty {
-            if coord == nil {
-                emptyHint("Turn on location to see stops near you.")
-            } else if case .error = store.referenceState {
-                // The stop directory failed to load (LTA flake) — the old
-                // copy claimed we were still "finding" forever. Stay quiet,
-                // be accurate, offer the way back. Foreground/appear also
-                // auto-retry, so the tap is a shortcut, not a chore.
-                Button {
-                    Task { await store.bootstrap() }
-                } label: {
-                    emptyHint("Stops aren’t loading right now — tap to retry.")
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            } else {
-                emptyHint("Finding stops near you…")
+    // MARK: loading / empty / hidden
+
+    @ViewBuilder private var loadingOrEmpty: some View {
+        if coord == nil && location.status != .notDetermined {
+            emptyState("Turn on location to see transport near you.")
+        } else if case .error = store.referenceState {
+            Button { Task { await store.bootstrap() } } label: {
+                emptyState("Stops aren’t loading right now — tap to retry.")
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+        } else {
+            WSSkeletonCard()
         }
+    }
+
+    private func emptyState(_ text: String) -> some View {
+        VStack(spacing: 10) {
+            WSIcon(glyph: .busSingle, size: 26, color: ws.faint)
+            Text(text)
+                .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
+        .background(ws.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .transition(.opacity.animation(.easeOut(duration: 0.25)))
+    }
+
+    @ViewBuilder private var hiddenFooter: some View {
         let hiddenHere = store.nearby.filter { m.hiddenNearby.contains($0.stopCode) }.count
         if hiddenHere > 0 {
             Button {
@@ -251,36 +286,47 @@ struct WSHomeView: View {
         }
     }
 
-    private func emptyHint(_ text: String) -> some View {
-        Text(text)
-            .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 22).padding(.vertical, 18)
+    // MARK: error banner (spec: inline, slides from top, self-dismisses)
+
+    private var errorBanner: some View {
+        HStack(spacing: 10) {
+            Text("Unable to refresh")
+                .font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.text)
+            Spacer(minLength: 8)
+            Button("Retry") { Task { await refresh() } }
+                .font(ws.sans(13, weight: .bold))
+                .foregroundStyle(ws.accentSoft)
+                .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16).frame(height: 44)
+        .background(ws.panel2)
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
+        .padding(.horizontal, 22).padding(.top, 6)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
 
-// MARK: - Closest stop hero card
+// MARK: - Bus stop card
 //
-// Describes the next five minutes at the closest stop, not the stop itself:
-// big name, a whisper-quiet walk line (no stop code / road — that's detail-
-// screen material), then live ETA chips sorted soonest-first. Chips deep-link
-// to their bus; the card itself opens the stop. Green ("Now") exists only
-// while a bus is genuinely arriving — at rest the card is fully neutral.
+// The reference card: "Bus stop" eyebrow row, stop name, walk line, then the
+// departure rows — plate, destination + seat dot, stacked ETAs, chevron. The
+// arriving bus gets a solid green plate and a green edge tick. "View all
+// buses" expands the card downward with a 25ms stagger (no navigation push).
 
-private struct ClosestStopCard: View {
+private struct BusStopCard: View {
     let stop: NearbyStop
     @Environment(AppModel.self) private var m: AppModel
     @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Drives the slow border/glow breath while something is arriving.
-    @State private var breathe = false
+    @State private var expanded = false
 
-    /// Live services soonest-first, so any truncation hides only the least
-    /// urgent buses — the one you're running for is never behind the +N.
-    /// Ties break on service number so equal ETAs don't trade places on
-    /// every refresh tick (Swift's sort is not guaranteed stable).
+    private static let collapsedCap = 3
+
+    /// Soonest-first; ties break on service number so equal ETAs never trade
+    /// places between ticks (Swift's sort is not guaranteed stable).
     private var services: [Service] {
         store.servicesFor(stop.stopCode).sorted {
             let (a, b) = (wsLiveETASec($0), wsLiveETASec($1))
@@ -288,46 +334,98 @@ private struct ClosestStopCard: View {
                           : a < b
         }
     }
-    private var anyArriving: Bool {
-        services.first.map { wsLiveETASec($0) < 60 } ?? false
-    }
 
     var body: some View {
-        // Child views track their own observation — the per-second countdown
-        // needs this view to read `tick` itself (same note as StopRow).
         let _ = m.tick
-        let arriving = anyArriving
-        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        let visible = expanded ? services : Array(services.prefix(Self.collapsedCap))
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text("CLOSEST STOP").font(ws.mono(10)).tracking(1.2).foregroundStyle(ws.dim)
-                Spacer(minLength: 8)
-                // Freshness whisper — the LIVE/Updated section header left
-                // Home with the stop list, and the hero is the only live
-                // thing on the screen now.
-                Text(WSFmt.upd(store.newestRefresh(amongst: [stop.stopCode]), use24h: m.use24h))
-                    .font(ws.mono(10)).tracking(0.4).foregroundStyle(ws.faint)
+            // Eyebrow row — the card's type, and the way into the stop.
+            Button {
+                UISelectionFeedbackGenerator().selectionChanged()
+                push(.busStop(code: stop.stopCode))
+            } label: {
+                HStack(spacing: 9) {
+                    WSIcon(glyph: .busSingle, size: 15, weight: .medium, color: ws.dim)
+                    Text("Nearest bus stop")
+                        .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
+                    Spacer(minLength: 8)
+                    WSIcon(glyph: .chevron, size: 12, color: ws.faint)
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(stop.stopName)")
+
             Text(stop.stopName)
-                .font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
-                .padding(.top, 7)
-            Text(walkLine)
-                .font(ws.mono(11.5, weight: .medium)).tracking(0.3).foregroundStyle(ws.dim)
-                .padding(.top, 5)
-            chipArea.padding(.top, 14)
+                .font(ws.sans(25, weight: .heavy)).foregroundStyle(ws.text)
+                .padding(.top, 12)
+
+            walkLine(distanceM: stop.distanceM)
+                .padding(.top, 10)
+
+            WSRowDivider().padding(.top, 16)
+
+            if services.isEmpty {
+                // Still fetching (or service ended) — shimmer rows, never a
+                // spinner (spec), never an empty card.
+                VStack(spacing: 14) {
+                    ForEach(0..<3, id: \.self) { _ in WSSkeletonRow() }
+                }
+                .padding(.vertical, 14)
+            } else {
+                // Row reorder (bus arrived → next becomes first) springs
+                // naturally: ForEach keyed by service number, spring scoped
+                // to the visible order.
+                VStack(spacing: 0) {
+                    ForEach(Array(visible.enumerated()), id: \.element.no) { index, svc in
+                        if index > 0 { WSRowDivider() }
+                        WSDepartureRow(service: svc, stopCode: stop.stopCode)
+                            .transition(reduceMotion
+                                ? .opacity
+                                : .asymmetric(
+                                    insertion: .opacity.combined(with: .offset(y: 8))
+                                        .animation(.easeOut(duration: 0.22)
+                                            .delay(Double(max(0, index - Self.collapsedCap)) * 0.025)),
+                                    removal: .opacity.combined(with: .offset(y: -8))))
+                    }
+                }
+                .animation(reduceMotion ? .easeInOut(duration: 0.2)
+                                        : .spring(response: 0.35, dampingFraction: 0.85),
+                           value: visible.map(\.no))
+
+                if services.count > Self.collapsedCap {
+                    WSRowDivider()
+                    Button {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(reduceMotion ? .easeInOut(duration: 0.2)
+                                                   : .snappy(duration: 0.3)) {
+                            expanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Spacer(minLength: 0)
+                            Text(expanded ? "Show fewer buses"
+                                          : "View all buses at this stop")
+                                .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
+                            WSIcon(glyph: expanded ? .chevronDown : .chevron, size: 12,
+                                   color: ws.faint)
+                        }
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(expanded ? "Show fewer buses"
+                                                 : "View all \(services.count) buses at this stop")
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
+        .padding(.horizontal, 18).padding(.vertical, 18)
         .background(ws.panel)
-        .overlay(shape.stroke(arriving ? ws.now.opacity(breathe ? 0.8 : 0.45) : ws.rule,
-                              lineWidth: arriving ? 1.5 : 1))
-        .clipShape(shape)
-        // Dark theme reads this as an edge glow; light theme as a soft green
-        // ambient shadow — same meaning, different physics.
-        .shadow(color: arriving ? ws.now.opacity(breathe ? 0.30 : 0.14) : .clear, radius: 16)
-        .contentShape(shape)
-        .onTapGesture { push(.busStop(code: stop.stopCode)) }
-        .contentShape(.contextMenuPreview, shape)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        // The card is the zoom source for the stop screen it opens (anim
+        // spec: matched geometry — same treatment as the MRT card).
+        .wsZoomSource(id: wsStopZoomID(stop.stopCode))
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 22, style: .continuous))
         .contextMenu {
             Button(action: togglePin) {
                 Label(isPinned ? "Remove from Saved" : "Save stop",
@@ -339,84 +437,18 @@ private struct ClosestStopCard: View {
                 Label("Hide from Nearby", systemImage: "eye.slash")
             }
         }
-        .onChange(of: arriving, initial: true) { _, isOn in
-            if isOn && !reduceMotion {
-                withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
-                    breathe = true
-                }
-            } else {
-                withAnimation(.easeOut(duration: 0.4)) { breathe = false }
-            }
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(a11y)
     }
 
-    // MARK: board
-
-    /// Rows on the board before the "+N more" footer. The Departures screen
-    /// has the vertical room now (the stop list left Home), so the hero
-    /// spends it on a real mini departure board: per-service rows with
-    /// destination, crowd, the next arrival AND the one after it.
-    private static let boardCap = 4
-
-    @ViewBuilder private var chipArea: some View {
-        if services.isEmpty {
-            // No live arrivals yet (still fetching, or service ended) — fall
-            // back to the plain route tiles so the card never sits empty.
-            let tiles = routeTiles
-            if !tiles.isEmpty { TileRow(services: tiles) }
-        } else {
-            VStack(spacing: 0) {
-                ForEach(Array(services.prefix(Self.boardCap).enumerated()),
-                        id: \.element.no) { index, svc in
-                    if index > 0 { WSRowDivider() }
-                    BoardRow(service: svc, stopCode: stop.stopCode)
-                }
-                if services.count > Self.boardCap {
-                    WSRowDivider()
-                    Button { push(.busStop(code: stop.stopCode)) } label: {
-                        HStack(spacing: 8) {
-                            Text("+\(services.count - Self.boardCap) MORE \(services.count - Self.boardCap == 1 ? "SERVICE" : "SERVICES")")
-                                .font(ws.mono(10, weight: .medium)).tracking(1.0)
-                                .foregroundStyle(ws.dim)
-                            Spacer(minLength: 0)
-                            WSIcon(glyph: .chevron, size: 11, color: ws.faint)
-                        }
-                        .padding(.vertical, 11)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(services.count - Self.boardCap) more services — open stop")
-                }
-            }
-        }
-    }
-
-    // MARK: derived
-
-    private var routeTiles: [String] {
-        let fromRoutes = store.servicesAtStop(stop.stopCode)
-        return fromRoutes.isEmpty ? store.servicesFor(stop.stopCode).map(\.no) : fromRoutes
-    }
-
-    /// "1 MIN WALK · 40M" — walk time first (how humans think), raw distance
-    /// as the whisper after. ~80 m/min, matching the MRT cards' pacing.
-    private var walkLine: String {
-        guard stop.distanceM > 0 else { return "" }
-        let walkMin = max(1, Int((Double(stop.distanceM) / 80).rounded()))
-        return "\(walkMin) MIN WALK · \(fmtDistance(stop.distanceM).uppercased())"
-    }
-
     private var isPinned: Bool { m.pins.contains { $0.code == stop.stopCode } }
-
     private func togglePin() {
         if let i = m.pins.firstIndex(where: { $0.code == stop.stopCode }) { m.pins.remove(at: i) }
         else { m.pins.append(Pin(code: stop.stopCode, nickname: "")) }
     }
 
     private var a11y: String {
-        var parts = ["Closest stop, \(stop.stopName)"]
+        var parts = ["Closest bus stop, \(stop.stopName)"]
         if stop.distanceM > 0 {
             parts.append("\(max(1, Int((Double(stop.distanceM) / 80).rounded()))) minute walk")
         }
@@ -429,151 +461,85 @@ private struct ClosestStopCard: View {
     }
 }
 
-/// One board row: service number (green while inside the arrival window),
-/// destination + crowd in the middle, the next arrival AND the one after it
-/// on the right ("Now / then 12 min"). Minute digits roll like an odometer;
-/// promotion to Now springs the number's tint. Tapping deep-links to the bus.
-private struct BoardRow: View {
-    let service: Service
-    let stopCode: String
-    @Environment(AppModel.self) private var m: AppModel
+/// "🚶 1 min walk · 39 m" — shared by both cards so the two stops always
+/// speak the same format. Walking-distance changes crossfade only (spec).
+private struct WalkLine: View {
+    let distanceM: Int
     @Environment(\.ws) private var ws
-    @Environment(\.wsPush) private var push
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
-        let _ = m.tick
-        let sec = wsLiveETASec(service)
-        let now = sec < 60
-        let minutes = max(1, sec / 60)
-        let followMin = liveFollowingMin()
-        Button { push(.trackBus(stopCode: stopCode, no: service.no)) } label: {
-            HStack(spacing: 12) {
-                Text(service.no)
-                    .font(ws.mono(17, weight: .bold))
-                    .foregroundStyle(now ? ws.now : ws.text)
-                    .frame(minWidth: 46, alignment: .leading)
-                VStack(alignment: .leading, spacing: 3) {
-                    if !service.dest.isEmpty {
-                        Text("to \(service.dest)")
-                            .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
-                            .lineLimit(1)
-                    }
-                    HStack(spacing: 5) {
-                        CrowdGauge(fraction: service.load.wsFraction, width: 22)
-                        Text(service.load.wsWord).font(ws.mono(9.5)).foregroundStyle(ws.dim)
-                    }
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Group {
-                        if now {
-                            Text("Now").font(ws.mono(15, weight: .bold)).foregroundStyle(ws.now)
-                        } else {
-                            (Text("\(minutes)").font(ws.mono(15, weight: .bold)).foregroundStyle(ws.text)
-                             + Text(" min").font(ws.mono(10)).foregroundStyle(ws.dim))
-                        }
-                    }
-                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
-                    if let followMin {
-                        Text("then \(followMin) min")
-                            .font(ws.mono(9.5)).foregroundStyle(ws.faint)
-                    }
-                }
-            }
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+        HStack(spacing: 8) {
+            WSIcon(glyph: .walk, size: 13, weight: .medium, color: ws.dim)
+            Text(text)
+                .font(ws.sans(13.5, weight: .medium)).foregroundStyle(ws.dim)
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: text)
         }
-        .buttonStyle(.plain)
-        // Promotion to "Now" springs the tint change; the countdown roll rides
-        // the same value-scoped animations (numericText needs one to animate).
-        .animation(reduceMotion ? .easeInOut(duration: 0.2)
-                                : .spring(response: 0.4, dampingFraction: 0.75), value: now)
-        .animation(.snappy(duration: 0.3), value: minutes)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11y(now: now, minutes: minutes, followMin: followMin))
     }
-
-    /// Live minutes to the bus after next, recomputed from the absolute
-    /// timestamp so it ticks with the board. nil when LTA has no second bus.
-    private func liveFollowingMin() -> Int? {
-        let sec: Int
-        if let d = service.followingDate {
-            sec = max(0, Int(d.timeIntervalSince(Date())))
-        } else if service.followingSec > 0 {
-            sec = service.followingSec
-        } else {
-            return nil
-        }
-        return max(1, sec / 60)
-    }
-
-    private func a11y(now: Bool, minutes: Int, followMin: Int?) -> String {
-        var parts = [now ? "Bus \(service.no), arriving now"
-                         : "Bus \(service.no), \(minutes) minutes"]
-        if !service.dest.isEmpty { parts.append("to \(service.dest)") }
-        parts.append(service.load.wsWord)
-        if let followMin { parts.append("then \(followMin) minutes") }
-        return parts.joined(separator: ", ")
+    private var text: String {
+        guard distanceM > 0 else { return "Nearby" }
+        let walkMin = max(1, Int((Double(distanceM) / 80).rounded()))
+        return "\(walkMin) min walk  ·  \(fmtDistance(distanceM))"
     }
 }
 
-// MARK: - MRT station card (nearest station, full width on Home)
+private func walkLine(distanceM: Int) -> WalkLine { WalkLine(distanceM: distanceM) }
 
-private struct MrtCard: View {
+// MARK: - Nearest MRT card
+
+private struct NearestMrtCard: View {
     let station: MrtGeoStation
     let distanceM: Int
     let walkMin: Int
-    /// Home's promoted nearest-station card spans the gutter; the compact
-    /// 186 pt form remains for horizontal strips (e.g. the map's callouts).
-    var fullWidth: Bool = false
     @Environment(AppModel.self) private var m: AppModel
     @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
 
     var body: some View {
-        Button { push(.mrtStation(station)) } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 5) {
-                    // Two bullets max in the fixed-width card — three plus the
-                    // crowd chip can't fit 186pt (the full set lives on the
-                    // station screen). Full width fits them all. Bullets are
-                    // fixedSize, so an overflow would draw past the card
-                    // instead of wrapping.
-                    ForEach(fullWidth ? station.codes : Array(station.codes.prefix(2)),
-                            id: \.self) { LineBullet(code: $0) }
-                    Spacer(minLength: 0)
+        Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            push(.mrtStation(station))
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    WSIcon(glyph: .train, size: 15, weight: .medium, color: ws.dim)
+                    Text("Nearest MRT")
+                        .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
+                    Spacer(minLength: 8)
+                    WSIcon(glyph: .chevron, size: 12, color: ws.faint)
+                }
+                HStack(spacing: 10) {
+                    Text(station.name)
+                        .font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
+                        .lineLimit(1)
+                    ForEach(station.codes, id: \.self) { LineBullet(code: $0) }
                     if let crowd = store.wsCrowd(for: station), crowd != .unknown {
-                        CrowdGauge(fraction: crowd.wsFraction, width: 22)
-                        Text(crowd.wsWord).font(ws.mono(10, weight: .bold)).foregroundStyle(ws.dim)
-                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        HStack(spacing: 6) {
+                            CrowdGauge(fraction: crowd.wsFraction, width: 22)
+                            Text(crowd.wsWord)
+                                .font(ws.mono(10, weight: .bold)).foregroundStyle(ws.dim)
+                                .lineLimit(1)
+                        }
                     }
                 }
-                Text(station.name)
-                    .font(ws.sans(15, weight: .bold)).foregroundStyle(ws.text)
-                    .lineLimit(1)
-                Text(subline).font(ws.mono(10.5)).tracking(0.3).foregroundStyle(ws.dim)
-                    .lineLimit(1)
-                // Full-width card has the room for the plain-language crowd
-                // hint ("PLENTY OF ROOM") — the gauge says how much, this
-                // says what it means.
-                if fullWidth, let crowd = store.wsCrowd(for: station), crowd != .unknown {
-                    Text(crowd.wsHint)
-                        .font(ws.mono(9.5)).tracking(0.6).foregroundStyle(ws.faint)
-                        .lineLimit(1)
-                }
+                .padding(.top, 12)
+                WSRowDivider().padding(.top, 14)
+                walkLine(distanceM: distanceM)
+                    .padding(.top, 13)
             }
-            .padding(fullWidth ? 16 : 14)
-            .frame(width: fullWidth ? nil : 186, alignment: .leading)
-            .frame(maxWidth: fullWidth ? .infinity : nil, alignment: .leading)
+            .padding(.horizontal, 18).padding(.vertical, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(ws.panel)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(ws.rule, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .contentShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .buttonStyle(WSCompressStyle())
+        // The card is the zoom source for the station screen it opens —
+        // tapping it expands the card into the detail (anim spec: matched
+        // geometry, "feels connected").
+        .wsZoomSource(id: wsMrtZoomID(station))
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 22, style: .continuous))
         .contextMenu {
             Button { m.toggleMrtSaved(station) } label: {
                 Label(m.isMrtSaved(station) ? "Remove from Saved" : "Save station",
@@ -583,15 +549,8 @@ private struct MrtCard: View {
         .accessibilityLabel(a11y)
     }
 
-    private var subline: String {
-        // Walk time leads (the human unit), raw distance follows — the same
-        // order as the hero card's walk line.
-        distanceM > 0 ? "\(walkMin) min walk · \(fmtDistance(distanceM))".uppercased()
-                      : wsLineNames(from: station.codes).uppercased()
-    }
-
     private var a11y: String {
-        var parts = ["\(station.name) MRT", wsLineNames(from: station.codes)]
+        var parts = ["Nearest MRT, \(station.name)", wsLineNames(from: station.codes)]
         if distanceM > 0 { parts.append("\(walkMin) minute walk") }
         if let crowd = store.wsCrowd(for: station), crowd != .unknown {
             parts.append("crowd \(crowd.wsWord)")

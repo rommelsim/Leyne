@@ -286,14 +286,17 @@ struct WSLiveBadge: View {
     @State private var on = false
     var body: some View {
         HStack(spacing: 5) {
+            // Anim spec: slow, subtle — a 2.5s breath (scale 1.0→1.08,
+            // opacity 70→100%), transforms only. The word never moves.
             Circle().fill(ws.accentSoft).frame(width: 6, height: 6)
-                .opacity(on || reduceMotion ? 1 : 0.3)
+                .scaleEffect(on ? 1.08 : 1.0)
+                .opacity(on || reduceMotion ? 1 : 0.7)
             Text("LIVE").font(ws.mono(9.5, weight: .bold)).tracking(1.1)
                 .foregroundStyle(ws.accentSoft)
         }
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { on = true }
+            withAnimation(.easeInOut(duration: 1.25).repeatForever(autoreverses: true)) { on = true }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Live data")
@@ -331,25 +334,174 @@ struct WSSectionHeader: View {
 
 struct WSCard<Content: View>: View {
     var title: String? = nil
+    /// Optional eyebrow glyph shown before the title (owner spec 2026-07-08 —
+    /// the "Nearest bus stop" / "Nearest MRT" card grammar from Home).
+    var glyph: WSGlyph? = nil
     @ViewBuilder var content: Content
     @Environment(\.ws) private var ws
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let title {
-                Text(title.uppercased())
-                    .font(ws.sans(11, weight: .heavy))
-                    .tracking(1.2)
-                    .foregroundStyle(ws.dim)
-                    .padding(.top, 12).padding(.bottom, 4)
+                HStack(spacing: 9) {
+                    if let glyph {
+                        WSIcon(glyph: glyph, size: 15, weight: .medium, color: ws.dim)
+                    }
+                    Text(title)
+                        .font(ws.sans(14, weight: .semibold))
+                        .foregroundStyle(ws.dim)
+                }
+                .padding(.top, 16).padding(.bottom, 4)
             }
             content
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ws.panel)
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(ws.rule, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+// MARK: - Tap compress (anim spec: 98% for 80ms, no ripple, no highlight)
+
+struct WSCompressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Departure row (the one bus-row grammar, Home + Bus stop screens)
+
+/// One departure: plate (solid green + white + a green edge tick while
+/// arriving), destination + coloured seat dot, the next arrivals stacked on
+/// the right, chevron. Anim spec: only the number animates (numericText);
+/// the dot's colour crossfades 200ms; tap compresses 98%/80ms and navigates
+/// immediately. `showsVehicleIcons` adds the double-deck / wheelchair glyphs
+/// (Bus stop screen); `extraFollowMin` appends a third arrival when known.
+struct WSDepartureRow: View {
+    let service: Service
+    let stopCode: String
+    var showsVehicleIcons: Bool = false
+    @Environment(AppModel.self) private var m: AppModel
+    @Environment(\.ws) private var ws
+    @Environment(\.wsPush) private var push
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let _ = m.tick
+        let sec = wsLiveETASec(service)
+        let now = sec < 60
+        let minutes = max(1, sec / 60)
+        let followMin = Self.liveMin(service.followingDate, fallbackSec: service.followingSec)
+        let sched = !service.monitored
+        Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            push(.trackBus(stopCode: stopCode, no: service.no))
+        } label: {
+            HStack(spacing: 13) {
+                Text(service.no)
+                    .font(ws.mono(service.no.count > 3 ? 16 : 19, weight: .bold))
+                    .foregroundStyle(now ? .white : ws.text)
+                    .frame(width: 62, height: 46)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(now ? ws.now : ws.panel2))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(service.dest.isEmpty ? "Bus \(service.no)" : service.dest)
+                        .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.text)
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(service.load.wsDotColor)
+                            .frame(width: 7, height: 7)
+                            .animation(.easeInOut(duration: 0.2), value: service.load)
+                        Text(service.load.wsSeatPhrase)
+                            .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
+                            .lineLimit(1).allowsTightening(true)
+                        if showsVehicleIcons {
+                            if service.deck == .DD { WSIcon(glyph: .busDouble, size: 13, color: ws.faint) }
+                            else if service.deck == .BD { WSIcon(glyph: .busBendy, size: 13, color: ws.faint) }
+                            if service.wab { WSIcon(glyph: .wheelchair, size: 13, color: ws.faint) }
+                        }
+                    }
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Group {
+                        if now {
+                            Text("Now")
+                                .font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.text)
+                        } else {
+                            // Scheduled-only ETA carries the whisper "~" —
+                            // never a banner (feedback_timely_over_honest).
+                            (Text(sched ? "~" : "")
+                                .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.dim)
+                             + Text("\(minutes)").font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.text)
+                             + Text(" min").font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim))
+                        }
+                    }
+                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
+                    if let followMin {
+                        Text(followText(followMin))
+                            .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
+                            .contentTransition(reduceMotion ? .opacity
+                                                            : .numericText(countsDown: true))
+                    }
+                }
+                WSIcon(glyph: .chevron, size: 12, color: ws.faint)
+            }
+            .padding(.vertical, 13)
+            .overlay(alignment: .leading) {
+                if now {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(ws.now)
+                        .frame(width: 3, height: 46)
+                        .offset(x: -12)
+                        .transition(.opacity)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(WSCompressStyle())
+        .animation(reduceMotion ? .easeInOut(duration: 0.2)
+                                : .spring(response: 0.35, dampingFraction: 0.85), value: now)
+        .animation(.snappy(duration: 0.28), value: minutes)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11y(now: now, minutes: minutes, followMin: followMin, sched: sched))
+    }
+
+    /// "12 min" — with the third bus appended when LTA knows it ("12 · 24 min").
+    private func followText(_ followMin: Int) -> String {
+        if let third = Self.liveMin(service.thirdDate, fallbackSec: 0) {
+            return "\(followMin) · \(third) min"
+        }
+        return "\(followMin) min"
+    }
+
+    /// Live minutes from an absolute timestamp so the row ticks with the
+    /// board. nil when LTA has no such bus.
+    static func liveMin(_ date: Date?, fallbackSec: Int) -> Int? {
+        let sec: Int
+        if let date {
+            sec = max(0, Int(date.timeIntervalSince(Date())))
+        } else if fallbackSec > 0 {
+            sec = fallbackSec
+        } else {
+            return nil
+        }
+        return max(1, sec / 60)
+    }
+
+    private func a11y(now: Bool, minutes: Int, followMin: Int?, sched: Bool) -> String {
+        var parts = [now ? "Bus \(service.no), arriving now"
+                         : "Bus \(service.no), \(sched ? "around " : "")\(minutes) minutes"]
+        if !service.dest.isEmpty { parts.append("to \(service.dest)") }
+        parts.append(service.load.wsSeatPhrase)
+        if service.wab { parts.append("wheelchair accessible") }
+        if let followMin { parts.append("then \(followMin) minutes") }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -608,3 +760,73 @@ struct WSRowDivider: View {
     @Environment(\.ws) private var ws
     var body: some View { Rectangle().fill(ws.rule).frame(height: 1) }
 }
+
+// MARK: - Skeletons (spec: shimmer, never a spinner)
+
+/// A single shimmering placeholder bar. The highlight sweeps left → right
+/// every 1.4s; Reduce Motion renders it static.
+struct WSShimmerBar: View {
+    var width: CGFloat? = nil
+    var height: CGFloat = 14
+    @Environment(\.ws) private var ws
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+            .fill(ws.panel2)
+            .frame(width: width, height: height)
+            .overlay(
+                GeometryReader { geo in
+                    LinearGradient(colors: [.clear, ws.rule.opacity(0.9), .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: geo.size.width * 0.6)
+                        .offset(x: phase * geo.size.width * 1.6)
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: height / 2, style: .continuous))
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
+                    phase = 1
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// Skeleton for one departure row: plate + two text bars + an ETA bar.
+struct WSSkeletonRow: View {
+    var body: some View {
+        HStack(spacing: 13) {
+            WSShimmerBar(width: 62, height: 46)
+            VStack(alignment: .leading, spacing: 7) {
+                WSShimmerBar(width: 130, height: 13)
+                WSShimmerBar(width: 88, height: 10)
+            }
+            Spacer(minLength: 8)
+            WSShimmerBar(width: 46, height: 16)
+        }
+    }
+}
+
+/// Whole-card skeleton shown before the first nearby stop resolves.
+struct WSSkeletonCard: View {
+    @Environment(\.ws) private var ws
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            WSShimmerBar(width: 84, height: 12)
+            WSShimmerBar(width: 190, height: 22)
+            WSShimmerBar(width: 120, height: 11)
+            WSRowDivider().padding(.top, 4)
+            ForEach(0..<3, id: \.self) { _ in WSSkeletonRow() }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ws.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityLabel("Finding transport near you")
+    }
+}
+
+

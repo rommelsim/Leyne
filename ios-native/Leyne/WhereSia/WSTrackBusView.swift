@@ -1,11 +1,13 @@
 // WhereSia — Track bus (screen 7).
 //
-// Bar title: "Bus N". A live card (route, destination, "reaching your stop in
-// N min", crowd) over a vertical route timeline. Long routes collapse with
-// tappable "N earlier/more stops" chips that expand/collapse the full route;
-// every other stop row pushes that stop's own arrivals. The moving bus is a
-// pulsing node between stops; MRT-interchange stops are flagged; the user's
-// stop is highlighted. CTA: "Alert me 1 stop before".
+// Bar title: "Bus N". A tracking card in the Home/Stop card grammar (owner
+// spec 2026-07-08): eyebrow row, green Now plate + edge tick while the bus is
+// pulling in, seat-dot crowd phrase, the your-stop ETA big on the right with
+// numericText-only updates. Below, the route card: a vertical timeline whose
+// long ends collapse behind tappable "N earlier/more stops" chips; every other
+// stop row pushes that stop's own arrivals. The moving bus is a pinging node
+// between stops; MRT-interchange stops are flagged; the user's stop is
+// highlighted. CTA: "Alert me 1 stop before".
 //
 // Position is APPROXIMATE — LTA gives coords + ETAs for the next buses only, so
 // per-stop minute times are not invented (only the your-stop ETA is real).
@@ -76,24 +78,14 @@ struct WSTrackBusView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if let r = route, !r.stops.isEmpty {
-                        WSSectionHeader(label: "Route", meta: "\(r.stops.count) stops")
-                            .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 10)
-                        // Loop / single-direction services stay silent here; most
-                        // services run both ways (Android parity: the toggle sits
-                        // under this same header on soft_bus_screen.dart).
-                        if let sr = serviceRouteData, sr.directions.count > 1 {
-                            WSSegmented(options: sr.directions.map { "To \(shortDest($0.destinationName))" },
-                                        selection: $selectedDirIndex)
-                                .padding(.horizontal, 22).padding(.bottom, 12)
-                        }
-                    }
-                    timeline
+                    routeCard
+                        .wsEntrance(delay: 0.06)
+                    Color.clear.frame(height: 16)
                 }
             }
 
             cta
-                .wsEntrance(delay: 0.08)
+                .wsEntrance(delay: 0.12)
         }
         .wsDetailAdBanner()
         .background(ws.bg)
@@ -128,116 +120,207 @@ struct WSTrackBusView: View {
         .sensoryFeedback(.success, trigger: refreshTick)
     }
 
-    // MARK: live card
+    // MARK: tracking card
     //
     // Information hierarchy, first glance → last: (1) WHEN the bus reaches
-    // your stop — the hero numerals, the whole reason this screen is open;
-    // (2) which bus, toward where; (3) is it live + how full. Rendered on
-    // real glass chrome (owner redesign, 2026-07-02).
+    // your stop — the whole reason this screen is open; (2) which bus, toward
+    // where; (3) is it live + how full. Same plate / seat-dot / stacked-ETA
+    // grammar as WSDepartureRow so a tapped row grows into a card that reads
+    // as the same object (anim spec: preserve spatial continuity). Only the
+    // ETA numeral animates (numericText); the seat dot's colour crossfades.
 
     private var liveCard: some View {
-        let eta = service.map { fmtETA(wsLiveETASec($0)) }
-        let arriving = eta?.big == "Arr"
-        return HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 11) {
-                    RouteTile(text: serviceNo, size: .large)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("TOWARD").font(ws.sans(9.5, weight: .heavy)).tracking(1.2).foregroundStyle(ws.dim)
-                        Text(service?.dest ?? destName)
-                            .font(ws.sans(15.5, weight: .heavy)).foregroundStyle(ws.text)
-                            .lineLimit(2)
-                    }
-                }
-                HStack(spacing: 7) {
+        let sec = service.map { wsLiveETASec($0) }
+        let now = (sec ?? Int.max) < 60
+        let minutes = sec.map { max(1, $0 / 60) }
+        let sched = !(service?.monitored ?? true)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                WSIcon(glyph: .busSingle, size: 15, weight: .medium, color: ws.dim)
+                Text("Tracking bus")
+                    .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
+                Spacer(minLength: 8)
+                if service != nil { WSLiveBadge() }
+            }
+
+            HStack(spacing: 13) {
+                Text(serviceNo)
+                    .font(ws.mono(serviceNo.count > 3 ? 16 : 19, weight: .bold))
+                    .foregroundStyle(now ? .white : ws.text)
+                    .frame(width: 62, height: 46)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(now ? ws.now : ws.panel2))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(destTitle)
+                        .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.text)
+                        .lineLimit(2)
                     if let load = service?.load {
-                        WSLiveBadge()
-                        Text("·").font(ws.mono(10)).foregroundStyle(ws.faint)
-                        CrowdGauge(fraction: load.wsFraction, width: 26)
-                        Text(load.wsWord).font(ws.mono(10)).foregroundStyle(ws.dim)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(load.wsDotColor)
+                                .frame(width: 7, height: 7)
+                                .animation(.easeInOut(duration: 0.2), value: load)
+                            Text(load.wsSeatPhrase)
+                                .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
+                                .lineLimit(1).allowsTightening(true)
+                        }
                     } else {
                         Text("Waiting for the next bus…")
-                            .font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim)
+                            .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
                     }
                 }
-            }
-            Spacer(minLength: 10)
-            VStack(alignment: .trailing, spacing: 3) {
-                if let eta {
-                    Text(eta.big)
-                        .font(ws.mono(arriving ? 30 : 40, weight: .bold))
-                        .foregroundStyle(ws.text)
-                        .contentTransition(.numericText(countsDown: true))
-                    Text(arriving ? "AT YOUR STOP" : "MIN TO YOUR STOP")
-                        .font(ws.mono(9)).tracking(0.7).foregroundStyle(ws.dim)
-                } else {
-                    Text("—").font(ws.mono(34, weight: .bold)).foregroundStyle(ws.faint)
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Group {
+                        if now {
+                            Text("Now")
+                                .font(ws.sans(27, weight: .heavy)).foregroundStyle(ws.text)
+                        } else if let minutes {
+                            // Scheduled-only ETA carries the whisper "~" —
+                            // never a banner (feedback_timely_over_honest).
+                            (Text(sched ? "~" : "")
+                                .font(ws.sans(19, weight: .semibold)).foregroundStyle(ws.dim)
+                             + Text("\(minutes)").font(ws.sans(27, weight: .heavy)).foregroundStyle(ws.text)
+                             + Text(" min").font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim))
+                        } else {
+                            Text("—").font(ws.sans(27, weight: .heavy)).foregroundStyle(ws.faint)
+                        }
+                    }
+                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
+                    Text(now ? "At your stop" : "To your stop")
+                        .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
                 }
             }
-            .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: eta?.big)
+            .padding(.top, 14)
+            // The green edge tick — same arriving mark as the departure
+            // rows. Anchored to THIS row so it sits centred beside the
+            // service plate; overlaying the whole card centred it against
+            // the eyebrow row too and it floated mid-air (owner-reported
+            // UI bug 2026-07-09).
+            .overlay(alignment: .leading) {
+                if now {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(ws.now)
+                        .frame(width: 3, height: 46)
+                        .offset(x: -12)
+                        .transition(.opacity)
+                }
+            }
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .padding(.horizontal, 18).padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // 14 matches the app's card radius family (WSCard 14, search 14,
-        // interchange 13). The previous 20 curved the bottom-left corner so
-        // far in that "ROUTE" below read as misaligned against the card's
-        // edge (owner-reported optical bug) — the margins were identical.
-        .wsGlassChrome(cornerRadius: 14, tint: ws.panel)
-        .shadow(color: .black.opacity(ws.isDark ? 0.3 : 0.08), radius: 12, x: 0, y: 5)
+        .background(ws.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .animation(reduceMotion ? .easeInOut(duration: 0.2)
+                                : .spring(response: 0.35, dampingFraction: 0.85), value: now)
+        .animation(.snappy(duration: 0.28), value: minutes)
         .padding(.horizontal, 22).padding(.top, 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(cardA11y(now: now, minutes: minutes, sched: sched))
     }
 
-    private var destName: String {
+    private var destTitle: String {
+        if let dest = service?.dest, !dest.isEmpty { return "To \(dest)" }
         let name = anchorDirection?.destinationName ?? ""
-        return name.isEmpty ? "—" : name
+        return name.isEmpty ? "Bus \(serviceNo)" : "To \(name)"
+    }
+
+    private func cardA11y(now: Bool, minutes: Int?, sched: Bool) -> String {
+        var parts = ["Tracking bus \(serviceNo)"]
+        if let dest = service?.dest, !dest.isEmpty { parts.append("to \(dest)") }
+        if now { parts.append("at your stop now") }
+        else if let minutes { parts.append("\(sched ? "around " : "")\(minutes) minutes to your stop") }
+        if let load = service?.load { parts.append(load.wsSeatPhrase) }
+        return parts.joined(separator: ", ")
+    }
+
+    // MARK: route card
+
+    @ViewBuilder private var routeCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                WSIcon(glyph: .map, size: 15, weight: .medium, color: ws.dim)
+                Text("Route")
+                    .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
+                Spacer(minLength: 8)
+                if let r = route, !r.stops.isEmpty {
+                    Text("\(r.stops.count) stops")
+                        .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
+                }
+            }
+
+            if let r = route, !r.stops.isEmpty {
+                // Loop / single-direction services stay silent here; most
+                // services run both ways (Android parity: the toggle sits
+                // under this same header on soft_bus_screen.dart).
+                if let sr = serviceRouteData, sr.directions.count > 1 {
+                    WSSegmented(options: sr.directions.map { "To \(shortDest($0.destinationName))" },
+                                selection: $selectedDirIndex)
+                        .padding(.top, 14)
+                }
+                timeline(r)
+                    .padding(.top, 14)
+            } else {
+                // Route still resolving — shimmer skeleton, never a spinner
+                // (anim spec), never bare "Loading…" text.
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(Array([150, 190, 120, 170, 140].enumerated()), id: \.offset) { _, w in
+                        HStack(spacing: 15) {
+                            WSShimmerBar(width: 13, height: 13)
+                            WSShimmerBar(width: CGFloat(w), height: 13)
+                        }
+                    }
+                }
+                .padding(.top, 18).padding(.bottom, 6)
+                .accessibilityLabel("Loading route")
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ws.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, 22).padding(.top, 14)
     }
 
     // MARK: timeline
 
-    @ViewBuilder private var timeline: some View {
-        if let r = route, !r.stops.isEmpty {
-            // The live bus marker and "your stop" highlight only mean anything
-            // on the direction that actually serves this stop — browsing the
-            // OTHER direction shows its full, plain route instead of guessing
-            // where a bus that isn't running that way would be (Android
-            // parity: dir.anchorPresent gates canMarkBoard / the bus estimate
-            // there too).
-            let anchorHere = currentDirection?.anchorPresent ?? true
-            let you = anchorHere ? min(max(r.youIndex, 0), r.stops.count - 1) : -1
-            let baseStart = anchorHere ? (displayBusIndex.map { min($0, you) } ?? max(0, you - 6)) : 0
-            let baseEnd = anchorHere ? min(r.stops.count - 1, you + 1) : r.stops.count - 1
-            let start = showEarlier ? 0 : baseStart
-            let end = showLater ? r.stops.count - 1 : baseEnd
-            VStack(alignment: .leading, spacing: 0) {
-                if baseStart > 0 {
-                    collapseChip(expanded: showEarlier,
-                                 show: "Show \(baseStart) earlier stop\(baseStart == 1 ? "" : "s") · from \(r.stops.first?.name ?? "")",
-                                 hide: "Hide earlier stops") {
-                        showEarlier.toggle()
-                    }
-                }
-                ForEach(start...end, id: \.self) { i in
-                    stepRow(r, index: i, you: you)
-                    if displayBusIndex == i && i < end {
-                        vehicleRow(r)
-                    }
-                }
-                let more = (r.stops.count - 1) - baseEnd
-                if more > 0 {
-                    collapseChip(expanded: showLater,
-                                 show: "Show \(more) more stop\(more == 1 ? "" : "s") to \(r.stops.last?.name ?? "")",
-                                 hide: "Hide later stops") {
-                        showLater.toggle()
-                    }
+    private func timeline(_ r: RouteInfo) -> some View {
+        // The live bus marker and "your stop" highlight only mean anything
+        // on the direction that actually serves this stop — browsing the
+        // OTHER direction shows its full, plain route instead of guessing
+        // where a bus that isn't running that way would be (Android
+        // parity: dir.anchorPresent gates canMarkBoard / the bus estimate
+        // there too).
+        let anchorHere = currentDirection?.anchorPresent ?? true
+        let you = anchorHere ? min(max(r.youIndex, 0), r.stops.count - 1) : -1
+        let baseStart = anchorHere ? (displayBusIndex.map { min($0, you) } ?? max(0, you - 6)) : 0
+        let baseEnd = anchorHere ? min(r.stops.count - 1, you + 1) : r.stops.count - 1
+        let start = showEarlier ? 0 : baseStart
+        let end = showLater ? r.stops.count - 1 : baseEnd
+        return VStack(alignment: .leading, spacing: 0) {
+            if baseStart > 0 {
+                collapseChip(expanded: showEarlier,
+                             show: "Show \(baseStart) earlier stop\(baseStart == 1 ? "" : "s") · from \(r.stops.first?.name ?? "")",
+                             hide: "Hide earlier stops") {
+                    showEarlier.toggle()
                 }
             }
-            .padding(.horizontal, 22)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: selectedDirIndex)
-        } else {
-            Text("Loading route…")
-                .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
-                .padding(.horizontal, 22).padding(.top, 20)
+            ForEach(start...end, id: \.self) { i in
+                stepRow(r, index: i, you: you)
+                if displayBusIndex == i && i < end {
+                    vehicleRow(r)
+                }
+            }
+            let more = (r.stops.count - 1) - baseEnd
+            if more > 0 {
+                collapseChip(expanded: showLater,
+                             show: "Show \(more) more stop\(more == 1 ? "" : "s") to \(r.stops.last?.name ?? "")",
+                             hide: "Hide later stops") {
+                    showLater.toggle()
+                }
+            }
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: selectedDirIndex)
     }
 
     private func stepRow(_ r: RouteInfo, index i: Int, you: Int) -> some View {
@@ -263,7 +346,10 @@ struct WSTrackBusView: View {
                 youBody(stop, ic: ic)
             } else {
                 // Any other stop on the route opens that stop's own arrivals.
-                Button { push(.busStop(code: stop.code)) } label: {
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    push(.busStop(code: stop.code))
+                } label: {
                     HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(stop.name)
@@ -271,7 +357,7 @@ struct WSTrackBusView: View {
                                 .foregroundStyle(passed ? ws.dim : ws.text)
                                 .multilineTextAlignment(.leading)
                             Text(stop.code)
-                                .font(ws.mono(10.5)).tracking(0.3)
+                                .font(ws.sans(12, weight: .medium))
                                 .foregroundStyle(ws.dim)
                             if let ic { interchangeFlag("MRT", ic.codes) }
                         }
@@ -280,35 +366,57 @@ struct WSTrackBusView: View {
                     .padding(.bottom, 13)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(WSCompressStyle())
             }
         }
     }
 
     private func youBody(_ stop: RouteStopLive, ic: (name: String, codes: [String])?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(ic != nil ? "YOUR STOP · MRT INTERCHANGE" : "YOUR STOP")
-                .font(ws.sans(9.5, weight: .heavy)).tracking(1.2).foregroundStyle(ws.dim)
+        let sec = service.map { wsLiveETASec($0) }
+        let now = (sec ?? Int.max) < 60
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(ic != nil ? "Your stop · MRT interchange" : "Your stop")
+                .font(ws.sans(11, weight: .heavy)).tracking(0.4).foregroundStyle(ws.dim)
             Text(stop.name).font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.text)
-            if let eta = service.map({ fmtETA(wsLiveETASec($0)) }) {
-                Text(eta.big == "Arr" ? "Arriving now" : "~\(eta.big) min")
-                    .font(ws.mono(11.5)).foregroundStyle(ws.dim)
+            if let sec {
+                Text(now ? "Arriving now" : "~\(max(1, sec / 60)) min")
+                    .font(ws.sans(12, weight: .semibold)).foregroundStyle(now ? ws.now : ws.dim)
+                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
             }
-            if let ic { interchangeFlag("CHANGE FOR", ic.codes) }
+            if let ic {
+                // The interchange line is a doorway into the MRT context —
+                // tapping it opens the station (anim spec: the CC pill is a
+                // continuity element between the bus and MRT worlds).
+                if let st = MrtGeo.station(forCode: ic.codes.first ?? "") {
+                    Button {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        push(.mrtStation(st))
+                    } label: {
+                        interchangeFlag("Change for", ic.codes)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(WSCompressStyle())
+                } else {
+                    interchangeFlag("Change for", ic.codes)
+                }
+            }
         }
-        .padding(11)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ws.panel)
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-        .overlay(alignment: .leading) { Rectangle().fill(ws.accent).frame(width: 3) }
-        .clipShape(RoundedRectangle(cornerRadius: 11))
+        .background(now ? ws.nowFill : ws.panel2)
+        // Green marks "arriving this minute" only; the resting highlight is
+        // the neutral nested surface + blue edge (identity stays blue).
+        .overlay(alignment: .leading) { Rectangle().fill(now ? ws.now : ws.accent).frame(width: 3) }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .animation(reduceMotion ? .easeInOut(duration: 0.2)
+                                : .spring(response: 0.35, dampingFraction: 0.85), value: now)
         .padding(.bottom, 14)
     }
 
     private func interchangeFlag(_ label: String, _ codes: [String]) -> some View {
         HStack(spacing: 7) {
             WSIcon(glyph: .train, size: 15, color: ws.dim)
-            Text(label).font(ws.mono(9)).tracking(0.5).foregroundStyle(ws.dim)
+            Text(label).font(ws.sans(11, weight: .medium)).foregroundStyle(ws.dim)
             ForEach(codes.prefix(3), id: \.self) { LineBullet(code: $0) }
         }
         .padding(.top, 2)
@@ -332,15 +440,20 @@ struct WSTrackBusView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Bus \(serviceNo) is here").font(ws.sans(12, weight: .bold)).foregroundStyle(ws.text)
                 // Its live GPS position sits between the two stops above and
-                // below this marker; the gauge + word is the onboard crowd
-                // (same idiom as everywhere else — a bare lowercase "seats"
-                // read as a mystery, owner question 2026-07-03).
+                // below this marker; the seat dot + phrase is the onboard
+                // crowd — the same idiom as the departure rows.
                 HStack(spacing: 6) {
-                    Text("between these stops").font(ws.mono(11)).foregroundStyle(ws.dim)
+                    Text("Between these stops")
+                        .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
                     if let load = service?.load {
                         Text("·").font(ws.mono(11)).foregroundStyle(ws.faint)
-                        CrowdGauge(fraction: load.wsFraction, width: 22)
-                        Text(load.wsWord).font(ws.mono(11)).foregroundStyle(ws.dim)
+                        Circle()
+                            .fill(load.wsDotColor)
+                            .frame(width: 7, height: 7)
+                            .animation(.easeInOut(duration: 0.2), value: load)
+                        Text(load.wsSeatPhrase)
+                            .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                            .lineLimit(1).allowsTightening(true)
                     }
                 }
             }
@@ -352,8 +465,9 @@ struct WSTrackBusView: View {
     private func collapseChip(expanded: Bool, show: String, hide: String,
                               action: @escaping () -> Void) -> some View {
         Button {
+            UISelectionFeedbackGenerator().selectionChanged()
             if reduceMotion { action() }
-            else { withAnimation(.snappy(duration: 0.25)) { action() } }
+            else { withAnimation(.snappy(duration: 0.3)) { action() } }
         } label: {
             HStack(alignment: .top, spacing: 15) {
                 VStack(spacing: 0) {
@@ -369,18 +483,17 @@ struct WSTrackBusView: View {
                 }
                 .frame(width: 24)
                 HStack(spacing: 8) {
-                    WSIcon(glyph: .chevronDown, size: 14, color: ws.dim)
-                        .rotationEffect(.degrees(expanded ? 180 : 0))
+                    WSIcon(glyph: expanded ? .chevronDown : .chevron, size: 12, color: ws.faint)
                     Text(expanded ? hide : show)
-                        .font(ws.mono(11)).foregroundStyle(ws.dim)
-                        .underline()
+                        .font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.dim)
+                        .multilineTextAlignment(.leading)
                 }
                 .padding(.vertical, 6)
                 Spacer()
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WSCompressStyle())
         .padding(.bottom, 6)
     }
 
@@ -401,7 +514,7 @@ struct WSTrackBusView: View {
             .background(ws.text)
             .clipShape(RoundedRectangle(cornerRadius: 15))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WSCompressStyle())
         .padding(.horizontal, 22).padding(.vertical, 12)
         // Arming reads as a small win (.success); cancelling is a quieter
         // acknowledgement (.impact) — matches the app's "quiet by default"

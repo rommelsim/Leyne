@@ -63,7 +63,7 @@ struct WSServiceInfoView: View {
             RouteTile(text: serviceNo, size: .large)
             VStack(alignment: .leading, spacing: 3) {
                 Text(destTitle).font(ws.sans(18, weight: .heavy)).foregroundStyle(ws.text)
-                Text(subtitle).font(ws.mono(11.5)).tracking(0.3).foregroundStyle(ws.dim)
+                Text(subtitle).font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
             }
             Spacer()
         }
@@ -74,11 +74,12 @@ struct WSServiceInfoView: View {
         if let d = selected?.destinationName, !d.isEmpty { return d }
         return "Bus \(serviceNo)"
     }
+    // Sentence case — the card grammar speaks quietly now (2026-07-08).
     private var subtitle: String {
-        let cat = freq?.category?.uppercased() ?? categoryFallback
-        return cat.isEmpty ? "BUS SERVICE" : cat
+        guard let cat = freq?.category, !cat.isEmpty else { return "Bus service" }
+        let lower = cat.lowercased()
+        return lower.prefix(1).uppercased() + lower.dropFirst()
     }
-    private var categoryFallback: String { "" }
 
     // MARK: first & last
 

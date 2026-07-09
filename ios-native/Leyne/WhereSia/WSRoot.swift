@@ -24,9 +24,49 @@ enum WSRoute: Hashable {
     case map
 }
 
+/// Zoom-transition source ID for an MRT station — the "connected" card→screen
+/// entry from the animation spec (matched geometry). Shared between the card
+/// that registers itself as the source and the pushed destination.
+func wsMrtZoomID(_ st: MrtGeoStation) -> String {
+    "mrt-" + (st.codes.first ?? st.name)
+}
+
+/// Zoom-transition source IDs for the other root-level pushes — the owner
+/// liked the MRT card→screen zoom (and its interactive swipe-back) so much it
+/// now covers the whole app base (owner call 2026-07-09): bus stops, track
+/// bus and the map door all zoom from the card/row that opened them.
+func wsStopZoomID(_ code: String) -> String { "stop-" + code }
+func wsBusZoomID(stopCode: String, no: String) -> String { "bus-\(stopCode)-\(no)" }
+let wsMapZoomID = "map"
+
 /// Environment-injected "push a route onto the current tab's stack".
 private struct WSPushKey: EnvironmentKey {
     static let defaultValue: (WSRoute) -> Void = { _ in }
+}
+
+/// The root's zoom-transition namespace, handed down so root-level cards can
+/// register as `matchedTransitionSource`s (nil in previews / outside WSRoot).
+private struct WSZoomNSKey: EnvironmentKey {
+    static let defaultValue: Namespace.ID? = nil
+}
+extension EnvironmentValues {
+    var wsZoomNS: Namespace.ID? {
+        get { self[WSZoomNSKey.self] }
+        set { self[WSZoomNSKey.self] = newValue }
+    }
+}
+
+/// Registers the view as the zoom source for `id` when the namespace exists.
+struct WSZoomSource: ViewModifier {
+    let id: String
+    @Environment(\.wsZoomNS) private var ns
+    func body(content: Content) -> some View {
+        if let ns { content.matchedTransitionSource(id: id, in: ns) }
+        else { content }
+    }
+}
+extension View {
+    func wsZoomSource(id: String) -> some View { modifier(WSZoomSource(id: id)) }
 }
 extension EnvironmentValues {
     var wsPush: (WSRoute) -> Void {
@@ -47,6 +87,9 @@ struct WSRoot: View {
     @State private var savedPath: [WSRoute] = []
     @State private var alertsPath: [WSRoute] = []
     @State private var showSearch = false
+    /// One namespace for the card→screen zoom transitions (anim spec:
+    /// matched geometry for the MRT station entry).
+    @Namespace private var zoomNS
 
     // Follow the system appearance directly — the in-app Appearance picker
     // left with the Me tab, and m.isDark would pin users to a stale choice.
@@ -91,6 +134,21 @@ struct WSRoot: View {
                     // instead (`wsDetailAdBanner`), where its 30–60 s refresh
                     // actually earns. Owner decision 2026-07-07.
                     WSTabBar(tab: $tab, alertCount: m.unseenAlertCount)
+                        // Scrim under the floating bar: scrolled-under content
+                        // fades toward the background instead of clashing with
+                        // the bar's transparent gutter (owner 2026-07-08 — the
+                        // browse card read as "covered", not "scrolled under").
+                        // As a `.background` it never affects the inset's
+                        // layout; negative top padding bleeds it a few points
+                        // above the bar, and it extends into the home bar.
+                        .background {
+                            LinearGradient(colors: [ws.bg.opacity(0),
+                                                    ws.bg.opacity(0.94), ws.bg],
+                                           startPoint: .top, endPoint: .bottom)
+                                .padding(.top, -24)
+                                .ignoresSafeArea(edges: .bottom)
+                                .allowsHitTesting(false)
+                        }
                         .transition(reduceMotion ? .opacity :
                             .move(edge: .bottom).combined(with: .opacity))
                 }
@@ -125,6 +183,29 @@ struct WSRoot: View {
         .onChange(of: tab) { _, new in
             if new == .alerts { m.markAllAlertsSeen() }
         }
+        // Screenshot/UI-test hook: `-wsRoute stop:83139`, `-wsRoute mrt:CC20`
+        // or `-wsRoute bus:83139/174` deep-links straight to a detail screen
+        // from the command line (simctl launch … -wsRoute stop:83139). No-op
+        // without the argument.
+        .onAppear {
+            let args = ProcessInfo.processInfo.arguments
+            guard let i = args.firstIndex(of: "-wsRoute"), args.indices.contains(i + 1)
+            else { return }
+            let parts = args[i + 1].split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return }
+            switch parts[0] {
+            case "stop": homePath = [.busStop(code: parts[1])]
+            case "mrt":  if let st = MrtGeo.station(forCode: parts[1]) {
+                             homePath = [.mrtStation(st)]
+                         }
+            case "bus":
+                let p = parts[1].split(separator: "/", maxSplits: 1).map(String.init)
+                if p.count == 2 {
+                    homePath = [.busStop(code: p[0]), .trackBus(stopCode: p[0], no: p[1])]
+                }
+            default: break
+            }
+        }
     }
 
     /// Wraps a tab root in a NavigationStack bound to that tab's path, with the
@@ -147,6 +228,7 @@ struct WSRoot: View {
                 }
         }
         .environment(\.wsPush) { route in path.wrappedValue.append(route) }
+        .environment(\.wsZoomNS, zoomNS)
     }
 
     @ViewBuilder
@@ -161,17 +243,36 @@ struct WSRoot: View {
             back()
             if let m { InterstitialAdManager.shared.maybeShowOnExit(model: m) }
         }
+        // Card→screen zoom (anim spec: matched geometry) — only from a
+        // root card/row that registered itself as the source (path depth 1);
+        // deeper pushes (stop → MRT, track bus → MRT) keep the standard
+        // slide so the system never zooms from an off-screen root card.
+        // Reduce Motion: plain push (the spec's fade fallback). If no source
+        // registered under the ID, the system falls back to the standard
+        // push on its own. Owner call 2026-07-09: the zoom (and its
+        // interactive swipe-back) covers every root-level push, not just MRT.
+        let zooms = path.wrappedValue.count == 1 && !reduceMotion
         switch route {
         case .busStop(let code):
-            WSBusStopView(code: code, onBack: backWithAd)
+            let v = WSBusStopView(code: code, onBack: backWithAd)
+            if zooms { v.navigationTransition(.zoom(sourceID: wsStopZoomID(code), in: zoomNS)) }
+            else { v }
         case .mrtStation(let station):
-            WSMrtStationView(station: station, onBack: backWithAd)
+            let v = WSMrtStationView(station: station, onBack: backWithAd)
+            if zooms { v.navigationTransition(.zoom(sourceID: wsMrtZoomID(station), in: zoomNS)) }
+            else { v }
         case .serviceInfo(let no, let fromStop):
             WSServiceInfoView(serviceNo: no, fromStop: fromStop, onBack: back)
         case .trackBus(let stopCode, let no):
-            WSTrackBusView(stopCode: stopCode, serviceNo: no, onBack: backWithAd)
+            let v = WSTrackBusView(stopCode: stopCode, serviceNo: no, onBack: backWithAd)
+            if zooms {
+                v.navigationTransition(.zoom(sourceID: wsBusZoomID(stopCode: stopCode, no: no),
+                                             in: zoomNS))
+            } else { v }
         case .map:
-            WSMapView(onBack: back)
+            let v = WSMapView(onBack: back)
+            if zooms { v.navigationTransition(.zoom(sourceID: wsMapZoomID, in: zoomNS)) }
+            else { v }
         }
     }
 }
