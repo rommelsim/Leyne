@@ -203,6 +203,11 @@ struct WSRoot: View {
                 if p.count == 2 {
                     homePath = [.busStop(code: p[0]), .trackBus(stopCode: p[0], no: p[1])]
                 }
+            case "svc":
+                // svc:189/17379 → Service Info (Full route) for a bus, opened
+                // from a stop. svc:189 → the origin-referenced route.
+                let p = parts[1].split(separator: "/", maxSplits: 1).map(String.init)
+                homePath = [.serviceInfo(no: p[0], fromStop: p.count == 2 ? p[1] : nil)]
             default: break
             }
         }

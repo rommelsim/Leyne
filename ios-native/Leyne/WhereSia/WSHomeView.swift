@@ -35,6 +35,8 @@ struct WSHomeView: View {
     @State private var refreshing = false
     /// Inline "Unable to refresh" banner (slides from top, self-dismisses).
     @State private var showErrorBanner = false
+    /// Bus (0) / MRT (1) content mode — the segmented toggle under the hero.
+    @State private var mode = 0
 
     private var coord: CLLocationCoordinate2D? { location.location?.coordinate }
 
@@ -51,43 +53,47 @@ struct WSHomeView: View {
         let _ = m.tick   // per-second live countdown refresh
         ScrollView {
             VStack(spacing: 0) {
-                // Launch sequence (spec): header 0ms → bus card 60ms →
+                // Launch sequence (spec): hero 0ms → bus card 60ms →
                 // MRT card 120ms → browse 180ms. Fade + 12pt rise, ease out.
-                header
+                // The hero is the living sky (WSGradientHero) — greeting +
+                // search over a time/weather-driven ambient gradient, NO photo
+                // (owner 2026-07-10, copyright). It owns the search entry, so
+                // the old header search circle is gone.
+                WSGreetingHero(onSearchTap: onSearch)
                     .wsEntrance(delay: 0)
 
-                if let closest = busStops.first {
-                    BusStopCard(stop: closest)
-                        .padding(.horizontal, 22).padding(.top, 18)
-                        .wsEntrance(delay: 0.06)
-                } else {
-                    loadingOrEmpty
-                        .padding(.horizontal, 22).padding(.top, 18)
-                        .wsEntrance(delay: 0.06)
-                }
-
-                if let item = nearbyStations.first {
-                    NearestMrtCard(station: item.station, distanceM: item.distanceM,
-                                   walkMin: item.walkMin)
-                        .padding(.horizontal, 22).padding(.top, 14)
-                        .wsEntrance(delay: 0.12)
-                }
-
-                browseCard
+                // Bus / MRT mode toggle (owner mockups): swaps the content
+                // below in place. Bus = nearby stops; MRT = nearest station
+                // + crowd/forecast/facilities/line-map/status (WSMrtHomeContent).
+                WSSegmented(options: ["Bus", "MRT"], selection: $mode)
                     .padding(.horizontal, 22).padding(.top, 14)
-                    .wsEntrance(delay: 0.18)
+                    .wsEntrance(delay: 0.03)
 
-                // One native ad per board — below the door card (placement
+                freshnessLine
+                    .padding(.horizontal, 22).padding(.top, 12)
+                    .wsEntrance(delay: 0.05)
+
+                if mode == 0 {
+                    busContent
+                        .transition(.opacity)
+                } else {
+                    mrtContent
+                        .transition(.opacity)
+                }
+
+                // One native ad per board — below the content (placement
                 // per ads-reenabled-2026-07; renders nothing until a
                 // creative loads).
                 NativeAdCard()
                     .padding(.horizontal, 22)
                     .padding(.top, 14)
 
-                hiddenFooter
+                if mode == 0 { hiddenFooter }
                 Color.clear.frame(height: 24)
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: mode)
+        .sensoryFeedback(.selection, trigger: mode)
         .refreshable { await refresh() }
         .background(ws.bg)
         .overlay(alignment: .top) { if showErrorBanner { errorBanner } }
@@ -108,6 +114,40 @@ struct WSHomeView: View {
                 store.prefetchNearbyArrivals()
                 store.wsWarmCrowd(for: nearbyStations.map(\.station))
             }
+        }
+    }
+
+    // MARK: content modes
+
+    @ViewBuilder private var busContent: some View {
+        // Bus mode is buses only (owner 2026-07-10): the Nearest-MRT card is
+        // gone; instead the nearest bus stops to the user stack down the
+        // board, each a full departure card, soonest walk first.
+        if busStops.isEmpty {
+            loadingOrEmpty
+                .padding(.horizontal, 22).padding(.top, 14)
+                .wsEntrance(delay: 0.06)
+        } else {
+            ForEach(Array(busStops.prefix(6).enumerated()), id: \.element.stopCode) { i, stop in
+                BusStopCard(stop: stop)
+                    .padding(.horizontal, 22).padding(.top, 14)
+                    .wsEntrance(delay: 0.06 + Double(i) * 0.04)
+            }
+        }
+
+        browseCard
+            .padding(.horizontal, 22).padding(.top, 14)
+            .wsEntrance(delay: 0.30)
+    }
+
+    @ViewBuilder private var mrtContent: some View {
+        if let item = nearbyStations.first {
+            WSMrtHomeContent(station: item.station, distanceM: item.distanceM,
+                             walkMin: item.walkMin)
+                .padding(.top, 14)
+        } else {
+            emptyState("Turn on location to see the station nearest you.")
+                .padding(.horizontal, 22).padding(.top, 14)
         }
     }
 
@@ -325,6 +365,14 @@ private struct BusStopCard: View {
 
     private static let collapsedCap = 3
 
+    /// "17379 · Clementi Ave 6" — the stop code and its road, the useful
+    /// per-stop identifier (road omitted when the directory doesn't have it).
+    private var metaLine: String {
+        let road = store.stopByCode[stop.stopCode]?.RoadName
+        if let road, !road.isEmpty { return "\(stop.stopCode)  ·  \(road)" }
+        return stop.stopCode
+    }
+
     /// Soonest-first; ties break on service number so equal ETAs never trade
     /// places between ticks (Swift's sort is not guaranteed stable).
     private var services: [Service] {
@@ -339,26 +387,30 @@ private struct BusStopCard: View {
         let _ = m.tick
         let visible = expanded ? services : Array(services.prefix(Self.collapsedCap))
         VStack(alignment: .leading, spacing: 0) {
-            // Eyebrow row — the card's type, and the way into the stop.
+            // Header — the stop's identity (name + code · road) and the way
+            // into it. No "Bus stop" eyebrow: we're already in a list of bus
+            // stops, so the label was redundant; the code + road name is what
+            // actually tells the stops apart (owner 2026-07-10).
             Button {
                 UISelectionFeedbackGenerator().selectionChanged()
                 push(.busStop(code: stop.stopCode))
             } label: {
-                HStack(spacing: 9) {
-                    WSIcon(glyph: .busSingle, size: 15, weight: .medium, color: ws.dim)
-                    Text("Nearest bus stop")
-                        .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(stop.stopName)
+                            .font(ws.sans(24, weight: .heavy)).foregroundStyle(ws.text)
+                            .lineLimit(1)
+                        Text(metaLine)
+                            .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 8)
-                    WSIcon(glyph: .chevron, size: 12, color: ws.faint)
+                    WSIcon(glyph: .chevron, size: 12, color: ws.faint).padding(.top, 6)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open \(stop.stopName)")
-
-            Text(stop.stopName)
-                .font(ws.sans(25, weight: .heavy)).foregroundStyle(ws.text)
-                .padding(.top, 12)
 
             walkLine(distanceM: stop.distanceM)
                 .padding(.top, 10)

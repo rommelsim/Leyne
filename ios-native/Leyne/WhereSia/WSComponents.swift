@@ -433,6 +433,11 @@ struct WSDepartureRow: View {
                         if now {
                             Text("Now")
                                 .font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.text)
+                        } else if sec < 120 && !sched {
+                            // Design spec: under 2 minutes reads "Arriving",
+                            // not a countdown — the number stops mattering.
+                            Text("Arriving")
+                                .font(ws.sans(16, weight: .heavy)).foregroundStyle(ws.text)
                         } else {
                             // Scheduled-only ETA carries the whisper "~" —
                             // never a banner (feedback_timely_over_honest).
@@ -729,22 +734,23 @@ struct ForecastBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
     var body: some View {
+        // The current period is ENLARGED (taller track, brighter label)
+        // rather than outlined — a thick border read as selection chrome,
+        // not emphasis (design spec §8).
+        let trackH: CGFloat = isNow ? 58 : 44
         VStack(spacing: 7) {
             RoundedRectangle(cornerRadius: 7)
                 .fill(ws.rule)
-                .frame(height: 46)
+                .frame(height: trackH)
                 .overlay(alignment: .bottom) {
                     RoundedRectangle(cornerRadius: 7)
                         .fill(ws.text)
-                        .frame(height: 46 * fraction)
+                        .frame(height: trackH * fraction)
                         .scaleEffect(y: shown ? 1 : 0, anchor: .bottom)
                 }
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(isNow ? ws.text : .clear, lineWidth: 2)
-                        .padding(-3)
-                )
-            Text(time).font(ws.mono(10)).foregroundStyle(ws.dim)
+            Text(time)
+                .font(ws.mono(10, weight: isNow ? .bold : .regular))
+                .foregroundStyle(isNow ? ws.text : ws.dim)
         }
         .frame(maxWidth: .infinity)
         .onAppear {

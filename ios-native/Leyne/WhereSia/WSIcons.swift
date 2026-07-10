@@ -20,6 +20,8 @@ enum WSGlyph {
     case search, scope, location, back, chevron, chevronDown, close, edit, share
     case gear, sun, textSize, info, database, lift, filters, clock, bellRing, map
     case walk, refresh, pin
+    // Station facilities
+    case restroom, escalator, card, bag
 
     var systemName: String {
         switch self {
@@ -61,6 +63,10 @@ enum WSGlyph {
         case .walk:           return "figure.walk"
         case .refresh:        return "arrow.clockwise"
         case .pin:            return "mappin"
+        case .restroom:       return "toilet"
+        case .escalator:      return "figure.stairs"
+        case .card:           return "creditcard"
+        case .bag:            return "bag"
         }
     }
 }

@@ -15,6 +15,7 @@ struct WSServiceInfoView: View {
     @Environment(AppModel.self) private var m: AppModel
     @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
+    @Environment(\.wsPush) private var push
 
     @State private var route: ServiceRoute?
     @State private var freq: WSServiceFreq?
@@ -36,6 +37,7 @@ struct WSServiceInfoView: View {
                                 selection: $dir)
                         .padding(.horizontal, 22)
                 }
+                routeStopsCard
                 firstLastCard
                 frequencyCard
                 Text("Buses run at these intervals — there’s no fixed minute timetable. For exact times, check live arrivals.")
@@ -79,6 +81,71 @@ struct WSServiceInfoView: View {
         guard let cat = freq?.category, !cat.isEmpty else { return "Bus service" }
         let lower = cat.lowercased()
         return lower.prefix(1).uppercased() + lower.dropFirst()
+    }
+
+    // MARK: full route (all stops)
+    //
+    // This is where "Full route ›" from Track Bus lands: the complete stop
+    // list for the selected direction, your boarding stop highlighted. Every
+    // row opens that stop's live arrivals.
+
+    private var routeStopsCard: some View {
+        let stops = selected?.stops ?? []
+        return WSCard(title: stops.isEmpty ? "Route" : "Route · \(stops.count) stops", glyph: .map) {
+            if stops.isEmpty {
+                Text(loading ? "Loading route…" : "Route unavailable right now.")
+                    .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                    .padding(.vertical, 12)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(stops.enumerated()), id: \.offset) { i, s in
+                        routeStopRow(s, isFirst: i == 0, isLast: i == stops.count - 1)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 22)
+    }
+
+    private func routeStopRow(_ s: RouteStopLive, isFirst: Bool, isLast: Bool) -> some View {
+        let isYou = s.code == fromStop
+        return Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            push(.busStop(code: s.code))
+        } label: {
+            HStack(alignment: .top, spacing: 14) {
+                // Left rail — the line runs continuously; your stop is a bold
+                // accent node, the rest are quiet outlines.
+                VStack(spacing: 0) {
+                    Circle()
+                        .fill(isYou ? ws.accent : ws.bg)
+                        .frame(width: isYou ? 14 : 11, height: isYou ? 14 : 11)
+                        .overlay(Circle().stroke(isYou ? ws.accent : ws.faint, lineWidth: isYou ? 3 : 2.5))
+                        .padding(.top, 3)
+                    if !isLast { Rectangle().fill(ws.rule).frame(width: 3) }
+                }
+                .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    if isYou {
+                        Text("YOUR STOP")
+                            .font(ws.mono(9, weight: .bold)).tracking(0.4)
+                            .foregroundStyle(ws.accentSoft)
+                    }
+                    Text(s.name)
+                        .font(ws.sans(14.5, weight: isYou ? .heavy : .semibold))
+                        .foregroundStyle(ws.text)
+                        .multilineTextAlignment(.leading)
+                    Text(s.code)
+                        .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                }
+                .padding(.bottom, isLast ? 0 : 15)
+                Spacer(minLength: 0)
+                WSIcon(glyph: .chevron, size: 11, color: ws.faint).padding(.top, 3)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(WSCompressStyle())
     }
 
     // MARK: first & last

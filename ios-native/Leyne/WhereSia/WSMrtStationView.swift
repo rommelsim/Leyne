@@ -27,6 +27,13 @@ struct WSMrtStationView: View {
     /// "Busiest around now" on a closed station (owner-reported 2026-07-04).
     @State private var forecastEnded = false
     @State private var titleCollapsed = false
+    /// Scroll-driven collapse of the line-map hero (same logic as the bus
+    /// view's map): the cards slide up over the shrinking/fading line strip.
+    @State private var scrollY: CGFloat = 0
+
+    /// How much of the station sheet header floats over the line-map hero at
+    /// rest — the "grab me" peek.
+    private let headerPeek: CGFloat = 92
 
     struct ForecastPoint: Identifiable {
         let id = UUID()
@@ -65,22 +72,16 @@ struct WSMrtStationView: View {
         // per-property tracking (ObservableObject used to refresh it for
         // free via the blanket per-second objectWillChange).
         let _ = m.tick
-        ScrollView {
-            VStack(spacing: 12) {
-                // Staggered launch sequence (anim spec): head → cards, 60ms
-                // steps, fade + 12pt rise.
-                titleRow.padding(.top, 12).wsEntrance(delay: 0)
-                crowdCard.wsEntrance(delay: 0.06)
-                busCard.wsEntrance(delay: 0.12)
-                forecastCard.wsEntrance(delay: 0.18)
-                Color.clear.frame(height: 12)
+        Group {
+            // The line map is the hero (owner 2026-07-11) — it collapses on
+            // scroll while the cards slide up over it, the same motion as the
+            // bus view's map. LRT-only / dead-end stops have no neighbour
+            // strip, so they fall back to the plain stacked layout.
+            if let map = wsLineNeighbors(around: station, radius: 2), map.items.count > 1 {
+                heroLayout(map: map)
+            } else {
+                plainLayout
             }
-            .padding(.bottom, 8)
-        }
-        .onScrollGeometryChange(for: Bool.self) { g in
-            g.contentOffset.y + g.contentInsets.top > 44
-        } action: { _, isPast in
-            titleCollapsed = isPast
         }
         .wsDetailAdBanner()
         .wsEntrance()
@@ -98,6 +99,163 @@ struct WSMrtStationView: View {
             for item in nearbyStops { store.ensureArrivals(stop: item.stop.BusStopCode, silent: true) }
             loadForecast()
         }
+    }
+
+    // MARK: hero layout (collapsing line map)
+
+    private func heroLayout(map: (prefix: String, items: [(code: String, name: String, current: Bool)])) -> some View {
+        GeometryReader { geo in
+            let restingHero = geo.size.height * 0.44
+            let spacer = max(120, restingHero - headerPeek)
+            ZStack(alignment: .top) {
+                lineHero(map: map, height: max(headerPeek, restingHero - scrollY))
+                    .opacity(1 - Double(min(1, scrollY / spacer)) * 0.85)
+                    .allowsHitTesting(false)
+
+                ScrollView {
+                    VStack(spacing: 12) {
+                        // Transparent window that lets the line map show through.
+                        Color.clear.frame(height: spacer)
+                        stationSheetHeader.wsEntrance()
+                        crowdCard.wsEntrance(delay: 0.06)
+                        facilitiesCard.wsEntrance(delay: 0.12)
+                        busCard.wsEntrance(delay: 0.18)
+                        forecastCard.wsEntrance(delay: 0.24)
+                        Color.clear.frame(height: 12)
+                    }
+                    .padding(.bottom, 8)
+                }
+                .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: CGFloat.self) {
+                    $0.contentOffset.y + $0.contentInsets.top
+                } action: { _, y in
+                    scrollY = max(0, y)
+                    titleCollapsed = y > 44
+                }
+            }
+        }
+    }
+
+    private var plainLayout: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                // Staggered launch sequence (anim spec): head → cards, 60ms
+                // steps, fade + 12pt rise.
+                titleRow.padding(.top, 12).wsEntrance(delay: 0)
+                crowdCard.wsEntrance(delay: 0.06)
+                facilitiesCard.wsEntrance(delay: 0.12)
+                busCard.wsEntrance(delay: 0.18)
+                forecastCard.wsEntrance(delay: 0.24)
+                Color.clear.frame(height: 12)
+            }
+            .padding(.bottom, 8)
+        }
+        .onScrollGeometryChange(for: Bool.self) { g in
+            g.contentOffset.y + g.contentInsets.top > 44
+        } action: { _, isPast in
+            titleCollapsed = isPast
+        }
+    }
+
+    // The hero: the station framed by its neighbours as a horizontal line
+    // strip on a faint line-colour wash — the one place colour = line identity.
+    private func lineHero(map: (prefix: String, items: [(code: String, name: String, current: Bool)]),
+                          height: CGFloat) -> some View {
+        let colour = WSLine.color(forStationCode: station.codes.first ?? "")
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                ForEach(station.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
+                Text("\(wsLineNames(from: station.codes)) Line")
+                    .font(ws.sans(14, weight: .heavy)).foregroundStyle(colour).lineLimit(1)
+                Spacer(minLength: 0)
+                Text("LINE MAP")
+                    .font(ws.mono(10, weight: .bold)).tracking(1).foregroundStyle(ws.faint)
+            }
+            Spacer(minLength: 12)
+            railRow(items: map.items, colour: colour)
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 10)
+        .frame(height: height, alignment: .top)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(colors: [colour.opacity(0.16), ws.bg],
+                           startPoint: .top, endPoint: .bottom))
+        .clipped()
+    }
+
+    private func railRow(items: [(code: String, name: String, current: Bool)],
+                         colour: Color) -> some View {
+        VStack(spacing: 10) {
+            // Node band: the rail runs through each column's centre (two
+            // half-segments, clear on the outer ends) with the node on top.
+            HStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.code) { i, item in
+                    ZStack {
+                        HStack(spacing: 0) {
+                            Rectangle().fill(i == 0 ? Color.clear : colour.opacity(0.4)).frame(height: 4)
+                            Rectangle().fill(i == items.count - 1 ? Color.clear : colour.opacity(0.4)).frame(height: 4)
+                        }
+                        Circle()
+                            .fill(item.current ? colour : ws.bg)
+                            .frame(width: item.current ? 18 : 12, height: item.current ? 18 : 12)
+                            .overlay(Circle().stroke(colour, lineWidth: item.current ? 4 : 3))
+                            .background { if item.current { WSPing(cornerRadius: 999) } }
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 22)
+                }
+            }
+            // Labels aligned to the same equal-width columns.
+            HStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.code) { _, item in
+                    VStack(spacing: 3) {
+                        Text(item.code)
+                            .font(ws.mono(11, weight: .bold))
+                            .foregroundStyle(item.current ? ws.text : colour)
+                        Text(item.name)
+                            .font(ws.sans(item.current ? 12.5 : 11, weight: item.current ? .bold : .medium))
+                            .foregroundStyle(item.current ? ws.text : ws.dim)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                    }
+                    .frame(maxWidth: .infinity).padding(.horizontal, 2)
+                }
+            }
+        }
+    }
+
+    // The floating sheet header — the grabber that carries the station name,
+    // line bullets, status, and the live crowd word (the "reason" summary,
+    // like the bus view's ETA header).
+    private var stationSheetHeader: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(ws.rule).frame(width: 40, height: 5)
+                .padding(.top, 10).padding(.bottom, 14)
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(station.name)
+                            .font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text).lineLimit(1)
+                        ForEach(station.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
+                    }
+                    Text("\(statusLine)  ·  \(WSFmt.upd(Date(), use24h: m.use24h))")
+                        .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
+                }
+                Spacer(minLength: 8)
+                if crowdNow != .unknown {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        WSLiveBadge()
+                        Text(crowdNow.wsWord)
+                            .font(ws.sans(13, weight: .bold)).foregroundStyle(ws.text)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 18).padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ws.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 14, y: -2)
+        .padding(.horizontal, 22)
     }
 
     /// Bus stops physically at/around the station (≤ 400 m walk).
@@ -224,6 +382,9 @@ struct WSMrtStationView: View {
                                         if sec < 60 {
                                             Text("Now").font(ws.sans(17, weight: .heavy))
                                                 .foregroundStyle(ws.text)
+                                        } else if sec < 120 {
+                                            Text("Arriving").font(ws.sans(14, weight: .heavy))
+                                                .foregroundStyle(ws.text)
                                         } else {
                                             (Text("\(minutes)")
                                                 .font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.text)
@@ -264,6 +425,20 @@ struct WSMrtStationView: View {
             }
             .padding(.horizontal, 22)
         }
+    }
+
+    // MARK: station facilities
+    //
+    // The mockup's 3×2 amenity grid. These are network-standard amenities
+    // present at effectively every MRT station (toilets, lifts, step-free
+    // access, escalators, fare top-up, retail) — presentational, greyscale,
+    // matching the "colour = data" rule (chrome stays neutral). Live lift-
+    // maintenance status still lives in the crowd/alerts path; this grid is
+    // the at-a-glance "what's here".
+
+    private var facilitiesCard: some View {
+        WSCard(title: "Station facilities", glyph: .info) { WSStationFacilitiesGrid() }
+            .padding(.horizontal, 22)
     }
 
     // MARK: forecast
