@@ -29,7 +29,7 @@ enum AdConfig {
     ///   • `bottomAdBanner` / `overlayAdBanner` mount the banner
     ///   • `AdConsent.gatherThenStart()` runs UMP + ATT
     ///   • `MobileAds.shared.start()` initializes the SDK
-    ///   • Onboarding's "Ads" step is shown (see OnboardingView)
+    ///   • the first-run ATT/UMP consent prompt is fired (see RootView)
     ///
     /// ON — re-enabled 2026-07-07 with fresh ad units (previous units were
     /// deleted in the AdMob console). Required for the ATT prompt to appear
@@ -240,9 +240,15 @@ enum AdConsent {
             }
         }
 
-        // 2. Apple ATT — required for IDFA-based personalization. Only
-        //    actually presents while the app is active (the caller's
-        //    `.task` runs after the scene is active).
+        // 2. Apple ATT — required for IDFA-based personalization. iOS silently
+        //    drops the prompt (returns .notDetermined without showing anything)
+        //    when requestTrackingAuthorization is called while the app isn't
+        //    fully `.active`. On first launch we arrive here immediately after
+        //    the location + notification system alerts dismiss, so the scene
+        //    can still be mid-transition. Wait for `.active`, then let it settle
+        //    a beat before requesting, otherwise the ATT prompt never appears.
+        await waitUntilActive()
+        try? await Task.sleep(for: .milliseconds(400))
         let status: ATTrackingManager.AuthorizationStatus =
             await withCheckedContinuation { cont in
                 ATTrackingManager.requestTrackingAuthorization {
@@ -253,6 +259,16 @@ enum AdConsent {
 
         // 3. Consent resolved — safe to initialize the SDK and serve ads.
         AdConfig.startOnce()
+    }
+
+    /// Await the app reaching the foreground-`.active` state (bounded to ~3s so
+    /// we never hang consent gathering). ATT requires `.active` to present.
+    @MainActor
+    private static func waitUntilActive() async {
+        var waited = 0
+        while UIApplication.shared.applicationState != .active && waited < 30 {
+            try? await Task.sleep(for: .milliseconds(100)); waited += 1
+        }
     }
 }
 

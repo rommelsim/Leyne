@@ -26,6 +26,13 @@ import os
 private let aoaLog = Logger(subsystem: "com.leyne.Leyne", category: "AppOpenAd")
 
 enum AppOpenAdConfig {
+    /// Master switch for the App Open format (cold launch AND warm resume).
+    /// OFF — owner decision 2026-07-11: pull all full-screen ads for now. The
+    /// units, wiring, and per-path gates below all stay in place; flip this back
+    /// to `true` (and `coldLaunchEnabled` if wanted) to re-enable. Enforced in
+    /// `showIfReady`, the single presentation choke point.
+    static let enabled = false
+
     // Ad unit selection mirrors AdConfig.bannerUnitID:
     //   • DEBUG (Xcode Run): Google's reserved App Open TEST unit.
     //   • RELEASE: the real production unit, unless `forceTestUnitForRelease`
@@ -172,6 +179,7 @@ final class AppOpenAdManager: NSObject {
     /// Present the App Open ad on foreground IF every guard passes; otherwise
     /// make sure one is loading for next time. Safe to call on every foreground.
     func showIfReady(model: AppModel) {
+        guard AppOpenAdConfig.enabled else { return }   // full-screen ads pulled
         guard !AdConfig.adsSuppressed else { return }
         guard AdConfig.started else { preload(); return }
 

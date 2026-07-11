@@ -27,6 +27,8 @@ struct WSMrtStationView: View {
     /// "Busiest around now" on a closed station (owner-reported 2026-07-04).
     @State private var forecastEnded = false
     @State private var titleCollapsed = false
+    /// Full-line diagram sheet (the "LINE MAP" link) — jump to any station.
+    @State private var showLineMap = false
     /// Scroll-driven collapse of the line-map hero (same logic as the bus
     /// view's map): the cards slide up over the shrinking/fading line strip.
     @State private var scrollY: CGFloat = 0
@@ -83,7 +85,6 @@ struct WSMrtStationView: View {
                 plainLayout
             }
         }
-        .wsDetailAdBanner()
         .wsEntrance()
         .background(ws.bg)
         .wsHeaderBar(eyebrow: "MRT station", title: station.name,
@@ -97,19 +98,46 @@ struct WSMrtStationView: View {
             store.wsWarmCrowd(for: [station])
             for l in lines { store.refreshForecast(line: l) }
             for item in nearbyStops { store.ensureArrivals(stop: item.stop.BusStopCode, silent: true) }
+            // Live service disruptions + lift outages for this station (same
+            // feeds the Alerts tab uses).
+            store.refreshTrainAlertsIfStale(force: true)
+            store.refreshLiftMaintenanceIfStale(force: true)
             loadForecast()
         }
+        .sheet(isPresented: $showLineMap) {
+            if let prefix = primaryLineCode.flatMap({ wsCodeParts($0)?.prefix }) {
+                WSLineMapSheet(
+                    prefix: prefix,
+                    currentCode: primaryLineCode ?? "",
+                    colour: WSLine.color(forStationCode: station.codes.first ?? ""),
+                    lineName: wsLineNames(from: station.codes),
+                    onSelect: { push(.mrtStation($0)) })
+                .environment(\.ws, ws)
+            }
+        }
+    }
+
+    /// The station's code on its primary heavy-rail line (e.g. "CC20").
+    private var primaryLineCode: String? {
+        station.codes.first { wsLine(forStationCode: $0) != nil }
     }
 
     // MARK: hero layout (collapsing line map)
 
     private func heroLayout(map: (prefix: String, items: [(code: String, name: String, current: Bool)])) -> some View {
-        GeometryReader { geo in
-            let restingHero = geo.size.height * 0.44
-            let spacer = max(120, restingHero - headerPeek)
+        let colour = WSLine.color(forStationCode: station.codes.first ?? "")
+        return GeometryReader { geo in
+            let restingHero = geo.size.height * 0.34
+            let spacer = max(110, restingHero - headerPeek)
+            let fade = 1 - Double(min(1, scrollY / spacer)) * 0.85
             ZStack(alignment: .top) {
-                lineHero(map: map, height: max(headerPeek, restingHero - scrollY))
-                    .opacity(1 - Double(min(1, scrollY / spacer)) * 0.85)
+                // Gradient wash (visual only) — collapses + fades behind the
+                // rising sheet. Non-interactive.
+                LinearGradient(colors: [colour.opacity(0.16), ws.bg],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: max(headerPeek, restingHero - scrollY))
+                    .frame(maxWidth: .infinity)
+                    .opacity(fade)
                     .allowsHitTesting(false)
 
                 ScrollView {
@@ -117,10 +145,12 @@ struct WSMrtStationView: View {
                         // Transparent window that lets the line map show through.
                         Color.clear.frame(height: spacer)
                         stationSheetHeader.wsEntrance()
+                        alertsCard.wsEntrance(delay: 0.04)
                         crowdCard.wsEntrance(delay: 0.06)
                         facilitiesCard.wsEntrance(delay: 0.12)
-                        busCard.wsEntrance(delay: 0.18)
-                        forecastCard.wsEntrance(delay: 0.24)
+                        adCard.wsEntrance(delay: 0.18)
+                        busCard.wsEntrance(delay: 0.24)
+                        forecastCard.wsEntrance(delay: 0.30)
                         Color.clear.frame(height: 12)
                     }
                     .padding(.bottom, 8)
@@ -132,6 +162,17 @@ struct WSMrtStationView: View {
                     scrollY = max(0, y)
                     titleCollapsed = y > 44
                 }
+
+                // The interactive line strip floats ON TOP of the sheet, not
+                // behind it: a ScrollView swallows touches meant for layers
+                // beneath it, so a strip drawn behind can't be tapped, swiped,
+                // or its LINE MAP button pressed. Here it slides up + fades with
+                // scroll to still read as "collapsing", and drops its hit
+                // testing once scrolled so it never blocks the cards below.
+                lineStrip(map: map, colour: colour)
+                    .offset(y: -scrollY)
+                    .opacity(fade)
+                    .allowsHitTesting(scrollY < 8)
             }
         }
     }
@@ -142,10 +183,12 @@ struct WSMrtStationView: View {
                 // Staggered launch sequence (anim spec): head → cards, 60ms
                 // steps, fade + 12pt rise.
                 titleRow.padding(.top, 12).wsEntrance(delay: 0)
+                alertsCard.wsEntrance(delay: 0.04)
                 crowdCard.wsEntrance(delay: 0.06)
                 facilitiesCard.wsEntrance(delay: 0.12)
-                busCard.wsEntrance(delay: 0.18)
-                forecastCard.wsEntrance(delay: 0.24)
+                adCard.wsEntrance(delay: 0.18)
+                busCard.wsEntrance(delay: 0.24)
+                forecastCard.wsEntrance(delay: 0.30)
                 Color.clear.frame(height: 12)
             }
             .padding(.bottom, 8)
@@ -157,69 +200,104 @@ struct WSMrtStationView: View {
         }
     }
 
-    // The hero: the station framed by its neighbours as a horizontal line
-    // strip on a faint line-colour wash — the one place colour = line identity.
-    private func lineHero(map: (prefix: String, items: [(code: String, name: String, current: Bool)]),
-                          height: CGFloat) -> some View {
-        let colour = WSLine.color(forStationCode: station.codes.first ?? "")
-        return VStack(spacing: 0) {
+    // The hero content: the line name + LINE MAP link, then the station framed
+    // by its neighbours as a horizontally scrollable strip — the one place
+    // colour = line identity. Drawn as a front overlay (see heroLayout) so it's
+    // interactive; the gradient wash lives on a separate layer behind the sheet.
+    private func lineStrip(map: (prefix: String, items: [(code: String, name: String, current: Bool)]),
+                           colour: Color) -> some View {
+        VStack(spacing: 0) {
             HStack(spacing: 8) {
                 ForEach(station.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
                 Text("\(wsLineNames(from: station.codes)) Line")
                     .font(ws.sans(14, weight: .heavy)).foregroundStyle(colour).lineLimit(1)
                 Spacer(minLength: 0)
-                Text("LINE MAP")
-                    .font(ws.mono(10, weight: .bold)).tracking(1).foregroundStyle(ws.faint)
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    showLineMap = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("LINE MAP")
+                            .font(ws.mono(10, weight: .bold)).tracking(1)
+                        WSIcon(glyph: .chevron, size: 9, color: ws.faint)
+                    }
+                    .foregroundStyle(ws.faint)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            Spacer(minLength: 12)
-            railRow(items: map.items, colour: colour)
-            Spacer(minLength: 12)
+            .padding(.horizontal, 22)
+            Spacer(minLength: 0).frame(height: 20)
+            railStrip(prefix: map.prefix, currentCode: primaryLineCode ?? "", colour: colour)
         }
-        .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 10)
-        .frame(height: height, alignment: .top)
-        .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(colors: [colour.opacity(0.16), ws.bg],
-                           startPoint: .top, endPoint: .bottom))
-        .clipped()
+        .padding(.top, 14)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
-    private func railRow(items: [(code: String, name: String, current: Bool)],
-                         colour: Color) -> some View {
-        VStack(spacing: 10) {
-            // Node band: the rail runs through each column's centre (two
-            // half-segments, clear on the outer ends) with the node on top.
-            HStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.code) { i, item in
-                    ZStack {
-                        HStack(spacing: 0) {
-                            Rectangle().fill(i == 0 ? Color.clear : colour.opacity(0.4)).frame(height: 4)
-                            Rectangle().fill(i == items.count - 1 ? Color.clear : colour.opacity(0.4)).frame(height: 4)
+    /// The whole line as a horizontally scrollable strip, auto-centred on the
+    /// current station. One continuous rail (a single rectangle behind the
+    /// nodes — no per-column seams, so the line never looks jagged) with a
+    /// fixed-width column per station. Neighbours push their own station; the
+    /// current station is inert. Swipe to walk the line, or tap LINE MAP for
+    /// the full jump-to-any diagram.
+    private func railStrip(prefix: String, currentCode: String, colour: Color) -> some View {
+        let seq = wsLineSequence(prefix: prefix)
+        let colW: CGFloat = 84
+        return ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                ZStack(alignment: .top) {
+                    // Single continuous rail, spanning first node centre to last,
+                    // sitting at the node band's vertical centre (22 / 2 = 11).
+                    Rectangle().fill(colour.opacity(0.4))
+                        .frame(height: 4)
+                        .padding(.horizontal, colW / 2)
+                        .padding(.top, 9)
+                    HStack(spacing: 0) {
+                        ForEach(seq, id: \.code) { s in
+                            lineColumn(code: s.code, name: s.name,
+                                       current: s.code == currentCode, colW: colW)
                         }
-                        Circle()
-                            .fill(item.current ? colour : ws.bg)
-                            .frame(width: item.current ? 18 : 12, height: item.current ? 18 : 12)
-                            .overlay(Circle().stroke(colour, lineWidth: item.current ? 4 : 3))
-                            .background { if item.current { WSPing(cornerRadius: 999) } }
                     }
-                    .frame(maxWidth: .infinity).frame(height: 22)
                 }
+                .padding(.horizontal, 22)
             }
-            // Labels aligned to the same equal-width columns.
-            HStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.code) { _, item in
-                    VStack(spacing: 3) {
-                        Text(item.code)
-                            .font(ws.mono(11, weight: .bold))
-                            .foregroundStyle(item.current ? ws.text : colour)
-                        Text(item.name)
-                            .font(ws.sans(item.current ? 12.5 : 11, weight: item.current ? .bold : .medium))
-                            .foregroundStyle(item.current ? ws.text : ws.dim)
-                            .lineLimit(1).minimumScaleFactor(0.75)
-                    }
-                    .frame(maxWidth: .infinity).padding(.horizontal, 2)
-                }
+            .onAppear { proxy.scrollTo(currentCode, anchor: .center) }
+        }
+    }
+
+    @ViewBuilder
+    private func lineColumn(code: String, name: String, current: Bool, colW: CGFloat) -> some View {
+        let column = VStack(spacing: 10) {
+            Circle()
+                .fill(current ? WSLine.color(forStationCode: code) : ws.bg)
+                .frame(width: current ? 18 : 12, height: current ? 18 : 12)
+                .overlay(Circle().stroke(WSLine.color(forStationCode: code),
+                                         lineWidth: current ? 4 : 3))
+                .background { if current { WSPing(cornerRadius: 999) } }
+                .frame(height: 22)
+            VStack(spacing: 3) {
+                Text(code)
+                    .font(ws.mono(11, weight: .bold))
+                    .foregroundStyle(current ? ws.text : WSLine.color(forStationCode: code))
+                Text(name)
+                    .font(ws.sans(current ? 12.5 : 11, weight: current ? .bold : .medium))
+                    .foregroundStyle(current ? ws.text : ws.dim)
+                    .lineLimit(1).minimumScaleFactor(0.75)
             }
+            .padding(.horizontal, 2)
+        }
+        .frame(width: colW)
+        .contentShape(Rectangle())
+        .id(code)
+
+        if current {
+            column
+        } else {
+            Button {
+                UISelectionFeedbackGenerator().selectionChanged()
+                if let st = MrtGeo.station(forCode: code) { push(.mrtStation(st)) }
+            } label: { column }
+            .buttonStyle(WSCompressStyle())
         }
     }
 
@@ -441,6 +519,93 @@ struct WSMrtStationView: View {
             .padding(.horizontal, 22)
     }
 
+    // MARK: service alerts (live disruptions + lift outages at THIS station)
+    //
+    // Same feeds as the Alerts tab (DataStore.trainAlerts by line +
+    // liftMaintenance by station), filtered to this station. Only rendered when
+    // something's actually wrong — otherwise the header's "Normal service" says
+    // it all.
+
+    /// Line disruptions touching any of this station's lines.
+    private var stationAlerts: [TrainAlert] {
+        let mine = Set(lines)
+        return store.trainAlerts.filter { $0.line.map(mine.contains) ?? false }
+    }
+    /// Lift outages reported at this station.
+    private var stationLifts: [LiftMaintenance] {
+        store.liftMaintenance.filter {
+            $0.stationName.caseInsensitiveCompare(station.name) == .orderedSame
+        }
+    }
+
+    @ViewBuilder private var alertsCard: some View {
+        let alerts = stationAlerts
+        let lifts = stationLifts
+        if !alerts.isEmpty || !lifts.isEmpty {
+            WSCard(title: "Service alerts", glyph: .alerts) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(alerts.indices, id: \.self) { i in
+                        let a = alerts[i]
+                        HStack(alignment: .top, spacing: 12) {
+                            LineBullet(code: a.lineCode, size: .large, isLineCode: true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(a.title).font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
+                                Text(a.detail)
+                                    .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim).lineSpacing(2)
+                                if a.freeBus || a.freeShuttle {
+                                    HStack(spacing: 6) {
+                                        if a.freeBus { miniBadge("FREE BUS") }
+                                        if a.freeShuttle { miniBadge("FREE SHUTTLE") }
+                                    }.padding(.top, 3)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 10)
+                        if i < alerts.count - 1 || !lifts.isEmpty { WSRowDivider() }
+                    }
+                    ForEach(lifts.indices, id: \.self) { i in
+                        let lift = lifts[i]
+                        HStack(alignment: .top, spacing: 12) {
+                            WSIcon(glyph: .lift, size: 18, color: ws.text)
+                                .frame(width: 34, height: 34)
+                                .background(ws.panel2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Lift out of service").font(ws.sans(14, weight: .bold)).foregroundStyle(ws.text)
+                                Text(lift.detail)
+                                    .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim).lineSpacing(2)
+                            }
+                            Spacer(minLength: 0)
+                            miniBadge("LIFT")
+                        }
+                        .padding(.vertical, 10)
+                        if i < lifts.count - 1 { WSRowDivider() }
+                    }
+                }
+            }
+            .padding(.horizontal, 22)
+        }
+    }
+
+    private func miniBadge(_ text: String) -> some View {
+        Text(text).font(ws.mono(9.5, weight: .bold)).tracking(0.7).foregroundStyle(ws.dim)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(ws.rule, lineWidth: 1))
+    }
+
+    // MARK: inline ad
+    //
+    // In-content MREC (300×250) styled as one of the sheet cards, replacing the
+    // old anchored bottom banner that read as bolted-on system chrome on this
+    // dark editorial layout. Self-suppresses when ads are disabled.
+    @ViewBuilder private var adCard: some View {
+        if !AdConfig.adsSuppressed {
+            MediumRectAd()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+        }
+    }
+
     // MARK: forecast
 
     private var forecastCard: some View {
@@ -523,5 +688,103 @@ struct WSMrtStationView: View {
             }
             await MainActor.run { forecast = pts; forecastEnded = false }
         }
+    }
+}
+
+// MARK: - Full line diagram (the "LINE MAP" sheet)
+//
+// The whole line as a scrollable vertical list with the rail running down the
+// side — the jump-to-any-station view. Auto-scrolls to the current station on
+// open; tapping any other station dismisses and pushes it.
+private struct WSLineMapSheet: View {
+    let prefix: String
+    let currentCode: String
+    let colour: Color
+    let lineName: String
+    var onSelect: (MrtGeoStation) -> Void
+
+    @Environment(\.ws) private var ws
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let seq = wsLineSequence(prefix: prefix)
+        VStack(spacing: 0) {
+            // Header
+            HStack(spacing: 10) {
+                LineBullet(code: currentCode)
+                Text("\(lineName) Line")
+                    .font(ws.sans(18, weight: .heavy)).foregroundStyle(ws.text)
+                Spacer()
+                Button { dismiss() } label: {
+                    WSIcon(glyph: .close, size: 15, color: ws.dim)
+                        .frame(width: 32, height: 32)
+                        .background(ws.panel2, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 14)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(seq.enumerated()), id: \.element.code) { i, s in
+                            row(code: s.code, name: s.name,
+                                isFirst: i == 0, isLast: i == seq.count - 1)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+                .onAppear { proxy.scrollTo(currentCode, anchor: .center) }
+            }
+        }
+        .background(ws.bg)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private func row(code: String, name: String, isFirst: Bool, isLast: Bool) -> some View {
+        let cur = code == currentCode
+        Button {
+            guard !cur, let st = MrtGeo.station(forCode: code) else { return }
+            UISelectionFeedbackGenerator().selectionChanged()
+            dismiss()
+            onSelect(st)
+        } label: {
+            HStack(spacing: 14) {
+                // Rail + node column: two flexible half-segments meeting at the
+                // node's centre, continuous across the fixed-height rows.
+                ZStack {
+                    VStack(spacing: 0) {
+                        Rectangle().fill(isFirst ? Color.clear : colour.opacity(0.4)).frame(width: 4)
+                        Rectangle().fill(isLast ? Color.clear : colour.opacity(0.4)).frame(width: 4)
+                    }
+                    Circle()
+                        .fill(cur ? colour : ws.bg)
+                        .frame(width: cur ? 16 : 12, height: cur ? 16 : 12)
+                        .overlay(Circle().stroke(colour, lineWidth: cur ? 4 : 3))
+                }
+                .frame(width: 34)
+
+                Text(code)
+                    .font(ws.mono(12, weight: .bold))
+                    .foregroundStyle(cur ? ws.text : colour)
+                    .frame(width: 48, alignment: .leading)
+                Text(name)
+                    .font(ws.sans(cur ? 16 : 15, weight: cur ? .bold : .medium))
+                    .foregroundStyle(cur ? ws.text : ws.dim)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if cur {
+                    Text("YOU ARE HERE")
+                        .font(ws.mono(9, weight: .bold)).tracking(1).foregroundStyle(ws.faint)
+                }
+            }
+            .padding(.horizontal, 20)
+            .frame(height: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(WSCompressStyle())
+        .id(code)
     }
 }

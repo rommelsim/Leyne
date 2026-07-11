@@ -18,6 +18,10 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     @Published var location: CLLocation?
     @Published var status: CLAuthorizationStatus
 
+    /// Resumed by the authorization delegate so callers can `await` the user's
+    /// answer to the location prompt (used by the first-run permission runner).
+    private var permissionContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
+
     override init() {
         status = manager.authorizationStatus
         super.init()
@@ -74,10 +78,31 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     func requestPermission() { requestAndStart() }
     func start() { startIfAuthorized() }
 
+    /// Prompt for permission and await the user's answer. Returns immediately
+    /// with the current status if it's already determined.
+    func requestPermissionAwaiting() async -> CLAuthorizationStatus {
+        refreshStatus()
+        guard status == .notDetermined else {
+            if authorized { manager.startUpdatingLocation() }
+            return status
+        }
+        return await withCheckedContinuation { cont in
+            permissionContinuation = cont
+            manager.requestWhenInUseAuthorization()
+        }
+    }
+
     nonisolated func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
         Task { @MainActor in
             status = m.authorizationStatus
             if authorized { m.startUpdatingLocation() }
+            // Only resume once the user has actually answered — the delegate
+            // also fires with `.notDetermined` at registration, before the
+            // prompt is shown.
+            if status != .notDetermined, let cont = permissionContinuation {
+                permissionContinuation = nil
+                cont.resume(returning: status)
+            }
         }
     }
 

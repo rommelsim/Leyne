@@ -74,24 +74,33 @@ struct WSSavedView: View {
 
     private var list: some View {
         List {
-            headerRow(WSSectionHeader(
-                label: "Stops",
-                meta: WSFmt.upd(store.newestRefresh(amongst: m.pins.map(\.code)), use24h: m.use24h)))
-            ForEach(m.pins, id: \.code) { pin in
-                row { savedStopRow(pin) }
+            // Stops — only when there are saved stops (was showing over saved
+            // stations, mislabelling them).
+            if !m.pins.isEmpty {
+                headerRow(WSSectionHeader(
+                    label: "Stops",
+                    meta: WSFmt.upd(store.newestRefresh(amongst: m.pins.map(\.code)), use24h: m.use24h)))
+                ForEach(m.pins, id: \.code) { pin in
+                    row { savedStopRow(pin) }
+                }
+                .onDelete { m.pins.remove(atOffsets: $0) }
+                .onMove { m.pins.move(fromOffsets: $0, toOffset: $1) }
             }
-            .onDelete { m.pins.remove(atOffsets: $0) }
-            .onMove { m.pins.move(fromOffsets: $0, toOffset: $1) }
 
-            ForEach(m.savedMrtStations) { st in
-                row { savedStationRow(st) }
+            // Stations — its own header now, not folded under Stops.
+            if !m.savedMrtStations.isEmpty {
+                headerRow(WSSectionHeader(label: "Stations"))
+                ForEach(m.savedMrtStations) { st in
+                    row { savedStationRow(st) }
+                }
+                .onDelete { m.savedMrtStations.remove(atOffsets: $0) }
+                .onMove { m.savedMrtStations.move(fromOffsets: $0, toOffset: $1) }
             }
-            .onDelete { m.savedMrtStations.remove(atOffsets: $0) }
-            .onMove { m.savedMrtStations.move(fromOffsets: $0, toOffset: $1) }
 
-            // One native ad per screen, between the stops and Lines sections.
+            // One native ad per screen, between the places and Lines sections.
             // Renders nothing until a creative loads; pinned out of edit mode.
             NativeAdCard()
+                .listRowSeparator(.hidden)
                 .deleteDisabled(true).moveDisabled(true)
 
             if !m.favServices.isEmpty {
@@ -126,12 +135,20 @@ struct WSSavedView: View {
             .moveDisabled(true)
     }
 
-    /// Shared row chrome: WhereSia insets, hairline separator, transparent bg.
+    /// Shared row chrome: each saved item is an inset rounded card on the panel
+    /// surface (replacing the old edge-to-edge hairline rows) so the sections
+    /// read as grouped cards in the app's card grammar. Swipe-to-delete and
+    /// EDIT reorder still work — listRowBackground preserves both.
     private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
-            .listRowBackground(Color.clear)
-            .listRowSeparatorTint(ws.rule)
-            .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+            .padding(.horizontal, 16)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(ws.panel)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4))
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
     }
 
     // MARK: rows

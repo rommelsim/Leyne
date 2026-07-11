@@ -109,6 +109,10 @@ struct WSServiceInfoView: View {
 
     private func routeStopRow(_ s: RouteStopLive, isFirst: Bool, isLast: Bool) -> some View {
         let isYou = s.code == fromStop
+        // MRT interchange at this stop → surface its line-colour pills, the same
+        // "colour = line" signature the MRT station screen uses (owner: the plain
+        // list needed the coloured pills ported in).
+        let ic = wsInterchange(forStopName: s.name)
         return Button {
             UISelectionFeedbackGenerator().selectionChanged()
             push(.busStop(code: s.code))
@@ -136,8 +140,17 @@ struct WSServiceInfoView: View {
                         .font(ws.sans(14.5, weight: isYou ? .heavy : .semibold))
                         .foregroundStyle(ws.text)
                         .multilineTextAlignment(.leading)
-                    Text(s.code)
-                        .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                    HStack(spacing: 7) {
+                        Text(s.code)
+                            .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                        if let ic {
+                            WSIcon(glyph: .train, size: 11, color: ws.faint)
+                            HStack(spacing: 4) {
+                                ForEach(ic.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
+                            }
+                        }
+                    }
+                    .padding(.top, ic == nil ? 0 : 1)
                 }
                 .padding(.bottom, isLast ? 0 : 15)
                 Spacer(minLength: 0)

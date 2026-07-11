@@ -561,27 +561,41 @@ struct WSSegmented: View {
     let options: [String]
     @Binding var selection: Int
     @Environment(\.ws) private var ws
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var ns
+
     var body: some View {
         HStack(spacing: 6) {
             ForEach(options.indices, id: \.self) { i in
                 let on = i == selection
-                Button { selection = i } label: {
+                Button {
+                    if reduceMotion { selection = i }
+                    else {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { selection = i }
+                    }
+                } label: {
                     Text(options[i])
                         .font(ws.sans(12.5, weight: .bold))
                         .foregroundStyle(on ? .white : ws.dim)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 9)
-                        .background(on ? ws.accent : .clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                        // The selected pill slides between segments (matched
+                        // geometry) rather than hard-cutting.
+                        .background {
+                            if on {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(ws.accent)
+                                    .matchedGeometryEffect(id: "wsSegThumb", in: ns)
+                            }
+                        }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(4)
-        .background(ws.panel)
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(ws.rule, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 13))
+        // Native iOS 26 Liquid Glass track (tinted ultraThin fallback below 26).
+        .wsGlassChrome(cornerRadius: 13, tint: ws.tabbar)
     }
 }
 

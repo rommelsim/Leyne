@@ -23,23 +23,11 @@ struct RootView: View {
             // "Soft" UI as the app root; swap back to SoftRoot() to revert.)
             WSRoot()
 
-            // ── Onboarding ──────────────────────────────────
-            if m.showOnboarding {
-                OnboardingView(
-                    onRequestLocation: { LocationManager.shared.requestPermission() },
-                    onRequestNotifications: {
-                        Task { await m.setNotificationsEnabled(true) }
-                    },
-                    onRequestTracking: {
-                        // Gather UMP + ATT consent here; the summary screen's
-                        // "Enter Leyne" finishes onboarding (onFinish).
-                        Task { await AdConsent.gatherThenStart() }
-                    },
-                    onFinish: { m.finishOnboarding() }
-                )
-                .transition(.opacity)
-                .zIndex(50)
-            }
+            // ── First-run permissions ───────────────────────
+            // The onboarding walkthrough was removed (owner, 2026-07-11): on a
+            // first launch we simply fire the three OS permission prompts one
+            // after another over the live app, then mark onboarding done. No
+            // custom screens. See `runFirstRunPermissions`.
 
             // ── What's New ──────────────────────────────────
             if !m.showOnboarding,
@@ -81,6 +69,23 @@ struct RootView: View {
             case .light:  m.isDark = false
             case .dark:   m.isDark = true
             }
+        }
+        // First-run permission sequence — replaces the onboarding walkthrough.
+        // Fires location → notifications → ATT/UMP consent one at a time (each
+        // awaits the user's answer), then finishes onboarding.
+        .task(id: m.showOnboarding) {
+            guard m.showOnboarding else { return }
+            // Let the launch splash clear before stacking OS dialogs over it.
+            var waited = 0
+            while m.launching && waited < 40 {
+                try? await Task.sleep(for: .milliseconds(120)); waited += 1
+            }
+            _ = await LocationManager.shared.requestPermissionAwaiting()
+            await m.setNotificationsEnabled(true)
+            // ATT/UMP only matters when ads are on; gatherThenStart also starts
+            // the ad SDK once consent is resolved.
+            if AdConfig.adsEnabled { await AdConsent.gatherThenStart() }
+            m.finishOnboarding()
         }
         .task {
             if !m.showOnboarding {

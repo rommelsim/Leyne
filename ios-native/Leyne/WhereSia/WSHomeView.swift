@@ -391,11 +391,11 @@ private struct BusStopCard: View {
             // into it. No "Bus stop" eyebrow: we're already in a list of bus
             // stops, so the label was redundant; the code + road name is what
             // actually tells the stops apart (owner 2026-07-10).
-            Button {
-                UISelectionFeedbackGenerator().selectionChanged()
-                push(.busStop(code: stop.stopCode))
-            } label: {
-                HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    push(.busStop(code: stop.stopCode))
+                } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(stop.stopName)
                             .font(ws.sans(24, weight: .heavy)).foregroundStyle(ws.text)
@@ -404,13 +404,26 @@ private struct BusStopCard: View {
                             .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
                             .lineLimit(1)
                     }
-                    Spacer(minLength: 8)
-                    WSIcon(glyph: .chevron, size: 12, color: ws.faint).padding(.top, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open \(stop.stopName)")
+
+                // Visible bookmark, same trailing-action pattern as the MRT
+                // station screen (previously save was buried in the long-press
+                // menu only). Fills when saved.
+                Button(action: togglePin) {
+                    WSIcon(glyph: isPinned ? .bookmarkFilled : .bookmark,
+                           size: 18, color: isPinned ? ws.accent : ws.dim)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .sensoryFeedback(.impact(weight: .light), trigger: isPinned)
+                .accessibilityLabel(isPinned ? "Remove \(stop.stopName) from Saved"
+                                             : "Save \(stop.stopName)")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open \(stop.stopName)")
 
             walkLine(distanceM: stop.distanceM)
                 .padding(.top, 10)
@@ -456,18 +469,21 @@ private struct BusStopCard: View {
                     } label: {
                         HStack(spacing: 8) {
                             Spacer(minLength: 0)
-                            Text(expanded ? "Show fewer buses"
-                                          : "View all buses at this stop")
+                            // Names the inline action (expand/collapse), not
+                            // navigation — the header chevron is what opens the
+                            // stop; this only reveals the remaining buses here.
+                            Text(expanded ? "Show fewer"
+                                          : "Show all \(services.count) buses")
                                 .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
-                            WSIcon(glyph: expanded ? .chevronDown : .chevron, size: 12,
-                                   color: ws.faint)
+                            WSIcon(glyph: .chevronDown, size: 12, color: ws.faint)
+                                .rotationEffect(.degrees(expanded ? 180 : 0))
                         }
                         .padding(.vertical, 14)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(expanded ? "Show fewer buses"
-                                                 : "View all \(services.count) buses at this stop")
+                                                 : "Show all \(services.count) buses at this stop")
                 }
             }
         }

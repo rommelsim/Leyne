@@ -28,6 +28,7 @@ struct WSAlertsView: View {
                 // the user's own alerts. Renders nothing until a creative
                 // loads; pinned out of edit mode.
                 NativeAdCard()
+                    .listRowSeparator(.hidden)
                     .deleteDisabled(true).moveDisabled(true)
                 headerRow(WSSectionHeader(label: "Your alerts"))
                 yourSection
@@ -87,12 +88,20 @@ struct WSAlertsView: View {
             .moveDisabled(true)
     }
 
-    /// Shared row chrome for List rows.
+    /// Shared row chrome: each alert is an inset rounded card on the panel
+    /// surface (replacing the old edge-to-edge hairline rows), matching the
+    /// Saved screen's grouped-card grammar. Swipe-delete + EDIT reorder are
+    /// preserved via listRowBackground.
     private func rowChrome<Content: View>(_ content: Content, editable: Bool = false) -> some View {
         content
-            .listRowBackground(Color.clear)
-            .listRowSeparatorTint(ws.rule)
-            .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+            .padding(.horizontal, 16)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(ws.panel)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4))
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .deleteDisabled(!editable)
             .moveDisabled(!editable)
     }
@@ -198,7 +207,7 @@ struct WSAlertsView: View {
     private func calmRow(_ text: String) -> some View {
         Text(text).font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 22).padding(.vertical, 14)
+            .padding(.vertical, 15)
     }
 
     private func miniBadge(_ text: String) -> some View {

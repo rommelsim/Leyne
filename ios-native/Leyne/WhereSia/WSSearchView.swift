@@ -76,9 +76,9 @@ struct WSSearchView: View {
                 }
             }
             .padding(.horizontal, 14).frame(height: 48)
-            .background(ws.input)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(ws.text, lineWidth: 1.5))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            // Native iOS 26 Liquid Glass (falls back to tinted ultraThin
+            // material below 26), matching the app's other chrome surfaces.
+            .wsGlassChrome(cornerRadius: 14, tint: ws.tabbar)
 
             Button(action: onClose) {
                 Text("Cancel").font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.dim)
@@ -107,17 +107,17 @@ struct WSSearchView: View {
                     .padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 4)
 
                     ForEach(m.recents, id: \.self) { r in
-                        Button { query = r } label: {
-                            HStack(spacing: 13) {
-                                iconWell(.search)
-                                Text(r).font(ws.sans(15, weight: .bold)).foregroundStyle(ws.text)
-                                Spacer()
-                                WSIcon(glyph: .chevron, size: 18, color: ws.faint)
-                            }
-                            .padding(.vertical, 13).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                        .padding(.horizontal, 22)
-                        WSRowDivider().padding(.horizontal, 22)
+                        searchCard {
+                            Button { query = r } label: {
+                                HStack(spacing: 13) {
+                                    iconWell(.search)
+                                    Text(r).font(ws.sans(15, weight: .bold)).foregroundStyle(ws.text)
+                                    Spacer()
+                                    WSIcon(glyph: .chevron, size: 18, color: ws.faint)
+                                }
+                                .padding(.vertical, 13).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
                     }
                 }
             }
@@ -235,21 +235,22 @@ struct WSSearchView: View {
                 }
                 if noResults {
                     if let suggestion = WSSpell.suggest(for: trimmed, store: store) {
-                        Button { query = suggestion } label: {
-                            HStack(spacing: 13) {
-                                iconWell(.search)
-                                (Text("Did you mean ")
-                                 + Text(suggestion).fontWeight(.heavy)
-                                 + Text("?"))
-                                    .font(ws.sans(15, weight: .medium)).foregroundStyle(ws.text)
-                                Spacer()
-                                WSIcon(glyph: .chevron, size: 18, color: ws.faint)
+                        searchCard {
+                            Button { query = suggestion } label: {
+                                HStack(spacing: 13) {
+                                    iconWell(.search)
+                                    (Text("Did you mean ")
+                                     + Text(suggestion).fontWeight(.heavy)
+                                     + Text("?"))
+                                        .font(ws.sans(15, weight: .medium)).foregroundStyle(ws.text)
+                                    Spacer()
+                                    WSIcon(glyph: .chevron, size: 18, color: ws.faint)
+                                }
+                                .padding(.vertical, 13).contentShape(Rectangle())
                             }
-                            .padding(.vertical, 13).contentShape(Rectangle())
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 22).padding(.top, 12)
-                        WSRowDivider().padding(.horizontal, 22)
+                        .padding(.top, 8)
                     }
                     Text("No matches for “\(trimmed)”.")
                         .font(ws.sans(14, weight: .medium)).foregroundStyle(ws.dim)
@@ -275,58 +276,68 @@ struct WSSearchView: View {
 
     // MARK: rows
 
+    /// Inset rounded-card container for a search row — the same grouped-card
+    /// grammar as Saved / Alerts (replaces the old edge-to-edge hairline rows).
+    private func searchCard<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+        content()
+            .padding(.horizontal, 16)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(ws.panel))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+    }
+
     private func resultRow(icon: WSGlyph, name: String, sub: String?,
                            codes: [String], action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 13) {
-                iconWell(icon)
-                VStack(alignment: .leading, spacing: 3) {
-                    wsHighlight(name, query: trimmed, ws: ws)
-                        .font(ws.sans(15, weight: .bold))
-                    if let sub {
-                        Text(sub).font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
+        searchCard {
+            Button(action: action) {
+                HStack(spacing: 13) {
+                    iconWell(icon)
+                    VStack(alignment: .leading, spacing: 3) {
+                        wsHighlight(name, query: trimmed, ws: ws)
+                            .font(ws.sans(15, weight: .bold))
+                        if let sub {
+                            Text(sub).font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
+                        }
+                        if !codes.isEmpty {
+                            HStack(spacing: 5) {
+                                ForEach(codes.prefix(3), id: \.self) { LineBullet(code: $0) }
+                            }.padding(.top, 1)
+                        }
                     }
-                    if !codes.isEmpty {
-                        HStack(spacing: 5) {
-                            ForEach(codes.prefix(3), id: \.self) { LineBullet(code: $0) }
-                        }.padding(.top, 1)
-                    }
+                    Spacer()
+                    WSIcon(glyph: .chevron, size: 18, color: ws.faint)
                 }
-                Spacer()
-                WSIcon(glyph: .chevron, size: 18, color: ws.faint)
+                .padding(.vertical, 13).contentShape(Rectangle())
             }
-            .padding(.vertical, 13).contentShape(Rectangle())
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 22)
-        .overlay(alignment: .bottom) { WSRowDivider().padding(.horizontal, 22) }
     }
 
     private func serviceRow(_ svc: LTABusServiceDTO) -> some View {
         let dest = svc.DestinationCode.map { store.stopName($0) } ?? ""
-        return Button {
-            select(.serviceInfo(no: svc.ServiceNo, fromStop: nil), label: "Bus \(svc.ServiceNo)")
-        } label: {
-            HStack(spacing: 13) {
-                Text(svc.ServiceNo).font(ws.mono(14, weight: .bold)).foregroundStyle(ws.text)
-                    .frame(width: 38, height: 38)
-                    .background(ws.panel2)
-                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 11))
-                VStack(alignment: .leading, spacing: 3) {
-                    (Text("Bus ") + wsHighlightRaw(svc.ServiceNo, query: trimmed))
-                        .font(ws.sans(15, weight: .bold)).foregroundStyle(ws.text)
-                    Text(dest.isEmpty ? "SERVICE" : "SERVICE · TO \(dest.uppercased())")
-                        .font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
+        return searchCard {
+            Button {
+                select(.serviceInfo(no: svc.ServiceNo, fromStop: nil), label: "Bus \(svc.ServiceNo)")
+            } label: {
+                HStack(spacing: 13) {
+                    Text(svc.ServiceNo).font(ws.mono(14, weight: .bold)).foregroundStyle(ws.text)
+                        .frame(width: 38, height: 38)
+                        .background(ws.panel2)
+                        .overlay(RoundedRectangle(cornerRadius: 11).stroke(ws.rule, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                    VStack(alignment: .leading, spacing: 3) {
+                        (Text("Bus ") + wsHighlightRaw(svc.ServiceNo, query: trimmed))
+                            .font(ws.sans(15, weight: .bold)).foregroundStyle(ws.text)
+                        Text(dest.isEmpty ? "SERVICE" : "SERVICE · TO \(dest.uppercased())")
+                            .font(ws.mono(11)).tracking(0.2).foregroundStyle(ws.dim)
+                    }
+                    Spacer()
+                    WSIcon(glyph: .chevron, size: 18, color: ws.faint)
                 }
-                Spacer()
-                WSIcon(glyph: .chevron, size: 18, color: ws.faint)
+                .padding(.vertical, 13).contentShape(Rectangle())
             }
-            .padding(.vertical, 13).contentShape(Rectangle())
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 22)
-        .overlay(alignment: .bottom) { WSRowDivider().padding(.horizontal, 22) }
     }
 
     private func iconWell(_ glyph: WSGlyph) -> some View {

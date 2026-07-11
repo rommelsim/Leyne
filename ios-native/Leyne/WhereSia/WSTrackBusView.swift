@@ -41,6 +41,8 @@ struct WSTrackBusView: View {
     @State private var scrollY: CGFloat = 0
     /// The full-screen interactive map (tap the hero to open).
     @State private var showFullMap = false
+    /// The ⓘ operating-hours / route-ends popover.
+    @State private var showInfo = false
 
     /// How much of the ETA sheet header overlaps (floats over) the hero map at
     /// rest — the "grab me" peek.
@@ -108,6 +110,8 @@ struct WSTrackBusView: View {
                                 .wsEntrance()
                             routeCard
                                 .wsEntrance(delay: 0.08)
+                            adCard
+                                .wsEntrance(delay: 0.14)
                             Color.clear.frame(height: 24)
                         }
                     }
@@ -129,20 +133,36 @@ struct WSTrackBusView: View {
             cta
                 .wsEntrance(delay: 0.16)
         }
-        .wsDetailAdBanner()
         .background(ws.bg)
         // The bar names the bus itself — "TRACK BUS" told the user nothing.
         .wsHeaderBar(eyebrow: "Track bus", title: "Bus \(serviceNo)",
                      collapsed: true, onBack: onBack) {
-            WSHairButton(glyph: .info) {
-                push(.serviceInfo(no: serviceNo, fromStop: stopCode))
+            HStack(spacing: 8) {
+                // Bookmark the bus right here — previously the only save button
+                // was buried on the Full-route screen (owner: hard to bookmark).
+                WSHairButton(glyph: m.isFavService(no: serviceNo, stop: stopCode)
+                                    ? .bookmarkFilled : .bookmark) {
+                    m.toggleFavService(no: serviceNo, stop: stopCode)
+                }
+                WSHairButton(glyph: .info) {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    showInfo = true
+                }
+                .popover(isPresented: $showInfo) {
+                    busInfoPopover
+                        .presentationCompactAdaptation(.popover)
+                }
             }
         }
+        .sensoryFeedback(.impact(weight: .light),
+                         trigger: m.isFavService(no: serviceNo, stop: stopCode))
         .fullScreenCover(isPresented: $showFullMap) {
             WSBusFullMap(serviceNo: serviceNo,
                          seg: approachSegment(),
                          stopCoord: stopCoord,
                          busCoord: busCoord,
+                         dest: destTitle,
+                         awayText: stopsAway,
                          etaText: fullMapETA.text,
                          etaNow: fullMapETA.now,
                          crowd: (service?.load).map { ($0.wsDotColor, $0.wsSeatPhrase) },
@@ -155,7 +175,12 @@ struct WSTrackBusView: View {
         // refetch immediately on return from background — the tick loop was
         // paused, so the card would otherwise show minutes-old data until a
         // pull-to-refresh (owner-reported).
-        .onChange(of: m.tick) { _, _ in store.ensureArrivals(stop: stopCode) }
+        .onChange(of: m.tick) { _, _ in
+            store.ensureArrivals(stop: stopCode)
+            // Move the map bus + "stops away" as the (freshly-cached) live GPS
+            // advances — the map is no longer a frozen open-time snapshot.
+            syncBusFromService()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { store.ensureArrivals(stop: stopCode, force: true) }
         }
@@ -175,6 +200,16 @@ struct WSTrackBusView: View {
     private func openFull() {
         UISelectionFeedbackGenerator().selectionChanged()
         showFullMap = true
+    }
+
+    /// "6 stops away" for the full-map info bar — nil when there's no live GPS
+    /// index to count from, or the bus is already at the stop.
+    private var stopsAway: String? {
+        guard let dir = anchorDirection, let bi = busIndex, !dir.stops.isEmpty else { return nil }
+        let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        let away = max(0, you - min(bi, you))
+        guard away > 0 else { return nil }
+        return away == 1 ? "1 stop away" : "\(away) stops away"
     }
 
     private var fullMapETA: (text: String, now: Bool) {
@@ -286,6 +321,76 @@ struct WSTrackBusView: View {
         else if let minutes { parts.append("\(sched ? "around " : "")\(minutes) minutes to your stop") }
         if let load = service?.load { parts.append(load.wsSeatPhrase) }
         return parts.joined(separator: ", ")
+    }
+
+    // MARK: info popover (ⓘ — operating hours + route ends)
+
+    private var busInfoPopover: some View {
+        let w = anchorDirection?.firstLast
+        let origin = anchorDirection?.originName ?? ""
+        let dest = anchorDirection?.destinationName ?? ""
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                RouteTile(text: serviceNo, size: .small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Bus \(serviceNo)")
+                        .font(ws.sans(15, weight: .heavy)).foregroundStyle(ws.text)
+                    if !origin.isEmpty && !dest.isEmpty {
+                        Text("\(origin) → \(dest)")
+                            .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.bottom, 14)
+
+            Text("FIRST & LAST BUS · YOUR STOP")
+                .font(ws.mono(9.5, weight: .bold)).tracking(1).foregroundStyle(ws.faint)
+                .padding(.bottom, 6)
+            if let w {
+                infoHoursRow("Weekdays", w.firstWD, w.lastWD)
+                infoHoursRow("Saturday", w.firstSat, w.lastSat)
+                infoHoursRow("Sun / P.H.", w.firstSun, w.lastSun, last: true)
+            } else {
+                Text(serviceRouteData == nil ? "Loading…" : "Not published for this stop.")
+                    .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
+                    .padding(.vertical, 8)
+            }
+
+            Button {
+                showInfo = false
+                push(.serviceInfo(no: serviceNo, fromStop: stopCode))
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Full route & stops")
+                        .font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.accentSoft)
+                    WSIcon(glyph: .chevron, size: 10, color: ws.accentSoft)
+                }
+                .padding(.top, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(18)
+        .frame(width: 268)
+        .background(ws.panel)
+    }
+
+    private func infoHoursRow(_ key: String, _ first: String?, _ last: String?,
+                              last isLast: Bool = false) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(key).font(ws.sans(12.5, weight: .semibold)).foregroundStyle(ws.dim)
+                Spacer()
+                (Text(WSFmt.firstLast(first)).foregroundStyle(ws.text)
+                 + Text(" – ").foregroundStyle(ws.dim)
+                 + Text(WSFmt.firstLast(last)).foregroundStyle(ws.text))
+                    .font(ws.mono(13, weight: .bold))
+            }
+            .padding(.vertical, 8)
+            if !isLast { WSRowDivider() }
+        }
     }
 
     // MARK: hero map
@@ -426,21 +531,61 @@ struct WSTrackBusView: View {
 
     // MARK: approach
 
+    /// Only ever show the final approach — the last few stops before you. A bus
+    /// that's still far would otherwise dump its entire 15–25-stop run into the
+    /// card (owner-reported "immense" list); those earlier stops collapse into a
+    /// single "N earlier stops · full route" row instead.
+    private static let approachWindow = 5
+
     private func approach(_ dir: RouteDirection) -> some View {
         let stops = dir.stops
         let you = min(max(dir.youIndex, 0), stops.count - 1)
         let busIdx = busIndex.map { min($0, you) }
         // Window: bus → your stop when a live position exists; otherwise just
         // the last few stops before you — spatial context, no invented count.
-        let start = busIdx ?? max(0, you - 3)
+        let naturalStart = busIdx ?? max(0, you - 3)
+        let truncated = (you - naturalStart) > Self.approachWindow
+        let start = truncated ? max(0, you - Self.approachWindow) : naturalStart
+        let hidden = start - naturalStart   // stops between the bus and the window
         let r = RouteInfo(stops: stops, youIndex: you, busIndex: busIdx, busCoord: nil)
         return VStack(alignment: .leading, spacing: 0) {
             approachHeadline(you: you, busIdx: busIdx).padding(.bottom, 14)
+            if truncated { collapsedEarlierRow(hidden: hidden) }
             ForEach(start...you, id: \.self) { i in
                 stepRow(r, index: i, you: you)
-                if busIdx == i && i < you { vehicleRow(r) }
+                // The inline "bus is here" marker only makes sense when the bus
+                // actually sits inside the shown window.
+                if !truncated, busIdx == i && i < you { vehicleRow(r) }
             }
         }
+    }
+
+    /// Stands in for the run of stops the bus still has to cover before the
+    /// final-approach window — a dotted rail node that opens the full route.
+    private func collapsedEarlierRow(hidden: Int) -> some View {
+        Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            push(.serviceInfo(no: serviceNo, fromStop: stopCode))
+        } label: {
+            HStack(alignment: .center, spacing: 15) {
+                VStack(spacing: 4) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Circle().fill(ws.faint).frame(width: 3, height: 3)
+                    }
+                }
+                .frame(width: 24, height: 30)
+                HStack(spacing: 4) {
+                    Text("\(hidden) earlier \(hidden == 1 ? "stop" : "stops") · full route")
+                        .font(ws.sans(12.5, weight: .semibold)).foregroundStyle(ws.dim)
+                    WSIcon(glyph: .chevron, size: 10, color: ws.accentSoft)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.bottom, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(WSCompressStyle())
+        .accessibilityLabel("\(hidden) earlier stops. Open the full route.")
     }
 
     /// "6 stops away · Seats available" — the one genuinely live line in this
@@ -619,6 +764,19 @@ struct WSTrackBusView: View {
         }
     }
 
+    // MARK: inline ad
+    //
+    // In-content MREC styled as a sheet card (same migration as the MRT station
+    // view), replacing the old anchored bottom banner that fought the pinned
+    // alert CTA. Self-suppresses when ads are disabled.
+    @ViewBuilder private var adCard: some View {
+        if !AdConfig.adsSuppressed {
+            MediumRectAd()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 14)
+        }
+    }
+
     // MARK: CTA
 
     private var cta: some View {
@@ -670,19 +828,45 @@ struct WSTrackBusView: View {
         }
         if let coord = await store.liveBus(service: serviceNo, stopCode: stopCode) {
             busCoord = coord
-            let you = min(max(anchor.youIndex, 0), anchor.stops.count - 1)
-            var best: (idx: Int, d: Double)? = nil
-            for i in 0...you {
-                let s = anchor.stops[i]
-                let d = haversine(coord.latitude, coord.longitude, s.lat, s.lon)
-                if best == nil || d < best!.d { best = (i, d) }
-            }
-            busIndex = best?.idx
+            busIndex = nearestStopIndex(to: coord, on: anchor)
         } else {
             busIndex = nil
             busCoord = nil
         }
         refitMap()
+    }
+
+    private func nearestStopIndex(to coord: CLLocationCoordinate2D, on dir: RouteDirection) -> Int? {
+        let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        var best: (idx: Int, d: Double)? = nil
+        for i in 0...you {
+            let s = dir.stops[i]
+            let d = haversine(coord.latitude, coord.longitude, s.lat, s.lon)
+            if best == nil || d < best!.d { best = (i, d) }
+        }
+        return best?.idx
+    }
+
+    /// Live position without a network round-trip or camera refit: the tracked
+    /// stop's arrivals are already refreshed every ~25s by `ensureArrivals`, and
+    /// the cached `Service` carries the next bus's GPS (`busLat/busLon`). Reading
+    /// those on each tick moves the map marker + "stops away" count between
+    /// refreshes without fighting the user's pan/zoom (unlike `refitMap`). The
+    /// your-stop ETA numeral already ticks off `m.tick`.
+    private func syncBusFromService() {
+        guard let svc = service, let lat = svc.busLat, let lon = svc.busLon,
+              lat != 0, lon != 0,
+              let anchor = anchorDirection, !anchor.stops.isEmpty else { return }
+        let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        // Skip if effectively unchanged (avoid re-animating on every tick).
+        if let cur = busCoord,
+           abs(cur.latitude - lat) < 1e-5, abs(cur.longitude - lon) < 1e-5 { return }
+        let idx = nearestStopIndex(to: coord, on: anchor)
+        if reduceMotion {
+            busCoord = coord; busIndex = idx
+        } else {
+            withAnimation(.easeInOut(duration: 0.6)) { busCoord = coord; busIndex = idx }
+        }
     }
 }
 
@@ -705,12 +889,6 @@ struct WSApproachMapContent: MapContent {
         // The user's own live location (system blue dot).
         UserAnnotation()
 
-        // The route the bus is taking to reach you.
-        if seg.count >= 2 {
-            MapPolyline(coordinates: seg.map(\.coord))
-                .stroke(ws.accent.opacity(0.6),
-                        style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
-        }
         // Upcoming stops on that segment (small neutral dots).
         ForEach(Array(seg.enumerated()), id: \.offset) { _, s in
             if !s.isYou {
@@ -793,6 +971,8 @@ private struct WSBusFullMap: View {
     let seg: [(coord: CLLocationCoordinate2D, isYou: Bool)]
     let stopCoord: CLLocationCoordinate2D?
     let busCoord: CLLocationCoordinate2D?
+    let dest: String
+    let awayText: String?
     let etaText: String
     let etaNow: Bool
     let crowd: (color: Color, phrase: String)?
@@ -805,6 +985,8 @@ private struct WSBusFullMap: View {
          seg: [(coord: CLLocationCoordinate2D, isYou: Bool)],
          stopCoord: CLLocationCoordinate2D?,
          busCoord: CLLocationCoordinate2D?,
+         dest: String,
+         awayText: String?,
          etaText: String, etaNow: Bool,
          crowd: (color: Color, phrase: String)?,
          onClose: @escaping () -> Void) {
@@ -812,6 +994,8 @@ private struct WSBusFullMap: View {
         self.seg = seg
         self.stopCoord = stopCoord
         self.busCoord = busCoord
+        self.dest = dest
+        self.awayText = awayText
         self.etaText = etaText
         self.etaNow = etaNow
         self.crowd = crowd
@@ -871,41 +1055,65 @@ private struct WSBusFullMap: View {
         .accessibilityLabel("Close map")
     }
 
+    // "Find me" — centres on the user's own location (falling back to the
+    // bus+stop frame if location isn't available yet). MapKit tracks the blue
+    // dot, so this follows the user without a CLLocationManager here.
     private var recenterButton: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.35)) {
-                camera = .region(wsApproachRegion(seg: seg, stop: stopCoord, bus: busCoord))
+                camera = .userLocation(
+                    fallback: .region(wsApproachRegion(seg: seg, stop: stopCoord, bus: busCoord)))
             }
         } label: {
-            WSIcon(glyph: .scope, size: 18, color: ws.text)
+            WSIcon(glyph: .location, size: 18, color: ws.text)
                 .frame(width: 46, height: 46)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .wsGlassChrome(cornerRadius: 23, tint: ws.tabbar)
-        .accessibilityLabel("Recenter map")
+        .accessibilityLabel("Centre on my location")
     }
 
     private var infoBar: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(etaNow ? "Arriving" : "\(etaText)")
-                    .font(ws.sans(20, weight: .heavy))
-                    .foregroundStyle(etaNow ? ws.now : ws.text)
-                Text("to your stop")
-                    .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(etaNow ? "Arriving" : "\(etaText)")
+                        .font(ws.sans(20, weight: .heavy))
+                        .foregroundStyle(etaNow ? ws.now : ws.text)
+                    Text(etaNow ? "at your stop" : "to your stop")
+                        .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                }
+                Spacer(minLength: 8)
+                if let crowd {
+                    HStack(spacing: 6) {
+                        Circle().fill(crowd.color).frame(width: 8, height: 8)
+                        Text(crowd.phrase)
+                            .font(ws.sans(12.5, weight: .semibold)).foregroundStyle(ws.dim)
+                            .lineLimit(1).allowsTightening(true)
+                    }
+                }
             }
-            Spacer(minLength: 8)
-            if let crowd {
-                HStack(spacing: 6) {
-                    Circle().fill(crowd.color).frame(width: 8, height: 8)
-                    Text(crowd.phrase)
-                        .font(ws.sans(12.5, weight: .semibold)).foregroundStyle(ws.dim)
-                        .lineLimit(1).allowsTightening(true)
+            // A little more context: where it's headed + how far out.
+            if !dest.isEmpty || awayText != nil {
+                HStack(spacing: 7) {
+                    if !dest.isEmpty {
+                        Text(dest)
+                            .font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim)
+                            .lineLimit(1)
+                    }
+                    if !dest.isEmpty && awayText != nil {
+                        Text("·").font(ws.mono(11)).foregroundStyle(ws.faint)
+                    }
+                    if let awayText {
+                        Text(awayText)
+                            .font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim)
+                    }
+                    Spacer(minLength: 0)
                 }
             }
         }
-        .padding(.horizontal, 18).frame(height: 66)
+        .padding(.horizontal, 18).padding(.vertical, 12)
         .wsGlassChrome(cornerRadius: 22, tint: ws.tabbar)
         .padding(.horizontal, 16).padding(.bottom, 20)
     }

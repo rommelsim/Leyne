@@ -87,6 +87,10 @@ struct WSRoot: View {
     @State private var savedPath: [WSRoute] = []
     @State private var alertsPath: [WSRoute] = []
     @State private var showSearch = false
+    /// Navigation path *inside* the search sheet — a result opens within the
+    /// sheet's own stack so Back returns to the search results, not the tab
+    /// root behind the sheet (owner-reported: back jumped to Home).
+    @State private var searchPath: [WSRoute] = []
     /// One namespace for the card→screen zoom transitions (anim spec:
     /// matched geometry for the MRT station entry).
     @Namespace private var zoomNS
@@ -156,12 +160,14 @@ struct WSRoot: View {
             .animation(.snappy(duration: 0.25), value: activePath.isEmpty)
         }
         .environment(\.ws, ws)
-        .sheet(isPresented: $showSearch) {
-            WSSearchView(onSelect: { route in
-                showSearch = false
-                tab = .home
-                homePath.append(route)
-            }, onClose: { showSearch = false })
+        .sheet(isPresented: $showSearch, onDismiss: { searchPath = [] }) {
+            // Search runs its own NavigationStack: a selected result pushes
+            // inside the sheet (Back → search results); the sheet's own root is
+            // the search field, and Cancel dismisses the whole thing.
+            stack($searchPath) {
+                WSSearchView(onSelect: { route in searchPath.append(route) },
+                             onClose: { showSearch = false })
+            }
             .environment(\.ws, ws)
             .environment(m)
             .environment(store)
