@@ -20,17 +20,19 @@
 //     not from this screen.
 //   • Stop card: name + "code · ROAD" subline (mono, uppercased road, no
 //     "Stop" prefix) + capped service-tile row (3 + "+N" overflow) + a
-//     trailing soonest-arrival column (big ETA, and — only for a real
-//     live/GPS reading, not a schedule-only estimate — "Bus {no} ·" plus
-//     CrowdMeter(compact:true) for the short Seats/Standing/Limited word).
-//     No leading icon tile and no walk/distance line — WSSavedView's
-//     `savedStopRow` has neither.
+//     trailing soonest-arrival column — "Now"/"N min" headline (sans, not
+//     mono, animated on change) and, only for a real live/GPS reading, not
+//     a schedule-only estimate, "Bus {no}" plus a coloured seat dot + word
+//     (2026-07-11 restyle, mirrors WSSavedView.swift's shared `etaText` +
+//     `Circle().fill(load.wsDotColor)` — the one deliberate colour
+//     exception in this otherwise-monochrome screen). No leading icon tile
+//     and no walk/distance line — WSSavedView's `savedStopRow` has neither.
 //   • Station card: name + line-names subline (e.g. "EAST WEST / DOWNTOWN")
 //     + up to 3 coloured line-code chips (Android's own established pill
 //     style, kept) + a trailing crowd dot-chip when a live reading exists.
 //   • Line (bus) card: ServiceBadge (Android's shared bus-number tile,
 //     standing in for iOS's neutral RouteTile) + destination + "at {stop}"/
-//     "Anywhere near you" + trailing ETA and CrowdMeter(compact:true).
+//     "Anywhere near you" + trailing "Now"/"Nm" headline + coloured seat dot.
 //   • Swipe gestures (Dismissible) — endToStart only (LEFT swipe = delete),
 //     mirroring WSSavedView's `.onDelete`:
 //       Pinned stop    → swipe LEFT → unpin via togglePin.
@@ -51,6 +53,8 @@
 //   • SoftTab.favourites is used internally (bottom bar label is "Saved"
 //     via SoftBottomBar — no change needed here).
 
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../data/data_store.dart';
@@ -60,8 +64,8 @@ import '../../data/mrt_stations.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/ad_banner.dart';
-import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/soft_components.dart';
+import '../../widgets/v2/soft_departure_board.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
 // ─── Freshness helper ──────────────────────────────────────────────────────
@@ -831,6 +835,100 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   }
 }
 
+// ─── Shared ETA headline (mirrors WSSavedView.swift's `etaText`) ──────────
+// "Now" (sec < 60) or "N min" — sans, not mono, per the modernised
+// departure-row grammar shared with SoftDepartureRow. AnimatedSwitcher gives
+// the numeric changes the same quiet cross-fade as iOS's
+// `.contentTransition(.numericText(countsDown: true))`.
+
+class _EtaHeadline extends StatelessWidget {
+  const _EtaHeadline({required this.sec, this.suffix = ' min'});
+
+  final int sec;
+
+  /// ' min' for the stop/station column, 'm' for the tighter Lines column —
+  /// matches iOS's two etaText call sites' differing suffixes.
+  final String suffix;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    final reduceMotion = softReduceMotion(context);
+    final isNow = sec < 60;
+    final label = isNow ? 'Now' : '${max(1, sec ~/ 60)}';
+    return AnimatedSwitcher(
+      duration: reduceMotion ? Duration.zero : LyneMotion.short,
+      transitionBuilder: (child, anim) =>
+          FadeTransition(opacity: anim, child: child),
+      child: Text.rich(
+        key: ValueKey('$isNow-$label'),
+        TextSpan(
+          children: [
+            TextSpan(
+              text: label,
+              style: t.sans(17, weight: FontWeight.w800, color: t.fg),
+            ),
+            if (!isNow)
+              TextSpan(
+                text: suffix,
+                style: t.sans(11, weight: FontWeight.w600, color: t.dim),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Small coloured seat/crowd dot + compact word — mirrors WSSavedView.swift's
+/// `Circle().fill(load.wsDotColor)` pairing. Colour is the one deliberate
+/// exception to Android's monochrome saved-row grammar (crowd/seat dots and
+/// MRT line pills only, per the platform's design rules).
+class _SeatDot extends StatelessWidget {
+  const _SeatDot({required this.load, required this.t});
+
+  final Load load;
+  final LyneTheme t;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: softLoadDotColor(load),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            _seatWord(load),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: t.sans(11.5, weight: FontWeight.w500, color: t.dim),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Compact word — mirrors iOS WSFormat.swift `Load.wsWord`.
+  static String _seatWord(Load load) {
+    switch (load) {
+      case Load.sea:
+        return 'Seats';
+      case Load.sda:
+        return 'Standing';
+      case Load.lsd:
+        return 'Limited';
+    }
+  }
+}
+
 // ─── Resolved arrival ────────────────────────────────────────────────────────
 
 class _Resolved {
@@ -1079,10 +1177,11 @@ class _StopCard extends StatelessWidget {
   }
 }
 
-/// Trailing soonest-arrival column for a saved stop: a big ETA number, and —
-/// only when the soonest bus is a real live/GPS reading, not a schedule-only
-/// estimate — "Bus {no} ·" plus the compact CrowdMeter word. Mirrors
-/// WSSavedView's trailing VStack (eta + "Bus {no} ·" + CrowdGauge + word).
+/// Trailing soonest-arrival column for a saved stop: a "Now"/"N min" headline,
+/// and — only when the soonest bus is a real live/GPS reading, not a
+/// schedule-only estimate — "Bus {no}" plus a coloured seat dot + word.
+/// Mirrors WSSavedView's trailing VStack (etaText + "Bus {no}" + coloured
+/// Circle + word).
 class _SoonestColumn extends StatelessWidget {
   const _SoonestColumn({required this.services});
 
@@ -1093,60 +1192,30 @@ class _SoonestColumn extends StatelessWidget {
     final soonest = _soonestOf(services);
     if (soonest == null) return const SizedBox.shrink();
     final t = context.t;
-    final eta = fmtEta(_liveEtaSec(soonest, DateTime.now()));
-    final arriving = eta.big == 'Arr';
+    final sec = _liveEtaSec(soonest, DateTime.now());
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // iOS parity fix (owner-reported "ETA is not the correct format
-        // as iOS" — screenshot showed lowercase "now" as the big headline):
-        // `eta.big` ("Arr" or the minute number) is ALWAYS the headline;
-        // `eta.small` ("now"/"min") never renders as the big text. Mirrors
-        // WSSavedView.swift's savedStopRow:
-        // `Text(eta.big) + Text(eta.big == "Arr" ? "" : " min")`, and matches
-        // Home's own working `_whenColumn` pattern in soft_home_screen.dart.
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: eta.big,
-                style: t.mono(19, weight: FontWeight.w700, color: t.fg),
-              ),
-              if (!arriving)
-                TextSpan(
-                  text: ' min',
-                  style: t.mono(11, weight: FontWeight.w600, color: t.dim),
-                ),
-            ],
-          ),
-        ),
+        // Modernised departure-row grammar (mirrors WSSavedView.swift's
+        // shared `etaText`): "Now" / "N min" headline, sans not mono, with
+        // an animated numeric cross-fade as the ETA ticks down.
+        const SizedBox(height: 1),
+        _EtaHeadline(sec: sec),
         if (soonest.monitored) ...[
           const SizedBox(height: 4),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 10pt matches WSSavedView's `ws.mono(10)` for this prefix —
-              // also keeps this row's fixed-width portion under the 130 cap
-              // above with room for the crowd word, avoiding a RenderFlex
-              // overflow at the width cap.
-              Text('Bus ${soonest.no} · ', style: t.mono(10, color: t.dim)),
-              // No glyphs (2026-07-03, coordinator/Home parity finding): the
-              // three person icons alone cost ~42dp and, inside this
-              // already width-capped column, were the biggest single
-              // contributor to crushing the stop-name title (owner-reported
-              // "route chips stacked vertically" traced back to the same
-              // width starvation as Home's). The word alone carries the
-              // crowd level in this compact context — matches Home's
-              // `_whenColumn` CrowdMeter call. Flexible so the compact word
-              // ellipsizes instead of overflowing when the 130-wide host is
-              // tight — safe here specifically because the host is bounded.
+              // "Bus {no}" prefix — mirrors WSSavedView.swift's savedStopRow
+              // trailing HStack ("Bus \(soonest.no)" · dot · word). Kept
+              // short (no "·" — the SeatDot supplies its own leading dot).
+              Text(
+                'Bus ${soonest.no} ',
+                style: t.sans(11.5, weight: FontWeight.w500, color: t.dim),
+              ),
               Flexible(
-                child: CrowdMeter(
-                  load: soonest.load,
-                  compact: true,
-                  showGlyphs: false,
-                ),
+                child: _SeatDot(load: soonest.load, t: t),
               ),
             ],
           ),
@@ -1227,8 +1296,8 @@ class _StationCard extends StatelessWidget {
 
 /// Mirrors WSSavedView.swift's `lineRow`: a bus-number tile (Android's
 /// shared `ServiceBadge`, standing in for iOS's neutral RouteTile) ·
-/// destination · "at {stop}" / "Anywhere near you" · a trailing ETA +
-/// CrowdMeter(compact:true) column.
+/// destination · "at {stop}" / "Anywhere near you" · a trailing "Now"/"Nm"
+/// headline + coloured seat dot column.
 class _LineCard extends StatelessWidget {
   const _LineCard({required this.fav, required this.resolved, this.onTap});
 
@@ -1305,36 +1374,17 @@ class _LineEtaColumn extends StatelessWidget {
         style: t.mono(16, weight: FontWeight.w600, color: t.faint),
       );
     }
-    final eta = fmtEta(_liveEtaSec(svc, DateTime.now()));
-    final arriving = eta.big == 'Arr';
+    final sec = _liveEtaSec(svc, DateTime.now());
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // iOS parity fix — same "Arr" headline bug as _SoonestColumn above:
-        // `eta.big` is always the headline, never `eta.small` ("now"/"min").
-        // Mirrors WSSavedView.swift's lineRow:
-        // `Text(eta.big) + Text(eta.big == "Arr" ? "" : "m")` — note the
-        // bare "m" suffix here (not " min") matches iOS's more compact
-        // Lines-section readout.
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: eta.big,
-                style: t.mono(17, weight: FontWeight.w700, color: t.fg),
-              ),
-              if (!arriving)
-                // 10 → 11: legibility floor (iOS's own value here is 10pt).
-                TextSpan(
-                  text: 'm',
-                  style: t.mono(11, color: t.dim),
-                ),
-            ],
-          ),
-        ),
+        // Same shared `etaText` grammar as the stop column above — "Now" /
+        // "Nm" (bare "m" suffix here matches iOS lineRow's more compact
+        // Lines-section readout).
+        _EtaHeadline(sec: sec, suffix: 'm'),
         const SizedBox(height: 4),
-        CrowdMeter(load: svc.load, compact: true),
+        _SeatDot(load: svc.load, t: t),
       ],
     );
   }

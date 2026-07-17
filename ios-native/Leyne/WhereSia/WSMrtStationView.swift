@@ -260,6 +260,10 @@ struct WSMrtStationView: View {
                     }
                 }
                 .padding(.horizontal, 22)
+                // Headroom above the node band so the current-station ping
+                // ring (scales to 2× its 18pt anchor) has room to expand
+                // into without the ScrollView clipping its top edge.
+                .padding(.top, 10)
             }
             .onAppear { proxy.scrollTo(currentCode, anchor: .center) }
         }

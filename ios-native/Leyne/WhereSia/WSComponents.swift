@@ -373,6 +373,30 @@ struct WSCompressStyle: ButtonStyle {
     }
 }
 
+// MARK: - Code chip (stop codes + bus numbers — one pill grammar)
+
+/// Compact mono code chip, shared by the Home stop rows (stop code) and the
+/// Bus stop board (bus number) so both screens speak one pill language. The
+/// old fixed-size plates (64×42 / 62×46) shouted over the row (owner
+/// 2026-07-17) — this hugs its content and stays quiet. `prominent` keeps
+/// full text colour for identity (bus numbers); off = dimmed meta (stop
+/// codes). `minWidth` aligns the column when codes vary in length.
+struct WSCodeChip: View {
+    let text: String
+    var prominent: Bool = false
+    var minWidth: CGFloat? = nil
+    @Environment(\.ws) private var ws
+    var body: some View {
+        Text(text)
+            .font(ws.mono(12.5, weight: .bold))
+            .foregroundStyle(prominent ? ws.text : ws.dim)
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .frame(minWidth: minWidth)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(ws.panel2))
+    }
+}
+
 // MARK: - Departure row (the one bus-row grammar, Home + Bus stop screens)
 
 /// One departure: plate (solid green + white + a green edge tick while
@@ -401,26 +425,23 @@ struct WSDepartureRow: View {
             UISelectionFeedbackGenerator().selectionChanged()
             push(.trackBus(stopCode: stopCode, no: service.no))
         } label: {
-            HStack(spacing: 13) {
-                Text(service.no)
-                    .font(ws.mono(service.no.count > 3 ? 16 : 19, weight: .bold))
-                    .foregroundStyle(now ? .white : ws.text)
-                    .frame(width: 62, height: 46)
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(now ? ws.now : ws.panel2))
+            // Layout logic (UX pass 2026-07-16): IDENTITY on the left (plate +
+            // destination), STATUS on the right (ETA, follow-ups, capacity).
+            // The plate stays neutral even while arriving — semantic green is
+            // reserved strictly for the "Now"/"Arriving" status text, so the
+            // board never colour-codes identity.
+            HStack(spacing: 12) {
+                // Same compact chip as the Home stop rows (owner 2026-07-17)
+                // — prominent (full text colour) because the number IS the
+                // row's identity here; minWidth keeps the destination column
+                // aligned across 1–4 character services.
+                WSCodeChip(text: service.no, prominent: true, minWidth: 46)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(service.dest.isEmpty ? "Bus \(service.no)" : service.dest)
                         .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.text)
                         .lineLimit(1)
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(service.load.wsDotColor)
-                            .frame(width: 7, height: 7)
-                            .animation(.easeInOut(duration: 0.2), value: service.load)
-                        Text(service.load.wsSeatPhrase)
-                            .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
-                            .lineLimit(1).allowsTightening(true)
-                        if showsVehicleIcons {
+                    if showsVehicleIcons && (service.deck == .DD || service.deck == .BD || service.wab) {
+                        HStack(spacing: 6) {
                             if service.deck == .DD { WSIcon(glyph: .busDouble, size: 13, color: ws.faint) }
                             else if service.deck == .BD { WSIcon(glyph: .busBendy, size: 13, color: ws.faint) }
                             if service.wab { WSIcon(glyph: .wheelchair, size: 13, color: ws.faint) }
@@ -428,31 +449,26 @@ struct WSDepartureRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Group {
-                        if now {
-                            Text("Now")
-                                .font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.text)
-                        } else if sec < 120 && !sched {
-                            // Design spec: under 2 minutes reads "Arriving",
-                            // not a countdown — the number stops mattering.
-                            Text("Arriving")
-                                .font(ws.sans(16, weight: .heavy)).foregroundStyle(ws.text)
-                        } else {
-                            // Scheduled-only ETA carries the whisper "~" —
-                            // never a banner (feedback_timely_over_honest).
-                            (Text(sched ? "~" : "")
-                                .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.dim)
-                             + Text("\(minutes)").font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.text)
-                             + Text(" min").font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim))
+                VStack(alignment: .trailing, spacing: 4) {
+                    // One ETA chain per bus (UX pass 2026-07-17): the lead
+                    // ETA and the follow-ups share a line — "Now  12  33 min"
+                    // — so a row spends two lines at most, not three.
+                    etaChain(now: now, sec: sec, sched: sched,
+                             minutes: minutes, followMin: followMin)
+                        .lineLimit(1)
+                    // Crowding only appears when it's bad — dot + phrase
+                    // together, never an unlabelled dot (owner feedback
+                    // 2026-07-17). A quiet row means seats are fine.
+                    if service.load != .sea {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(service.load.wsDotColor)
+                                .frame(width: 7, height: 7)
+                                .animation(.easeInOut(duration: 0.2), value: service.load)
+                            Text(service.load.wsSeatPhrase)
+                                .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
+                                .lineLimit(1).allowsTightening(true)
                         }
-                    }
-                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
-                    if let followMin {
-                        Text(followText(followMin))
-                            .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
-                            .contentTransition(reduceMotion ? .opacity
-                                                            : .numericText(countsDown: true))
                     }
                 }
                 WSIcon(glyph: .chevron, size: 12, color: ws.faint)
@@ -462,7 +478,7 @@ struct WSDepartureRow: View {
                 if now {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(ws.now)
-                        .frame(width: 3, height: 46)
+                        .frame(width: 3, height: 30)   // matches the compact chip
                         .offset(x: -12)
                         .transition(.opacity)
                 }
@@ -477,12 +493,58 @@ struct WSDepartureRow: View {
         .accessibilityLabel(a11y(now: now, minutes: minutes, followMin: followMin, sched: sched))
     }
 
-    /// "12 min" — with the third bus appended when LTA knows it ("12 · 24 min").
-    private func followText(_ followMin: Int) -> String {
-        if let third = Self.liveMin(service.thirdDate, fallbackSec: 0) {
-            return "\(followMin) · \(third) min"
+    /// The single ETA line: lead status ("Now" / "Arriving" / "~12") then the
+    /// follow-ups — no separator glyphs. Whitespace plus a stepped opacity
+    /// fade (100% → 60% → 35%) encode the order, so the chain reads "soonest
+    /// first" with zero added ink; each number is its own Text so it counts
+    /// down independently (numericText). The scheduled-only "~" stays a
+    /// whisper, never a banner (feedback_timely_over_honest).
+    private func etaChain(now: Bool, sec: Int, sched: Bool,
+                          minutes: Int, followMin: Int?) -> some View {
+        var follows: [Int] = []
+        if let followMin { follows.append(followMin) }
+        if let third = Self.liveMin(service.thirdDate, fallbackSec: 0), followMin != nil {
+            follows.append(third)
         }
-        return "\(followMin) min"
+        // "Now"/"Arriving" alone carry no unit; " min" prints once at the end.
+        let unit = (!follows.isEmpty || !(now || (sec < 120 && !sched)))
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            // Countdown ring (owner pick 2026-07-17, option 3): a small gauge
+            // that FILLS as the bus approaches over a 20-minute window and
+            // turns green inside 2 minutes — a full green ring means "it's
+            // here". Live-tracked ETAs only; scheduled-only rows keep the "~"
+            // whisper and no ring, so the ring itself also reads as "live".
+            if !sched {
+                WSCountdownRing(fraction: 1 - min(1, Double(sec) / 1200),
+                                tint: sec < 120 ? ws.now : ws.dim)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+            }
+            Group {
+                if now {
+                    Text("Now").font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.now)
+                } else if sec < 120 && !sched {
+                    // Design spec: under 2 minutes reads "Arriving", not a
+                    // countdown — the number stops mattering.
+                    Text("Arriving").font(ws.sans(16, weight: .heavy)).foregroundStyle(ws.now)
+                } else {
+                    (Text(sched ? "~" : "")
+                        .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.dim)
+                     + Text("\(minutes)").font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.text))
+                }
+            }
+            .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
+            ForEach(Array(follows.enumerated()), id: \.offset) { i, min in
+                Text("\(min)")
+                    .font(ws.sans(15, weight: .semibold))
+                    .foregroundStyle(ws.text.opacity(i == 0 ? 0.6 : 0.35))
+                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
+            }
+            if unit {
+                Text("min")
+                    .font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.dim)
+                    .padding(.leading, -6)
+            }
+        }
     }
 
     /// Live minutes from an absolute timestamp so the row ticks with the
@@ -507,6 +569,27 @@ struct WSDepartureRow: View {
         if service.wab { parts.append("wheelchair accessible") }
         if let followMin { parts.append("then \(followMin) minutes") }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The departure row's countdown gauge: a 13pt ring that fills clockwise from
+/// 12 o'clock as the bus approaches. Track in the hairline colour so an
+/// almost-empty ring still reads as a gauge, not a stray mark.
+struct WSCountdownRing: View {
+    let fraction: Double
+    let tint: Color
+    @Environment(\.ws) private var ws
+    var body: some View {
+        ZStack {
+            Circle().stroke(ws.rule, lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: max(0.04, fraction))
+                .stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 13, height: 13)
+        .animation(.easeInOut(duration: 0.3), value: fraction)
+        .accessibilityHidden(true)
     }
 }
 

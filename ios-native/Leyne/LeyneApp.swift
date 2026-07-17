@@ -35,10 +35,6 @@ struct LeyneApp: App {
                     // bootstrap reference data.
                     if let v = AppModel.bootVersion { model.setCurrentVersion(v) }
                     await store.bootstrap()
-                    // Reference data is now loaded, so favourite-service stop
-                    // names / destinations resolve — re-publish the snapshot
-                    // the Favourite Service widget reads.
-                    model.republishFavServicesToWidget()
                 }
                 // Spotlight handoff — when a user taps a pinned-stop
                 // result in iOS system search, iOS launches/foregrounds
@@ -114,12 +110,21 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
         ) { task in
             Self.handleAlertsRefresh(task as! BGAppRefreshTask)
         }
+        // Best-effort Live Activity freshness while backgrounded — see
+        // AppModel.refreshLiveActivityInBackground(). Not a substitute for a
+        // real ActivityKit push channel, just narrows the staleness gap.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.liveActivityRefreshTaskID, using: nil
+        ) { task in
+            Self.handleLiveActivityRefresh(task as! BGAppRefreshTask)
+        }
         return true
     }
 
     // MARK: - Background app refresh
 
     static let alertsRefreshTaskID = "com.leyne.Leyne.alertsRefresh"
+    static let liveActivityRefreshTaskID = "com.leyne.Leyne.liveActivityRefresh"
 
     /// Request the next opportunistic refresh (~15 min out). iOS decides the
     /// actual timing from usage patterns, so this is best-effort, not a guarantee.
@@ -135,6 +140,30 @@ final class LeyneAppDelegate: NSObject, UIApplicationDelegate,
         scheduleAlertsRefresh()
         let work = Task { @MainActor in
             await DataStore.shared.refreshAlertsInBackground()
+            task.setTaskCompleted(success: true)
+        }
+        task.expirationHandler = { work.cancel() }
+    }
+
+    /// Request the next opportunistic Live Activity refresh (~5 min out — the
+    /// activity's own countdown is minutes-scale, so this needs a tighter
+    /// cadence than the 15 min alerts refresh; iOS still decides actual timing).
+    static func scheduleLiveActivityRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: liveActivityRefreshTaskID)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 5 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    /// Runs when iOS grants a refresh window: push one fresh ETA into the
+    /// running Live Activity (if any), then reschedule while it's still live.
+    static func handleLiveActivityRefresh(_ task: BGAppRefreshTask) {
+        let work = Task { @MainActor in
+            guard let model = AppModel.shared, model.liveActivityOn else {
+                task.setTaskCompleted(success: true)
+                return
+            }
+            await model.refreshLiveActivityInBackground()
+            if model.liveActivityOn { scheduleLiveActivityRefresh() }
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = { work.cancel() }

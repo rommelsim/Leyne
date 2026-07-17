@@ -20,6 +20,11 @@ import SwiftUI
 
 /// One source of truth for the app's outbound links (also used by Settings).
 enum AppLinks {
+    /// Stripe Payment Link for "Support Leyne" — PayNow + cards + Apple Pay,
+    /// settles SGD. Leyne is ad-funded, not paywalled; this is optional.
+    /// Same link as Android (`_kCoffeeUrl` in soft_settings_screen.dart).
+    static let coffee = URL(string: "https://buy.stripe.com/6oU3cv5689oB3PI6R68so00")!
+
     /// Leyne's App Store numeric ID (apps.apple.com/sg/app/leyne/id6770481761).
     static let appStoreID = "6770481761"
     /// Opens the App Store review composer directly — always works (unlike

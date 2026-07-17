@@ -84,5 +84,6 @@ implementation as a divergence just because it isn't a 1:1 SwiftUI copy.
 
 ## Follow-up
 
-To actually close gaps, use the `port-ios-feature` skill. For version/changelog,
-use `release-build` / `changelog-update`.
+To actually close gaps, use the `port-ios-feature` skill. When judging whether
+the iOS side itself is styled correctly (Liquid Glass usage, glass button
+styles, floating tab bar), use the `ios-modern-design` skill as the reference.

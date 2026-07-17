@@ -276,12 +276,14 @@ struct WSSearchView: View {
 
     // MARK: rows
 
-    /// Inset rounded-card container for a search row — the same grouped-card
-    /// grammar as Saved / Alerts (replaces the old edge-to-edge hairline rows).
+    /// Inset rounded-card container for a search row — matches the elevated
+    /// panel-card family used app-wide (routeCard, MRT header, Home cards:
+    /// radius 22 + soft shadow), not the flatter Saved/Alerts grouped-row style.
     private func searchCard<V: View>(@ViewBuilder _ content: () -> V) -> some View {
         content()
             .padding(.horizontal, 16)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(ws.panel))
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(ws.panel))
+            .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
             .padding(.horizontal, 16)
             .padding(.vertical, 4)
     }

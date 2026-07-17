@@ -28,6 +28,10 @@ import 'package:lyne/state/app_model.dart';
 /// `lyne.onboardingDone: true`, so without this the splash's own full-screen
 /// GestureDetector would swallow every subsequent `tester.tap()`.
 Future<void> _skipLaunchScreen(WidgetTester tester) async {
+  // The animated splash was removed from cold start (owner ask 2026-07-13) —
+  // the app boots straight into the root shell, so there is usually nothing
+  // to skip. The tap path is kept for if the splash is ever reinstated.
+  if (find.byType(LaunchScreen).evaluate().isEmpty) return;
   await tester.tap(find.byType(LaunchScreen));
   // A leading zero-duration pump lets the exit AnimationController's ticker
   // fire its first callback — which is when it latches its internal
@@ -66,10 +70,19 @@ void main() {
     // search entry point (see the "pops the nested stack" test below) and
     // stays a pushed route (SoftTab.search). MRT lost its destination in the
     // owner walkthrough (2026-07-03): stations open from Home's strip/Search.
+    // "MRT" DOES appear on Home since the Wave-1 board port (2026-07-13) — as
+    // the Bus·MRT mode toggle — so the no-MRT-tab check is scoped to the
+    // NavigationDestinations rather than the whole tree.
     expect(find.text('Home'), findsAtLeastNWidgets(1));
     expect(find.text('Saved'), findsAtLeastNWidgets(1));
     expect(find.text('Alerts'), findsAtLeastNWidgets(1));
-    expect(find.text('MRT'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(NavigationDestination),
+        matching: find.text('MRT'),
+      ),
+      findsNothing,
+    );
 
     // The Bus (Home) tab is the initial tab — its empty-state copy is visible.
     expect(find.text('No stops yet'), findsOneWidget);

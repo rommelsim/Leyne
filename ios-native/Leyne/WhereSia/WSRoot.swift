@@ -101,6 +101,26 @@ struct WSRoot: View {
     private var ws: WSTheme { .resolve(dark: colorScheme == .dark) }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Glass map button, bottom-trailing above the tab bar (Apple Maps
+    /// idiom) — zoom-expands into WSMapView via the shared namespace.
+    private var mapFab: some View {
+        Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            homePath.append(.map)
+        } label: {
+            WSIcon(glyph: .map, size: 19, weight: .medium, color: ws.text)
+                .frame(width: 52, height: 52)
+                .contentShape(Circle())
+        }
+        .buttonStyle(WSCompressStyle())
+        .wsGlassChrome(cornerRadius: 26, tint: ws.tabbar, interactive: true)
+        .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 14, x: 0, y: 6)
+        .padding(.trailing, 16)
+        .matchedTransitionSource(id: wsMapZoomID, in: zoomNS)
+        .environment(\.ws, ws)
+        .accessibilityLabel("Browse nearby transport — all stops and stations on the map")
+    }
+
     /// The navigation path of the currently selected tab.
     private var activePath: [WSRoute] {
         switch tab {
@@ -158,6 +178,19 @@ struct WSRoot: View {
                 }
             }
             .animation(.snappy(duration: 0.25), value: activePath.isEmpty)
+            // Floating map button (Home root only) — the door to the nearby
+            // map. Anchored to the tab-bar inset itself and offset ABOVE it
+            // (an overlay never affects the inset's layout), so it always
+            // hovers just over the bar's top edge — it can't land on the bar
+            // or get covered by it, wherever the bar is.
+            .overlay(alignment: .topTrailing) {
+                if tab == .home && homePath.isEmpty {
+                    mapFab
+                        .offset(y: -64)   // 52pt button + 12pt gap above the bar
+                        .transition(reduceMotion ? .opacity :
+                            .move(edge: .bottom).combined(with: .opacity))
+                }
+            }
         }
         .environment(\.ws, ws)
         .sheet(isPresented: $showSearch, onDismiss: { searchPath = [] }) {

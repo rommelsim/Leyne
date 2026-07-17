@@ -122,11 +122,19 @@ class _SoftNearbyScreenState extends State<SoftNearbyScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Row(
                     children: [
-                      Icon(Icons.visibility_off_outlined, size: 20, color: t.crit),
+                      Icon(
+                        Icons.visibility_off_outlined,
+                        size: 20,
+                        color: t.crit,
+                      ),
                       const SizedBox(width: 14),
                       Text(
                         'Hide from Nearby',
-                        style: t.sans(15, weight: FontWeight.w500, color: t.crit),
+                        style: t.sans(
+                          15,
+                          weight: FontWeight.w500,
+                          color: t.crit,
+                        ),
                       ),
                     ],
                   ),

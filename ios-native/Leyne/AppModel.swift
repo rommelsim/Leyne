@@ -6,45 +6,8 @@ import Observation
 import CoreLocation
 import UIKit
 import ActivityKit
-import WidgetKit
 import UserNotifications
 import os
-
-/// App Group shared between the app and the LyneWidgets extension.
-enum AppGroup {
-    static let id = "group.com.leyne"        // must match *.entitlements
-    static let pinsKey = "leyne.pins.shared"
-    static let nearbyKey = "leyne.nearby.shared"
-    static let favsKey = "leyne.favs.shared"
-    static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
-}
-
-/// Minimal pinned-stop record the Home Screen widget reads (it can't see the
-/// app's models). One row = one pinnable stop the user can pick in the widget.
-struct SharedPinnedStop: Codable, Identifiable, Hashable {
-    let id: String      // bus stop code
-    let name: String    // nickname or resolved stop name
-}
-
-/// Last-known nearby stop the Nearby widget reads. The widget refetches live
-/// arrivals itself; this carries only what it can't compute without the stop
-/// database (name + walking distance). Mirrors WNearbyStop in the extension.
-struct SharedNearbyStop: Codable, Identifiable, Hashable {
-    let id: String      // bus stop code
-    let name: String
-    let walkMin: Int
-}
-
-/// A favourited service, pre-resolved to a concrete stop + the route's
-/// destination so the extension (which has no route/stop DB) can render the
-/// Favourite Service widget. Mirrors WFavService in the extension.
-struct SharedFavService: Codable, Identifiable, Hashable {
-    let no: String
-    let stopCode: String
-    let stopName: String
-    let dest: String
-    var id: String { "\(no)#\(stopCode)" }
-}
 
 private let laLog = Logger(subsystem: "com.leyne.Leyne", category: "LiveActivity")
 
@@ -84,6 +47,53 @@ struct WhatsNewEntry {
 /// lib/data/changelog.dart — drop old entries freely; only the running
 /// version's entry is ever read.
 let kChangelog: [String: WhatsNewEntry] = [
+    "2.9.3": WhatsNewEntry(
+        headline: "A clearer live map.",
+        items: [
+            WhatsNewItem(
+                icon: "mappin.and.ellipse",
+                title: "Your stop, named on the map",
+                body: "The stop you're tracking to now carries its name on a bold "
+                    + "blue flag, so it's unmistakable at a glance."
+            ),
+            WhatsNewItem(
+                icon: "bus.fill",
+                title: "Real stop markers",
+                body: "Every stop on the bus's approach shows as a labelled bus-stop "
+                    + "marker instead of an anonymous dot."
+            ),
+            WhatsNewItem(
+                icon: "person.fill",
+                title: "You, on the map",
+                body: "Your own position is now a clear person marker — easy to tell "
+                    + "apart from your stop and the live bus."
+            ),
+        ]
+    ),
+    "2.9.2": WhatsNewEntry(
+        headline: "A smoother start and a cleaner MRT view.",
+        items: [
+            WhatsNewItem(
+                icon: "hand.tap.fill",
+                title: "A gentler first run",
+                body: "No more walkthrough — we simply ask for the permissions we "
+                    + "need, one at a time, and get you straight into the app."
+            ),
+            WhatsNewItem(
+                icon: "tram.fill",
+                title: "Tap any station on the line",
+                body: "The MRT line strip now scrolls end to end and every station "
+                    + "is tappable, with lift-maintenance and service alerts surfaced "
+                    + "right on the station."
+            ),
+            WhatsNewItem(
+                icon: "location.fill",
+                title: "Clearer bus tracking",
+                body: "A tidier map with first/last-bus info, a recenter button, and "
+                    + "long routes folded down to “X stops away.”"
+            ),
+        ]
+    ),
     "2.9.0": WhatsNewEntry(
         headline: "A simpler app — your bus and search, faster.",
         items: [
@@ -611,7 +621,9 @@ final class AppModel {
 
     // Navigation / overlays
     var tab: AppTab = .home
-    var launching = true
+    // Launch-splash animation removed (owner, 2026-07-13) — the flag stays
+    // (App Open / Interstitial gates read it) but nothing sets it true.
+    var launching = false
     var showOnboarding = false
     var showAdd = false
     var searchOpen = false
@@ -623,6 +635,10 @@ final class AppModel {
     private var liveActivity: Activity<LeyneActivityAttributes>?
     private var liveActivityTask: Task<Void, Never>?
     private var liveActivityEndObserver: Task<Void, Never>?
+    /// Weak bridge to the process-lifetime AppModel instance for
+    /// LeyneAppDelegate's BGAppRefreshTask handler, which is a static context
+    /// with no SwiftUI @Environment access of its own.
+    static weak var shared: AppModel?
 
     static func liveKey(bus: String, stopCode: String) -> String {
         "\(stopCode)|\(bus)"
@@ -682,6 +698,7 @@ final class AppModel {
     private let ds = DataStore.shared
 
     init() {
+        Self.shared = self
         loadPins()
         loadFavServices()
         loadSavedMrt()
@@ -702,7 +719,6 @@ final class AppModel {
         syncFeedback()
         restoreLiveActivity()
         observeActivityRestores()
-        mirrorPinsToWidget()
         // Sync notification authorization from the system on every cold launch.
         // `autoTrackSoonestAlert()` — which spawns the arrival Live Activity —
         // is gated on `notificationAuth`, which otherwise stays `.notDetermined`
@@ -749,7 +765,6 @@ final class AppModel {
         if let d = try? JSONEncoder().encode(favServices) {
             UserDefaults.standard.set(d, forKey: "leyne.favServices")
         }
-        mirrorFavServicesToWidget()
     }
     private func loadHiddenNearby() {
         if let d = UserDefaults.standard.data(forKey: "leyne.hiddenNearby"),
@@ -827,29 +842,6 @@ final class AppModel {
     /// Restore a previously hidden stop (Settings → Hidden stops).
     func unhideNearby(code: String) { hiddenNearby.remove(code) }
 
-    /// Re-publish the favourite-service snapshot. Called after reference data
-    /// finishes loading, when stop names + destinations finally resolve.
-    func republishFavServicesToWidget() { mirrorFavServicesToWidget() }
-
-    /// Publishes favourite *services* to the App Group so the Favourite
-    /// Service widget can offer them. Only favs anchored to a concrete stop
-    /// are widget-eligible — an "anywhere" fav has no stop the extension can
-    /// fetch without location, so it stays in-app only. Destination is
-    /// resolved here from live route data (the extension can't resolve a
-    /// DestinationCode → name).
-    private func mirrorFavServicesToWidget() {
-        let shared: [SharedFavService] = favServices.compactMap { fav in
-            guard let stop = fav.stop else { return nil }       // skip "anywhere"
-            let name = { let n = ds.stopName(stop); return n.isEmpty ? stop : n }()
-            let dest = ds.servicesFor(stop).first { $0.no == fav.no }?.dest ?? ""
-            return SharedFavService(no: fav.no, stopCode: stop, stopName: name, dest: dest)
-        }
-        if let d = try? JSONEncoder().encode(shared) {
-            AppGroup.defaults?.set(d, forKey: AppGroup.favsKey)
-        }
-        WidgetCenter.shared.reloadAllTimelines()
-    }
-
     // ─── Favourite-service helpers ─────────────────────────
     /// Is this exact (bus, stop?) saved? `stop == nil` checks the anywhere one.
     func isFavService(no: String, stop: String?) -> Bool {
@@ -899,26 +891,11 @@ final class AppModel {
         if let d = try? JSONEncoder().encode(pins) {
             UserDefaults.standard.set(d, forKey: "leyne.pins")
         }
-        mirrorPinsToWidget()
         // Keep iOS Spotlight in sync — every pin becomes a searchable
         // result discoverable from the system search anywhere.
         Spotlight.updateIndex(pins: pins) { [ds] code in ds.stopName(code) }
     }
 
-    /// Publishes the pinned stops to the App Group and asks WidgetKit to
-    /// refresh, so the Home Screen widget always offers the current pins.
-    private func mirrorPinsToWidget() {
-        let stops = pins.map { p -> SharedPinnedStop in
-            let nick = p.nickname.trimmingCharacters(in: .whitespaces)
-            let name = !nick.isEmpty ? nick
-                : { let n = ds.stopName(p.code); return n.isEmpty ? p.code : n }()
-            return SharedPinnedStop(id: p.code, name: name)
-        }
-        if let d = try? JSONEncoder().encode(stops) {
-            AppGroup.defaults?.set(d, forKey: AppGroup.pinsKey)
-        }
-        WidgetCenter.shared.reloadAllTimelines()
-    }
     private func loadRecents() {
         recents = UserDefaults.standard.stringArray(forKey: "leyne.recents") ?? []
     }
@@ -1679,6 +1656,13 @@ final class AppModel {
             Feedback.shared.select()
             observeLiveActivityEnd(act)
             startLivePolling(busNo: s.no, stopCode: stopCode)
+            // The in-app polling loop above only runs while the process is
+            // alive; once backgrounded, iOS suspends it and the activity goes
+            // stale until the user reopens the app. This opportunistic
+            // BGAppRefreshTask doesn't fix that (no APNs push channel — see
+            // memory), but it narrows the gap with a best-effort periodic
+            // refresh while backgrounded.
+            LeyneAppDelegate.scheduleLiveActivityRefresh()
         } catch {
             liveActivity = nil
             liveActivityKey = nil
@@ -1880,6 +1864,34 @@ final class AppModel {
                 }
             }
         }
+    }
+
+    /// One-shot refresh for `LeyneAppDelegate`'s BGAppRefreshTask — a single
+    /// LTA fetch + Live Activity update, mirroring one iteration of
+    /// `startLivePolling` without the 15 s in-process loop (which iOS has
+    /// already suspended by the time this runs). Opportunistic and best-effort:
+    /// iOS may grant this seconds to minutes late, or skip it entirely under
+    /// battery/usage constraints — it narrows the staleness gap, it doesn't
+    /// close it (that needs an ActivityKit push channel).
+    func refreshLiveActivityInBackground() async {
+        guard let act = liveActivity else { return }
+        let busNo = act.attributes.busNo
+        let stopCode = act.attributes.stopCode
+        guard let snap = await ds.liveServiceSnapshot(serviceNo: busNo, stopCode: stopCode) else { return }
+        let eta = snap.etaSec
+        if eta <= 0 {
+            await finishLiveActivityAsArrived(monitored: snap.monitored)
+            return
+        }
+        var stopsAway = -1
+        if let r = await ds.route(service: busNo, stopCode: stopCode) {
+            let fromEta = Int((Double(max(0, eta)) / 90.0).rounded())
+            stopsAway = max(0, min(r.youIndex, fromEta))
+        }
+        let state = liveState(etaSec: eta, stopsAway: stopsAway,
+                              monitored: snap.monitored, eta: snap.arrivalDate)
+        await act.update(ActivityContent(state: state,
+                                         staleDate: Date().addingTimeInterval(120)))
     }
 
     /// Pushes a final "Bus is here" state, holds it briefly on both the Lock

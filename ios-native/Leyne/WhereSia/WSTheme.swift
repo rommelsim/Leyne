@@ -191,13 +191,18 @@ extension EnvironmentValues {
 private struct WSGlassChrome: ViewModifier {
     var cornerRadius: CGFloat
     var tint: Color
+    /// Tappable chrome (FABs, close/recenter buttons) opts in so the glass
+    /// gives the system touch response (scale/shimmer); static chrome stays off.
+    var interactive: Bool
     @Environment(\.ws) private var ws
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         Group {
             if #available(iOS 26.0, *) {
-                content.glassEffect(.regular.tint(tint.opacity(0.5)), in: shape)
+                let glass = interactive ? Glass.regular.tint(tint.opacity(0.5)).interactive()
+                                        : Glass.regular.tint(tint.opacity(0.5))
+                content.glassEffect(glass, in: shape)
             } else {
                 content
                     .background {
@@ -217,8 +222,8 @@ extension View {
     /// Floating glass chrome for bars/surfaces (tab bar today). Real Liquid
     /// Glass on iOS 26, `.ultraThinMaterial` fallback on 18–25 — both tinted
     /// so the surface still reads as the WhereSia board in either theme.
-    func wsGlassChrome(cornerRadius: CGFloat, tint: Color) -> some View {
-        modifier(WSGlassChrome(cornerRadius: cornerRadius, tint: tint))
+    func wsGlassChrome(cornerRadius: CGFloat, tint: Color, interactive: Bool = false) -> some View {
+        modifier(WSGlassChrome(cornerRadius: cornerRadius, tint: tint, interactive: interactive))
     }
 }
 

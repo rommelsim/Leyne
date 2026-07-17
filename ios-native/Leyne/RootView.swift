@@ -1,7 +1,8 @@
 // Root composition — Leyne 2.0 "Soft" UI is now the default and only
-// experience. Wraps `SoftRoot` with the launch splash, onboarding gate,
-// What's New modal, theme listener, and notification / Spotlight deep
-// link handler.
+// experience. Wraps `SoftRoot` with the onboarding gate, theme listener,
+// and notification / Spotlight deep link handler. (The auto-shown What's
+// New modal and the animated launch splash were both removed 2026-07-13;
+// release notes remain reachable from Settings.)
 
 import SwiftUI
 
@@ -29,24 +30,10 @@ struct RootView: View {
             // after another over the live app, then mark onboarding done. No
             // custom screens. See `runFirstRunPermissions`.
 
-            // ── What's New ──────────────────────────────────
-            if !m.showOnboarding,
-               let v = m.whatsNewVersion,
-               let entry = kChangelog[v] {
-                WhatsNewView(entry: entry, onDismiss: { m.markWhatsNewSeen() })
-                    .environment(m)
-                    .transition(.opacity)
-                    .zIndex(55)
-            }
-
-            // ── Launch splash ───────────────────────────────
-            if m.launching {
-                LaunchScreenView { m.launching = false }
-                    .zIndex(200)
-            }
+            // (Launch splash animation removed — owner, 2026-07-13. The app
+            // goes straight from the OS launch screen to WSRoot.)
         }
         .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
-        .animation(.easeInOut(duration: 0.3), value: m.whatsNewVersion)
         // Contextual App Store review prompt — paced by PromptCenter.
         .sheet(item: $prompts.active) { prompt in
             PromptCard(prompt: prompt)
@@ -75,11 +62,6 @@ struct RootView: View {
         // awaits the user's answer), then finishes onboarding.
         .task(id: m.showOnboarding) {
             guard m.showOnboarding else { return }
-            // Let the launch splash clear before stacking OS dialogs over it.
-            var waited = 0
-            while m.launching && waited < 40 {
-                try? await Task.sleep(for: .milliseconds(120)); waited += 1
-            }
             _ = await LocationManager.shared.requestPermissionAwaiting()
             await m.setNotificationsEnabled(true)
             // ATT/UMP only matters when ads are on; gatherThenStart also starts

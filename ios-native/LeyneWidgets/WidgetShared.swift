@@ -1,7 +1,6 @@
-// Shared foundation for every Home Screen widget in the extension. The
-// extension can't import the app module, so the palette, the fonts, the App
-// Group readers, the self-contained LTA client, and the common UI atoms all
-// live here once instead of being copy-pasted per widget. Values mirror
+// Shared foundation for the widget extension (now Live Activity only). The
+// extension can't import the app module, so the palette, the fonts and the
+// common UI atoms live here. Values mirror
 // Leyne/WhereSia/WSTheme.swift and the WhereSia components (RouteTile,
 // WSLiveBadge) so a widget always reads as a quote of the app.
 
@@ -102,141 +101,6 @@ func wMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
     return .custom(name, fixedSize: size)
 }
 
-// ─── Shared App Group (published by the app) ─────────────────────────
-enum WGroup {
-    static let id       = "group.com.leyne"        // must match LeyneWidgets.entitlements
-    static let pinsKey  = "leyne.pins.shared"      // [WPinnedStop]
-    static let nearbyKey = "leyne.nearby.shared"   // [WNearbyStop]
-    static let favsKey  = "leyne.favs.shared"      // [WFavService]
-}
-
-private func decode<T: Decodable>(_ key: String, _ type: [T].Type) -> [T] {
-    guard let d = UserDefaults(suiteName: WGroup.id)?.data(forKey: key),
-          let v = try? JSONDecoder().decode([T].self, from: d)
-    else { return [] }
-    return v
-}
-
-// Pinned stops the user can point the Stop widget at.
-struct WPinnedStop: Codable, Identifiable, Hashable {
-    let id: String      // bus stop code
-    let name: String    // nickname OR resolved stop name (set by the app)
-}
-func loadPinnedStops() -> [WPinnedStop] { decode(WGroup.pinsKey, [WPinnedStop].self) }
-
-// Last-known nearby stops, published by the app whenever location updates.
-// The widget refetches live arrivals itself — this is just the stop list +
-// walking distance, which the widget can't compute without the stop DB.
-struct WNearbyStop: Codable, Identifiable, Hashable {
-    let id: String      // bus stop code
-    let name: String
-    let walkMin: Int
-}
-func loadNearby() -> [WNearbyStop] { decode(WGroup.nearbyKey, [WNearbyStop].self) }
-
-// A favourited service, pre-resolved app-side to a concrete stop + the
-// route's destination (neither is resolvable inside the extension, which
-// has no stop/route database).
-struct WFavService: Codable, Identifiable, Hashable {
-    let no: String          // service number, e.g. "186"
-    let stopCode: String
-    let stopName: String
-    let dest: String        // "St. Michael's Ter" ("" when route unknown)
-    var id: String { "\(no)#\(stopCode)" }
-}
-func loadFavs() -> [WFavService] { decode(WGroup.favsKey, [WFavService].self) }
-
-// ─── Self-contained LTA Bus Arrival v3 client ────────────────────────
-// Same live source the app uses. Captures the GPS `Monitored` flag per
-// arrival so the widget can be as honest about uncertainty as the app.
-enum WLTA {
-    static let key  = "+6zJ3XstTqOcDkvczHttWA=="
-    static let base = URL(string: "https://datamall2.mytransport.sg/ltaodataservice")!
-
-    private struct Resp: Decodable { let Services: [Svc] }
-    private struct Svc: Decodable {
-        let ServiceNo: String
-        let NextBus: Bus
-        let NextBus2: Bus
-        let NextBus3: Bus
-    }
-    private struct Bus: Decodable { let EstimatedArrival: String?; let Monitored: Int? }
-
-    private static let iso: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
-    }()
-    private static let isoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
-    }()
-    private static func mins(_ s: String?) -> Int? {
-        guard let s, !s.isEmpty, let d = iso.date(from: s) ?? isoFrac.date(from: s)
-        else { return nil }
-        return max(0, Int((d.timeIntervalSinceNow / 60).rounded()))
-    }
-
-    struct Row: Identifiable, Hashable {
-        let id: String          // service number
-        let eta1: Int?
-        let eta2: Int?
-        let eta3: Int?
-        /// First arrival is GPS-monitored (live). False = scheduled-only.
-        var mon1: Bool = true
-
-        init(id: String, eta1: Int?, eta2: Int?, eta3: Int? = nil, mon1: Bool = true) {
-            self.id = id; self.eta1 = eta1; self.eta2 = eta2; self.eta3 = eta3; self.mon1 = mon1
-        }
-    }
-
-    static func arrivals(stop: String) async -> [Row] {
-        var c = URLComponents(url: base.appendingPathComponent("v3/BusArrival"),
-                              resolvingAgainstBaseURL: false)!
-        c.queryItems = [URLQueryItem(name: "BusStopCode", value: stop)]
-        var req = URLRequest(url: c.url!)
-        req.setValue(key, forHTTPHeaderField: "AccountKey")
-        req.setValue("application/json", forHTTPHeaderField: "accept")
-        req.timeoutInterval = 12
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode),
-              let decoded = try? JSONDecoder().decode(Resp.self, from: data)
-        else { return [] }
-        return decoded.Services
-            .map { Row(id: $0.ServiceNo,
-                       eta1: mins($0.NextBus.EstimatedArrival),
-                       eta2: mins($0.NextBus2.EstimatedArrival),
-                       eta3: mins($0.NextBus3.EstimatedArrival),
-                       mon1: ($0.NextBus.Monitored ?? 1) == 1) }
-            // Number order, matching the in-app board: rows must not
-            // reshuffle between refreshes.
-            .sorted { a, b in
-                let na = Int(a.id.filter(\.isNumber)) ?? Int.max
-                let nb = Int(b.id.filter(\.isNumber)) ?? Int.max
-                if na != nb { return na < nb }
-                return a.id < b.id
-            }
-    }
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────
-func etaLabel(_ m: Int?) -> String {
-    guard let m else { return "—" }
-    return m <= 0 ? "Arr" : "\(m)"
-}
-
-/// Whisper-quiet estimate tell: a single faint "~" before a scheduled-only
-/// ETA. The widget reads as a confident live number (timeliness is the
-/// promise); the "~" is the only quiet signal. See memory
-/// `feedback_timely_over_honest`.
-func schedPrefix(_ mon: Bool, _ m: Int?) -> String {
-    (!mon && (m ?? 0) > 0) ? "~" : ""
-}
-
-/// Deep links the host app can route (tap-to-open). Harmless if unhandled.
-func stopURL(_ code: String) -> URL? { URL(string: "lyne://stop/\(code)") }
-func serviceURL(_ no: String, stop: String) -> URL? {
-    URL(string: "lyne://service/\(no)?stop=\(stop)")
-}
-
 // ─── Shared UI atoms ─────────────────────────────────────────────────
 
 /// Route tile — the widget counterpart of in-app RouteTile: mono numerals on
@@ -273,38 +137,5 @@ struct WLiveBadge: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Live data")
         .widgetAccentable()
-    }
-}
-
-/// The "2 / 18 / 35 min" arrival triple: a hero ETA plus up to two thin
-/// follow-up columns. "Arriving" emphasis is the blue live accent + bold,
-/// matching the in-app board. Plex Mono keeps digit widths stable as the
-/// countdown ticks.
-struct WEtaColumns: View {
-    let row: WLTA.Row
-    var heroSize: CGFloat = 22
-    private var arriving: Bool { row.mon1 && (row.eta1 ?? 99) <= 1 }
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
-                    .font(wMono(etaLabel(row.eta1) == "Arr" ? heroSize * 0.78 : heroSize,
-                                arriving ? .bold : .medium))
-                    .foregroundStyle(arriving ? wAccentSoft : wFg)
-                    .widgetAccentable(arriving)
-                if etaLabel(row.eta1) != "Arr" {
-                    Text("min").font(wMono(9)).foregroundStyle(wDim)
-                }
-            }
-            .contentTransition(.numericText(countsDown: true))
-
-            ForEach(Array([row.eta2, row.eta3].compactMap { $0 }.prefix(2).enumerated()),
-                    id: \.offset) { _, m in
-                Text(m <= 0 ? "Arr" : "\(m)")
-                    .font(wMono(12))
-                    .foregroundStyle(wFaint)
-            }
-        }
     }
 }

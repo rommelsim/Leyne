@@ -17,17 +17,14 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:workmanager/workmanager.dart';
 
-import 'data/changelog.dart';
 import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'data/mrt_geo.dart';
 import 'l10n/app_localizations.dart';
-import 'screens/launch_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/v2/soft_bus_screen.dart';
 import 'screens/v2/soft_root.dart';
 import 'screens/v2/soft_stop_screen.dart';
-import 'screens/whats_new_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
 import 'services/alerts_background.dart';
 import 'services/analytics_service.dart';
@@ -263,28 +260,12 @@ class LyneApp extends StatelessWidget {
   }
 }
 
-/// Routes between OnboardingScreen, WhatsNewScreen and RootScaffold based on
-/// persisted state. Listens to AppModel so the "Show again" entry in
-/// Settings can re-enter onboarding mid-session, and so dismissing What's
-/// New drops straight through to Home.
-///
-/// Also owns the one-shot [LaunchScreen] overlay: a Stack layer shown on
-/// EVERY cold start — first-run and returning users alike — mirroring
-/// RootView.swift, where LaunchScreenView sits at the top zIndex
-/// unconditionally and only reveals whatever's underneath (OnboardingView
-/// or WSRoot) once its reveal finishes. Concretely this means the overlay
-/// masks OnboardingScreen too: the splash plays first, THEN onboarding's
-/// welcome step appears once it dismisses — never the other way around.
-///
-/// This matters for permissions: onboarding's location/notification
-/// primers (steps 2–3) only fire an OS prompt when the user taps through to
-/// them, and the splash's opaque tap-to-skip layer sits on top of
-/// OnboardingScreen the whole time it's up, so no tap — and therefore no
-/// permission prompt — can reach the screen underneath before the splash
-/// is gone. Before this was `_launching && onboardingDone`, which skipped
-/// the splash entirely for first-run installs and only played it AFTER
-/// onboarding (and its permission asks) had already completed — the
-/// opposite of the owner's "context before permission asks" intent.
+/// Routes between OnboardingScreen and RootScaffold based on persisted
+/// state. Listens to AppModel so the "Show again" entry in Settings can
+/// re-enter onboarding mid-session. (The auto-shown What's New screen on
+/// update and the animated Departly launch splash were both removed
+/// 2026-07-13, owner ask — cold starts go straight from the OS launch
+/// screen into Home / onboarding.)
 class _AppRoot extends StatefulWidget {
   const _AppRoot();
 
@@ -293,12 +274,6 @@ class _AppRoot extends StatefulWidget {
 }
 
 class _AppRootState extends State<_AppRoot> {
-  /// True until the launch screen finishes its reveal (or is tapped away).
-  /// Lives on this State — not AppModel — so it resets only on a real cold
-  /// start (a new `_AppRootState`), never on the ListenableBuilder rebuilds
-  /// below.
-  bool _launching = true;
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -307,18 +282,7 @@ class _AppRootState extends State<_AppRoot> {
         final onboardingDone = AppModel.shared.onboardingDone;
         final Widget body;
         if (onboardingDone) {
-          // A returning user who just updated into a build with release
-          // notes sees them once before Home.
-          final wn = AppModel.shared.whatsNewVersion;
-          if (wn != null) {
-            body = WhatsNewScreen(
-              version: wn,
-              entry: kChangelog[wn]!,
-              onDismiss: AppModel.shared.markWhatsNewSeen,
-            );
-          } else {
-            body = const SoftRoot();
-          }
+          body = const SoftRoot();
         } else {
           body = OnboardingScreen(
             // Awaited by the primer: the step advances only after the OS
@@ -341,23 +305,7 @@ class _AppRootState extends State<_AppRoot> {
           );
         }
 
-        return Stack(
-          children: [
-            body,
-            // Unconditional on onboardingDone (see class doc): the splash is
-            // the FIRST thing any cold start sees, first-run included, and
-            // its opaque tap-to-skip layer blocks all touches to `body`
-            // underneath until it dismisses.
-            if (_launching)
-              Positioned.fill(
-                child: LaunchScreen(
-                  onDone: () {
-                    if (mounted) setState(() => _launching = false);
-                  },
-                ),
-              ),
-          ],
-        );
+        return body;
       },
     );
   }

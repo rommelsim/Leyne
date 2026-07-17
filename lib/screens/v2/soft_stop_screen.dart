@@ -1,18 +1,22 @@
 // SoftStopScreen — Leyne Stop detail (Material 3 Android variant).
 //
 // Layout mirrors the current iOS WhereSia spec, ios-native/Leyne/WhereSia/
-// WSBusStopView.swift (NOT the dormant V2/SoftStopView.swift predecessor
-// this screen used to track):
+// WSBusStopView.swift (Wave 2 restyle, 2026-07-11 — supersedes the earlier
+// hand-rolled board that tracked a pre-restyle version of the same file):
 //   • Top bar: circular back + bookmark (save/pin) — no sort menu. WhereSia
 //     has no per-stop sort control; the board is always number-sorted.
-//   • Title block: large stop name, "● LIVE" (when loaded) + code · ROAD ·
-//     Updated h:mm on one line. No walk/distance row (not in the iOS spec).
-//   • No section header text before the arrivals list (iOS goes straight
-//     from the interchange card into the service rows).
-//   • Service rows: neutral (never accent-coloured) route tile · destination
-//     + ETA on one line · deck/wheelchair/"then…"/crowd on a second line ·
-//     trailing chevron. A monitored bus under a minute out swaps the ETA for
-//     the solid accent "ARRIVING" capsule.
+//   • ONE rounded board card: large stop name, "● LIVE" (when loaded) +
+//     code · ROAD · Updated h:mm meta head, a hairline divider, then the
+//     departure rows — same card grammar as Home's BusStopCard. No section
+//     header text before the rows (iOS goes straight from the meta head
+//     into the service rows).
+//   • No "MRT at this stop" interchange card any more — it duplicated the
+//     interchange visible on Home/the map and read as a stray row under the
+//     board (owner call, matches WSBusStopView.swift 2026-07-09 removal).
+//   • Service rows reuse the shared [SoftDepartureRow] primitive
+//     (showsVehicleIcons: true) — the neutral "Now" plate + edge tick
+//     replaces the old blue "ARRIVING" capsule; Android stays monochrome
+//     (colour only on the seat/crowd dot).
 //
 // All existing logic preserved: data loading, pin toggle, per-bus alerts
 // (swipe actions — the Material-idiomatic equivalent of iOS's long-press
@@ -26,15 +30,12 @@ import 'package:flutter_slidable/flutter_slidable.dart';
 import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
 import '../../data/models.dart';
-import '../../data/mrt_geo.dart';
-import '../../data/mrt_stations.dart';
 import '../../services/analytics_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/alert_actions.dart';
-import '../../widgets/v2/confidence.dart';
+import '../../widgets/v2/soft_departure_board.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
-import 'soft_mrt_station_screen.dart';
 
 class SoftStopScreen extends StatefulWidget {
   const SoftStopScreen({
@@ -142,13 +143,14 @@ class _SoftStopScreenState extends State<SoftStopScreen>
                   // ── Top bar ─────────────────────────────────────────────
                   _topBar(context, isPinned),
                   const SizedBox(height: 20),
-                  // ── Title block ─────────────────────────────────────────
-                  _titleBlock(context),
-                  const SizedBox(height: 20),
-                  // ── MRT interchange card (stops at a station) ──────────
-                  ..._interchangeCard(context),
-                  // ── Arrivals section ────────────────────────────────────
-                  _arrivalSection(context, state, sorted, isPinned),
+                  // ── "Watching" alerts (Android-only addition; sits above
+                  //    the board, matching where it already lived) ────────
+                  ..._activeAlertRows(context),
+                  // ── One rounded board card: name + LIVE meta head +
+                  //    departure rows — mirrors WSBusStopView's single
+                  //    panel exactly (no separate title block, no
+                  //    interchange card any more). ──────────────────────
+                  SoftEntrance(child: _boardCard(context, state, sorted)),
                   // No inline MREC any more — the Stop screen's single ad is
                   // the anchored banner in [SoftDetailBottomBar], mirroring
                   // iOS's wsDetailAdBanner (owner placement redesign
@@ -160,225 +162,6 @@ class _SoftStopScreenState extends State<SoftStopScreen>
         ),
       ),
     );
-  }
-
-  // ── MRT interchange card ────────────────────────────────────────────────
-  // When the stop's name resolves to an MRT station ("Farrer Rd Stn Exit A"
-  // → Farrer Road), a compact card links straight into that station's detail
-  // (crowd, forecast, disruptions). Feature parity with iOS's interchange
-  // card on the WhereSia Bus Stop screen.
-
-  List<Widget> _interchangeCard(BuildContext context) {
-    final t = context.t;
-    final stopName = DataStore.shared.stopName(widget.stopCode);
-    final resolved = resolveMrtStation(stopName);
-    if (resolved == null) return const [];
-    // The detail screen needs the geo record (lat/lon for its nearby-stops
-    // section) — match the resolved display name against the geo dataset.
-    final geoMatches = MrtGeo.all.where(
-      (s) => s.name.toLowerCase() == resolved.name.toLowerCase(),
-    );
-    if (geoMatches.isEmpty) return const [];
-    final station = geoMatches.first;
-    final crowd = _interchangeCrowd(station, resolved.codes);
-    return [
-      Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.lg),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => SoftMrtStationScreen(
-                  station: station,
-                  onBack: () => Navigator.of(context).pop(),
-                  onTab: widget.onTab ?? (_) {},
-                  tabSelection: widget.tabSelection ?? SoftTab.home,
-                  onOpenStop: (code) {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => SoftStopScreen(
-                          stopCode: code,
-                          onBack: () => Navigator.of(context).pop(),
-                          onOpenBus: widget.onOpenBus,
-                          onSeeAll: () {},
-                          onTab: widget.onTab,
-                          tabSelection: widget.tabSelection,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            );
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Wrap(
-                  spacing: 4,
-                  children: resolved.codes.take(3).map((c) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: c.color,
-                        borderRadius: BorderRadius.circular(LyneRadius.full),
-                      ),
-                      child: Text(
-                        c.code,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        resolved.name,
-                        style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        'MRT AT THIS STOP',
-                        style: t
-                            .mono(9, color: t.dim)
-                            .copyWith(letterSpacing: 0.6),
-                      ),
-                    ],
-                  ),
-                ),
-                if (crowd != null) ...[
-                  _miniGauge(_crowdFraction(crowd.level), t),
-                  const SizedBox(width: 6),
-                  Text(
-                    _crowdLevelLabel(crowd.level),
-                    style: t.mono(11, weight: FontWeight.w600, color: t.fg),
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                Icon(Icons.chevron_right_rounded, color: t.dim),
-              ],
-            ),
-          ),
-        ),
-      ),
-      const SizedBox(height: 16),
-    ];
-  }
-
-  /// This station's live crowd reading, looked up from [DataStore.crowdByLine]
-  /// via the interchange's first line code — mirrors iOS SoftStopView's
-  /// `store.wsCrowd(for: station)`. Null when the line isn't tracked or no
-  /// reading has landed yet; the `.unknown` level is also treated as "no
-  /// reading" (iOS excludes it from the chip too).
-  StationCrowd? _interchangeCrowd(MrtGeoStation station, List<MrtCode> codes) {
-    if (codes.isEmpty) return null;
-    final line = _lineFromStationCode(codes.first.code);
-    if (line == null) return null;
-    final list = DataStore.shared.crowdByLine[line];
-    if (list == null) return null;
-    StationCrowd? match;
-    for (final entry in list) {
-      for (final code in station.codes) {
-        if (entry.code.toUpperCase() == code.toUpperCase()) {
-          match = entry;
-          break;
-        }
-      }
-      if (match != null) break;
-    }
-    if (match == null || match.level == CrowdLevel.unknown) return null;
-    return match;
-  }
-
-  /// Two-letter station-code prefix → [MRTLine]. Mirrors the private
-  /// `_lineFromCode` in SoftMrtStationScreen (kept local since that one
-  /// isn't exported).
-  static MRTLine? _lineFromStationCode(String code) {
-    if (code.length < 2) return null;
-    switch (code.substring(0, 2).toUpperCase()) {
-      case 'EW':
-      case 'CG':
-        return MRTLine.ew;
-      case 'NS':
-        return MRTLine.ns;
-      case 'NE':
-        return MRTLine.ne;
-      case 'CC':
-      case 'CE':
-        return MRTLine.cc;
-      case 'DT':
-        return MRTLine.dt;
-      case 'TE':
-        return MRTLine.te;
-      default:
-        return null;
-    }
-  }
-
-  /// Gauge fill fraction — 34/67/100%, matching iOS `CrowdLevel.wsFraction`.
-  double _crowdFraction(CrowdLevel level) {
-    switch (level) {
-      case CrowdLevel.low:
-        return 0.34;
-      case CrowdLevel.moderate:
-        return 0.67;
-      case CrowdLevel.high:
-        return 1.0;
-      case CrowdLevel.unknown:
-        return 0;
-    }
-  }
-
-  /// A small neutral occupancy bar (never colour-coded — owner decision
-  /// 2026-07-03) mirroring iOS's `WSChip`/`CrowdGauge`: a hairline track with
-  /// a fg-coloured fill proportional to [fraction].
-  Widget _miniGauge(double fraction, LyneTheme t) {
-    return Container(
-      width: 22,
-      height: 5,
-      alignment: Alignment.centerLeft,
-      decoration: BoxDecoration(
-        color: t.line,
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: FractionallySizedBox(
-        widthFactor: fraction.clamp(0, 1),
-        child: Container(
-          decoration: BoxDecoration(
-            color: t.fg,
-            borderRadius: BorderRadius.circular(99),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _crowdLevelLabel(CrowdLevel level) {
-    switch (level) {
-      case CrowdLevel.low:
-        return 'Low';
-      case CrowdLevel.moderate:
-        return 'Moderate';
-      case CrowdLevel.high:
-        return 'High';
-      case CrowdLevel.unknown:
-        return 'Unknown';
-    }
   }
 
   // ── Top bar ──────────────────────────────────────────────────────────────
@@ -476,67 +259,132 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     );
   }
 
-  // ── Title block ──────────────────────────────────────────────────────────
+  // ── Board card ───────────────────────────────────────────────────────────
+  //
+  // One rounded panel — name + LIVE meta head, a hairline divider, then the
+  // departure rows. Same card grammar as Home's BusStopCard, matching
+  // WSBusStopView.swift's single `VStack` panel exactly (no separate title
+  // block, no interchange card, no section header before the rows).
 
-  Widget _titleBlock(BuildContext context) {
+  Widget _boardCard(
+    BuildContext context,
+    ArrivalState? state,
+    List<Service> sorted,
+  ) {
     final t = context.t;
     final ds = DataStore.shared;
-    final state = ds.arrivals[widget.stopCode];
     // LIVE marks "arrivals have loaded", same as iOS's `case .loaded =
     // store.arrivals[code]` — it is not gated on feed recency (that's what
     // the per-row "~" confidence marker is for).
     final loaded = state != null && state.kind == ArrivalStateKind.loaded;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Large stop name
-        Text(
-          ds.stopName(widget.stopCode),
-          style: t.sans(29, weight: FontWeight.w700, color: t.fg),
-        ),
-        const SizedBox(height: 6),
-        // LIVE badge (when loaded) + "code · ROAD · Updated h:mm" — one line,
-        // matching iOS's metaline exactly (no separate walk/distance row;
-        // not part of the current WhereSia spec).
-        Row(
-          children: [
-            if (loaded)
-              Semantics(
-                label: 'Live data',
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: t.soon,
-                        shape: BoxShape.circle,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 6),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Large stop name
+          Text(
+            ds.stopName(widget.stopCode),
+            style: t.sans(25, weight: FontWeight.w800, color: t.fg),
+          ),
+          const SizedBox(height: 8),
+          // LIVE badge (when loaded) + "code · ROAD · Updated h:mm" — one
+          // line, matching iOS's metaline exactly (no separate walk/distance
+          // row; not part of the current WhereSia spec).
+          Row(
+            children: [
+              if (loaded)
+                Semantics(
+                  label: 'Live data',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: t.soon,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'LIVE',
-                      style: t
-                          .mono(10, weight: FontWeight.w700, color: t.soon)
-                          .copyWith(letterSpacing: 0.5),
-                    ),
-                    const SizedBox(width: 9),
-                  ],
+                      const SizedBox(width: 4),
+                      Text(
+                        'LIVE',
+                        style: t
+                            .mono(10, weight: FontWeight.w700, color: t.soon)
+                            .copyWith(letterSpacing: 0.5),
+                      ),
+                      const SizedBox(width: 9),
+                    ],
+                  ),
+                ),
+              Flexible(
+                child: Text(
+                  _metaline(),
+                  style: t.mono(12, color: t.dim).copyWith(letterSpacing: 0.3),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-            Flexible(
-              child: Text(
-                _metaline(),
-                style: t.mono(12, color: t.dim).copyWith(letterSpacing: 0.3),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const SoftRowDivider(),
+          const SizedBox(height: 4),
+          // No "Arrivals" header/sort-pill row: iOS goes straight from the
+          // meta head into the service rows with no section label at all —
+          // matches WSBusStopView exactly.
+          if (state == null || state.kind == ArrivalStateKind.loading)
+            _boardStateCard(context, 'Loading live arrivals…', loading: true)
+          else if (state.kind == ArrivalStateKind.empty)
+            _boardStateCard(
+              context,
+              'No live arrivals right now. The last bus may have gone.',
+            )
+          else if (state.kind == ArrivalStateKind.error)
+            _boardStateCard(context, state.errorMessage ?? "Couldn't reach LTA")
+          else
+            _arrivalsList(context, sorted),
+        ],
+      ),
+    );
+  }
+
+  /// The board content's loading/empty/error presentation — inline (no card
+  /// chrome of its own; it already sits inside [_boardCard]'s panel).
+  Widget _boardStateCard(
+    BuildContext context,
+    String message, {
+    bool loading = false,
+  }) {
+    final t = context.t;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Row(
+        children: [
+          if (loading)
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2.2, color: t.dim),
+            )
+          else
+            Icon(Icons.directions_bus_rounded, color: t.dim, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: t.sans(13, weight: FontWeight.w500, color: t.dim),
             ),
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -549,37 +397,6 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     if (road.isNotEmpty) parts.add(road.toUpperCase());
     parts.add(_updatedLabel());
     return parts.join(' · ');
-  }
-
-  // ── Arrivals ───────────────────────────────────────────────────────────────
-
-  // No "Arrivals" header/sort-pill row: iOS goes straight from the title
-  // block (or interchange card) into the service rows with no section
-  // label at all — matches WSBusStopView exactly.
-  Widget _arrivalSection(
-    BuildContext context,
-    ArrivalState? state,
-    List<Service> sorted,
-    bool isPinned,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (state == null || state.kind == ArrivalStateKind.loading)
-          _emptyCard(context, 'Loading live arrivals…', loading: true)
-        else if (state.kind == ArrivalStateKind.empty)
-          _emptyCard(
-            context,
-            'No live arrivals right now. The last bus may have gone.',
-          )
-        else if (state.kind == ArrivalStateKind.error)
-          _emptyCard(context, state.errorMessage ?? "Couldn't reach LTA")
-        else ...[
-          ..._activeAlertRows(context),
-          _arrivalsList(context, sorted),
-        ],
-      ],
-    );
   }
 
   /// "Watching" section — the buses at this stop the user is being notified
@@ -677,9 +494,13 @@ class _SoftStopScreenState extends State<SoftStopScreen>
 
   // ── Arrivals list ─────────────────────────────────────────────────────────
 
-  /// The grouped arrivals card: one row per service with hairline dividers,
-  /// then a "Show more" expander past [_collapsedCount]. Mirrors iOS
-  /// WSBusStopView's number-sorted service board.
+  /// The service rows: one [SoftDepartureRow] per bus (showsVehicleIcons:
+  /// true — deck/wheelchair glyphs, mirrors iOS's `showsVehicleIcons`),
+  /// split by hairline dividers, then a "Show more" expander past
+  /// [_collapsedCount]. Mirrors iOS WSBusStopView's number-sorted service
+  /// board, reusing the shared Wave 1 primitive instead of a hand-rolled
+  /// row — its neutral "Now" plate + edge tick replaces the old blue
+  /// "ARRIVING" capsule (Android stays monochrome).
   Widget _arrivalsList(BuildContext context, List<Service> sorted) {
     final canCollapse = sorted.length > _collapsedCount;
     final shown = (_expanded || !canCollapse)
@@ -695,256 +516,25 @@ class _SoftStopScreenState extends State<SoftStopScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _arrivalsCard(
-            context,
-            shown,
-            canCollapse: canCollapse,
-            total: sorted.length,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// One grouped arrivals card: a row per service split by hairline dividers,
-  /// plus the "Show more" expander when [canCollapse]. Pulled out of
-  /// [_arrivalsList] so the full view can render two cards with an ad between.
-  Widget _arrivalsCard(
-    BuildContext context,
-    List<Service> rows, {
-    required bool canCollapse,
-    required int total,
-  }) {
-    final t = context.t;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: t.line, width: 1),
-        ),
-        child: Column(
-          children: [
-            for (var i = 0; i < rows.length; i++) ...[
-              if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
-              _swipeNotify(context, rows[i], _busRow(context, rows[i])),
-            ],
-            if (canCollapse) ...[
-              Divider(height: 1, thickness: 1, color: t.line),
-              _showMoreRow(context, total),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Service row (inside the grouped card) ─────────────────────────────────
-  //
-  // Neutral route tile · destination + ETA on one line · deck/wheelchair/
-  // "then…"/crowd on a second line · trailing chevron. The whole row opens
-  // the bus view. No per-row bell (matches iOS WSBusStopView); alert
-  // management is a swipe action here (the Material-idiomatic stand-in for
-  // iOS's long-press context menu).
-
-  Widget _busRow(BuildContext context, Service bus) {
-    final t = context.t;
-    final now = DateTime.now();
-    final feed = Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
-    final conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed);
-    final etas = _arrivalTimes(bus, now);
-    final leadSec = etas.first;
-    final later = etas.skip(1).map((s) => fmtEta(s).big).toList();
-    // The blue "pulling in" mark — reserved for a monitored arrival under a
-    // minute out. Matches iOS exactly: gated on `svc.monitored` only, not on
-    // feed recency (a monitored bus stays "arriving" even if the stop's feed
-    // itself has gone briefly stale). Static (no pulsing — owner-flagged as
-    // distracting on iOS; the capsule + row wash carry it instead).
-    final arrivingNow = bus.monitored && fmtEta(leadSec).big == 'Arr';
-
-    return Semantics(
-      label: 'Bus ${bus.no} to ${bus.dest}',
-      hint: arrivingNow
-          ? 'Bus ${bus.no} is arriving now'
-          : 'Opens bus ${bus.no}',
-      button: true,
-      child: InkWell(
-        onTap: () => widget.onOpenBus(bus.no),
-        child: Container(
-          // Margin + padding together always sum to the original 16/14 inset
-          // so non-arriving rows stay pixel-identical; only the fill colour
-          // changes. Keeps every row the same height (no divider jitter) and
-          // keeps the highlight inset from the card's own rounded edges
-          // rather than bleeding full-width (owner-flagged on iOS).
-          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          decoration: BoxDecoration(
-            color: arrivingNow
-                ? t.accent.withValues(alpha: 0.08)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            children: [
-              // Neutral tile — never colour-coded; only MRT line pills and
-              // the accent-only ARRIVING capsule carry colour on this screen.
-              _routeTile(bus.no, t),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Destination ⟷ ETA share one line (iOS parity): a
-                    // stacked "big number over unit" column here would put
-                    // the ETA visibly above the destination instead of
-                    // beside it.
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            bus.dest.isEmpty ? 'Bus ${bus.no}' : bus.dest,
-                            style: t.sans(
-                              15,
-                              weight: FontWeight.w700,
-                              color: t.fg,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        if (arrivingNow)
-                          _arrivingCapsule(t)
-                        else
-                          _leadEta(t, leadSec, conf),
-                      ],
-                    ),
-                    _secondLine(t, bus, later),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 6),
-              Icon(Icons.chevron_right_rounded, size: 18, color: t.faint),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Second line under the destination: deck/wheelchair attrs · "then 12 ·
-  /// 24 min" (later arrivals, omitted when there are none) · crowd meter
-  /// trailing. Omitted entirely when there's nothing to show, so
-  /// schedule-only ghost rows stay single-line.
-  Widget _secondLine(LyneTheme t, Service bus, List<String> later) {
-    // Deck/wheelchair are static bus attributes, known regardless of live
-    // GPS — iOS shows them unconditionally, so no sched/monitored gate here.
-    final showAttrs = bus.wab || bus.deck != Deck.sd;
-    final showThen = later.isNotEmpty;
-    // Crowd only for a confirmed (non-schedule-only) arrival — mirrors iOS
-    // WSBusStopView's `!sched` gate on the crowd gauge.
-    final showCrowd = bus.monitored;
-    if (!showAttrs && !showThen && !showCrowd) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child: Row(
-        children: [
-          if (showAttrs) _serviceAttrs(t, bus),
-          if (showAttrs && showThen) const SizedBox(width: 8),
-          if (showThen)
-            Flexible(
-              child: Text(
-                'then ${later.join(' · ')} min',
-                style: t.mono(11, color: t.dim),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+          for (var i = 0; i < shown.length; i++) ...[
+            if (i > 0) const SoftRowDivider(),
+            _swipeNotify(
+              context,
+              shown[i],
+              SoftDepartureRow(
+                key: ValueKey(shown[i].no),
+                service: shown[i],
+                onTap: () => widget.onOpenBus(shown[i].no),
+                showsVehicleIcons: true,
               ),
             ),
-          const Spacer(),
-          // Short word (Seats/Standing/Limited) matches iOS Load.wsWord —
-          // the row is already dense with attrs/"then"/crowd on one line.
-          if (showCrowd) CrowdMeter(load: bus.load, compact: true),
+          ],
+          if (canCollapse) ...[
+            const SoftRowDivider(),
+            _showMoreRow(context, sorted.length),
+          ],
         ],
       ),
-    );
-  }
-
-  /// Solid accent "ARRIVING" capsule — the sanctioned live-accent exception,
-  /// shown in place of the ETA when the lead bus is under a minute out and
-  /// monitored by GPS.
-  Widget _arrivingCapsule(LyneTheme t) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: t.accent,
-        borderRadius: BorderRadius.circular(100),
-      ),
-      child: Text(
-        'ARRIVING',
-        style: t
-            .mono(11, weight: FontWeight.w700, color: Colors.white)
-            .copyWith(letterSpacing: 0.8),
-      ),
-    );
-  }
-
-  /// The ETA, inline on the destination's baseline: "~12 min" for a
-  /// scheduled/ghost bus, "12 min" for a monitored one, "Arr" alone with no
-  /// suffix. The "~" depends only on whether the bus is monitored — never on
-  /// feed staleness — and the numeral itself always stays full-ink
-  /// (timeliness is the promise — see feedback_timely_over_honest). Matches
-  /// iOS's inline `Text(sched ? "~" : "") + eta.big + " min"` exactly.
-  Widget _leadEta(LyneTheme t, int sec, ArrivalConfidence conf) {
-    final eta = fmtEta(sec);
-    final arriving = eta.big == 'Arr';
-    final sched = conf == ArrivalConfidence.unconfirmed;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        if (sched)
-          Text(
-            '~',
-            style: t.mono(15, weight: FontWeight.w600, color: t.dim),
-          ),
-        Text(
-          eta.big,
-          style: t.mono(19, weight: FontWeight.w700, color: t.fg),
-        ),
-        if (!arriving)
-          Text(
-            ' min',
-            style: t.mono(11, weight: FontWeight.w600, color: t.dim),
-          ),
-      ],
-    );
-  }
-
-  /// Small inline row of service attribute chips: deck type when it's not
-  /// plain single-deck, then wheelchair (WAB) — iOS's icon order. Colour is
-  /// dim/faint so it never competes with the ETA.
-  Widget _serviceAttrs(LyneTheme t, Service bus) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (bus.deck != Deck.sd)
-          Text(
-            bus.deck == Deck.dd ? 'Double-deck' : 'Bendy',
-            style: t.mono(10, color: t.faint),
-          ),
-        if (bus.deck != Deck.sd && bus.wab) const SizedBox(width: 5),
-        if (bus.wab)
-          Semantics(
-            label: 'Wheelchair accessible',
-            excludeSemantics: true,
-            child: Icon(Icons.accessible_rounded, size: 13, color: t.dim),
-          ),
-      ],
     );
   }
 
@@ -1027,96 +617,6 @@ class _SoftStopScreenState extends State<SoftStopScreen>
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  /// Live seconds for a service — recomputed from arrivalDate for smoothness.
-  int _liveSec(Service s, DateTime now) {
-    if (s.arrivalDate != null) {
-      return s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30);
-    }
-    return s.etaSec;
-  }
-
-  /// 1–3 upcoming arrival times (seconds) for a service, dropping any that
-  /// aren't strictly later than the previous one.
-  List<int> _arrivalTimes(Service s, DateTime now) {
-    final first = _liveSec(s, now);
-    final result = [first];
-    int? second;
-    if (s.followingDate != null) {
-      second = s.followingDate!.difference(now).inSeconds.clamp(0, 1 << 30);
-    } else if (s.followingSec > first) {
-      second = s.followingSec;
-    }
-    if (second != null && second > first) result.add(second);
-    final third = s.thirdDate;
-    if (third != null) {
-      final sec = third.difference(now).inSeconds.clamp(0, 1 << 30);
-      if (sec > result.last) result.add(sec);
-    }
-    return result;
-  }
-
-  // ── Route tile ─────────────────────────────────────────────────────────────
-  // Neutral, bordered, monospaced — matches iOS's `RouteTile(size: .large)`.
-  // Bus route numbers are NEVER colour-filled; colour is reserved for MRT
-  // line pills and the accent-only ARRIVING capsule.
-
-  Widget _routeTile(String svc, LyneTheme t) {
-    return Container(
-      width: 46,
-      height: 40,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: t.line, width: 1),
-      ),
-      child: Text(
-        svc,
-        style: t.mono(16, weight: FontWeight.w700, color: t.fg),
-        maxLines: 1,
-      ),
-    );
-  }
-
-  // ── Empty / loading / error card ──────────────────────────────────────────
-  // One shared presentation for all three non-loaded states, so they read as
-  // one system rather than a bare spinner for loading and a bordered card
-  // for empty/error. Copy for the empty state matches iOS WSBusStopView's
-  // "No live arrivals right now. The last bus may have gone." exactly; the
-  // spinner-in-a-card is the Material-idiomatic stand-in for iOS's plain
-  // "Loading live arrivals…" text row.
-  Widget _emptyCard(
-    BuildContext context,
-    String message, {
-    bool loading = false,
-  }) {
-    final t = context.t;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-        border: Border.all(color: t.line, width: 1),
-      ),
-      child: Row(
-        children: [
-          if (loading)
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.2, color: t.dim),
-            )
-          else
-            Icon(Icons.directions_bus_rounded, color: t.dim, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(message, style: t.sans(14, color: t.fg)),
-          ),
-        ],
       ),
     );
   }

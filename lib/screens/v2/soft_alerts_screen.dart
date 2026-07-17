@@ -572,21 +572,26 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     required String body,
   }) {
     final t = context.t;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.lg),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-            ),
-            const SizedBox(height: 2),
-            Text(body, style: t.sans(13, color: t.dim)),
-          ],
+    // Full width so the card lines up with the lift-maintenance / advisory
+    // cards — a bare Column would shrink-wrap to the widest text line.
+    return SizedBox(
+      width: double.infinity,
+      child: Material(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.lg),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: t.sans(14, weight: FontWeight.w600, color: t.fg),
+              ),
+              const SizedBox(height: 2),
+              Text(body, style: t.sans(13, color: t.dim)),
+            ],
+          ),
         ),
       ),
     );

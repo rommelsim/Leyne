@@ -1,21 +1,38 @@
 // WhereSia — Track bus (screen 7).
 //
-// Map-first tracking screen (owner 2026-07-11). The live map is the hero: it
-// fills from the top down to just above the alert button, with a pull-up sheet
-// floating over it. The sheet's header IS the ETA — the thing you grab to pull
-// the route up is the same element that tells you when the bus arrives (anim
-// spec: spatial continuity). Scrolling up collapses the map behind the rising
-// sheet and slides the full "On the way" timeline into view; scrolling back
-// down re-expands it. Tapping the map opens a full-screen interactive map with
-// the approach stops and a live-info bar.
+// Map-first tracking screen (owner 2026-07-11, sheet redone 2026-07-12). The
+// live map is a full-screen hero behind a hand-rolled bottom sheet (not a
+// system `.sheet` — that auto-inset + rounded-all-corners at non-.large
+// detents read as a floating card disconnected from the map, and never
+// cleanly dismissed on back-navigation). The sheet's header IS the ETA — the
+// thing you drag to pull the route up is the same element that tells you when
+// the bus arrives (anim spec: spatial continuity). Dragging the sheet between
+// peek (simple ETA card) / half / full continuously shrinks, dims and blurs
+// the map in place, and re-fits its camera wider once there's room to show
+// the whole approach instead of just the tight your-stop framing. Tapping the
+// map opens a full-screen interactive map with the approach stops and a
+// live-info bar.
 //
 // Position is APPROXIMATE — LTA gives coords + ETAs for the next buses only, so
 // per-stop minute times are not invented (only the your-stop ETA is real).
 // iOS-only native MapKit (Android deliberately has no bus map — android-no-map).
 
 import SwiftUI
+import UIKit
 import MapKit
 import CoreLocation
+
+/// Rounds only the top two corners — the flush-to-bottom-edge look of a real
+/// bottom sheet (Apple Maps), vs. a system `.sheet`'s all-corners rounding.
+private struct WSTopRoundedCorner: Shape {
+    var radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(UIBezierPath(roundedRect: rect,
+                          byRoundingCorners: [.topLeft, .topRight],
+                          cornerRadii: CGSize(width: radius, height: radius)).cgPath)
+    }
+}
 
 struct WSTrackBusView: View {
     let stopCode: String
@@ -36,17 +53,38 @@ struct WSTrackBusView: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var refreshTick = false
 
-    /// Scroll-driven collapse: how far the sheet has been pulled up. Drives the
-    /// hero map's height + fade so the map appears to slide out behind the sheet.
-    @State private var scrollY: CGFloat = 0
+    /// The pull-up sheet's current height — a hand-rolled bottom sheet
+    /// (owner: a real `.sheet` auto-insets + rounds all four corners at
+    /// non-`.large` detents, so it read as a floating card disconnected from
+    /// the map instead of one unified surface; it also left a stray sheet
+    /// behind on back-navigation since `.sheet(isPresented: .constant(true))`
+    /// never gets a clean dismiss when the screen pops).
+    @State private var sheetHeight: CGFloat = Self.sheetPeek
+    @State private var sheetDragStartHeight: CGFloat?
+    /// Sticky docked/undocked flag — NOT recomputed fresh from `sheetHeight`
+    /// every frame (owner-reported: dragging slowly through the swap
+    /// threshold made the card "spasm," jittering back and forth). A single
+    /// trigger line flips on the tiniest per-frame wobble in the drag value,
+    /// and each flip swaps the sheet's content (compact card <-> full
+    /// scrollable route), which is what actually visibly jittered. A
+    /// hysteresis band around the threshold means the flip only fires once,
+    /// cleanly, in each direction.
+    @State private var docked: Bool = true
+    // Tall enough to clear the ETA header + divider + CTA's fixed height at
+    // rest (~330pt) without clipping them — anything smaller cuts off the CTA
+    // button since only the route ScrollView between them is flexible.
+    private static let sheetPeek: CGFloat = 340
+    /// How far past peek the sheet has to move before the content actually
+    /// swaps from the compact docked card to the full scrollable route list.
+    /// Was gated to a `sheetStage` that only updated on drag-release, so
+    /// mid-drag the (still-compact) content sat inside a taller frame than it
+    /// needed, leaving dead space at the bottom (owner-reported "gap").
+    /// Computed straight from `sheetHeight` instead so it tracks the drag.
+    private static let sheetContentSwapThreshold: CGFloat = 60
     /// The full-screen interactive map (tap the hero to open).
     @State private var showFullMap = false
     /// The ⓘ operating-hours / route-ends popover.
     @State private var showInfo = false
-
-    /// How much of the ETA sheet header overlaps (floats over) the hero map at
-    /// rest — the "grab me" peek.
-    private let headerPeek: CGFloat = 96
 
     /// The tracked stop's own coordinate (for the live map).
     private var stopCoord: CLLocationCoordinate2D? {
@@ -84,54 +122,61 @@ struct WSTrackBusView: View {
 
     var body: some View {
         let _ = m.tick
-        VStack(spacing: 0) {
-            GeometryReader { geo in
-                let restingMap = geo.size.height * 0.56
-                // The transparent window in the scroll content that lets the
-                // map show through; the sheet header floats over its last
-                // `headerPeek` points.
-                let mapSpacer = max(140, restingMap - headerPeek)
-                ZStack(alignment: .top) {
-                    // ── Hero map: a non-interactive preview. Shrinks + fades
-                    //    as the sheet is pulled up so it reads as sliding out.
-                    heroMap(height: max(headerPeek, restingMap - scrollY))
-                        .opacity(1 - Double(min(1, scrollY / mapSpacer)) * 0.85)
-                        .allowsHitTesting(false)
+        GeometryReader { geo in
+            let undockedHeight = geo.size.height * 0.9
+            // 0 docked, 1 fully undocked. Drives the map's live dim as the
+            // sheet is dragged, not just a snap between fixed states.
+            let progress = min(1, max(0, (sheetHeight - Self.sheetPeek) / (undockedHeight - Self.sheetPeek)))
+            ZStack(alignment: .bottom) {
+                // ── Hero map: the full-screen hero. Interactive (pinch to
+                //    zoom, drag to pan) at rest — "Tap to expand" is the only
+                //    way into the dedicated full-screen map now, so a plain
+                //    tap on the map itself doesn't swallow zoom/pan gestures.
+                //    A plain opacity scrim dims it as the sheet rises — NOT
+                //    scaleEffect/blur, which forced the live MKMapView to
+                //    re-render every drag frame and caused visible flashing
+                //    plus a rendering gap at its shrunk-away edge (both
+                //    owner-reported).
+                heroMap(height: nil)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Color.black.opacity(0.32 * progress)
+                    .allowsHitTesting(false)
 
-                    // ── The pull-up sheet: ETA header (the grabber) + route.
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Transparent over the map — tapping it (i.e.
-                            // tapping "the map") opens the full-screen map.
-                            Color.clear.frame(height: mapSpacer)
-                                .contentShape(Rectangle())
-                                .onTapGesture { openFull() }
-                            etaHeader
-                                .wsEntrance()
-                            routeCard
-                                .wsEntrance(delay: 0.08)
-                            adCard
-                                .wsEntrance(delay: 0.14)
-                            Color.clear.frame(height: 24)
-                        }
-                    }
-                    .scrollIndicators(.hidden)
-                    .onScrollGeometryChange(for: CGFloat.self) {
-                        $0.contentOffset.y + $0.contentInsets.top
-                    } action: { _, y in
-                        scrollY = max(0, y)
-                    }
+                mapTapHint
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .opacity(1 - progress)
+                    .allowsHitTesting(progress < 0.5)
 
-                    // Affordance that the map is tappable — fades on scroll.
-                    mapTapHint
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                        .opacity(Double(max(0, 1 - scrollY / 60)))
-                        .allowsHitTesting(false)
+                bottomSheet(undockedHeight: undockedHeight, docked: docked,
+                           bottomInset: geo.safeAreaInsets.bottom)
+            }
+            // Re-fit the camera once the sheet actually crosses into/out of
+            // docked — tight on the approach docked, the whole segment
+            // undocked.
+            .onChange(of: sheetHeight, initial: true) { _, newHeight in
+                updateDocked(for: newHeight)
+            }
+            .onChange(of: docked) { _, isDocked in
+                // Refit only when returning to docked — the old undock refit
+                // zoomed out to the whole run behind a 90%-height sheet + dim,
+                // pure motion with nothing to see (owner: "what does it zoom
+                // in to and for?").
+                if isDocked {
+                    withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .easeInOut(duration: 0.6)) {
+                        refitMap()
+                    }
+                }
+                // The initial `.task` fetch can silently come back nil on a
+                // transient network hiccup, leaving `serviceRouteData` nil
+                // forever with no retry (owner-reported: route sometimes
+                // missing after pulling the card up — it was stuck showing
+                // the loading shimmer indefinitely). Retry right when the
+                // user pulls the sheet up to see it, since that's the moment
+                // it'd actually be noticed missing.
+                if !isDocked, serviceRouteData == nil {
+                    Task { await loadRoute() }
                 }
             }
-
-            cta
-                .wsEntrance(delay: 0.16)
         }
         .background(ws.bg)
         // The bar names the bus itself — "TRACK BUS" told the user nothing.
@@ -160,6 +205,7 @@ struct WSTrackBusView: View {
             WSBusFullMap(serviceNo: serviceNo,
                          seg: approachSegment(),
                          stopCoord: stopCoord,
+                         stopName: store.stopName(stopCode),
                          busCoord: busCoord,
                          dest: destTitle,
                          awayText: stopsAway,
@@ -189,11 +235,6 @@ struct WSTrackBusView: View {
             // fetch cancels automatically if the user pops before it resolves.
             await loadRoute()
         }
-        .refreshable {
-            await store.refreshArrivals(stop: stopCode)
-            await loadRoute()
-            refreshTick.toggle()
-        }
         .sensoryFeedback(.success, trigger: refreshTick)
     }
 
@@ -218,6 +259,128 @@ struct WSTrackBusView: View {
         if now { return ("Arriving", true) }
         if let sec { return ("\(max(1, sec / 60)) min", false) }
         return ("—", false)
+    }
+
+    // MARK: bottom sheet — one unified surface over the full-screen map
+    //
+    // Hand-rolled (not a system `.sheet`) so it reads as flush with the map
+    // instead of a floating, all-corners-rounded card: rounded TOP corners
+    // only, extends past the bottom safe area, drag handle lives in the ETA
+    // header. Previously two separately-clipped `ws.panel` cards also stacked
+    // with their own corner radii + shadow (owner: Bus view not polished) —
+    // now a single panel start to finish.
+
+    private func bottomSheet(undockedHeight: CGFloat, docked: Bool, bottomInset: CGFloat) -> some View {
+        // The panel is laid out ONCE at its full (undocked) height and slid
+        // with `.offset` — NOT `.frame(height: sheetHeight)`. Resizing the
+        // frame per drag frame re-laid-out the entire panel (header + route
+        // ScrollView) AND re-rendered the drop shadow — a Gaussian blur over
+        // a layer whose size changed every frame — which dropped the frame
+        // rate visibly while pulling the card up (owner-reported). An offset
+        // is a cheap translation: layout and shadow are computed once and the
+        // panel just slides. The CTA can't live inside a full-height sliding
+        // panel (it would slide offscreen when docked), so it's pinned as its
+        // own opaque footer layered over the panel's bottom edge.
+        ZStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                etaHeader
+                    .contentShape(Rectangle())
+                    .gesture(sheetDrag(undocked: undockedHeight))
+                WSRowDivider().padding(.horizontal, 18).padding(.vertical, 14)
+                if docked {
+                    // Docked = the simple ETA card only. No scroll container, no
+                    // stop list — a fixed compact summary row so nothing from the
+                    // route list can ever leak through a too-short sheet (owner-
+                    // reported bug: a partial stop row was visible above the CTA).
+                    routeCard(compact: true)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            routeCard(compact: false)
+                            adCard.padding(.top, 14)
+                            // Clearance for the pinned CTA footer overlaying
+                            // the bottom of the panel (it's outside this
+                            // scroll view now).
+                            Color.clear.frame(height: 102 + bottomInset)
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                    .refreshable {
+                        await store.refreshArrivals(stop: stopCode)
+                        await loadRoute()
+                        refreshTick.toggle()
+                    }
+                }
+            }
+            .frame(height: undockedHeight, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ws.panel)
+            .clipShape(WSTopRoundedCorner(radius: 22))
+            .shadow(color: .black.opacity(0.22), radius: 16, y: -2)
+            .offset(y: undockedHeight - sheetHeight)
+
+            // `.ignoresSafeArea` below drops the automatic home-indicator
+            // inset, so the CTA reclaims it manually — otherwise it sits
+            // flush under the indicator on Face ID devices. Opaque panel
+            // fill so undocked scroll content passes behind it, not through.
+            cta.padding(.bottom, bottomInset)
+                .frame(maxWidth: .infinity)
+                .background(ws.panel)
+        }
+        .frame(height: undockedHeight, alignment: .bottom)
+        .ignoresSafeArea(edges: .bottom)
+        // NOT `.animation(value: sheetHeight)` — that implicitly springs
+        // EVERY change, including the ~60-120/s updates from onChanged
+        // below, so each finger movement queued a new spring on top of the
+        // last one and the sheet visibly lagged behind the drag, leaving a
+        // gap to the map underneath (owner-reported). Only the two explicit
+        // `withAnimation` calls below (snap-to-rest, and the initial
+        // appearance) should animate; the live drag must track 1:1.
+        .wsEntrance()
+    }
+
+    /// Widens the docked/undocked swap threshold into a band so a slow drag
+    /// hovering right around the trigger line doesn't flip content back and
+    /// forth every frame.
+    private func updateDocked(for height: CGFloat) {
+        let trigger = Self.sheetPeek + Self.sheetContentSwapThreshold
+        let band: CGFloat = 20
+        let newDocked = docked ? (height < trigger + band) : (height < trigger - band)
+        if newDocked != docked { docked = newDocked }
+    }
+
+    private func sheetDrag(undocked: CGFloat) -> some Gesture {
+        // Global space, NOT the default .local — the header this gesture
+        // lives on moves with every sheetHeight change, so local-space
+        // translations were measured against a frame that shifted under the
+        // finger each event. On a slow drag that feeds back (height update →
+        // header moves → translation jumps → height jumps) as a visible
+        // jitter (owner-reported spasm).
+        DragGesture(coordinateSpace: .global)
+            .onChanged { value in
+                let start = sheetDragStartHeight ?? sheetHeight
+                sheetDragStartHeight = start
+                // No animation here — 1:1 with the finger every frame.
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) {
+                    sheetHeight = min(undocked, max(Self.sheetPeek * 0.7, start - value.translation.height))
+                }
+            }
+            .onEnded { value in
+                sheetDragStartHeight = nil
+                let draggingUp = value.translation.height < 0
+                let midpoint = (Self.sheetPeek + undocked) / 2
+                // A decisive flick commits to the other state even before
+                // crossing the midpoint — feels responsive, not sticky.
+                let fastFlick = abs(value.predictedEndTranslation.height - value.translation.height) > 200
+                let goUndocked = fastFlick ? draggingUp : sheetHeight > midpoint
+                let target = goUndocked ? undocked : Self.sheetPeek
+                UISelectionFeedbackGenerator().selectionChanged()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
+                    sheetHeight = target
+                }
+            }
     }
 
     // MARK: ETA header (the sheet grabber)
@@ -274,7 +437,7 @@ struct WSTrackBusView: View {
                         // Scheduled-only ETA carries the whisper "~" — never a
                         // banner (feedback_timely_over_honest).
                         (Text(sched ? "~" : "").font(ws.sans(20, weight: .semibold)).foregroundStyle(ws.dim)
-                         + Text("\(minutes)").font(ws.sans(36, weight: .heavy)).foregroundStyle(ws.text)
+                         + Text("\(minutes)").font(ws.sans(36, weight: .heavy).monospacedDigit()).foregroundStyle(ws.text)
                          + Text(" min").font(ws.sans(16, weight: .semibold)).foregroundStyle(ws.dim))
                     } else {
                         Text("—").font(ws.sans(32, weight: .heavy)).foregroundStyle(ws.faint)
@@ -286,10 +449,8 @@ struct WSTrackBusView: View {
                     .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
             }
         }
-        .padding(.horizontal, 18).padding(.bottom, 16)
+        .padding(.horizontal, 18).padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ws.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         // Green left tick while arriving — the same "now" mark as the rows.
         .overlay(alignment: .leading) {
             if now {
@@ -298,12 +459,9 @@ struct WSTrackBusView: View {
                     .transition(.opacity)
             }
         }
-        // A soft shadow so the sheet reads as floating over the map.
-        .shadow(color: .black.opacity(0.18), radius: 14, y: -2)
         .animation(reduceMotion ? .easeInOut(duration: 0.2)
                                 : .spring(response: 0.35, dampingFraction: 0.85), value: now)
         .animation(.snappy(duration: 0.28), value: minutes)
-        .padding(.horizontal, 22)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(cardA11y(now: now, minutes: minutes, sched: sched))
     }
@@ -401,35 +559,57 @@ struct WSTrackBusView: View {
     // WSApproachMapContent so the two draw identically.
 
     /// The stops on the live approach (bus → your stop) with their coords —
-    /// the segment the map draws as a route line + stop markers.
-    private func approachSegment() -> [(coord: CLLocationCoordinate2D, isYou: Bool)] {
+    /// the segment the map draws as labelled stop markers.
+    private func approachSegment() -> [WSApproachStop] {
         guard let dir = anchorDirection, !dir.stops.isEmpty else { return [] }
         let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
         let lo = (busIndex.map { min($0, you) }) ?? max(0, you - 4)
         return (lo...you).map { i in
-            (CLLocationCoordinate2D(latitude: dir.stops[i].lat, longitude: dir.stops[i].lon), i == you)
+            WSApproachStop(coord: CLLocationCoordinate2D(latitude: dir.stops[i].lat,
+                                                         longitude: dir.stops[i].lon),
+                           isYou: i == you, name: dir.stops[i].name)
         }
     }
 
-    @ViewBuilder private func heroMap(height: CGFloat) -> some View {
-        Map(position: $camera, interactionModes: []) {
+    /// The full run from the bus (or route start) to your stop.
+    private func wideSegment() -> [WSApproachStop] {
+        guard let dir = anchorDirection, !dir.stops.isEmpty else { return approachSegment() }
+        let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
+        let lo = busIndex.map { min($0, you) } ?? 0
+        return (lo...you).map { i in
+            WSApproachStop(coord: CLLocationCoordinate2D(latitude: dir.stops[i].lat,
+                                                         longitude: dir.stops[i].lon),
+                           isYou: i == you, name: dir.stops[i].name)
+        }
+    }
+
+    @ViewBuilder private func heroMap(height: CGFloat?) -> some View {
+        // Zoom + pan directly on the docked map (owner: couldn't pinch to
+        // zoom before — the whole map ate every tap to jump to the
+        // full-screen cover instead). Rotate/pitch stay off; this is a
+        // preview, not the primary navigation surface — "Tap to expand" is
+        // the deliberate, explicit way into that.
+        Map(position: $camera, interactionModes: [.zoom, .pan]) {
             WSApproachMapContent(ws: ws, serviceNo: serviceNo,
                                  seg: approachSegment(),
-                                 stopCoord: stopCoord, busCoord: busCoord)
+                                 stopCoord: stopCoord, stopName: store.stopName(stopCode),
+                                 busCoord: busCoord)
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .frame(height: height)
         .clipped()
-        // A small legend so the marks are self-explanatory.
-        .overlay(alignment: .bottomLeading) { mapLegend.padding(.bottom, headerPeek - 8) }
-        .overlay(alignment: .topTrailing) {
+        // No legend: the route line + labelled YOUR STOP pin and numbered bus
+        // plate are self-explanatory, and the legend competed with "Tap to
+        // expand" for the map's header row (UX critique, 2026-07-13).
+        .overlay(alignment: .topLeading) {
             if busCoord == nil {
                 Text("Live bus updating…")
                     .font(ws.sans(11, weight: .semibold)).foregroundStyle(ws.dim)
                     .padding(.horizontal, 10).frame(height: 24)
                     .background(Capsule().fill(ws.panel))
                     .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
-                    .padding(.top, 10).padding(.trailing, 14)
+                    .padding(.top, 10).padding(.leading, 14)
             }
         }
         .accessibilityLabel(busCoord == nil
@@ -438,38 +618,39 @@ struct WSTrackBusView: View {
     }
 
     private var mapTapHint: some View {
-        HStack(spacing: 5) {
-            WSIcon(glyph: .map, size: 12, weight: .semibold, color: ws.text)
-            Text("Tap to expand")
-                .font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.text)
+        Button(action: openFull) {
+            HStack(spacing: 5) {
+                WSIcon(glyph: .map, size: 12, weight: .semibold, color: ws.text)
+                Text("Tap to expand")
+                    .font(ws.sans(12, weight: .semibold)).foregroundStyle(ws.text)
+            }
+            .padding(.horizontal, 11).frame(height: 30)
+            .wsGlassChrome(cornerRadius: 15, tint: ws.tabbar)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 11).frame(height: 30)
-        .wsGlassChrome(cornerRadius: 15, tint: ws.tabbar)
+        .buttonStyle(WSCompressStyle())
         .padding(.top, 10).padding(.trailing, 22)
     }
 
-    private var mapLegend: some View {
-        HStack(spacing: 10) {
-            legendDot(ws.accent, "Your stop")
-            legendDot(ws.now, "Bus")
-        }
-        .padding(.horizontal, 10).frame(height: 26)
-        .background(Capsule().fill(ws.panel.opacity(0.92)))
-        .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
-        .padding(.leading, 14)
-    }
-
-    private func legendDot(_ color: Color, _ label: String) -> some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(label).font(ws.sans(10.5, weight: .semibold)).foregroundStyle(ws.dim)
-        }
-    }
-
     /// Frame the map to fit your stop, the bus, and the approach segment.
-    private func refitMap() {
-        camera = .region(wsApproachRegion(seg: approachSegment(),
-                                          stop: stopCoord, bus: busCoord))
+    /// `wide` widens it to the whole bus→you run — used once the sheet is
+    /// pulled past peek and there's room above it to show the bigger picture.
+    private func refitMap(wide: Bool = false) {
+        let seg = wide ? wideSegment() : approachSegment()
+        var region = wsApproachRegion(seg: seg, stop: stopCoord, bus: busCoord)
+        // The peeked sheet permanently covers the bottom ~340pt of the
+        // full-screen map, so a region centered on the whole screen puts the
+        // markers under the sheet (owner screenshot: collapsed map showed
+        // bare streets). When docked, stretch the region south so the fitted
+        // content sits in the visible strip above the sheet.
+        if docked {
+            let screenH = UIScreen.main.bounds.height
+            let covered = min(0.75, Self.sheetPeek / max(screenH, 1))
+            let extra = region.span.latitudeDelta * covered / (1 - covered)
+            region.span.latitudeDelta += extra
+            region.center.latitude -= extra / 2
+        }
+        camera = .region(region)
     }
 
     // MARK: route card — the live "approach" (Option A, owner 2026-07-10)
@@ -482,14 +663,18 @@ struct WSTrackBusView: View {
     // Info (the ⓘ / "Full route ›" link). Grounded on the anchor direction —
     // no direction switcher (that's a full-route concern).
 
-    @ViewBuilder private var routeCard: some View {
+    /// `compact: true` is the docked card — headline only, no stop list, no
+    /// "Full route" link (owner: docked view was leaking a partial stop row
+    /// through the collapsed sheet instead of showing only what fits). The
+    /// full breakdown only appears once the sheet is pulled up (undocked).
+    @ViewBuilder private func routeCard(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 WSIcon(glyph: .busSingle, size: 15, weight: .medium, color: ws.dim)
                 Text("On the way")
                     .font(ws.sans(14, weight: .semibold)).foregroundStyle(ws.dim)
                 Spacer(minLength: 8)
-                if serviceRouteData != nil {
+                if !compact, serviceRouteData != nil {
                     Button {
                         UISelectionFeedbackGenerator().selectionChanged()
                         push(.serviceInfo(no: serviceNo, fromStop: stopCode))
@@ -507,8 +692,14 @@ struct WSTrackBusView: View {
             }
 
             if let dir = anchorDirection, !dir.stops.isEmpty {
-                approach(dir).padding(.top, 14)
-            } else {
+                let you = min(max(dir.youIndex, 0), dir.stops.count - 1)
+                let busIdx = busIndex.map { min($0, you) }
+                if compact {
+                    approachHeadline(you: you, busIdx: busIdx).padding(.top, 14)
+                } else {
+                    approach(dir).padding(.top, 14)
+                }
+            } else if !compact {
                 // Route still resolving — shimmer skeleton, never a spinner.
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(Array([150, 190, 120].enumerated()), id: \.offset) { _, w in
@@ -522,11 +713,8 @@ struct WSTrackBusView: View {
                 .accessibilityLabel("Loading route")
             }
         }
-        .padding(.horizontal, 18).padding(.vertical, 16)
+        .padding(.horizontal, 18).padding(.bottom, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ws.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .padding(.horizontal, 22).padding(.top, 14)
     }
 
     // MARK: approach
@@ -548,11 +736,15 @@ struct WSTrackBusView: View {
         let start = truncated ? max(0, you - Self.approachWindow) : naturalStart
         let hidden = start - naturalStart   // stops between the bus and the window
         let r = RouteInfo(stops: stops, youIndex: you, busIndex: busIdx, busCoord: nil)
+        // The vehicle marker row is the one true "live position" signal — when
+        // it's showing, the your-stop rail dot stays a static accent (no
+        // second ping competing for attention).
+        let showsVehicleMarker = !truncated && busIdx != nil && (busIdx ?? -1) < you
         return VStack(alignment: .leading, spacing: 0) {
             approachHeadline(you: you, busIdx: busIdx).padding(.bottom, 14)
             if truncated { collapsedEarlierRow(hidden: hidden) }
             ForEach(start...you, id: \.self) { i in
-                stepRow(r, index: i, you: you)
+                stepRow(r, index: i, you: you, pingYou: !showsVehicleMarker)
                 // The inline "bus is here" marker only makes sense when the bus
                 // actually sits inside the shown window.
                 if !truncated, busIdx == i && i < you { vehicleRow(r) }
@@ -561,22 +753,27 @@ struct WSTrackBusView: View {
     }
 
     /// Stands in for the run of stops the bus still has to cover before the
-    /// final-approach window — a dotted rail node that opens the full route.
+    /// final-approach window — a dashed rail segment that opens the full route,
+    /// weighted to match a real stop row rather than reading as a footnote.
     private func collapsedEarlierRow(hidden: Int) -> some View {
         Button {
             UISelectionFeedbackGenerator().selectionChanged()
             push(.serviceInfo(no: serviceNo, fromStop: stopCode))
         } label: {
             HStack(alignment: .center, spacing: 15) {
-                VStack(spacing: 4) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        Circle().fill(ws.faint).frame(width: 3, height: 3)
+                Rectangle().fill(ws.rule)
+                    .frame(width: 3, height: 30)
+                    .mask {
+                        VStack(spacing: 4) {
+                            ForEach(0..<5, id: \.self) { _ in
+                                Rectangle().frame(height: 3)
+                            }
+                        }
                     }
-                }
-                .frame(width: 24, height: 30)
+                    .frame(width: 24, height: 30)
                 HStack(spacing: 4) {
                     Text("\(hidden) earlier \(hidden == 1 ? "stop" : "stops") · full route")
-                        .font(ws.sans(12.5, weight: .semibold)).foregroundStyle(ws.dim)
+                        .font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.dim)
                     WSIcon(glyph: .chevron, size: 10, color: ws.accentSoft)
                 }
                 Spacer(minLength: 0)
@@ -596,9 +793,16 @@ struct WSTrackBusView: View {
         HStack(spacing: 8) {
             if let busIdx {
                 let away = max(0, you - busIdx)
-                if now || away == 0 {
+                if now {
                     Text("Arriving")
-                        .font(ws.sans(17, weight: .heavy)).foregroundStyle(now ? ws.now : ws.text)
+                        .font(ws.sans(17, weight: .heavy)).foregroundStyle(ws.now)
+                } else if away == 0 {
+                    // GPS says the bus is at/near your stop but the tracked
+                    // ETA isn't under a minute (usually a nearer bus of the
+                    // same service) — don't shout "Arriving" against a
+                    // headline ETA of 20 min.
+                    Text("Approaching your stop")
+                        .font(ws.sans(15, weight: .heavy)).foregroundStyle(ws.text)
                 } else {
                     (Text("\(away)").font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
                      + Text(away == 1 ? " stop away" : " stops away")
@@ -609,20 +813,15 @@ struct WSTrackBusView: View {
                 Text("Final approach")
                     .font(ws.sans(15, weight: .heavy)).foregroundStyle(ws.text)
             }
-            if let load = service?.load {
-                Text("·").font(ws.mono(12)).foregroundStyle(ws.faint)
-                Circle().fill(load.wsDotColor).frame(width: 7, height: 7)
-                    .animation(.easeInOut(duration: 0.2), value: load)
-                Text(load.wsSeatPhrase)
-                    .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
-                    .lineLimit(1).allowsTightening(true)
-            }
+            // No crowd repeat here — the sheet header two rows up already
+            // says "· Seats available"; the same phrase twice in one card
+            // read as clutter (owner route-list refinement, 2026-07-13).
             Spacer(minLength: 0)
         }
         .animation(.snappy(duration: 0.28), value: busIdx)
     }
 
-    private func stepRow(_ r: RouteInfo, index i: Int, you: Int) -> some View {
+    private func stepRow(_ r: RouteInfo, index i: Int, you: Int, pingYou: Bool = true) -> some View {
         let stop = r.stops[i]
         let passed = displayBusIndex.map { i < $0 } ?? false
         let isYou = i == you
@@ -637,10 +836,16 @@ struct WSTrackBusView: View {
                     .fill(isYou ? ws.accent : (passed ? ws.faint : ws.bg))
                     .frame(width: isYou ? 15 : 13, height: isYou ? 15 : 13)
                     .overlay(Circle().stroke(isYou ? ws.accent : (passed ? ws.text : ws.faint), lineWidth: isYou ? 3 : 2.5))
-                    // Ping the user's stop — the one node that matters most.
-                    .background { if isYou { WSPing(cornerRadius: 999) } }
+                    // Ping the user's stop — but only when the live bus tile
+                    // isn't already pinging elsewhere in the same window
+                    // (one live signal at a time, not a wall of pulses).
+                    .background { if isYou && pingYou { WSPing(cornerRadius: 999) } }
                     .padding(.top, 4)
-                Rectangle().fill(passed ? ws.text : ws.rule).frame(width: 3)
+                // The rail ends at your stop — it's the journey's terminus in
+                // this card, so no dangling tail below the last row.
+                if !isYou {
+                    Rectangle().fill(passed ? ws.text : ws.rule).frame(width: 3)
+                }
             }
             .frame(width: 24)
 
@@ -878,39 +1083,77 @@ struct WSTrackBusView: View {
 // — colour is data (blue = your stop, green = the live bus); everything else
 // stays neutral.
 
+/// One stop on the drawn approach segment.
+struct WSApproachStop {
+    let coord: CLLocationCoordinate2D
+    let isYou: Bool
+    let name: String
+}
+
 struct WSApproachMapContent: MapContent {
     let ws: WSTheme
     let serviceNo: String
-    let seg: [(coord: CLLocationCoordinate2D, isYou: Bool)]
+    let seg: [WSApproachStop]
     let stopCoord: CLLocationCoordinate2D?
+    let stopName: String
     let busCoord: CLLocationCoordinate2D?
 
     @MapContentBuilder var body: some MapContent {
-        // The user's own live location (system blue dot).
-        UserAnnotation()
+        // The user's own live location — a person in an indigo puck, not the
+        // default dot (which tints with the app accent and read as a muddy
+        // brown blob; owner 2026-07-14). Indigo keeps it clear of the marker
+        // palette: blue = your stop, green = the live bus.
+        UserAnnotation {
+            WSIcon(glyph: .me, size: 12, weight: .bold, color: .white)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(.indigo))
+                .overlay(Circle().stroke(.white, lineWidth: 2.5))
+                .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+        }
 
-        // Upcoming stops on that segment (small neutral dots).
+        // Upcoming stops on the approach — proper mini stop markers (bus
+        // glyph in a white puck + the stop's name), not anonymous nodes, so
+        // the bus's remaining run reads without a route line (owner pulled
+        // the polyline, 2026-07-14: MKDirections geometry was buggy).
         ForEach(Array(seg.enumerated()), id: \.offset) { _, s in
             if !s.isYou {
-                Annotation("", coordinate: s.coord, anchor: .center) {
-                    Circle().fill(ws.bg)
-                        .frame(width: 10, height: 10)
-                        .overlay(Circle().stroke(ws.accent, lineWidth: 3))
+                Annotation("", coordinate: s.coord, anchor: .top) {
+                    VStack(spacing: 3) {
+                        WSIcon(glyph: .busSingle, size: 10, weight: .bold, color: ws.accent)
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(.white))
+                            .overlay(Circle().stroke(ws.accent, lineWidth: 2))
+                            .shadow(color: .black.opacity(0.22), radius: 3, y: 1)
+                        Text(s.name)
+                            .font(ws.sans(10, weight: .semibold)).foregroundStyle(ws.text)
+                            .lineLimit(1)
+                            .padding(.horizontal, 6).padding(.vertical, 2.5)
+                            .background(Capsule().fill(ws.panel.opacity(0.92)))
+                            .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
+                    }
                 }
                 .annotationTitles(.hidden)
             }
         }
-        // YOUR STOP — the boarding stop, highlighted distinctly: a labelled
-        // accent pin with a halo, unmistakable vs the small route dots, the
-        // green bus, and the blue user dot.
+        // YOUR STOP — the boarding stop, the loudest mark on the map: an
+        // accent flag naming the stop (eyebrow + name), white-edged so it
+        // separates from the tile, over the haloed pin dot.
         if let stopCoord {
             Annotation("Your stop", coordinate: stopCoord, anchor: .bottom) {
                 VStack(spacing: 3) {
-                    Text("YOUR STOP")
-                        .font(ws.mono(9, weight: .bold)).tracking(0.4).foregroundStyle(.white)
-                        .padding(.horizontal, 7).frame(height: 20)
-                        .background(Capsule().fill(ws.accent))
-                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                    VStack(spacing: 1) {
+                        Text("YOUR STOP")
+                            .font(ws.mono(8.5, weight: .bold)).tracking(0.5)
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text(stopName)
+                            .font(ws.sans(11.5, weight: .heavy)).foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(ws.accent))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(.white, lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
                     ZStack {
                         Circle().fill(ws.accent).frame(width: 20, height: 20)
                             .overlay(Circle().stroke(.white, lineWidth: 3))
@@ -939,7 +1182,7 @@ struct WSApproachMapContent: MapContent {
 }
 
 /// Frame a region that fits your stop, the live bus, and the approach segment.
-func wsApproachRegion(seg: [(coord: CLLocationCoordinate2D, isYou: Bool)],
+func wsApproachRegion(seg: [WSApproachStop],
                       stop: CLLocationCoordinate2D?,
                       bus: CLLocationCoordinate2D?) -> MKCoordinateRegion {
     var lats: [Double] = [], lons: [Double] = []
@@ -968,8 +1211,9 @@ func wsApproachRegion(seg: [(coord: CLLocationCoordinate2D, isYou: Bool)],
 
 private struct WSBusFullMap: View {
     let serviceNo: String
-    let seg: [(coord: CLLocationCoordinate2D, isYou: Bool)]
+    let seg: [WSApproachStop]
     let stopCoord: CLLocationCoordinate2D?
+    let stopName: String
     let busCoord: CLLocationCoordinate2D?
     let dest: String
     let awayText: String?
@@ -982,8 +1226,9 @@ private struct WSBusFullMap: View {
     @State private var camera: MapCameraPosition
 
     init(serviceNo: String,
-         seg: [(coord: CLLocationCoordinate2D, isYou: Bool)],
+         seg: [WSApproachStop],
          stopCoord: CLLocationCoordinate2D?,
+         stopName: String,
          busCoord: CLLocationCoordinate2D?,
          dest: String,
          awayText: String?,
@@ -993,6 +1238,7 @@ private struct WSBusFullMap: View {
         self.serviceNo = serviceNo
         self.seg = seg
         self.stopCoord = stopCoord
+        self.stopName = stopName
         self.busCoord = busCoord
         self.dest = dest
         self.awayText = awayText
@@ -1012,7 +1258,8 @@ private struct WSBusFullMap: View {
         ZStack {
             Map(position: $camera) {
                 WSApproachMapContent(ws: ws, serviceNo: serviceNo,
-                                     seg: seg, stopCoord: stopCoord, busCoord: busCoord)
+                                     seg: seg, stopCoord: stopCoord, stopName: stopName,
+                                     busCoord: busCoord)
             }
             .mapStyle(.standard(pointsOfInterest: .excludingAll))
             .ignoresSafeArea()
@@ -1051,7 +1298,7 @@ private struct WSBusFullMap: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .wsGlassChrome(cornerRadius: 22, tint: ws.tabbar)
+        .wsGlassChrome(cornerRadius: 22, tint: ws.tabbar, interactive: true)
         .accessibilityLabel("Close map")
     }
 
@@ -1070,7 +1317,7 @@ private struct WSBusFullMap: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .wsGlassChrome(cornerRadius: 23, tint: ws.tabbar)
+        .wsGlassChrome(cornerRadius: 23, tint: ws.tabbar, interactive: true)
         .accessibilityLabel("Centre on my location")
     }
 
@@ -1079,7 +1326,7 @@ private struct WSBusFullMap: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(etaNow ? "Arriving" : "\(etaText)")
-                        .font(ws.sans(20, weight: .heavy))
+                        .font(ws.sans(20, weight: .heavy).monospacedDigit())
                         .foregroundStyle(etaNow ? ws.now : ws.text)
                     Text(etaNow ? "at your stop" : "to your stop")
                         .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)

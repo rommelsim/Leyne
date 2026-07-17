@@ -216,9 +216,9 @@ private extension Color {
 
 // MARK: - Greeting hero
 
-// Rotating headline prompts (hoisted out of the generic view — a generic type
-// can't hold a static stored property).
-private let wsGreetingPrompts = ["Where to?", "Catch your bus.", "Beat the crowd.", "Never miss it."]
+// No clock headline: the OS status bar already shows the time, so a second
+// in-app clock was pure duplication (UX pass 2026-07-16) — the greeting is
+// now a single quiet line and the search field starts almost immediately.
 
 /// The Home header: the living sky behind a time-of-day greeting and (optional)
 /// trailing action + a tappable search field. Fades into the page background at
@@ -228,14 +228,6 @@ struct WSGreetingHero<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing
 
     @Environment(\.ws) private var ws
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// The headline used to be a static "Where to?" that just re-stated the
-    /// search field below it (owner: redundant + annoying). It now cycles a
-    /// short set of transit-flavoured prompts with a soft rise/fade so the
-    /// header feels alive without a second call-to-action competing with search.
-    @State private var promptIndex = 0
-    private let rotate = Timer.publish(every: 3.6, on: .main, in: .common).autoconnect()
 
     // GRADIENT PARKED (owner, 2026-07-10 "remove the gradient for now"): the
     // living-sky background is disabled while the layout settles. The sky
@@ -244,34 +236,7 @@ struct WSGreetingHero<Trailing: View>: View {
     // For now the header is a plain, content-sized greeting + search over the
     // page background (no fixed height → no dead space below the field).
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(WSSky.greeting())
-                        .font(ws.sans(19, weight: .medium))
-                        .foregroundStyle(ws.dim)
-                    // Clipped, fixed-height row so the rise/fade stays within
-                    // the headline's line and never overlaps the greeting/search.
-                    ZStack(alignment: .leading) {
-                        Text(wsGreetingPrompts[promptIndex])
-                            .font(ws.sans(27, weight: .heavy))
-                            .foregroundStyle(ws.text)
-                            .id(promptIndex)
-                            .transition(reduceMotion ? .opacity : .asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .move(edge: .top).combined(with: .opacity)))
-                    }
-                    .frame(height: 34, alignment: .leading)
-                    .clipped()
-                    .animation(.spring(response: 0.5, dampingFraction: 0.9), value: promptIndex)
-                    .onReceive(rotate) { _ in
-                        guard !reduceMotion else { return }
-                        promptIndex = (promptIndex + 1) % wsGreetingPrompts.count
-                    }
-                }
-                Spacer(minLength: 8)
-                trailing()
-            }
+        VStack(alignment: .leading, spacing: 10) {
 
             Button(action: onSearchTap) {
                 HStack(spacing: 11) {

@@ -220,7 +220,7 @@ struct WSMapView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .wsGlassChrome(cornerRadius: 23, tint: ws.tabbar)
+            .wsGlassChrome(cornerRadius: 23, tint: ws.tabbar, interactive: true)
             .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 14, x: 0, y: 6)
             .accessibilityLabel("Recenter on my location")
 

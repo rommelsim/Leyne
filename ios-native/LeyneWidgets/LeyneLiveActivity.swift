@@ -38,6 +38,11 @@ private func busURL(_ a: LeyneActivityAttributes) -> URL? {
     return URL(string: "lyne://bus/\(a.stopCode)/\(bus)")
 }
 
+// `Link` requires a non-optional destination; busURL(_:) only returns nil
+// for a malformed/empty attributes payload, which shouldn't happen for a
+// running Activity — fall back to opening the app at Home in that case.
+private let fallbackURL = URL(string: "lyne://home")!
+
 // ─── Journey phase + progress ────────────────────────────────────────
 // The hero is the bus's approach toward your stop, not a bare number. Both
 // the phase word and the track position are *derived* from the state the app
@@ -219,37 +224,43 @@ struct LeyneLiveActivity: Widget {
                 // Bus NUMBER, not a generic glyph — the identity is the whole
                 // point. Paired with the ETA in compactTrailing, the collapsed
                 // island answers "which bus, how long" at a glance.
-                Text(context.attributes.busNo)
-                    .font(wMono(14, .bold))
-                    .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .widgetAccentable()
-                    .widgetURL(busURL(context.attributes))
+                // `.widgetURL` alone isn't reliably tappable in the compact
+                // region — only `Link` is; without it, taps on the collapsed
+                // island silently did nothing.
+                Link(destination: busURL(context.attributes) ?? fallbackURL) {
+                    Text(context.attributes.busNo)
+                        .font(wMono(14, .bold))
+                        .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .widgetAccentable()
+                }
             } compactTrailing: {
                 // STATIC minute value only — never a `Text(timerInterval:)` here.
                 // A self-sizing timer reserves width for its widest value, which
                 // balloons the compact island across the whole notch and covers
                 // the status-bar clock + battery. The live m:ss countdown lives
                 // on the lock screen + expanded views, where there's room.
-                Text(context.state.arrived
-                     ? "Now"
-                     : confPrefix(context.state) + etaText(context.state)
-                        + (context.state.etaMinutes <= 0 ? "" : "m"))
-                    .font(wMono(13, .semibold))
-                    .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
-                    .widgetURL(busURL(context.attributes))
+                Link(destination: busURL(context.attributes) ?? fallbackURL) {
+                    Text(context.state.arrived
+                         ? "Now"
+                         : confPrefix(context.state) + etaText(context.state)
+                            + (context.state.etaMinutes <= 0 ? "" : "m"))
+                        .font(wMono(13, .semibold))
+                        .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
+                }
             } minimal: {
                 // The minimal view (multiple Live Activities) is the tiniest notch
                 // presentation — show the ETA, the one actionable number. The app
                 // only ever runs ONE bus Live Activity at a time, so the bus
                 // number isn't needed to disambiguate here (it's in the
                 // compact/expanded views). Static minute, never a wide timer.
-                Text(context.state.arrived ? "Now" : etaText(context.state))
-                    .font(wMono(11, .bold))
-                    .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .widgetAccentable()
-                    .widgetURL(busURL(context.attributes))
+                Link(destination: busURL(context.attributes) ?? fallbackURL) {
+                    Text(context.state.arrived ? "Now" : etaText(context.state))
+                        .font(wMono(11, .bold))
+                        .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .widgetAccentable()
+                }
             }
             .keylineTint(context.state.arrived ? wAccentSoft : wFg)
         }
@@ -342,14 +353,7 @@ private struct LockScreenView: View {
 @main
 struct LeyneWidgetBundle: WidgetBundle {
     var body: some Widget {
-        // Home Screen widgets are live again — the app already publishes their
-        // data to the App Group every refresh (mirrorNearbyToWidget /
-        // mirrorFavServicesToWidget / pinned-stop publish in AppModel+DataStore).
-        LeyneStopWidget()          // Home Screen — saved stop departure board
-                                   // (was compiled but missing from the bundle,
-                                   // so it never appeared in the gallery)
-        LeyneNearbyWidget()        // Home Screen — nearest stop, live mini board
-        LeyneFavServiceWidget()    // Home Screen — favourited service
+        LeyneNearestStopWidget()   // Home Screen — nearest stop, tap → Stop view
         LeyneLiveActivity()        // Lock Screen / Dynamic Island
     }
 }

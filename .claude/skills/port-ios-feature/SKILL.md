@@ -55,8 +55,11 @@ Flutter**, not to transliterate Swift.
 
 ## Boundaries
 
-- **Don't bump versions or edit changelogs here** — that's `release-build` /
-  `changelog-update`, run when the build is actually cut.
+- **Don't bump versions or edit changelogs here** — do that only when a build
+  is actually cut (CHANGELOG.md + kChangelog on both platforms).
+- To understand the iOS-side design idiom you're porting *from* (Liquid Glass
+  APIs and rules), consult the `ios-modern-design` skill — but remember its
+  glass chrome never ports to Android.
 - For deeper Flutter architecture decisions, delegate to the `android-tech-lead`
   agent.
 - To first discover *what* needs porting, run the `parity-audit` skill.

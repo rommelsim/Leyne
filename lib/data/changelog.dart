@@ -30,6 +30,36 @@ class WhatsNewItem {
 }
 
 const Map<String, WhatsNewEntry> kChangelog = {
+  // NOTE (2026-07-13): the auto-shown What's New screen on update was
+  // removed (main.dart no longer routes to WhatsNewScreen), so entries here
+  // are currently not surfaced anywhere. Kept in sync per release policy in
+  // case release notes get a Settings entry point later.
+  '3.1.0': WhatsNewEntry(
+    headline: 'A faster, cleaner Home.',
+    items: [
+      WhatsNewItem(
+        icon: Icons.departure_board_rounded,
+        title: 'New departure board',
+        body:
+            'Nearby stops now show a proper departure board — a bold "Now" '
+            'plate for buses at the stop, with seat availability at a glance.',
+      ),
+      WhatsNewItem(
+        icon: Icons.train_rounded,
+        title: 'MRT on Home',
+        body:
+            'Flip Home to MRT mode for your nearest station: live platform '
+            'crowd, both directions, facilities and a mini line map.',
+      ),
+      WhatsNewItem(
+        icon: Icons.auto_fix_high_rounded,
+        title: 'Polish throughout',
+        body:
+            'Bus, stop and station screens were reworked to match, and the '
+            'Alerts screen got small layout fixes.',
+      ),
+    ],
+  ),
   '3.0.0': WhatsNewEntry(
     headline: 'Meet Departly — same app, new name.',
     items: [

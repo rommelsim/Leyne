@@ -5,6 +5,32 @@ import CoreLocation
 import Observation
 import WidgetKit
 
+/// The nearest-stop snapshot the Nearest Stop widget reads (it can't see the
+/// app's models). Field names are the JSON contract — WNearestStop in the
+/// extension must decode exactly this.
+struct SharedNearestStop: Codable {
+    static let groupID = "group.com.leyne"       // must match *.entitlements
+    static let key = "leyne.nearest.shared"
+    let id: String      // bus stop code
+    let name: String
+    let road: String?
+    let walkMin: Int
+    let asOf: Date      // when the app last confirmed this from live location
+}
+
+/// One row of the compact stop directory the app publishes to the App Group
+/// container so the widget can find the nearest stop from its OWN location
+/// fix (NSWidgetWantsLocation) without the app running. Short keys keep the
+/// ~5000-stop file small; the widget's WLiteStop must decode exactly this.
+struct SharedLiteStop: Codable {
+    static let file = "stops.widget.json"
+    let c: String       // bus stop code
+    let n: String       // name (Description)
+    let r: String       // road
+    let la: Double
+    let lo: Double
+}
+
 enum LoadState: Equatable {
     case loading, ready, error(String)
 }
@@ -228,6 +254,7 @@ final class DataStore {
                 stopByCode = Dictionary(s.map { ($0.BusStopCode, $0) }) { a, _ in a }
                 services = v
                 referenceState = .ready
+                publishStopDirectoryForWidget(s)
                 // Cold-start race: if the first location fix beat this bootstrap,
                 // the nearby list was derived from an empty stop directory and the
                 // arrival prefetch ran on nothing. Re-derive AND re-prefetch here —
@@ -246,6 +273,25 @@ final class DataStore {
             }
         }
         referenceState = .error(lastMessage)
+    }
+
+    /// Writes the compact stop directory to the App Group container. The
+    /// Nearest Stop widget takes its own location fix at each WidgetKit
+    /// refresh and resolves the closest stop from this file, so the widget
+    /// stays correct even when the app hasn't run for days.
+    private func publishStopDirectoryForWidget(_ stops: [LTABusStop]) {
+        Task.detached(priority: .utility) {
+            guard let dir = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: SharedNearestStop.groupID)
+            else { return }
+            let lite = stops.map {
+                SharedLiteStop(c: $0.BusStopCode, n: $0.Description,
+                               r: $0.RoadName, la: $0.Latitude, lo: $0.Longitude)
+            }
+            guard let d = try? JSONEncoder().encode(lite) else { return }
+            try? d.write(to: dir.appendingPathComponent(SharedLiteStop.file),
+                         options: .atomic)
+        }
     }
 
     func stopName(_ code: String) -> String {
@@ -422,6 +468,12 @@ final class DataStore {
 
     // ─── Nearby ───────────────────────────────────────────
     func updateNearby(_ loc: CLLocation) {
+        // Debounce GPS jitter: right after launch the fix wanders a few
+        // metres per tick, and re-ranking on every wobble makes the Home
+        // cards trade places erratically. Once a list exists, only a
+        // meaningful move (>25 m from the last ranked fix) re-sorts it.
+        if let last = lastLoc, !nearby.isEmpty,
+           loc.distance(from: last) < 25 { return }
         lastLoc = loc
         guard !stopByCode.isEmpty else { return }
         let here = loc.coordinate
@@ -441,26 +493,31 @@ final class DataStore {
                 services: servicesFor(s.BusStopCode)
             )
         }
-        mirrorNearbyToWidget()
+        mirrorNearestToWidget()
     }
 
-    /// Publishes the closest few stops to the App Group for the Nearby widget.
-    /// Guarded by the stop set: location ticks every few metres, but the
-    /// widget only cares when the *stops* change — re-publishing (and waking
-    /// WidgetKit) on every GPS jitter would be wasteful and throttled anyway.
-    private var lastPublishedNearby: [String] = []
-    private func mirrorNearbyToWidget() {
-        let top = nearby.prefix(6)
-        let codes = top.map(\.stopCode)
-        guard codes != lastPublishedNearby else { return }
-        lastPublishedNearby = codes
-        let shared = top.map {
-            SharedNearbyStop(id: $0.stopCode, name: $0.stopName, walkMin: $0.walkMin)
+    /// Publishes the single nearest stop to the App Group for the Nearest
+    /// Stop widget (name + code + walk time — the widget shows no ETAs).
+    /// Guarded by the stop code: location ticks every few metres, but the
+    /// widget only cares when the *stop* changes — waking WidgetKit on every
+    /// GPS jitter would be wasteful and throttled anyway.
+    private var lastPublishedNearest: String?
+    private func mirrorNearestToWidget() {
+        guard let n = nearby.first else { return }
+        let road = roadName(n.stopCode)
+        let shared = SharedNearestStop(id: n.stopCode, name: n.stopName,
+                                       road: road.isEmpty ? nil : road,
+                                       walkMin: n.walkMin, asOf: .now)
+        if let d = try? JSONEncoder().encode(shared) {
+            UserDefaults(suiteName: SharedNearestStop.groupID)?
+                .set(d, forKey: SharedNearestStop.key)
         }
-        if let d = try? JSONEncoder().encode(Array(shared)) {
-            AppGroup.defaults?.set(d, forKey: AppGroup.nearbyKey)
-        }
-        WidgetCenter.shared.reloadAllTimelines()
+        // The snapshot (incl. its freshness stamp) is written on every tick,
+        // but WidgetKit is only woken when the *stop* changes — the widget's
+        // own 30-min timeline fallback picks up the newer stamp otherwise.
+        guard n.stopCode != lastPublishedNearest else { return }
+        lastPublishedNearest = n.stopCode
+        WidgetCenter.shared.reloadTimelines(ofKind: "com.leyne.Leyne.NearestStopWidget")
     }
 
     // ─── Live arrivals ────────────────────────────────────

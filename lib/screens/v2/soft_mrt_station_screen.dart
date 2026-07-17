@@ -24,6 +24,8 @@ import '../../data/mrt_stations.dart';
 import '../../services/analytics_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
+import '../../widgets/v2/soft_departure_board.dart';
+import '../../widgets/v2/soft_mrt_home.dart' show SoftStationFacilitiesGrid;
 import '../../widgets/v2/soft_tab_bar.dart';
 
 class SoftMrtStationScreen extends StatefulWidget {
@@ -192,64 +194,15 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
                   sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      // Title block lives in the BODY, not the app bar — a
-                      // multi-row Column inside SliverAppBar.title clips to
-                      // toolbar height (owner-reported cut-off wording).
-                      _titleBlock(t, disrupted: alerts.isNotEmpty),
-                      const SizedBox(height: 16),
-                      // Disruption card
-                      if (alerts.isNotEmpty) ...[
-                        _DisruptionCard(alerts: alerts, t: t),
-                        const SizedBox(height: 12),
-                      ],
-                      // Lift maintenance card
-                      if (lifts.isNotEmpty) ...[
-                        _StationLiftCard(lifts: lifts, t: t),
-                        const SizedBox(height: 12),
-                      ],
-                      // Section order mirrors WSMrtStationView.swift: crowd
-                      // now → bus stops at this station → crowd forecast.
-                      if (lines.isNotEmpty) ...[
-                        _StationCrowdHeadlineCard(
-                          station: widget.station,
-                          lines: lines,
-                          crowdByLine: ds.crowdByLine,
-                          t: t,
-                        ),
-                        const SizedBox(height: 12),
-                        // Per-line platform rows ONLY at interchanges — on a
-                        // single-line station they'd repeat the headline.
-                        if (lines.length > 1) ...[
-                          _CrowdSection(
-                            station: widget.station,
-                            lines: lines,
-                            crowdByLine: ds.crowdByLine,
-                            t: t,
-                          ),
-                          const SizedBox(height: 12),
-                        ],
-                      ],
-                      // Bus stops at this station (≤ 400 m, nearest 3, live ETA)
-                      if (_nearbyStops.isNotEmpty) ...[
-                        _BusStopsSection(
-                          stops: _nearbyStops,
-                          arrivals: ds.arrivals,
-                          onOpenStop: widget.onOpenStop,
-                          t: t,
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      // Station-level crowd forecast — its own card at the
-                      // end (iOS parity), not nested inside a per-line card.
-                      if (lines.isNotEmpty)
-                        _ForecastCard(
-                          station: widget.station,
-                          line: lines.first,
-                          forecastRawByLine: ds.forecastRawByLine,
-                          t: t,
-                        ),
-                    ]),
+                    delegate: SliverChildListDelegate(
+                      _buildStaggered(
+                        t,
+                        ds: ds,
+                        alerts: alerts,
+                        lifts: lifts,
+                        lines: lines,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -308,6 +261,117 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
     );
   }
 
+  /// Builds the card list with a staggered fade+rise entrance (mirrors
+  /// WSMrtStationView.swift's `.wsEntrance(delay:)` sequence: head → cards,
+  /// ~40ms steps). Reduce-motion is handled inside SoftEntrance itself.
+  List<Widget> _buildStaggered(
+    LyneTheme t, {
+    required DataStore ds,
+    required List<TrainAlert> alerts,
+    required List<LiftMaintenance> lifts,
+    required List<MRTLine> lines,
+  }) {
+    var step = 0;
+    Widget stagger(Widget child) {
+      final d = Duration(milliseconds: (step++) * 50);
+      return SoftEntrance(delay: d, child: child);
+    }
+
+    final items = <Widget>[
+      // Title block lives in the BODY, not the app bar — a multi-row Column
+      // inside SliverAppBar.title clips to toolbar height (owner-reported
+      // cut-off wording).
+      stagger(_titleBlock(t, disrupted: alerts.isNotEmpty)),
+      const SizedBox(height: 16),
+    ];
+
+    // Disruption card
+    if (alerts.isNotEmpty) {
+      items.addAll([
+        stagger(_DisruptionCard(alerts: alerts, t: t)),
+        const SizedBox(height: 12),
+      ]);
+    }
+    // Lift maintenance card
+    if (lifts.isNotEmpty) {
+      items.addAll([
+        stagger(_StationLiftCard(lifts: lifts, t: t)),
+        const SizedBox(height: 12),
+      ]);
+    }
+    // Section order mirrors WSMrtStationView.swift: crowd now → facilities →
+    // bus stops at this station → crowd forecast.
+    if (lines.isNotEmpty) {
+      items.addAll([
+        stagger(
+          _StationCrowdHeadlineCard(
+            station: widget.station,
+            lines: lines,
+            crowdByLine: ds.crowdByLine,
+            t: t,
+          ),
+        ),
+        const SizedBox(height: 12),
+      ]);
+      // Per-line platform rows ONLY at interchanges — on a single-line
+      // station they'd repeat the headline.
+      if (lines.length > 1) {
+        items.addAll([
+          stagger(
+            _CrowdSection(
+              station: widget.station,
+              lines: lines,
+              crowdByLine: ds.crowdByLine,
+              t: t,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ]);
+      }
+    }
+    // Station facilities — network-standard amenities, greyscale chrome
+    // (mirrors WSMrtStationView.swift's facilitiesCard / SoftStationFacilitiesGrid).
+    items.addAll([
+      stagger(
+        SoftCard(
+          title: 'Station facilities',
+          icon: Icons.info_outline_rounded,
+          child: const SoftStationFacilitiesGrid(),
+        ),
+      ),
+      const SizedBox(height: 12),
+    ]);
+    // Bus stops at this station (≤ 400 m, nearest 3, live ETA)
+    if (_nearbyStops.isNotEmpty) {
+      items.addAll([
+        stagger(
+          _BusStopsSection(
+            stops: _nearbyStops,
+            arrivals: ds.arrivals,
+            onOpenStop: widget.onOpenStop,
+            t: t,
+          ),
+        ),
+        const SizedBox(height: 12),
+      ]);
+    }
+    // Station-level crowd forecast — its own card at the end (iOS parity),
+    // not nested inside a per-line card.
+    if (lines.isNotEmpty) {
+      items.add(
+        stagger(
+          _ForecastCard(
+            station: widget.station,
+            line: lines.first,
+            forecastRawByLine: ds.forecastRawByLine,
+            t: t,
+          ),
+        ),
+      );
+    }
+    return items;
+  }
+
   /// Station name + status/updated line + line pills (+ walk context).
   Widget _titleBlock(LyneTheme t, {required bool disrupted}) {
     return Column(
@@ -325,27 +389,25 @@ class _SoftMrtStationScreenState extends State<SoftMrtStationScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 4),
-        // Status + freshness line — mirrors WSMrtStationView.swift:97-98.
-        // DataStore doesn't publicly expose a per-feed (crowd/train) last-
-        // fetch timestamp, so — like iOS's own Date()-driven "UPD" stamp —
-        // this reflects "now" at each data-driven rebuild rather than a
-        // stored fetch time.
+        // Status + freshness line — mirrors WSMrtStationView.swift's
+        // sentence-case `statusLine` ("Normal service" / "Service
+        // disrupted"), not the old ALL-CAPS mono eyebrow. DataStore doesn't
+        // publicly expose a per-feed (crowd/train) last-fetch timestamp, so
+        // — like iOS's own Date()-driven "UPD" stamp — this reflects "now"
+        // at each data-driven rebuild rather than a stored fetch time.
         Text(
-          '${disrupted ? 'SERVICE DISRUPTED' : 'NORMAL SERVICE'} · '
+          '${disrupted ? 'Service disrupted' : 'Normal service'} · '
           'Updated ${_updatedClock()}',
-          style: t
-              .mono(11, weight: FontWeight.w600, color: t.dim)
-              .copyWith(letterSpacing: 0.4),
+          style: t.sans(13, weight: FontWeight.w500, color: t.dim),
         ),
         const SizedBox(height: 3),
         // Standard network-wide hours (owner decision 2026-07-03) — the app
         // carries no per-station timetable, so every station shows the same
-        // window. Mirrors WSMrtStationView.swift's hoursLine.
+        // window. Mirrors WSMrtStationView.swift's sentence-case
+        // `hoursDisplay`.
         Text(
-          'OPEN DAILY · 5:30 am – 12:00 am',
-          style: t
-              .mono(11, weight: FontWeight.w500, color: t.faint)
-              .copyWith(letterSpacing: 0.4),
+          'Open daily · 5:30 am – 12:00 am',
+          style: t.sans(13, weight: FontWeight.w500, color: t.faint),
         ),
         const SizedBox(height: 6),
         // Line code pills + optional walk/distance.
@@ -662,11 +724,17 @@ class _BusStopsSection extends StatelessWidget {
           // separate label rendered above the card.
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text(
-              'BUS STOPS AT THIS STATION',
-              style: t
-                  .mono(10, weight: FontWeight.w600, color: t.dim)
-                  .copyWith(letterSpacing: 0.8),
+            child: Row(
+              children: [
+                Icon(Icons.directions_bus_rounded, size: 13, color: t.dim),
+                const SizedBox(width: 6),
+                Text(
+                  'BUS STOPS AT THIS STATION',
+                  style: t
+                      .mono(10, weight: FontWeight.w600, color: t.dim)
+                      .copyWith(letterSpacing: 0.8),
+                ),
+              ],
             ),
           ),
           for (var i = 0; i < stops.length; i++) ...[
@@ -717,42 +785,72 @@ class _BusStopRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final soonest = _soonest;
     final callback = onOpenStop;
+    final isNow =
+        soonest != null &&
+        SoftDepartureRow.liveEtaSec(soonest, DateTime.now()) < 60;
+    final reduceMotion = softReduceMotion(context);
 
     final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  stop.stopName,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: t.fg,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          // Monochrome edge tick — the Android "Now" cue (a neutral bar, NOT
+          // a coloured plate/fill; colour stays reserved for crowd dots and
+          // MRT line pills). Mirrors SoftDepartureRow's own tick.
+          if (isNow)
+            Positioned(
+              left: -16,
+              top: 0,
+              bottom: 0,
+              child: Container(
+                width: 3,
+                margin: const EdgeInsets.symmetric(vertical: 2),
+                decoration: BoxDecoration(
+                  color: t.fg,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '${stop.stopCode} · ${_formatDistance(stop.distanceM)}',
-                  style: t.mono(11, color: t.dim),
-                ),
-              ],
+              ),
             ),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      stop.stopName,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: t.fg,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${stop.stopCode} · ${_formatDistance(stop.distanceM)}',
+                      style: t.mono(11, color: t.dim),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (soonest == null)
+                Text('—', style: TextStyle(fontSize: 13, color: t.faint))
+              else
+                _EtaLabel(
+                  sec: SoftDepartureRow.liveEtaSec(soonest, DateTime.now()),
+                  reduceMotion: reduceMotion,
+                  t: t,
+                ),
+              if (callback != null) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
+              ],
+            ],
           ),
-          const SizedBox(width: 10),
-          if (soonest == null)
-            Text('—', style: TextStyle(fontSize: 13, color: t.faint))
-          else
-            _EtaLabel(sec: soonest.etaSec, t: t),
-          if (callback != null) ...[
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded, size: 16, color: t.faint),
-          ],
         ],
       ),
     );
@@ -784,34 +882,35 @@ class _BusStopRow extends StatelessWidget {
   }
 }
 
+/// "Now" / "N min" ETA label with an animated numeric transition as the
+/// live second-tick advances — mirrors WSMrtStationView.swift's busCard
+/// (`.contentTransition(.numericText(countsDown:))`), reimplemented as a
+/// Material crossfade since Flutter has no native numeric-morph transition.
 class _EtaLabel extends StatelessWidget {
-  const _EtaLabel({required this.sec, required this.t});
+  const _EtaLabel({
+    required this.sec,
+    required this.reduceMotion,
+    required this.t,
+  });
 
   final int sec;
+  final bool reduceMotion;
   final LyneTheme t;
 
   @override
   Widget build(BuildContext context) {
-    final eta = fmtEta(sec);
-    final arriving = eta.big == 'Arr';
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Text(
-          eta.big,
-          style: t.mono(
-            14,
-            weight: FontWeight.w700,
-            color: arriving ? t.soon : t.fg,
-          ),
-        ),
-        if (!arriving) ...[
-          const SizedBox(width: 2),
-          Text(eta.small, style: t.mono(10, color: t.dim)),
-        ],
-      ],
+    final isNow = sec < 60;
+    final minutes = (sec / 60).ceil().clamp(1, 1 << 30);
+    final label = isNow ? 'Now' : '$minutes min';
+    return AnimatedSwitcher(
+      duration: reduceMotion ? Duration.zero : LyneMotion.short,
+      transitionBuilder: (child, anim) =>
+          FadeTransition(opacity: anim, child: child),
+      child: Text(
+        label,
+        key: ValueKey(label),
+        style: t.mono(14, weight: FontWeight.w700, color: t.fg),
+      ),
     );
   }
 }
@@ -930,11 +1029,17 @@ class _StationCrowdHeadlineCard extends StatelessWidget {
           // matching WSCard's title-inside-panel layout in
           // WSMrtStationView.swift) — was previously a separate label
           // rendered above the card.
-          Text(
-            'STATION CROWD · NOW',
-            style: t
-                .mono(10, weight: FontWeight.w600, color: t.dim)
-                .copyWith(letterSpacing: 0.8),
+          Row(
+            children: [
+              Icon(Icons.train_rounded, size: 13, color: t.dim),
+              const SizedBox(width: 6),
+              Text(
+                'STATION CROWD · NOW',
+                style: t
+                    .mono(10, weight: FontWeight.w600, color: t.dim)
+                    .copyWith(letterSpacing: 0.8),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           if (level == null)
@@ -1294,11 +1399,17 @@ class _ForecastCard extends StatelessWidget {
           // Header now lives inside the panel (owner decision 2026-07-03,
           // matching WSCard's title-inside-panel layout) — was previously a
           // separate label rendered above the card.
-          Text(
-            'CROWD FORECAST · TODAY',
-            style: t
-                .mono(10, weight: FontWeight.w600, color: t.dim)
-                .copyWith(letterSpacing: 0.8),
+          Row(
+            children: [
+              Icon(Icons.schedule_rounded, size: 13, color: t.dim),
+              const SizedBox(width: 6),
+              Text(
+                'CROWD FORECAST · TODAY',
+                style: t
+                    .mono(10, weight: FontWeight.w600, color: t.dim)
+                    .copyWith(letterSpacing: 0.8),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           if (intervals.isNotEmpty && !ended)

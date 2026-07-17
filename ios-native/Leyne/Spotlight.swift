@@ -4,7 +4,7 @@
 
 import Foundation
 import CoreSpotlight
-import UniformTypeIdentifiers
+import UniformTypeIdentifiers		
 import os
 
 private let spotlightLog = Logger(subsystem: "com.leyne.Leyne", category: "Spotlight")

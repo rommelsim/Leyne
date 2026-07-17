@@ -29,8 +29,9 @@ struct WSBusStopView: View {
         let _ = m.tick
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // Same card grammar as Home (owner spec 2026-07-08): name +
-                // meta head, then the departure rows in one rounded panel.
+                // Same composition as Home (owner 2026-07-17): a header card,
+                // then ONE ROUNDED CARD PER SERVICE — not divider rows inside
+                // a single panel — so both screens share the row design.
                 VStack(alignment: .leading, spacing: 0) {
                     Text(store.stopName(code))
                         .font(ws.sans(25, weight: .heavy)).foregroundStyle(ws.text)
@@ -40,14 +41,15 @@ struct WSBusStopView: View {
                             .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
                     }
                     .padding(.top, 8)
-                    WSRowDivider().padding(.top, 16)
-                    servicesSection
                 }
-                .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
+                .padding(.horizontal, 18).padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(ws.panel)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .padding(.horizontal, 22).padding(.top, 12)
                 .wsEntrance(delay: 0)
+
+                servicesSection
                 // No "MRT at this stop" card any more — it duplicated the
                 // interchange the user can already see on Home / the map and
                 // read as a stray row under the board (owner call 2026-07-09).
@@ -111,10 +113,15 @@ struct WSBusStopView: View {
         case .loaded(let services):
             // Row reorder springs (anim spec) — keyed by service number so
             // a departed bus's removal moves the rest up naturally.
-            VStack(spacing: 0) {
+            VStack(spacing: 10) {
                 ForEach(Array(services.enumerated()), id: \.element.no) { index, svc in
-                    if index > 0 { WSRowDivider() }
                     WSDepartureRow(service: svc, stopCode: code, showsVehicleIcons: true)
+                        .padding(.horizontal, 18)
+                        .background(ws.panel)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .contentShape(.contextMenuPreview,
+                                      RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .wsEntrance(delay: 0.05 + Double(index) * 0.04)
                         // Long-press: set the arrival alert or favourite the
                         // service without drilling into Track Bus first.
                         .contextMenu {
@@ -134,24 +141,33 @@ struct WSBusStopView: View {
                         }
                 }
             }
+            .padding(.horizontal, 22).padding(.top, 10)
             .animation(.spring(response: 0.35, dampingFraction: 0.85),
                        value: services.map(\.no))
         case .empty:
-            stateText("No live arrivals right now. The last bus may have gone.")
+            stateCard("No live arrivals right now. The last bus may have gone.")
         case .error(let msg):
-            stateText(msg)
+            stateCard(msg)
         default:
-            VStack(spacing: 14) {
-                ForEach(0..<4, id: \.self) { _ in WSSkeletonRow() }
+            VStack(spacing: 10) {
+                ForEach(0..<4, id: \.self) { _ in
+                    WSSkeletonRow()
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(ws.panel)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
             }
-            .padding(.vertical, 14)
+            .padding(.horizontal, 22).padding(.top, 10)
         }
     }
 
-    private func stateText(_ s: String) -> some View {
+    private func stateCard(_ s: String) -> some View {
         Text(s).font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 20)
+            .padding(.horizontal, 18).padding(.vertical, 20)
+            .background(ws.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.horizontal, 22).padding(.top, 10)
     }
 
     // No footer: the metaline under the stop name already carries LIVE +

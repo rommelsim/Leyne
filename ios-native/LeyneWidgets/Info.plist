@@ -20,6 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSWidgetWantsLocation</key>
+	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Departly uses your location to show nearby bus stops and accurate arrival times.</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

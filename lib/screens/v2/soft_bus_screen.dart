@@ -21,27 +21,31 @@
 //      doesn't show them and neither does WSServiceInfoView (both checked,
 //      2026-07-03) — there is nowhere on iOS this data appears, so Android
 //      matching content means dropping it here too.
-//   3. Route — "ROUTE ── N stops" header, the direction toggle (only when
-//      the service runs >1 way), then a WINDOWED timeline: a collapsed
-//      lead-in ("Show N earlier stops · from X") when the bus/your-stop
-//      focus is deep into a long route, the stops immediately around the
-//      live bus + your stop, a "BUS {svc} is here" node between the two
-//      stops it's currently between, your stop rendered as a highlighted
-//      card (accent bar + "YOUR STOP" overline + live ETA + MRT
-//      interchange), then a collapsed tail ("Show N more stops to Y").
-//      Built directly in this file rather than via the shared
-//      `widgets/v2/route_timeline.dart` `RouteTimeline` widget — that
+//   3. Route — "On the way" (2026-07-11, Option A — supersedes the earlier
+//      full-route WINDOWED timeline this screen used to draw): a single
+//      carded live-approach view, mirroring WSTrackBusView's `routeCard` /
+//      `approach` exactly. An eyebrow row ("On the way" + a "Full route ›"
+//      link to Service Info) sits above either a shimmer skeleton (route
+//      still resolving) or the approach itself — a fixed 5-stop window from
+//      the live bus down to your stop (or the last few stops before it when
+//      there's no GPS fix), a "N stops away · [crowd]" headline that falls
+//      back to "Final approach", a single collapsed "N earlier stops · full
+//      route" node standing in for anything further back, a "Bus {svc} is
+//      here" node between the two stops it's currently between, and your
+//      stop rendered as a highlighted card (accent bar + "YOUR STOP"
+//      overline + live ETA + MRT interchange). There is no direction
+//      switcher and no earlier/later collapse chips any more — this view
+//      only ever shows the direction that actually serves the tracked stop
+//      (`_anchorDir`), matching iOS. The whole-route flat list with its
+//      direction toggle survives only for the bus-search entry point
+//      (`fullRoute`), which has no "your stop" to approach and has no iOS
+//      equivalent to mirror. Built directly in this file rather than via the
+//      shared `widgets/v2/route_timeline.dart` `RouteTimeline` widget — that
 //      widget's whole visual language (checkmark-passed dots, an inner
 //      "ROUTE · BUS N · stops away" header, an ALIGHT chip) is the OLD
 //      pre-WhereSia design and doesn't match WSTrackBusView's structure at
-//      all (it also duplicated this screen's own "ROUTE" header — a real
-//      double-heading bug). File ownership for this punch-list pass is
-//      scoped to this screen only, so rather than editing that shared
-//      widget this screen stopped calling it; see the end-of-task report for
-//      the resulting dead-code flag (`RouteTimeline` now has zero remaining
-//      call sites anywhere in the app — grep-verified).
-//      Bare on the screen background — no card — matching iOS's Route
-//      section, which is a plain VStack directly on ws.bg.
+//      all; `RouteTimeline` has zero remaining call sites anywhere in the
+//      app (grep-verified).
 //   4. CTA — "Alert me 1 stop before" pinned above the ad banner, the one
 //      primary action on this screen (iOS parity), unchanged.
 //
@@ -71,6 +75,7 @@ import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
+import '../../widgets/v2/soft_departure_board.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 import 'soft_service_info_screen.dart';
 import 'soft_stop_screen.dart';
@@ -118,12 +123,6 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   // that just hasn't landed yet.
   bool _routeLoaded = false;
   int _dirIndex = 0;
-
-  // ── Timeline windowing (mirrors iOS WSTrackBusView's @State showEarlier /
-  // showLater) — whether the collapsed lead-in / tail run of stops is
-  // expanded. Not reset on a direction switch, matching iOS.
-  bool _showEarlierStops = false;
-  bool _showLaterStops = false;
 
   // Periodic ticker (1.5 s) — keeps this stop's arrivals fresh while the view
   // is open (the global app tick only refreshes pinned / open-card stops).
@@ -661,8 +660,25 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
-  // ── Route — header · direction toggle · windowed timeline ──────────────
+  // ── Route ────────────────────────────────────────────────────────────
+  // Anchored at a real stop (the normal case): a single "On the way" card
+  // showing ONLY the live approach — bus → your stop, or the last few stops
+  // before it — mirrors WSTrackBusView's `routeCard`/`approach` 1:1 (Option
+  // A, owner 2026-07-11): no direction switcher, no earlier/later collapse
+  // chips, a "Full route ›" link to Service Info instead. Opened from a bus
+  // search with no "your stop" context (`fullRoute`), there is nothing to
+  // approach, so that entry point keeps its own flat, direction-toggling
+  // whole-route list — an Android-only affordance with no iOS equivalent to
+  // mirror (kept as-is; not part of this port).
   Widget _buildRouteSection(LyneTheme t) {
+    if (widget.fullRoute) return _buildFullRouteSection(t);
+    return _buildOnTheWayCard(t);
+  }
+
+  // ── Full-route (search entry point) — bare header · direction toggle ·
+  //    flat stop list. Unchanged behaviour, just split out of the old
+  //    combined builder. ───────────────────────────────────────────────
+  Widget _buildFullRouteSection(LyneTheme t) {
     final hasRoute =
         _routeLoaded &&
         _serviceRoute != null &&
@@ -671,37 +687,31 @@ class _SoftBusScreenState extends State<SoftBusScreen>
 
     final Widget body;
     if (!_routeLoaded) {
-      // Still fetching the route — a loading state, not an empty timeline.
       body = _routeLoadingState(t);
     } else if (!hasRoute) {
-      // Fetch finished but returned no route (unavailable for this service).
       body = _routeUnavailableState(t);
     } else {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _routeSectionHeader(t, _route!.stops.length),
-          // Loop / single-direction services stay silent here; most
-          // services run both ways. Sits directly under the ROUTE header and
-          // above the timeline, exactly where WSTrackBusView places its
-          // WSSegmented toggle (owner item 5, 2026-07-03) — the OLD Android
-          // layout only looked displaced because RouteTimeline's own inner
-          // "ROUTE · BUS N" header used to render a second heading between
-          // this toggle and the actual stop rows; that inner header is gone
-          // now that this screen builds its timeline directly.
           if (dirs > 1) ...[
             const SizedBox(height: 10),
             _routeDirectionToggle(t),
           ],
           const SizedBox(height: 12),
-          _buildTimeline(t),
+          for (final s in _route!.stops)
+            _timelineStepRow(
+              t,
+              stop: s,
+              passed: false,
+              isYou: false,
+              liveService: null,
+            ),
         ],
       );
     }
 
-    // SizedBox, not Container — no fill/border/radius. Bare on t.bg, matching
-    // iOS; width:double.infinity only keeps the loading/unavailable states
-    // (Column(mainAxisSize: min) centred inside) full-width as before.
     return SizedBox(width: double.infinity, child: body);
   }
 
@@ -839,59 +849,113 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     return trimmed.length > 12 ? '${trimmed.substring(0, 12)}…' : trimmed;
   }
 
-  // ── Timeline ─────────────────────────────────────────────────────────
-  // Windowed stop list built directly against `_route`/`_estimatedBusIndex`
-  // — mirrors WSTrackBusView's `timeline` computed property line-for-line
-  // (see the file-header comment for why this no longer goes through the
-  // shared RouteTimeline widget).
-  Widget _buildTimeline(LyneTheme t) {
-    final route = _route;
-    if (route == null || route.stops.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 20),
-        child: Text(
-          'Loading route…',
-          style: t.sans(13, weight: FontWeight.w500, color: t.dim),
-        ),
-      );
-    }
-    final dir = _currentDir;
-    // Browsing the OTHER direction (the one that doesn't serve this stop)
-    // shows its full, plain route instead of guessing where a bus that
-    // isn't running that way would be — mirrors iOS's `anchorHere` gate,
-    // which also backs `_estimatedBusIndex()`'s own null-without-anchor
-    // rule above.
-    final anchorHere = !widget.fullRoute && (dir?.anchorPresent ?? true);
-    final stops = route.stops;
-    final you = anchorHere ? route.youIndex.clamp(0, stops.length - 1) : -1;
-    final busIdx = anchorHere ? _estimatedBusIndex() : null;
-    final baseStart = !anchorHere
-        ? 0
-        : (busIdx != null
-              ? busIdx.clamp(0, you)
-              : (you - 6).clamp(0, stops.length - 1));
-    final baseEnd = anchorHere
-        ? (you + 1).clamp(0, stops.length - 1)
-        : stops.length - 1;
-    final start = _showEarlierStops ? 0 : baseStart;
-    final end = _showLaterStops ? stops.length - 1 : baseEnd;
+  // ── "On the way" card ────────────────────────────────────────────────
+  // Mirrors WSTrackBusView's `routeCard` exactly: an eyebrow row (bus glyph
+  // + "On the way" + a "Full route ›" link to Service Info), then either the
+  // live approach or a shimmer skeleton while the route is still resolving.
+  // Reuses the wave-1 SoftCard/SoftShimmerBar/SoftTapCompress primitives so
+  // this matches the rest of the app's card grammar.
+  Widget _buildOnTheWayCard(LyneTheme t) {
+    final dir = _anchorDir;
+    final hasStops = dir != null && dir.stops.isNotEmpty;
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.directions_bus_rounded, size: 15, color: t.dim),
+              const SizedBox(width: 9),
+              Text(
+                'On the way',
+                style: t.sans(14, weight: FontWeight.w600, color: t.dim),
+              ),
+              const Spacer(),
+              if (_serviceRoute != null)
+                SoftTapCompress(
+                  onTap: _openServiceInfo,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Full route',
+                        style: t.sans(
+                          12.5,
+                          weight: FontWeight.w600,
+                          color: t.accent,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 14,
+                        color: t.accent,
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          if (hasStops) ...[
+            const SizedBox(height: 14),
+            _approachContent(t, dir),
+          ] else ...[
+            const SizedBox(height: 18),
+            _routeCardSkeleton(t),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Shimmer placeholder shown until the route resolves — mirrors iOS's
+  /// three-row skeleton (never a spinner on this card).
+  Widget _routeCardSkeleton(LyneTheme t) {
+    const widths = [150.0, 190.0, 120.0];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < widths.length; i++)
+          Padding(
+            padding: EdgeInsets.only(bottom: i == widths.length - 1 ? 0 : 18),
+            child: Row(
+              children: [
+                const SoftShimmerBar(width: 13, height: 13),
+                const SizedBox(width: 15),
+                SoftShimmerBar(width: widths[i], height: 13),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// The live approach — bus → your stop, or the last few stops before it.
+  /// Mirrors WSTrackBusView's `approach(dir:)` line-for-line: a fixed
+  /// 5-stop window, a single collapsed "N earlier stops · full route" node
+  /// standing in for anything further back, and the inline "bus is here"
+  /// marker only when it actually falls inside the shown window.
+  static const int _approachWindow = 5;
+
+  Widget _approachContent(LyneTheme t, RouteDirection dir) {
+    final stops = dir.stops;
+    final you = dir.youIndex.clamp(0, stops.length - 1);
+    final rawBusIdx = _estimatedBusIndex();
+    final busIdx = rawBusIdx?.clamp(0, you);
+    final naturalStart = busIdx ?? (you - 3).clamp(0, stops.length - 1);
+    final truncated = (you - naturalStart) > _approachWindow;
+    final start = truncated
+        ? (you - _approachWindow).clamp(0, stops.length - 1)
+        : naturalStart;
+    final hidden = start - naturalStart;
     final liveService = _liveService();
 
-    final children = <Widget>[];
-    if (baseStart > 0) {
-      children.add(
-        _collapseChip(
-          t,
-          expanded: _showEarlierStops,
-          collapsedLabel:
-              'Show $baseStart earlier stop${baseStart == 1 ? '' : 's'} · '
-              'from ${stops.first.name}',
-          expandedLabel: 'Hide earlier stops',
-          onTap: () => setState(() => _showEarlierStops = !_showEarlierStops),
-        ),
-      );
-    }
-    for (var i = start; i <= end; i++) {
+    final children = <Widget>[
+      _approachHeadline(t, you: you, busIdx: busIdx, liveService: liveService),
+      const SizedBox(height: 14),
+    ];
+    if (truncated) children.add(_collapsedEarlierRow(t, hidden: hidden));
+    for (var i = start; i <= you; i++) {
       children.add(
         _timelineStepRow(
           t,
@@ -901,26 +965,137 @@ class _SoftBusScreenState extends State<SoftBusScreen>
           liveService: liveService,
         ),
       );
-      if (busIdx != null && i == busIdx && i < end) {
+      // Only meaningful when the bus actually sits inside the shown window.
+      if (!truncated && busIdx == i && i < you) {
         children.add(_timelineVehicleRow(t, liveService: liveService));
       }
-    }
-    final more = (stops.length - 1) - baseEnd;
-    if (more > 0) {
-      children.add(
-        _collapseChip(
-          t,
-          expanded: _showLaterStops,
-          collapsedLabel:
-              'Show $more more stop${more == 1 ? '' : 's'} to ${stops.last.name}',
-          expandedLabel: 'Hide later stops',
-          onTap: () => setState(() => _showLaterStops = !_showLaterStops),
-        ),
-      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: children,
+    );
+  }
+
+  /// "N stops away" — the one genuinely live line in this card. Falls back
+  /// to "Final approach" when there's no GPS to count from, "Arriving" when
+  /// the ETA is under a minute, and "Approaching your stop" when the GPS sits
+  /// at your stop but the ETA disagrees. Mirrors `approachHeadline`.
+  Widget _approachHeadline(
+    LyneTheme t, {
+    required int you,
+    required int? busIdx,
+    required Service? liveService,
+  }) {
+    final now =
+        liveService != null && _liveEtaSec(liveService, DateTime.now()) < 60;
+    final Widget headline;
+    if (busIdx != null) {
+      final away = (you - busIdx).clamp(0, 1 << 30);
+      if (now) {
+        headline = Text(
+          'Arriving',
+          style: t.sans(17, weight: FontWeight.w800, color: t.live),
+        );
+      } else if (away == 0) {
+        // GPS says the bus is at/near your stop but the tracked ETA isn't
+        // under a minute (usually a nearer bus of the same service) — don't
+        // shout "Arriving" against a long headline ETA (iOS parity,
+        // 2026-07-13 route-card refinement).
+        headline = Text(
+          'Approaching your stop',
+          style: t.sans(15, weight: FontWeight.w800, color: t.fg),
+        );
+      } else {
+        headline = RichText(
+          text: TextSpan(
+            children: [
+              TextSpan(
+                text: '$away',
+                style: t.sans(22, weight: FontWeight.w800, color: t.fg),
+              ),
+              TextSpan(
+                text: away == 1 ? ' stop away' : ' stops away',
+                style: t.sans(13, weight: FontWeight.w600, color: t.dim),
+              ),
+            ],
+          ),
+        );
+      }
+    } else {
+      headline = Text(
+        'Final approach',
+        style: t.sans(15, weight: FontWeight.w800, color: t.fg),
+      );
+    }
+    // No crowd repeat here — the hero card above already carries the seat
+    // dot + phrase; the same phrase twice in one screen read as clutter
+    // (iOS parity, 2026-07-13 route-card refinement).
+    return Row(children: [headline]);
+  }
+
+  /// Stands in for the run of stops the bus still has to cover before the
+  /// final-approach window — a 3-dot rail node that opens the full route.
+  /// Mirrors `collapsedEarlierRow`.
+  Widget _collapsedEarlierRow(LyneTheme t, {required int hidden}) {
+    return Semantics(
+      button: true,
+      label: '$hidden earlier stops. Open the full route.',
+      child: SoftTapCompress(
+        onTap: _openServiceInfo,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 24,
+                height: 30,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var i = 0; i < 3; i++)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Container(
+                          width: 3,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: t.faint,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '$hidden earlier ${hidden == 1 ? 'stop' : 'stops'} · '
+                        'full route',
+                        style: t.sans(
+                          12.5,
+                          weight: FontWeight.w600,
+                          color: t.dim,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 14,
+                      color: t.accent,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -946,11 +1121,15 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                   padding: const EdgeInsets.only(top: 4),
                   child: _timelineDot(t, isYou: isYou, passed: passed),
                 ),
-                Expanded(
-                  child: Center(
-                    child: Container(width: 3, color: passed ? t.fg : t.line),
+                // The rail ends at your stop — it's the journey's terminus in
+                // this card, so no dangling tail below the last row (iOS
+                // parity, 2026-07-13 route-card refinement).
+                if (!isYou)
+                  Expanded(
+                    child: Center(
+                      child: Container(width: 3, color: passed ? t.fg : t.line),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1238,62 +1417,6 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     );
   }
 
-  /// Tappable expand/collapse node standing in for a run of hidden stops —
-  /// dotted rail + chevron + underlined label. Mirrors WSTrackBusView's
-  /// shared `collapseChip` (used for both the leading and trailing run).
-  Widget _collapseChip(
-    LyneTheme t, {
-    required bool expanded,
-    required String collapsedLabel,
-    required String expandedLabel,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(width: 24, child: _DottedRail(color: t.faint)),
-              const SizedBox(width: 15),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      AnimatedRotation(
-                        turns: expanded ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 150),
-                        child: Icon(
-                          Icons.keyboard_arrow_down_rounded,
-                          size: 14,
-                          color: t.dim,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          expanded ? expandedLabel : collapsedLabel,
-                          style: t
-                              .mono(11, color: t.dim)
-                              .copyWith(decoration: TextDecoration.underline),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ── CTA — the single primary action, pinned above the ad banner (iOS
   //    WSTrackBusView parity: "Alert me 1 stop before" is the one button on
   //    this screen). ────────────────────────────────────────────────────
@@ -1396,42 +1519,4 @@ class _CircleButton extends StatelessWidget {
       ),
     );
   }
-}
-
-/// A dotted vertical line filling its box — the collapsed-stops rail glyph.
-/// Mirrors WSTrackBusView's `collapseChip` mask trick (a stack of short
-/// rectangles) with a `CustomPainter` dash instead, so it stretches to fit
-/// however tall the chip's label wraps rather than a hardcoded dash count.
-class _DottedRail extends StatelessWidget {
-  const _DottedRail({required this.color});
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) =>
-      CustomPaint(painter: _DottedRailPainter(color));
-}
-
-class _DottedRailPainter extends CustomPainter {
-  _DottedRailPainter(this.color);
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 2;
-    const dash = 3.0;
-    const gap = 3.0;
-    final x = size.width / 2;
-    var y = 0.0;
-    while (y < size.height) {
-      final yEnd = (y + dash).clamp(0.0, size.height);
-      canvas.drawLine(Offset(x, y), Offset(x, yEnd), paint);
-      y += dash + gap;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DottedRailPainter oldDelegate) =>
-      oldDelegate.color != color;
 }

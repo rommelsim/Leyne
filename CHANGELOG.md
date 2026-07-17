@@ -8,6 +8,110 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Departly 3.1.0 · Android (57) · 2026-07-13
+
+**2026-07-14 — versionCode bumped 56 → 57:** Play Console rejected the
+upload ("Version code 56 has already been used") — 56 was already burned
+on the console. Same content, rebuilt as `3.1.0+57`.
+
+**2026-07-13 — Android AAB (3.1.0, build 56):** Wave 1 port of the iOS
+home/departure-board redesign to Android, plus today's fixes. versionName
+`3.1.0`, versionCode `56`. Built from `home-hero-redesign`. Artifact:
+`build/app/outputs/bundle/release/app-release.aab`. What's New entry added
+under `3.1.0` in `lib/data/changelog.dart` (note: currently unsurfaced — see
+below).
+
+**2026-07-14 — AAB rebuilt (same 3.1.0+56, pre-upload):** folded in the
+route-card refinements ported from iOS 2.9.3 (`soft_bus_screen.dart`):
+
+- **"Approaching your stop"** headline when the live GPS sits at your stop
+  but the tracked ETA isn't under a minute — no more false "Arriving"
+  against a long ETA; green "Arriving" is reserved for a genuine <1 min.
+- **Crowd de-dupe** — "· Seats available" dropped from the approach headline
+  (the hero card above already carries the seat dot + phrase).
+- **Rail terminates at your stop** — no dangling connector below the last
+  timeline row.
+- Test hygiene: `_skipLaunchScreen` no-ops now the splash is gone; the
+  no-MRT-tab assertion scoped to `NavigationDestination`s (the Home Bus·MRT
+  toggle legitimately says "MRT").
+
+- **Departure board on Home** — new shared `soft_departure_board.dart`
+  primitives (port of WSComponents/WSFormat): neutral high-contrast "Now"
+  plate (Android stays monochrome; colour reserved for the seat/crowd dot
+  and MRT line pills), reduce-motion-gated animation.
+- **MRT mode on Home** — new `soft_mrt_home.dart` (port of WSHomeMrt):
+  nearest station card, live platform crowd, both platform directions,
+  facilities grid, ±2-station mini line map, service status; derived from
+  existing data, no new endpoints.
+- **Home / Bus / Stop / Station / Service-info / Saved screens reworked** to
+  the new board design (large diffs in `lib/screens/v2/`).
+- **Auto What's New screen removed** — the release-notes modal no longer
+  auto-shows after an update (both platforms, owner ask 2026-07-13);
+  `kChangelog` entries are kept but currently unsurfaced on Android.
+- **Animated launch splash removed** — cold starts go straight from the OS
+  launch screen into the app (both platforms, owner ask 2026-07-13). iOS
+  `AppModel.launching` now defaults `false` (the App Open / Interstitial
+  gates still read it).
+- **Alerts screen fix** — "All lines running normally" / "No bus alerts"
+  cards now stretch to the full section width like the lift-maintenance
+  card (`_calmCard` was shrink-wrapping to its text).
+- **Home header = greeting + live clock** — the static "Departures" title is
+  replaced with a time-of-day greeting over a live "Sun, 13 Jul · 7:35 PM"
+  headline (minute-boundary refresh, honours the 12/24h setting), matching
+  iOS's WSGreetingHero (owner parity ask 2026-07-13).
+
+## Departly 2.9.3 · iOS (build 33) · 2026-07-14
+
+**2026-07-14 — iOS Archive (2.9.3, build 33):** Track Bus map polish from the
+owner's UX-critique session. 2.9.2 (build 32) was approved on the App Store,
+closing that train (errors 90062/90186 on re-upload), so today's work ships as
+`MARKETING_VERSION 2.9.3`, build 33. Built from `home-hero-redesign`.
+`kChangelog` entry added under `2.9.3` in `AppModel.swift`.
+
+- **Named YOUR STOP flag** — the tracked stop's marker is now a blue
+  white-edged flag carrying the stop name over the haloed pin dot.
+- **Labelled stop markers** — approach stops draw as white bus-glyph pucks
+  with the stop name in a capsule, replacing the anonymous nodes.
+- **Person marker for the user** — custom indigo person puck replaces the
+  default `UserAnnotation` dot (which tinted app-accent brown). Indigo = you,
+  blue = your stop, green = the live bus.
+- **Docked camera fits above the sheet** — the region stretches south so the
+  markers land in the visible strip instead of under the peeked sheet.
+- **Pull-up zoom removed** — the camera no longer re-fits behind the
+  90%-height sheet; it only re-fits when returning to docked.
+- **Route card refinements** — rail terminates at your stop, duplicate crowd
+  phrase dropped from the headline, and a nearer-bus GPS at your stop reads
+  "Approaching your stop" instead of a false "Arriving" against a long ETA.
+- **Map legend removed**; "Live bus updating…" pill moved top-left. A route
+  polyline (MKDirections road geometry) was tried and removed same-day
+  (buggy rendering — owner call).
+
+## Departly 2.9.2 · iOS (build 32) · 2026-07-13
+
+**2026-07-13 — iOS Archive (2.9.2, build 32):** Re-submission of the build
+rejected by App Store Connect as 2.9.1 — that version string was already
+approved (train closed, errors 90062/90186), so this is the same work bumped
+to `MARKETING_VERSION 2.9.2`, build 32. The `kChangelog` entry written for it
+was rekeyed `2.9.1` → `2.9.2` in `AppModel.swift`. Built from
+`home-hero-redesign`.
+
+- **Map-first Track Bus** — full-screen live map behind a hand-rolled bottom
+  sheet (peek = ETA card, pull up = full "On the way" route); camera re-fits
+  wider once undocked; "Tap to expand" button into the full-screen map.
+- **Sheet drag fixes** — content-swap hysteresis (no more spasm at the
+  threshold), drag measured in global coordinate space (no feedback jitter on
+  slow drags), fixed-height panel slid with `.offset` instead of per-frame
+  `.frame(height:)` re-layout + shadow re-render (fps drop on pull-up).
+- **Route retry** — a transiently failed route fetch retries when the sheet
+  is pulled up instead of showing the shimmer skeleton forever.
+- **Home headline = live clock** — replaces the rotating prompts.
+- **Live Activity background refresh** — opportunistic BGAppRefreshTask
+  (~5 min cadence) narrows ETA staleness while backgrounded.
+- **Gentler first run** — walkthrough removed; permissions asked one at a
+  time (per the 2.9.2 What's New entry).
+- **MRT line strip** — scrolls end to end, every station tappable, with
+  lift-maintenance / service alerts on the station.
+
 ## Departly 3.0.0 · Android (55) · 2026-07-04
 
 **2026-07-04 — Android AAB (3.0.0, build 55):** Major release — the public
