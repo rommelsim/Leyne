@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leyne — iOS 26</title>
+<style>
+:root{
+  --bg:#F2F2F7; --bg-elev:#FFFFFF; --group:#FFFFFF;
+  --ink:#000000; --sub:#3C3C43; --sub2:rgba(60,60,67,.6); --sub3:rgba(60,60,67,.3);
+  --sep:rgba(60,60,67,.12); --sep-op:rgba(60,60,67,.29);
+  --blue:#007AFF; --green:#34C759; --seat:#248A3D; --stand:#B25000; --full:#D70015;
+  --seat-bg:rgba(52,199,89,.14); --stand-bg:rgba(255,149,0,.16); --full-bg:rgba(255,59,48,.14);
+  --glass:rgba(255,255,255,.72); --glass-brd:rgba(255,255,255,.5); --glass-shadow:rgba(0,0,0,.12);
+  --star:#FF9F0A; --page:#C8C9CE;
+  --hero-num:#000; --fill:rgba(120,120,128,.12); --fill-hi:rgba(120,120,128,.2);
+}
+[data-theme="dark"]{
+  --bg:#000000; --bg-elev:#1C1C1E; --group:#1C1C1E;
+  --ink:#FFFFFF; --sub:rgba(235,235,245,.9); --sub2:rgba(235,235,245,.6); --sub3:rgba(235,235,245,.3);
+  --sep:rgba(84,84,88,.36); --sep-op:rgba(84,84,88,.6);
+  --blue:#0A84FF; --green:#30D158; --seat:#30D158; --stand:#FF9F0A; --full:#FF453A;
+  --seat-bg:rgba(48,209,88,.18); --stand-bg:rgba(255,159,10,.18); --full-bg:rgba(255,69,58,.18);
+  --glass:rgba(30,30,32,.72); --glass-brd:rgba(255,255,255,.12); --glass-shadow:rgba(0,0,0,.5);
+  --star:#FFD60A; --page:#000;
+  --hero-num:#fff; --fill:rgba(120,120,128,.24); --fill-hi:rgba(120,120,128,.36);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display','Segoe UI',system-ui,sans-serif;
+  background:var(--page); display:flex; align-items:center; justify-content:center; padding:22px;
+  transition:background .5s ease; font-feature-settings:"tnum" 0;
+}
+.tnum{font-variant-numeric:tabular-nums}
+#phone{
+  width:390px; height:820px; max-height:96vh; background:var(--bg); border-radius:52px;
+  overflow:hidden; position:relative; display:flex; flex-direction:column;
+  box-shadow:0 30px 80px rgba(0,0,0,.32), 0 0 0 11px #0b0b0d, 0 0 0 12px #26262a;
+  transition:background .5s ease;
+}
+.statusbar{height:52px; flex-shrink:0; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 6px; position:relative; z-index:30}
+.sb-time{font-size:15px; font-weight:600; color:var(--ink); letter-spacing:.02em}
+.sb-right{display:flex; align-items:center; gap:6px; font-size:13px; color:var(--ink)}
+.notch{position:absolute; top:9px; left:50%; transform:translateX(-50%); width:120px; height:34px; background:#000; border-radius:20px; z-index:31}
+#screen{flex:1; overflow-y:auto; overflow-x:hidden; scrollbar-width:none; position:relative}
+#screen::-webkit-scrollbar{display:none}
+#screen::after{content:""; position:sticky; bottom:0; display:block; height:96px; margin-top:-96px; pointer-events:none;
+  background:linear-gradient(to bottom, transparent, var(--bg)); z-index:5}
+.view{min-height:100%; display:flex; flex-direction:column; animation:viewIn .42s cubic-bezier(.32,.72,0,1) both}
+.view.back{animation:viewBack .4s cubic-bezier(.32,.72,0,1) both}
+@keyframes viewIn{from{opacity:0; transform:translateX(30px)}to{opacity:1; transform:none}}
+@keyframes viewBack{from{opacity:0; transform:translateX(-24px)}to{opacity:1; transform:none}}
+.stagger>*{animation:riseIn .5s cubic-bezier(.32,.72,0,1) both}
+.stagger>*:nth-child(1){animation-delay:.03s}.stagger>*:nth-child(2){animation-delay:.08s}
+.stagger>*:nth-child(3){animation-delay:.13s}.stagger>*:nth-child(4){animation-delay:.18s}
+.stagger>*:nth-child(5){animation-delay:.23s}.stagger>*:nth-child(6){animation-delay:.28s}
+@keyframes riseIn{from{opacity:0; transform:translateY(14px)}to{opacity:1; transform:none}}
+.tap{transition:transform .2s cubic-bezier(.32,.72,0,1), background .2s ease, opacity .2s ease; cursor:pointer; user-select:none}
+.tap:active{transform:scale(.96); opacity:.85}
+.px{padding-left:20px; padding-right:20px}
+.largetitle{font-size:34px; font-weight:700; letter-spacing:.37px; color:var(--ink); line-height:1.1}
+.navrow{display:flex; align-items:center; justify-content:space-between; padding:4px 20px 2px}
+.subtitle{font-size:15px; color:var(--sub2); margin-top:2px}
+.eyebrow{font-size:13px; font-weight:600; color:var(--sub2); text-transform:uppercase; letter-spacing:.05em; display:flex; align-items:center; gap:6px; margin-bottom:9px}
+.eyebrow svg{width:14px; height:14px; flex-shrink:0}
+.ey-ic{width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0}
+.eta-line{display:flex; align-items:baseline; justify-content:flex-end; gap:3px}
+.dep-row{display:flex; align-items:center; gap:14px; cursor:pointer}
+.card-title{font-size:22px; font-weight:700; color:var(--ink); letter-spacing:-.02em; display:flex; align-items:center; gap:7px; min-width:0}
+.card-title .ct-star{color:var(--star); width:16px; height:16px; display:inline-flex; flex-shrink:0}
+.card-sub{font-size:14px; color:var(--sub2); margin-top:2px}
+.card-div{height:1px; background:var(--sep); margin:15px -22px}
+.live{display:flex; align-items:center; gap:6px; font-size:13px; color:var(--sub2); font-weight:500}
+.live-dot{position:relative; width:8px; height:8px}
+.live-dot::before{content:""; position:absolute; inset:0; border-radius:99px; background:var(--green)}
+.live-dot::after{content:""; position:absolute; inset:0; border-radius:99px; border:1.5px solid var(--green); animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{0%{transform:scale(1); opacity:.55}70%,100%{transform:scale(2.6); opacity:0}}
+/* grouped inset card — the iOS content surface */
+.group{background:var(--group); border-radius:22px; margin:0 16px; box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.hero{padding:20px 22px; cursor:pointer}
+.hero-badge{display:inline-flex; align-items:center; justify-content:center; background:var(--ink); color:var(--bg-elev); border-radius:9px; padding:5px 12px; font-size:19px; font-weight:700; letter-spacing:.01em}
+.big-eta{font-size:88px; font-weight:700; letter-spacing:-3px; color:var(--green); line-height:.85; font-variant-numeric:tabular-nums}
+.big-eta.calm{color:var(--hero-num)}
+.unit{font-size:19px; color:var(--sub2); font-weight:600}
+.then{font-size:13px; color:var(--sub2); margin-top:6px; font-variant-numeric:tabular-nums}
+.chev{font-size:15px; color:var(--sub3); font-weight:600}
+.cell{display:grid; grid-template-columns:50px minmax(0,1fr) auto 30px; align-items:center; gap:12px; padding:12px 0; margin-left:18px; padding-right:16px; border-bottom:.5px solid var(--sep)}
+.cell:last-child{border-bottom:none}
+/* consistent leading/trailing row for stop & search lists — flex, not grid, so widths always align */
+.lcell{display:flex; align-items:center; gap:12px; padding:13px 0; margin-left:18px; padding-right:16px; border-bottom:.5px solid var(--sep)}
+.lcell:last-child{border-bottom:none}
+.lcell .lead{flex:1; min-width:0}
+.lcell .lead-title{font-size:16px; font-weight:500; color:var(--ink); display:flex; align-items:center; gap:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.lcell .lead-sub{font-size:13px; color:var(--sub2); margin-top:2px; font-variant-numeric:tabular-nums}
+.lcell .trail{flex-shrink:0; display:flex; align-items:center; gap:10px}
+.lcell .lead-star{color:var(--star); width:14px; height:14px; display:inline-flex; flex-shrink:0}
+.chev-ic{color:var(--sub3); font-size:17px; font-weight:600; flex-shrink:0; width:8px; text-align:center}
+.walkchip{display:inline-flex; align-items:center; gap:3px; font-size:12px; font-weight:600; color:var(--sub2); background:var(--fill); border-radius:100px; padding:2px 8px 2px 6px; flex-shrink:0}
+.walkchip svg{width:12px; height:12px}
+.lcell-ic{width:38px; height:38px; border-radius:9px; background:var(--fill); display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--sub)}
+.lcell-ic svg{width:19px; height:19px}
+.route-line{font-size:13px; color:var(--sub2); margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+.rl-badge{font-size:12px; font-weight:700; color:var(--ink); background:var(--fill); border-radius:5px; padding:1px 6px}
+.badge{background:var(--fill); color:var(--ink); border-radius:8px; min-width:50px; height:36px; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:15px; flex-shrink:0}
+.dest{font-size:16px; color:var(--ink); font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; letter-spacing:-.01em}
+.dd{font-size:10px; color:var(--sub2); margin-left:6px; background:var(--fill); border-radius:4px; padding:1px 5px; font-weight:600; vertical-align:1px}
+.eta{display:inline-flex; align-items:baseline; white-space:nowrap; font-variant-numeric:tabular-nums}
+.eta b{font-weight:600; font-size:20px}
+.eta small{font-size:13px; color:var(--sub2); font-weight:400; margin-left:2px}
+.mini{font-size:12px; color:var(--sub3); margin-top:2px; font-variant-numeric:tabular-nums}
+.load{display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; padding:2px 8px 2px 6px; border-radius:100px; margin-top:6px}
+.load svg{width:13px; height:13px}
+.load.seat{background:var(--seat-bg); color:var(--seat)} .load.stand{background:var(--stand-bg); color:var(--stand)} .load.full{background:var(--full-bg); color:var(--full)}
+.bell{background:none; border:none; padding:9px 0; display:flex; justify-content:center; cursor:pointer; color:var(--sub3)}
+.bell.on{color:var(--blue)}
+.bell svg{width:19px; height:19px; transition:transform .28s cubic-bezier(.34,1.56,.64,1)}
+.bell.on svg{transform:rotate(14deg) scale(1.1)}
+.buzz{width:calc(100% - 44px); margin:6px 22px 4px; display:flex; align-items:center; justify-content:center; gap:8px; border-radius:14px; padding:14px 0; font-size:16px; font-weight:600; border:none; background:var(--fill); color:var(--blue); font-family:inherit; letter-spacing:-.01em}
+.buzz.on{background:var(--blue); color:#fff}
+.buzz svg{width:17px; height:17px}
+.pill{display:inline-flex; align-items:center; gap:5px; border-radius:100px; padding:7px 14px; font-size:15px; font-weight:600; border:none; background:var(--fill); color:var(--blue); font-family:inherit}
+.pill.on{color:var(--star)}
+.pill svg{width:15px; height:15px}
+.backbtn{background:none; border:none; color:var(--blue); font-size:17px; font-weight:400; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:2px; padding:0; margin-left:-4px}
+.backbtn svg{width:12px; height:20px}
+.h1{font-size:17px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:210px}
+.search-input{width:100%; background:var(--fill); border:none; border-radius:12px; padding:11px 14px 11px 38px; font-size:17px; color:var(--ink); outline:none; font-family:inherit}
+.search-wrap{position:relative}
+.search-wrap svg{position:absolute; left:12px; top:50%; transform:translateY(-50%); width:17px; height:17px; color:var(--sub2)}
+.rstop{display:grid; grid-template-columns:22px minmax(0,1fr); gap:14px; align-items:center; min-height:46px}
+.rline{display:flex; flex-direction:column; align-items:center; align-self:stretch}
+.rline i{width:2px; flex:1; background:var(--sep-op)}
+.rline i.hide{background:transparent}
+.rdot{width:9px; height:9px; border-radius:99px; background:var(--sub3); flex-shrink:0}
+.rdot.you{width:14px; height:14px; background:var(--green); box-shadow:0 0 0 4px var(--seat-bg)}
+.rdot.bus{width:12px; height:12px; background:var(--blue); animation:busPulse 1.8s ease-in-out infinite}
+@keyframes busPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,122,255,.35)}50%{box-shadow:0 0 0 8px transparent}}
+/* Liquid Glass tab bar — floating, inset 21pt, translucent */
+.tabbar{position:absolute; left:21px; right:21px; bottom:calc(18px + env(safe-area-inset-bottom)); height:64px; z-index:40;
+  background:var(--glass); backdrop-filter:blur(28px) saturate(1.8); -webkit-backdrop-filter:blur(28px) saturate(1.8);
+  border:.5px solid var(--glass-brd); border-radius:30px; display:flex; align-items:center;
+  box-shadow:0 8px 32px var(--glass-shadow), inset 0 1px 1px rgba(255,255,255,.25);
+  transition:background .5s ease}
+.tabbtn{flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; background:none; border:none; cursor:pointer; color:var(--sub2); font-family:inherit; font-size:10px; font-weight:600; letter-spacing:.02em; padding:0}
+.tabbtn.active{color:var(--blue)}
+.tabbtn svg{width:25px; height:25px}
+.theme-toggle{width:38px; height:38px; border-radius:100px; border:none; background:var(--fill); color:var(--ink); font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .2s ease}
+.theme-toggle:active{transform:scale(.9)}
+.count-up{display:inline-block; animation:countPop .55s cubic-bezier(.34,1.4,.5,1) both}
+@keyframes countPop{from{opacity:0; transform:translateY(14px) scale(.94)}to{opacity:1; transform:none}}
+.section-fade{opacity:0; animation:riseIn .5s .2s ease both}
+.toast{position:absolute; bottom:110px; left:50%; transform:translateX(-50%) translateY(16px);
+  background:var(--glass); backdrop-filter:blur(24px) saturate(1.8); -webkit-backdrop-filter:blur(24px) saturate(1.8);
+  color:var(--ink); border:.5px solid var(--glass-brd); border-radius:100px; padding:12px 20px; font-size:14px; font-weight:600;
+  opacity:0; pointer-events:none; transition:all .4s cubic-bezier(.32,.72,0,1); white-space:nowrap; z-index:60; box-shadow:0 8px 32px var(--glass-shadow)}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+.pad-bottom{height:120px; flex-shrink:0}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important; transition:none!important}}
+</style>
+</head>
+<body>
+<div id="phone">
+  <div class="notch"></div>
+  <div class="statusbar">
+    <span class="sb-time tnum">8:38</span>
+    <span class="sb-right">􀙇 􀛨 <span style="font-weight:600">100%</span></span>
+  </div>
+  <div id="screen"></div>
+  <div class="tabbar" id="tabbar"></div>
+  <div class="toast" id="toast"></div>
+</div>
+<script>
+const DB = {
+  stops: {
+    "17239": { code:"17239", name:"NTUC Fairprice", road:"Clementi Ave 3", walk:"1 min walk · 46 m", walkMin:1, starred:true,
+      buses:[
+        {no:"96", to:"Clementi Int", mins:1, next:[9,23], lc:"seat", dd:true},
+        {no:"78", to:"Jurong Town Hall Int", mins:3, next:[5,20], lc:"seat", dd:false},
+        {no:"147", to:"Hougang Ctrl Int", mins:3, next:[12,22], lc:"stand", dd:true},
+        {no:"151", to:"Clementi Int", mins:7, next:[15,28], lc:"full", dd:false},
+        {no:"165", to:"Bt Merah Int", mins:11, next:[24,39], lc:"seat", dd:true},
+      ]},
+    "17169": { code:"17169", name:"Blk 329", road:"C'wealth Ave West", walk:"1 min walk · 70 m", walkMin:1, starred:true,
+      buses:[
+        {no:"52", to:"Bishan Int", mins:0, next:[8,21], lc:"seat", dd:false},
+        {no:"111", to:"Ghim Moh Ter", mins:4, next:[14,25], lc:"stand", dd:true},
+        {no:"14", to:"Bedok Int", mins:6, next:[16,30], lc:"seat", dd:true},
+      ]},
+    "17179": { code:"17179", name:"Clementi Stn Exit A", road:"Commonwealth Ave W", walk:"4 min walk", walkMin:4, starred:false,
+      buses:[{no:"166", to:"Clementi Int", mins:5, next:[17,29], lc:"seat", dd:false},{no:"185", to:"Soon Lee", mins:9, next:[21,33], lc:"seat", dd:false}]},
+    "17249": { code:"17249", name:"Opp Blk 348", road:"Clementi Ave 4", walk:"6 min walk", walkMin:6, starred:false,
+      buses:[{no:"99", to:"Jurong East", mins:8, next:[19,31], lc:"stand", dd:false},{no:"7", to:"Bedok Int", mins:12, next:[26,40], lc:"seat", dd:true}]},
+  },
+  routes:{ "96":{ no:"96", dest:"Clementi Int", op:"Tower Transit", freq:"8–12 min",
+    stops:[{name:"Clementi Int",code:"17009"},{name:"Clementi Stn Exit A",code:"17179"},{name:"NTUC Fairprice",code:"17239",you:true},{name:"Blk 349",code:"17249b"},{name:"Clementi Ave 4",code:"17259",bus:true},{name:"Kent Ridge Ter",code:"16009"}]}},
+  recents:["96","Clementi Int","17239"],
+};
+const defaultRoute=(no,from)=>({no,dest:(from&&DB.stops[from]?.buses.find(b=>b.no===no)?.to)||"—",op:"SBS Transit",freq:"10–15 min",stops:[{name:"Interchange",code:"x1"},{name:"Along the way",code:"x2",bus:true},{name:from?DB.stops[from].name:"Your stop",code:"x3",you:!!from},{name:"Terminal",code:"x4"}]});
+const NEAREST_ORDER=["17239","17169","17179","17249"];
+const state={ nav:[{v:"home"}], tab:"home", theme:"light", alerts:{}, starred:{"17239":true,"17169":true}, savedBuses:["17169|52"] };
+const screen=document.getElementById("screen"), tabbar=document.getElementById("tabbar"), toastEl=document.getElementById("toast");
+let toastTimer; function toast(m){toastEl.textContent=m;toastEl.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastEl.classList.remove("show"),1800);}
+
+const ic={
+  bell:(o)=>`<svg viewBox="0 0 24 24" fill="${o?'currentColor':'none'}" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>`,
+  search:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7.5"/><path d="m20 20-3.6-3.6"/></svg>`,
+  searchF:`<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 2a8 8 0 015.3 14l4.4 4.3-1.4 1.4-4.3-4.4A8 8 0 1110 2zm0 2a6 6 0 100 12 6 6 0 000-12z"/></svg>`,
+  pin:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.5-7-11a7 7 0 0114 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>`,
+  star:(f)=>`<svg viewBox="0 0 24 24" fill="${f?'currentColor':'none'}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/></svg>`,
+  home:(f)=>`<svg viewBox="0 0 24 24" fill="${f?'currentColor':'none'}" stroke="currentColor" stroke-width="${f?0:2}" stroke-linecap="round" stroke-linejoin="round">${f?'<path d="M12 3l9 8h-2v9h-5v-6h-4v6H5v-9H3z"/>':'<path d="M3 11l9-8 9 8M5 10v10h14V10"/>'}</svg>`,
+  seat:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18v-3h10v3M7 15V8a2 2 0 012-2h4a2 2 0 012 2v7M18 18v-2M6 18v-2"/></svg>`,
+  stand:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M12 8v8M8 21l4-5 4 5M9 12h6"/></svg>`,
+  full:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="6" r="1.6"/><circle cx="16" cy="6" r="1.6"/><path d="M4 20v-4a2 2 0 012-2h4a2 2 0 012 2v4M14 14h4a2 2 0 012 2v4"/></svg>`,
+  chevL:`<svg viewBox="0 0 12 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 2 10l8 8"/></svg>`,
+  walk:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="M11 21l1-6-2-2v-4l3 1 2 3M10 9l-3 2-1 4"/></svg>`,
+};
+const loadMeta={seat:{icon:ic.seat,word:"Seats"},stand:{icon:ic.stand,word:"Standing"},full:{icon:ic.full,word:"Full"}};
+const loadChip=(lc,full)=>`<span class="load ${lc}">${loadMeta[lc].icon}${full?loadMeta[lc].word:''}</span>`;
+const eta=(m,s=20)=>m===0?`<span class="eta"><b style="font-size:${s}px;color:var(--green)">Now</b></span>`:`<span class="eta"><b style="font-size:${s}px;color:${m<=1?'var(--green)':'var(--ink)'}">${m}</b><small>min</small></span>`;
+const walkChip=(min)=>`<span class="walkchip">${ic.walk}${min} min</span>`;
+// grouped departure: badge · dest · load ---- ETA · then  (reads as one fact)
+const departureRow=(b,onclick)=>`
+  <div class="dep-row tap" ${onclick?`onclick="${onclick}"`:''}>
+    <span class="hero-badge" style="font-size:17px;padding:6px 12px">${b.no}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:16px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.to}${b.dd?'<span class="dd">DD</span>':''}</div>
+      <div style="margin-top:2px">${loadChip(b.lc,true)}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0">
+      <div class="eta-line">${eta(b.mins,40)}</div>
+      <div class="then">then ${b.next.join(" · ")}</div>
+    </div>
+  </div>`;
+const best=(s)=>[...s.buses].sort((a,b)=>a.mins-b.mins)[0];
+// Catchability: a bus is makeable if it arrives at/after you can walk there (with 0-min grace for "Now" = miss).
+// Returns the soonest MAKEABLE bus, plus buffer minutes. Falls back to soonest if none makeable.
+function catchable(s){
+  const w=s.walkMin||0;
+  const make=[...s.buses].filter(b=>b.mins>=w).sort((a,b)=>a.mins-b.mins);
+  const bus=make[0]||[...s.buses].sort((a,b)=>a.mins-b.mins)[0];
+  return {bus, buffer:bus.mins-w, makeable:bus.mins>=w};
+}
+// Sort stops so the most catchable-soon rises: primary by makeable arrival, tie-break by walk.
+const byCatch=(a,b)=>{ const ca=catchable(a),cb=catchable(b); return (ca.bus.mins-cb.bus.mins)||((a.walkMin||0)-(b.walkMin||0)); };
+
+function push(p){ state.nav.push(p); render(false); }
+function back(){ if(state.nav.length>1){state.nav.pop(); render(true);} }
+function tabTo(v){ state.tab=v; state.nav=[{v}]; render(false); }
+
+function homeView(){
+  const pinned=NEAREST_ORDER.filter(c=>state.starred[c]), isP=pinned.length>0;
+  const heroId=isP?pinned[0]:NEAREST_ORDER[0], fav=DB.stops[heroId], hero=best(fav);
+  const others=NEAREST_ORDER.filter(c=>c!==heroId).map(c=>DB.stops[c]);
+  return `<div class="view">
+    <div class="navrow" style="margin-top:6px">
+      <div><div class="largetitle">Buses</div></div>
+      <button class="theme-toggle tap" onclick="toggleTheme()">${state.theme==='dark'?'☀':'☾'}</button>
+    </div>
+    <div class="px" style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 16px">
+      <span class="subtitle">Tuesday 21 July</span>
+      <span class="live"><span class="live-dot"></span>Live</span>
+    </div>
+    <div class="group hero tap" onclick="push({v:'stop',id:'${heroId}'})">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div style="min-width:0">
+          <div class="eyebrow" style="${isP?'color:var(--star)':''}"><span class="ey-ic">${isP?ic.star(true):ic.pin}</span>${isP?'Pinned':'Nearest'}</div>
+          <div class="card-title">${fav.name}</div>
+          <div class="card-sub">${fav.road}</div>
+        </div>
+        ${walkChip(fav.walkMin)}
+      </div>
+      <div class="card-div"></div>
+      ${departureRow(hero, `event.stopPropagation();push({v:'bus',id:'${hero.no}',from:'${heroId}'})`)}
+      <div style="display:flex;justify-content:${isP?'flex-end':'space-between'};align-items:center;margin-top:14px">
+        ${isP?"":`<button class="pill tap" onclick="event.stopPropagation();toggleStar('${heroId}')">${ic.star(false)} Pin stop</button>`}
+        <span class="chev">All ${fav.buses.length} services ›</span>
+      </div>
+    </div>
+    <div class="px section-fade" style="margin-top:26px">
+      <div class="eyebrow">Nearby</div>
+    </div>
+    <div class="group section-fade stagger" style="margin-top:0">
+      ${others.sort(byCatch).map(s=>{const c=catchable(s),b=c.bus;return `
+      <div class="lcell tap" onclick="push({v:'stop',id:'${s.code}'})">
+        <div class="lead">
+          <div class="lead-title">${state.starred[s.code]?`<span class="lead-star">${ic.star(true)}</span>`:""}${s.name}</div>
+          <div class="route-line"><span class="rl-badge">${b.no}</span>${b.to}${walkChip(s.walkMin)}</div>
+        </div>
+        <div class="trail">${eta(b.mins,20)}<span class="chev-ic">›</span></div>
+      </div>`}).join("")}
+    </div>
+    <div class="pad-bottom"></div>
+  </div>`;
+}
+
+function stopView(id){
+  const s=DB.stops[id]; if(!s) return homeView();
+  const sorted=[...s.buses].sort((a,b)=>a.mins-b.mins), hero=sorted[0], rest=sorted.slice(1);
+  const on=!!state.alerts[id+hero.no];
+  return `<div class="view">
+    <div class="navrow" style="margin-top:2px;padding-top:6px">
+      <button class="backbtn tap" onclick="back()">${ic.chevL} Buses</button>
+      <button class="pill tap ${state.starred[id]?'on':''}" onclick="toggleStar('${id}')">${ic.star(!!state.starred[id])} ${state.starred[id]?"Saved":"Save"}</button>
+    </div>
+    <div class="px" style="margin-top:8px"><div class="largetitle">${s.name}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+        <span class="subtitle tnum">${s.code} · ${s.road}</span><span class="live"><span class="live-dot"></span>Live</span>
+      </div>
+    </div>
+    <div class="group" style="margin-top:18px;padding:20px 22px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div class="eyebrow" style="margin-bottom:0">Next departure</div>
+        ${walkChip(s.walkMin||0)}
+      </div>
+      <div class="card-div" style="margin-top:14px"></div>
+      ${departureRow(hero, `push({v:'bus',id:'${hero.no}',from:'${id}'})`)}
+      <button class="buzz tap ${on?'on':''}" style="margin:16px 0 0;width:100%" onclick="toggleAlert('${id}','${hero.no}')">${ic.bell(on)} ${on?"Alert on — we'll buzz you":"Buzz me when it's close"}</button>
+    </div>
+    <div class="px section-fade" style="margin-top:24px"><div class="eyebrow">More services</div></div>
+    <div class="group section-fade stagger">
+      ${rest.map(b=>{const bon=!!state.alerts[id+b.no];return `
+      <div class="cell">
+        <div class="badge tap" onclick="push({v:'bus',id:'${b.no}',from:'${id}'})">${b.no}</div>
+        <div class="tap" style="min-width:0" onclick="push({v:'bus',id:'${b.no}',from:'${id}'})">
+          <div class="dest">${b.to}${b.dd?'<span class="dd">DD</span>':''}</div>${loadChip(b.lc,false)}
+        </div>
+        <div class="tap" style="text-align:right" onclick="push({v:'bus',id:'${b.no}',from:'${id}'})">${eta(b.mins,20)}<div class="mini">then ${b.next.join(" · ")}</div></div>
+        <button class="bell tap ${bon?'on':''}" onclick="toggleAlert('${id}','${b.no}')" aria-label="Alert">${ic.bell(bon)}</button>
+      </div>`}).join("")}
+    </div>
+    <div class="pad-bottom"></div>
+  </div>`;
+}
+
+function busView(id,from){
+  const r=DB.routes[id]||defaultRoute(id,from), arr=from&&DB.stops[from]?DB.stops[from].buses.find(b=>b.no===id):null, on=!!state.alerts[(from||"x")+id];
+  return `<div class="view">
+    <div class="navrow" style="margin-top:2px;padding-top:6px">
+      <button class="backbtn tap" onclick="back()">${ic.chevL} Back</button>
+      ${from?`<button class="pill tap ${state.savedBuses.includes(from+'|'+id)?'on':''}" onclick="toggleSaveBus('${from}','${id}')">${ic.star(state.savedBuses.includes(from+'|'+id))} ${state.savedBuses.includes(from+'|'+id)?'Saved':'Save bus'}</button>`:`<span class="subtitle" style="margin:0">${r.op}</span>`}
+    </div>
+    <div class="px" style="margin-top:8px"><div class="largetitle">Bus ${r.no}</div><div class="subtitle">to ${r.dest} · every ${r.freq}</div></div>
+    ${arr?`
+    <div class="group hero" style="margin-top:18px;display:flex;align-items:flex-end;justify-content:space-between">
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">At your stop</div>
+        ${arr.mins===0?`<span class="big-eta" style="font-size:52px;letter-spacing:-2px">Now</span>`:`<span class="big-eta tnum" style="font-size:56px">${arr.mins}</span><span class="unit">min</span>`}
+        <div>${loadChip(arr.lc,true)}</div>
+      </div>
+      <button class="pill tap ${on?'on':''}" style="${on?'background:var(--blue);color:#fff':''}" onclick="toggleAlert('${from}','${id}')">${ic.bell(on)} ${on?"On":"Buzz me"}</button>
+    </div>`:""}
+    <div class="px section-fade" style="margin-top:24px"><div class="eyebrow">Route</div></div>
+    <div class="group section-fade stagger" style="padding:16px 20px">
+      ${r.stops.map((st,i)=>`
+      <div class="rstop">
+        <div class="rline"><i class="${i===0?'hide':''}"></i><span class="rdot ${st.you?'you':''} ${st.bus?'bus':''}"></span><i class="${i===r.stops.length-1?'hide':''}"></i></div>
+        <div style="font-size:16px;font-weight:${st.you?600:400};color:${st.you?'var(--ink)':'var(--sub)'};display:flex;align-items:center;gap:8px">${st.name}
+          ${st.you?'<span style="font-size:11px;color:var(--green);font-weight:700">YOU</span>':''}${st.bus?'<span style="font-size:11px;color:var(--blue);font-weight:700">BUS</span>':''}</div>
+      </div>`).join("")}
+    </div>
+    <div class="pad-bottom"></div>
+  </div>`;
+}
+
+function savedView(){
+  const saved=Object.values(DB.stops).filter(s=>state.starred[s.code]);
+  // saved buses: {stopId, no} — the actual "my 96 from here" mental model
+  const savedBuses=state.savedBuses.map(k=>{const [sid,no]=k.split("|");const st=DB.stops[sid];const b=st&&st.buses.find(x=>x.no===no);return b?{st,b}:null}).filter(Boolean);
+  return `<div class="view">
+    <div class="navrow" style="margin-top:6px"><div class="largetitle">Saved</div><span class="subtitle" style="margin:0;display:flex;align-items:center;gap:5px;color:var(--sub2)">${ic.star(false).replace('width:14px','width:12px')}<span style="width:0"></span>Synced</span></div>
+    ${savedBuses.length?`<div class="px" style="margin-top:10px"><div class="eyebrow">Saved buses</div></div>
+    <div class="group stagger">${savedBuses.map(({st,b})=>`
+      <div class="lcell tap" onclick="push({v:'bus',id:'${b.no}',from:'${st.code}'})">
+        <span class="lcell-ic" style="background:var(--ink);color:var(--bg-elev);font-weight:700;font-size:15px">${b.no}</span>
+        <div class="lead">
+          <div class="lead-title" style="font-weight:600">${b.no} to ${b.to}</div>
+          <div class="lead-sub">from ${st.name}</div>
+        </div>
+        <div class="trail">${eta(b.mins,20)}<button class="bell tap ${state.alerts[st.code+b.no]?'on':''}" style="padding:0 2px" onclick="event.stopPropagation();toggleAlert('${st.code}','${b.no}')">${ic.bell(!!state.alerts[st.code+b.no])}</button></div>
+      </div>`).join("")}</div>`:""}
+    ${saved.length?`<div class="px" style="margin-top:${savedBuses.length?'22px':'12px'}"><div class="eyebrow">Saved stops</div></div>
+    <div class="group stagger">${saved.map(s=>{const c=catchable(s),b=c.bus;return `
+      <div class="lcell tap" onclick="push({v:'stop',id:'${s.code}'})">
+        <div class="lead">
+          <div class="lead-title"><span class="lead-star">${ic.star(true)}</span>${s.name}</div>
+          <div class="route-line"><span class="rl-badge">${b.no}</span>${b.to}${walkChip(s.walkMin||0)}</div>
+        </div>
+        <div class="trail">${eta(b.mins,20)}<button class="bell tap ${state.alerts[s.code+b.no]?'on':''}" style="padding:0 2px" onclick="event.stopPropagation();toggleAlert('${s.code}','${b.no}')">${ic.bell(!!state.alerts[s.code+b.no])}</button></div>
+      </div>`}).join("")}</div>
+      <div class="px" style="font-size:13px;color:var(--sub2);padding:14px 4px;line-height:1.4">Saved stops and buses sync to your account — they survive phone changes and reinstalls.</div>`
+    :(savedBuses.length?"":`<div style="text-align:center;padding:80px 30px"><div style="font-size:18px;font-weight:600">Save your first stop</div><div style="font-size:15px;color:var(--sub2);margin-top:8px;line-height:1.4">Star a stop to pin it here and to your home screen.</div></div>`)}
+    <div class="pad-bottom"></div>
+  </div>`;
+}
+
+function searchView(){
+  return `<div class="view">
+    <div class="navrow" style="margin-top:6px"><div class="largetitle">Search</div></div>
+    <div class="px" style="margin-top:12px"><div class="search-wrap">${ic.search}<input class="search-input" id="q" placeholder="Stop, bus or station" autocomplete="off" oninput="renderResults(this.value)"></div><div id="results"></div></div>
+    <div class="pad-bottom"></div>
+  </div>`;
+}
+// a recent string may be a bus no (all digits <=3 & in routes) or a stop code (5 digits) or a stop name
+function classifyRecent(r){
+  if(DB.routes[r]) return {type:"bus",no:r};
+  const byCode=Object.values(DB.stops).find(s=>s.code===r);
+  if(byCode) return {type:"stop",stop:byCode};
+  const byName=Object.values(DB.stops).find(s=>s.name===r);
+  if(byName) return {type:"stop",stop:byName};
+  return {type:"text",text:r};
+}
+function routeRow(r){return `<div class="lcell tap" onclick="push({v:'bus',id:'${r.no}',from:null})"><span class="lcell-ic" style="background:var(--ink);color:var(--bg-elev);font-weight:700;font-size:15px">${r.no}</span><div class="lead"><div class="lead-title">Bus ${r.no}</div><div class="lead-sub">to ${r.dest}</div></div><div class="trail"><span class="chev-ic">›</span></div></div>`;}
+function stopRow(s){const c=catchable(s),b=c.bus;return `<div class="lcell tap" onclick="push({v:'stop',id:'${s.code}'})"><span class="lcell-ic">${ic.pin}</span><div class="lead"><div class="lead-title">${s.name}</div><div class="route-line"><span class="rl-badge">${b.no}</span>${b.to}</div></div><div class="trail">${eta(b.mins,20)}<span class="chev-ic">›</span></div></div>`;}
+function renderResults(q){
+  const el=document.getElementById("results"), ql=q.trim().toLowerCase();
+  if(!ql){
+    const rec=DB.recents.map(classifyRecent);
+    const nearby=NEAREST_ORDER.map(c=>DB.stops[c]).sort(byCatch).slice(0,3);
+    el.innerHTML=
+      `<div class="eyebrow" style="margin:22px 0 10px">Recent</div><div class="group">`+
+      rec.map(x=>x.type==="bus"?routeRow(DB.routes[x.no]):x.type==="stop"?stopRow(x.stop):`<div class="lcell tap" onclick="document.getElementById('q').value='${x.text}';renderResults('${x.text}')"><span class="lcell-ic">${ic.search}</span><div class="lead"><div class="lead-title">${x.text}</div></div><div class="trail"><span class="chev-ic">›</span></div></div>`).join("")+
+      `</div>`+
+      `<div class="eyebrow" style="margin:22px 0 10px">Nearby stops</div><div class="group">`+
+      nearby.map(s=>stopRow(s)).join("")+`</div>`;
+    return;
+  }
+  const stops=Object.values(DB.stops).filter(s=>s.name.toLowerCase().includes(ql)||s.code.includes(ql));
+  const routes=Object.values(DB.routes).filter(r=>r.no.includes(ql));
+  const hit=routes.length||stops.length;
+  el.innerHTML=hit?
+    (routes.length?`<div class="eyebrow" style="margin:16px 0 10px">Buses</div><div class="group stagger">`+routes.map(routeRow).join("")+`</div>`:"")+
+    (stops.length?`<div class="eyebrow" style="margin:${routes.length?'20px':'16px'} 0 10px">Stops</div><div class="group stagger">`+stops.map(stopRow).join("")+`</div>`:"")
+    :`<div style="font-size:15px;color:var(--sub2);padding:24px 4px">No matches for "${q}" — try a stop code, name, or bus number.</div>`;
+}
+
+function toggleAlert(st,no){const k=(st||"x")+no;state.alerts[k]=!state.alerts[k];toast(state.alerts[k]?`We'll buzz you when the ${no} is close`:`Alert for ${no} removed`);render(false,true);}
+function toggleStar(id){state.starred[id]=!state.starred[id];toast(state.starred[id]?"Stop saved":"Removed from Saved");render(false,true);}
+function toggleSaveBus(stopId,no){const k=stopId+"|"+no;const i=state.savedBuses.indexOf(k);if(i>=0){state.savedBuses.splice(i,1);toast("Bus removed from Saved");}else{state.savedBuses.push(k);toast(`Saved the ${no} from ${DB.stops[stopId]?.name||'stop'}`);}render(false,true);}
+function toggleTheme(){state.theme=state.theme==="light"?"dark":"light";document.documentElement.setAttribute("data-theme",state.theme==="dark"?"dark":"");render(false,true);}
+
+function tabbarHTML(){
+  const t=(v,label,f)=>`<button class="tabbtn tap ${state.tab===v?'active':''}" onclick="tabTo('${v}')">${f(state.tab===v)}<span>${label}</span></button>`;
+  return t("home","Buses",ic.home)+t("saved","Saved",(a)=>ic.star(a))+t("search","Search",(a)=>a?ic.searchF:ic.search);
+}
+
+function render(isBack,silent){
+  const cur=state.nav[state.nav.length-1]; let html="";
+  if(cur.v==="home")html=homeView(); else if(cur.v==="stop")html=stopView(cur.id);
+  else if(cur.v==="bus")html=busView(cur.id,cur.from); else if(cur.v==="saved")html=savedView(); else if(cur.v==="search")html=searchView();
+  screen.innerHTML=html; tabbar.innerHTML=tabbarHTML();
+  if(silent){const v=screen.querySelector(".view");if(v){v.style.animation="none";screen.querySelectorAll(".stagger>*,.count-up,.section-fade").forEach(e=>e.style.animation="none");}}
+  else if(isBack){const v=screen.querySelector(".view");if(v)v.classList.add("back");}
+  if(cur.v==="search"){renderResults(document.getElementById("q").value||"");const q=document.getElementById("q");q&&q.focus();}
+  screen.scrollTop=0;
+}
+render(false);
+</script>
+</body>
+</html>

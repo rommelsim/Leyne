@@ -18,7 +18,6 @@ import 'soft_stop_screen.dart';
 import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
 import '../../services/app_open_ad.dart';
-import '../../services/interstitial_ad.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -26,21 +25,6 @@ import '../../widgets/v2/soft_tab_bar.dart';
 /// Route name tagged on Stop / Bus detail routes so the navigator observer can
 /// recognise a detail-view exit (and ignore other pops, e.g. the search route).
 const String _kDetailRouteName = 'detail';
-
-/// Fires an interstitial attempt whenever a Stop / Bus detail route is popped.
-/// Hooking the navigator (not just each onBack button) means the back button,
-/// the Android system back, and the predictive-back gesture all trigger it —
-/// they all route through Navigator.pop → didPop. The manager's own guards
-/// decide whether an ad actually shows, so a stray pop is harmless.
-class _InterstitialOnExitObserver extends NavigatorObserver {
-  @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route.settings.name == _kDetailRouteName) {
-      InterstitialAdManager.instance.maybeShowOnExit();
-    }
-    super.didPop(route, previousRoute);
-  }
-}
 
 /// Reports every push/pop/replace/remove on the nested navigator so the root
 /// PopScope can keep `canPop` in sync with whether a detail/Search route is
@@ -93,7 +77,6 @@ class _SoftRootState extends State<SoftRoot> {
   final List<SoftTab> _tabHistory = [];
 
   final _navKey = GlobalKey<NavigatorState>();
-  final _exitObserver = _InterstitialOnExitObserver();
   late final AppLifecycleListener _lifecycle;
 
   /// True while a Stop / Bus / Station / Search route is pushed on the nested
@@ -139,9 +122,6 @@ class _SoftRootState extends State<SoftRoot> {
     // aggressive. The call is kept (it no-ops) so re-enabling is a one-flag
     // change. Warm returns are handled by the onResume listener below.
     AppOpenAdManager.instance.showOnColdLaunch();
-    // Interstitial ad — preload so one is ready when the user backs out of a
-    // Stop / Bus detail (the navigator observer fires the show attempt).
-    InterstitialAdManager.instance.preloadWhenReady();
     _lifecycle = AppLifecycleListener(
       // Stamp backgrounding time — warm-return App Open ads only qualify
       // after ≥30 min in the background (manager's _minBackgroundDuration).
@@ -382,7 +362,7 @@ class _SoftRootState extends State<SoftRoot> {
         onNotification: (_) => true,
         child: Navigator(
           key: _navKey,
-          observers: [_exitObserver, _stackObserver],
+          observers: [_stackObserver],
           onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => _rootTab()),
         ),
       ),

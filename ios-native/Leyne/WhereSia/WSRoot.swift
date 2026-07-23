@@ -113,8 +113,9 @@ struct WSRoot: View {
                 .contentShape(Circle())
         }
         .buttonStyle(WSCompressStyle())
+        // No drop shadow: wsGlassChrome already strokes a hairline, which is
+        // the edge that actually survives sunlight.
         .wsGlassChrome(cornerRadius: 26, tint: ws.tabbar, interactive: true)
-        .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 14, x: 0, y: 6)
         .padding(.trailing, 16)
         .matchedTransitionSource(id: wsMapZoomID, in: zoomNS)
         .environment(\.ws, ws)
@@ -157,7 +158,8 @@ struct WSRoot: View {
                     // anchored banner lives on the high-dwell detail screens
                     // instead (`wsDetailAdBanner`), where its 30–60 s refresh
                     // actually earns. Owner decision 2026-07-07.
-                    WSTabBar(tab: $tab, alertCount: m.unseenAlertCount)
+                    WSTabBar(tab: $tab, alertCount: m.unseenAlertCount,
+                             disrupted: !store.trainAlerts.isEmpty)
                         // Scrim under the floating bar: scrolled-under content
                         // fades toward the background instead of clashing with
                         // the bar's transparent gutter (owner 2026-07-08 — the
@@ -326,6 +328,9 @@ struct WSRoot: View {
 struct WSTabBar: View {
     @Binding var tab: WSTab
     var alertCount: Int
+    /// A live service disruption exists — the Alerts badge turns amber
+    /// (transit-standard "delays" colour) instead of the neutral unseen dot.
+    var disrupted: Bool = false
     @Environment(\.ws) private var ws
 
     var body: some View {
@@ -338,7 +343,6 @@ struct WSTabBar: View {
         .padding(.top, 11)
         .padding(.bottom, 9)
         .wsGlassChrome(cornerRadius: 26, tint: ws.tabbar)
-        .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 18, x: 0, y: 8)
         .padding(.horizontal, 18)
         .padding(.bottom, 6)
         // One selection tick per tab change, regardless of which item fired it.
@@ -355,7 +359,11 @@ struct WSTabBar: View {
                 WSIcon(glyph: glyph, size: 22, weight: on ? .regular : .light,
                        color: on ? ws.text : ws.dim)
                     .overlay(alignment: .topTrailing) {
-                        if badge > 0 {
+                        // Amber dot = live disruption (even with everything
+                        // read); neutral dot = plain unseen alerts.
+                        if t == .alerts && disrupted {
+                            Circle().fill(ws.warn).frame(width: 7, height: 7).offset(x: 5, y: -2)
+                        } else if badge > 0 {
                             Circle().fill(ws.text).frame(width: 7, height: 7).offset(x: 5, y: -2)
                         }
                     }
@@ -368,5 +376,6 @@ struct WSTabBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(t == .alerts && disrupted ? "Alerts — service disruption reported" : label)
     }
 }

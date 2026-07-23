@@ -56,10 +56,10 @@ struct WSHomeView: View {
             VStack(spacing: 0) {
                 // Launch sequence (spec): hero 0ms → bus card 60ms →
                 // MRT card 120ms → browse 180ms. Fade + 12pt rise, ease out.
-                // The hero is the living sky (WSGradientHero) — greeting +
-                // search over a time/weather-driven ambient gradient, NO photo
-                // (owner 2026-07-10, copyright). It owns the search entry, so
-                // the old header search circle is gone.
+                // The header is a flat search entry over the page background
+                // (the animated sky gradient was removed 2026-07-22 — see
+                // WSGradientHero.swift). It owns the search entry, so the old
+                // header search circle is gone.
                 WSGreetingHero(onSearchTap: onSearch)
                     .wsEntrance(delay: 0)
 
@@ -71,7 +71,7 @@ struct WSHomeView: View {
                     .wsEntrance(delay: 0.03)
 
                 freshnessLine
-                    .padding(.horizontal, 22).padding(.top, 12)
+                    .padding(.horizontal, 22).padding(.top, 14)
                     .wsEntrance(delay: 0.05)
 
                 if mode == 0 {
@@ -122,21 +122,28 @@ struct WSHomeView: View {
                 .padding(.horizontal, 22).padding(.top, 14)
                 .wsEntrance(delay: 0.06)
         } else {
-            ForEach(Array(busStops.prefix(6).enumerated()), id: \.element.stopCode) { i, stop in
+            // One board panel, not one slab per stop: six isolated grey cards
+            // each carrying two text lines read as repetitive dead weight.
+            // The rows share a panel with hairline dividers — the same
+            // departure-board grammar as the Bus stop screen. Previously split
+            // in two around an in-feed native ad; the ad was removed
+            // (owner 2026-07-22) and the board is whole again.
+            stopBoard(Array(busStops.prefix(6)))
+                .padding(.horizontal, 22).padding(.top, 14)
+                .wsEntrance(delay: 0.06)
+        }
+    }
+
+    /// One board panel of nearby-stop rows separated by hairline dividers.
+    private func stopBoard(_ stops: [NearbyStop]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(stops.enumerated()), id: \.element.stopCode) { i, stop in
+                if i > 0 { WSRowDivider().padding(.leading, 18) }
                 BusStopCard(stop: stop)
-                    .padding(.horizontal, 22).padding(.top, 14)
-                    .wsEntrance(delay: 0.06 + Double(i) * 0.04)
-                // One native ad per board, in-feed after the second stop
-                // card (moved up from below the mini-map card, which the
-                // tab bar was covering — owner 2026-07-17). Renders
-                // nothing until a creative loads.
-                if i == 1 { NativeAdCard().padding(.horizontal, 22).padding(.top, 14) }
-            }
-            // Boards with 0–1 stops still get their one ad, below.
-            if busStops.count < 2 {
-                NativeAdCard().padding(.horizontal, 22).padding(.top, 14)
             }
         }
+        .background(ws.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     @ViewBuilder private var mrtContent: some View {
@@ -144,7 +151,6 @@ struct WSHomeView: View {
             WSMrtHomeContent(station: item.station, distanceM: item.distanceM,
                              walkMin: item.walkMin)
                 .padding(.top, 14)
-            NativeAdCard().padding(.horizontal, 22).padding(.top, 14)
         } else {
             emptyState("Turn on location to see the station nearest you.")
                 .padding(.horizontal, 22).padding(.top, 14)
@@ -317,7 +323,7 @@ struct WSHomeView: View {
         .padding(.horizontal, 16).frame(height: 44)
         .background(ws.panel2)
         .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
+        .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
         .padding(.horizontal, 22).padding(.top, 6)
         .transition(.move(edge: .top).combined(with: .opacity))
     }
@@ -343,24 +349,49 @@ private struct BusStopCard: View {
                 UISelectionFeedbackGenerator().selectionChanged()
                 push(.busStop(code: stop.stopCode))
             } label: {
-                // Same identity grammar as a departure row: a plate on the
-                // left (here the stop code, mono — clearly a code, not a
-                // number in prose), then exactly two text lines. The MRT
-                // tiles sit inline after the name so an interchange never
-                // adds a third line (owner 2026-07-17).
-                HStack(spacing: 12) {
-                    // Compact chip, not a big plate — the code is meta, the
-                    // stop NAME is the identity (owner 2026-07-17: the old
-                    // 64×42 pill was distracting).
-                    WSCodeChip(text: stop.stopCode)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text(stop.stopName)
-                                .font(ws.sans(17, weight: .bold)).foregroundStyle(ws.text)
-                                .lineLimit(1).layoutPriority(1)
-                            mrtBadges
-                        }
-                        WalkLine(distanceM: stop.distanceM, compact: true)
+                // ONE flush-left column (owner 2026-07-22). The stop code is
+                // gone from this row entirely: it was meta, and as a left
+                // column it kept fighting the layout — a fixed-size chip
+                // beside a variable-height text column left a hole under it,
+                // and stretching it into a rail turned the least important
+                // element into the heaviest. The code still appears on the
+                // stop screen this row opens, and in the a11y label below.
+                //
+                // A 2×2 grid of STATIC facts — no live ETA (owner 2026-07-22).
+                // Arrivals left this row entirely: the live number belongs on
+                // the stop screen, where there's room to show the whole board
+                // honestly. What's left is everything that helps you CHOOSE a
+                // stop, and none of it can go stale mid-glance.
+                //
+                //   Changi Beach CP 5                 5 min
+                //   95081                        380 meters
+                //
+                // Left column = identity (which stop), right column = cost
+                // (how long, how far) on the trailing edge where the eye
+                // exits; line 1 is the answer, line 2 the same pair one tier
+                // quieter. Four cells on a shared grid, so the card reads as
+                // a table rather than four loose bits (owner layout).
+                VStack(alignment: .leading, spacing: 3) {
+                    // Line 1 — identity left, cost right.
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(stop.stopName)
+                            .font(ws.sans(17, weight: .bold)).foregroundStyle(ws.text)
+                            // One line, never wrapped (owner 2026-07-19);
+                            // a truly long one shrinks a touch, last resort.
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .layoutPriority(1)
+                        mrtBadges
+                        Spacer(minLength: 8)
+                        walkTime.fixedSize().accessibilityHidden(true)
+                    }
+                    // Line 2 — the same pair, one tier quieter.
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(stop.stopCode)
+                            .font(ws.mono(12, weight: .medium))
+                            .foregroundStyle(ws.faint)
+                        Spacer(minLength: 8)
+                        distanceText.fixedSize().accessibilityHidden(true)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -368,27 +399,19 @@ private struct BusStopCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open \(stop.stopName)")
-
-            // Visible bookmark, same trailing-action pattern as the MRT
-            // station screen. Fills when saved.
-            Button(action: togglePin) {
-                WSIcon(glyph: isPinned ? .bookmarkFilled : .bookmark,
-                       size: 18, color: isPinned ? ws.accent : ws.dim)
-                    .frame(width: 36, height: 36)
-                    .contentShape(Rectangle().inset(by: -6))
-            }
-            .buttonStyle(.plain)
-            .sensoryFeedback(.impact(weight: .light), trigger: isPinned)
-            .accessibilityLabel(isPinned ? "Remove \(stop.stopName) from Saved"
-                                         : "Save \(stop.stopName)")
         }
-        .padding(.horizontal, 18).padding(.vertical, 14)
+        .sensoryFeedback(.impact(weight: .light), trigger: isPinned)
+        // The row is two lines again, so it can afford a little more air than
+        // the three-line version needed (14 → 15, back to the board's
+        // original row rhythm).
+        .padding(.horizontal, 18).padding(.vertical, 15)
+        // No per-row surface: rows live inside the shared board panel
+        // (stopBoard) with hairline dividers between them.
         .background(ws.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        // The card is the zoom source for the stop screen it opens (anim
+        // The row is the zoom source for the stop screen it opens (anim
         // spec: matched geometry — same treatment as the MRT card).
         .wsZoomSource(id: wsStopZoomID(stop.stopCode))
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
         .contextMenu {
             Button(action: togglePin) {
                 Label(isPinned ? "Remove from Saved" : "Save stop",
@@ -402,6 +425,52 @@ private struct BusStopCard: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(a11y)
+        // With the visible bookmark gone, saving must still be reachable
+        // without a long-press: this puts it in VoiceOver's Actions rotor.
+        .accessibilityAction(named: isPinned ? "Remove from Saved" : "Save stop",
+                             togglePin)
+    }
+
+    /// Walk minutes — the answer that sits opposite the stop name, because "how
+    /// long to get there?" is the decision this row exists to support. 80 m/min
+    /// is the standard pedestrian planning figure.
+    @ViewBuilder private var walkTime: some View {
+        let d = stop.distanceM
+        if d <= 0 {
+            Text("Nearby")
+                .font(ws.sans(13.5, weight: .semibold)).foregroundStyle(ws.text)
+        } else if d > 50_000 {
+            // A simulator fix or a stale GPS lock — "169575 min walk" is noise,
+            // not data. Say the one true thing and stop.
+            Text("Far from here")
+                .font(ws.sans(13.5, weight: .semibold)).foregroundStyle(ws.dim)
+        } else {
+            let walkMin = max(1, Int((Double(d) / 80).rounded()))
+            HStack(spacing: 5) {
+                WSIcon(glyph: .walk, size: 11, weight: .medium, color: ws.dim)
+                Text(walkMin <= 60 ? "\(walkMin) min" : "over an hour")
+                    .font(ws.mono(13.5, weight: .bold)).foregroundStyle(ws.text)
+            }
+        }
+    }
+
+    /// Raw distance, under the walk time — the supporting detail that makes the
+    /// minutes checkable. Spelt out ("380 meters", never "380 m") per the
+    /// app-wide rule, since a bare "m" reads as minutes at a glance.
+    @ViewBuilder private var distanceText: some View {
+        let d = stop.distanceM
+        if d > 0 {
+            // Beyond the walk threshold the MINUTES are nonsense, but the
+            // distance never is — and printing it keeps line 2 balanced and
+            // lets the reader sanity-check a stale GPS lock for themselves.
+            Text(d < 1000 ? "\(d) meters"
+                          : String(format: d >= 50_000 ? "%.0f km" : "%.1f km",
+                                   Double(d) / 1000))
+                .font(ws.sans(12, weight: .medium))
+                .foregroundStyle(ws.faint)
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: d)
+        }
     }
 
     /// MRT interchange badges (owner 2026-07-17): when this bus stop sits at
@@ -426,9 +495,14 @@ private struct BusStopCard: View {
     }
 
     private var a11y: String {
-        var parts = ["Bus stop \(stop.stopName)"]
-        if stop.distanceM > 0 {
+        // The code is no longer shown in the row, so VoiceOver carries it —
+        // it's still how riders match a stop against a pole sign.
+        var parts = ["Bus stop \(stop.stopName)", "code \(stop.stopCode)"]
+        if stop.distanceM > 0, stop.distanceM <= 50_000 {
             parts.append("\(max(1, Int((Double(stop.distanceM) / 80).rounded()))) minute walk")
+            parts.append(stop.distanceM < 1000
+                         ? "\(stop.distanceM) meters away"
+                         : String(format: "%.1f kilometers away", Double(stop.distanceM) / 1000))
         }
         return parts.joined(separator: ", ")
     }
@@ -452,13 +526,22 @@ private struct WalkLine: View {
                 .foregroundStyle(compact ? ws.dim : ws.text)
                 .contentTransition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: text)
+                // One line always — with the next-bus teaser on the row's
+                // trailing edge this can get squeezed; shrink, never wrap.
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
     }
     private var text: String {
         guard distanceM > 0 else { return "Nearby" }
+        // Walk minutes only while walking is plausible (~1 h). Beyond that —
+        // and especially the far-off fixes a simulator or a stale GPS lock
+        // produces — "169575 min walk · 13566.0 km" is noise, not data.
+        if distanceM > 50_000 { return "Far from here" }
         let walkMin = max(1, Int((Double(distanceM) / 80).rounded()))
         let dist = distanceM < 1000 ? "\(distanceM) meters"
                                     : String(format: "%.1f km", Double(distanceM) / 1000)
+        guard walkMin <= 60 else { return "\(dist) away" }
         return "\(walkMin) min walk  ·  \(dist)"
     }
 }
@@ -499,7 +582,7 @@ private struct NearestMrtCard: View {
                         HStack(spacing: 6) {
                             CrowdGauge(fraction: crowd.wsFraction, width: 22)
                             Text(crowd.wsWord)
-                                .font(ws.mono(10, weight: .bold)).foregroundStyle(ws.dim)
+                                .font(ws.mono(11, weight: .bold)).foregroundStyle(ws.dim)
                                 .lineLimit(1)
                         }
                     }

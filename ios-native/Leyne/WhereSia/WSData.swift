@@ -32,9 +32,38 @@ func wsLiveETASec(_ s: Service, now: Date = Date()) -> Int {
     return max(0, s.etaSec)
 }
 
-/// The soonest service at a stop (by live ETA), or nil.
+/// Seconds until arrival, SIGNED — negative once the arrival time has passed.
+/// `wsLiveETASec` deliberately clamps to zero for display, which destroys the
+/// only signal that a bus has already gone; this keeps the sign. Nil when the
+/// service carries no absolute timestamp (nothing to reason about).
+func wsSecUntil(_ s: Service, now: Date = Date()) -> Int? {
+    s.arrivalDate.map { Int($0.timeIntervalSince(now)) }
+}
+
+/// Has this bus already left? LTA keeps returning a service for a short while
+/// after its arrival time passes, and because BOTH the ingestion clamp
+/// (LTAModels: `max(0, …)`) and `wsLiveETASec` floor it at zero, a departed bus
+/// otherwise reads as a permanent "Now" AND sorts ahead of every real upcoming
+/// bus — which is how the same service appeared to be arriving at several
+/// stops simultaneously (owner-spotted, 2026-07-22).
+///
+/// The grace window keeps a bus that is genuinely pulling in right now (a few
+/// seconds either side of its predicted time) on the board; past that it's gone.
+func wsIsDeparted(_ s: Service, now: Date = Date(), grace: Int = 45) -> Bool {
+    guard let sec = wsSecUntil(s, now: now) else { return false }
+    return sec < -grace
+}
+
+/// Services with departed buses removed — the list any arrival UI should use.
+func wsLiveServices(_ services: [Service], now: Date = Date()) -> [Service] {
+    services.filter { !wsIsDeparted($0, now: now) }
+}
+
+/// The soonest service at a stop (by live ETA), or nil. Departed buses are
+/// excluded, so this never returns a bus that has already gone.
 func wsSoonest(_ services: [Service], now: Date = Date()) -> Service? {
-    services.min { wsLiveETASec($0, now: now) < wsLiveETASec($1, now: now) }
+    wsLiveServices(services, now: now)
+        .min { wsLiveETASec($0, now: now) < wsLiveETASec($1, now: now) }
 }
 
 // MARK: - Station crowd lookup

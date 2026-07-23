@@ -13,7 +13,7 @@ import SwiftUI
 /// by the underlying symbol, so a symbol swap is a one-line change here.
 enum WSGlyph {
     // Transit identity
-    case busSingle, busDouble, busBendy, wheelchair, live, train, bookmark, bookmarkFilled
+    case busSingle, busDouble, busBendy, busStop, wheelchair, live, train, bookmark, bookmarkFilled
     // Navigation / tab bar
     case home, saved, alerts, me
     // Chrome
@@ -32,6 +32,7 @@ enum WSGlyph {
         // the same base symbol, distinct from busSingle's outline "bus" and
         // busDouble's entirely different silhouette.
         case .busBendy:       return "bus.fill"
+        case .busStop:        return "signpost.right.fill"
         case .wheelchair:     return "figure.roll"
         case .live:           return "dot.radiowaves.up.forward"
         case .train:          return "tram"

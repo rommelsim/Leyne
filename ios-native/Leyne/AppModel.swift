@@ -1144,23 +1144,8 @@ final class AppModel {
         currentVersion = v
     }
 
-    /// The version whose What's New screen should be shown now, or nil.
-    /// Fresh installs (still in onboarding) never see it — they have no
-    /// prior version to have "updated" from; `finishOnboarding` pins their
-    /// version so it stays that way.
-    var whatsNewVersion: String? {
-        guard let v = currentVersion, kChangelog[v] != nil else { return nil }
-        if lastSeenVersion == v { return nil }
-        if !onboarded { return nil }
-        return v
-    }
-
-    /// Acknowledge the running version's What's New screen. After this the
-    /// What's New screen won't show again until the next version with a
-    /// changelog entry.
-    func markWhatsNewSeen() {
-        if let v = currentVersion { lastSeenVersion = v }
-    }
+    // (whatsNewVersion / markWhatsNewSeen deleted 2026-07-19 with the dead
+    // WhatsNewView — the auto modal left the launch flow on 2026-07-13.)
 
     /// Replay onboarding from Settings.
     func resetOnboarding() {

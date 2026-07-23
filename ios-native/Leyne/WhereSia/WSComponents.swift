@@ -529,7 +529,7 @@ struct WSDepartureRow: View {
                 } else {
                     (Text(sched ? "~" : "")
                         .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.dim)
-                     + Text("\(minutes)").font(ws.sans(19, weight: .heavy)).foregroundStyle(ws.text))
+                     + Text("\(minutes)").font(ws.mono(19, weight: .bold)).foregroundStyle(ws.text))
                 }
             }
             .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
@@ -572,23 +572,25 @@ struct WSDepartureRow: View {
     }
 }
 
-/// The departure row's countdown gauge: a 13pt ring that fills clockwise from
-/// 12 o'clock as the bus approaches. Track in the hairline colour so an
-/// almost-empty ring still reads as a gauge, not a stray mark.
+/// The departure row's countdown gauge: three ascending "approach ticks"
+/// that fill left-to-right as the bus gets closer (far → 1, mid → 2, near →
+/// all 3). Replaced the 2026-07-17 ring, which read as a loading spinner
+/// next to a number (owner 2026-07-19). Empty ticks stay in the hairline
+/// colour so the gauge shape is always visible.
 struct WSCountdownRing: View {
-    let fraction: Double
+    let fraction: Double        // 0 = 20+ min away, 1 = here
     let tint: Color
     @Environment(\.ws) private var ws
     var body: some View {
-        ZStack {
-            Circle().stroke(ws.rule, lineWidth: 2.5)
-            Circle()
-                .trim(from: 0, to: max(0.04, fraction))
-                .stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+        let lit = fraction >= 0.9 ? 3 : fraction >= 0.5 ? 2 : fraction > 0.1 ? 1 : 0
+        HStack(alignment: .bottom, spacing: 2.5) {
+            ForEach(0..<3, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(i < lit ? tint : ws.rule)
+                    .frame(width: 3, height: 5 + CGFloat(i) * 4)
+            }
         }
-        .frame(width: 13, height: 13)
-        .animation(.easeInOut(duration: 0.3), value: fraction)
+        .animation(.easeInOut(duration: 0.3), value: lit)
         .accessibilityHidden(true)
     }
 }

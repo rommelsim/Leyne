@@ -131,10 +131,12 @@ struct WSMrtStationView: View {
             let spacer = max(110, restingHero - headerPeek)
             let fade = 1 - Double(min(1, scrollY / spacer)) * 0.85
             ZStack(alignment: .top) {
-                // Gradient wash (visual only) — collapses + fades behind the
-                // rising sheet. Non-interactive.
-                LinearGradient(colors: [colour.opacity(0.16), ws.bg],
-                               startPoint: .top, endPoint: .bottom)
+                // Flat line-identity tint behind the hero — collapses + fades
+                // behind the rising sheet. Non-interactive. Was a gradient
+                // wash; flattened 2026-07-22 (ornament, and a vertical fade is
+                // exactly what glare flattens into mud anyway). The line colour
+                // stays because here it IS data: station identity.
+                colour.opacity(0.10)
                     .frame(height: max(headerPeek, restingHero - scrollY))
                     .frame(maxWidth: .infinity)
                     .opacity(fade)
@@ -336,7 +338,8 @@ struct WSMrtStationView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ws.panel)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: .black.opacity(0.18), radius: 14, y: -2)
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(ws.rule, lineWidth: 1))
         .padding(.horizontal, 22)
     }
 

@@ -316,7 +316,9 @@ struct WSTrackBusView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(ws.panel)
             .clipShape(WSTopRoundedCorner(radius: 22))
-            .shadow(color: .black.opacity(0.22), radius: 16, y: -2)
+            // Hairline, not a drop shadow: the sheet still needs a hard edge
+            // against the live map, but soft depth washes out in sunlight.
+            .overlay(WSTopRoundedCorner(radius: 22).stroke(ws.rule, lineWidth: 1))
             .offset(y: undockedHeight - sheetHeight)
 
             // `.ignoresSafeArea` below drops the automatic home-indicator
@@ -437,7 +439,12 @@ struct WSTrackBusView: View {
                         // Scheduled-only ETA carries the whisper "~" — never a
                         // banner (feedback_timely_over_honest).
                         (Text(sched ? "~" : "").font(ws.sans(20, weight: .semibold)).foregroundStyle(ws.dim)
-                         + Text("\(minutes)").font(ws.sans(36, weight: .heavy).monospacedDigit()).foregroundStyle(ws.text)
+                         // The hero ETA MUST be tabular: `.monospacedDigit()`
+                         // does not reliably apply to a bundled custom face,
+                         // so this goes through ws.mono (IBM Plex Mono, real
+                         // tabular figures) — otherwise the number jitters as
+                         // it counts down.
+                         + Text("\(minutes)").font(ws.mono(36, weight: .bold)).foregroundStyle(ws.text)
                          + Text(" min").font(ws.sans(16, weight: .semibold)).foregroundStyle(ws.dim))
                     } else {
                         Text("—").font(ws.sans(32, weight: .heavy)).foregroundStyle(ws.faint)
@@ -735,54 +742,116 @@ struct WSTrackBusView: View {
         let truncated = (you - naturalStart) > Self.approachWindow
         let start = truncated ? max(0, you - Self.approachWindow) : naturalStart
         let hidden = start - naturalStart   // stops between the bus and the window
-        let r = RouteInfo(stops: stops, youIndex: you, busIndex: busIdx, busCoord: nil)
-        // The vehicle marker row is the one true "live position" signal — when
-        // it's showing, the your-stop rail dot stays a static accent (no
-        // second ping competing for attention).
-        let showsVehicleMarker = !truncated && busIdx != nil && (busIdx ?? -1) < you
+        let ic = wsInterchange(forStopName: stops[you].name)
+        // HORIZONTAL rail (owner 2026-07-19: the vertical list read as a
+        // static timeline). The approach becomes a left→right progress strip —
+        // the bus physically travels toward your stop, colour and motion carry
+        // the liveness; your stop's detail card sits below it.
         return VStack(alignment: .leading, spacing: 0) {
-            approachHeadline(you: you, busIdx: busIdx).padding(.bottom, 14)
-            if truncated { collapsedEarlierRow(hidden: hidden) }
-            ForEach(start...you, id: \.self) { i in
-                stepRow(r, index: i, you: you, pingYou: !showsVehicleMarker)
-                // The inline "bus is here" marker only makes sense when the bus
-                // actually sits inside the shown window.
-                if !truncated, busIdx == i && i < you { vehicleRow(r) }
-            }
+            approachHeadline(you: you, busIdx: busIdx).padding(.bottom, 16)
+            approachRail(stops: stops, start: start, you: you,
+                         busIdx: busIdx, hidden: hidden)
+                .padding(.bottom, 16)
+            youBody(stops[you], ic: ic)
         }
     }
 
-    /// Stands in for the run of stops the bus still has to cover before the
-    /// final-approach window — a dashed rail segment that opens the full route,
-    /// weighted to match a real stop row rather than reading as a footnote.
-    private func collapsedEarlierRow(hidden: Int) -> some View {
-        Button {
-            UISelectionFeedbackGenerator().selectionChanged()
-            push(.serviceInfo(no: serviceNo, fromStop: stopCode))
-        } label: {
-            HStack(alignment: .center, spacing: 15) {
-                Rectangle().fill(ws.rule)
-                    .frame(width: 3, height: 30)
-                    .mask {
-                        VStack(spacing: 4) {
-                            ForEach(0..<5, id: \.self) { _ in
-                                Rectangle().frame(height: 3)
-                            }
-                        }
-                    }
-                    .frame(width: 24, height: 30)
-                HStack(spacing: 4) {
-                    Text("\(hidden) earlier \(hidden == 1 ? "stop" : "stops") · full route")
-                        .font(ws.sans(14.5, weight: .bold)).foregroundStyle(ws.dim)
-                    WSIcon(glyph: .chevron, size: 10, color: ws.accentSoft)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.bottom, 14)
-            .contentShape(Rectangle())
+    /// The approach as a horizontal strip: hairline track, a blue→(green when
+    /// arriving) progress fill behind the bus, a dot per stop, your stop as
+    /// the big accent terminus, and the bus itself as a pinging capsule that
+    /// springs along the rail as its GPS index advances.
+    private func approachRail(stops: [RouteStopLive], start: Int, you: Int,
+                              busIdx: Int?, hidden: Int) -> some View {
+        let count = you - start + 1
+        let sec = service.map { wsLiveETASec($0) }
+        let now = (sec ?? Int.max) < 60
+        let busFrac: CGFloat? = busIdx.map { bi in
+            count > 1 ? CGFloat(max(0, bi - start)) / CGFloat(count - 1) : 1
         }
-        .buttonStyle(WSCompressStyle())
-        .accessibilityLabel("\(hidden) earlier stops. Open the full route.")
+        return VStack(alignment: .leading, spacing: 10) {
+            GeometryReader { geo in
+                let w = geo.size.width
+                let midY = geo.size.height / 2
+                let xAt: (Int) -> CGFloat = { j in
+                    count > 1 ? CGFloat(j) / CGFloat(count - 1) * (w - 16) + 8 : w / 2
+                }
+                ZStack(alignment: .leading) {
+                    // Track.
+                    Capsule().fill(ws.rule)
+                        .frame(width: w, height: 4)
+                        .position(x: w / 2, y: midY)
+                    // Covered ground — blue while travelling, green on arrival.
+                    if let busFrac {
+                        let pw = max(10, busFrac * (w - 16) + 8)
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [ws.accent, now ? ws.now : ws.accentSoft],
+                                startPoint: .leading, endPoint: .trailing))
+                            .frame(width: pw, height: 4)
+                            .position(x: pw / 2, y: midY)
+                            .animation(reduceMotion ? .easeInOut(duration: 0.3)
+                                       : .spring(response: 0.6, dampingFraction: 0.9),
+                                       value: busFrac)
+                    }
+                    // Stop dots; your stop is the big terminus.
+                    ForEach(0..<count, id: \.self) { j in
+                        let i = start + j
+                        let passed = busIdx.map { i <= $0 } ?? false
+                        let isYou = i == you
+                        Circle()
+                            .fill(isYou ? ws.accent : (passed ? ws.accentSoft : ws.bg))
+                            .frame(width: isYou ? 16 : 10, height: isYou ? 16 : 10)
+                            .overlay(Circle().stroke(
+                                isYou ? Color.white : (passed ? ws.accentSoft : ws.faint),
+                                lineWidth: isYou ? 2.5 : 2))
+                            // The terminus pings only when the bus capsule
+                            // (the true live signal) isn't on the rail.
+                            .background { if isYou && busFrac == nil { WSPing(cornerRadius: 999) } }
+                            .position(x: xAt(j), y: midY)
+                            .animation(.easeInOut(duration: 0.25), value: passed)
+                    }
+                    // The bus — pinging capsule riding the rail.
+                    if let busFrac {
+                        HStack(spacing: 3) {
+                            WSIcon(glyph: .busSingle, size: 10, weight: .bold, color: .white)
+                            Text(serviceNo)
+                                .font(ws.mono(11, weight: .bold)).foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 7).frame(height: 22)
+                        .background(Capsule().fill(now ? ws.now : ws.accent))
+                        .overlay(Capsule().stroke(.white, lineWidth: 1.5))
+                        .background { WSPing(cornerRadius: 999) }
+                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+                        .position(x: min(max(24, busFrac * (w - 16) + 8), w - 24), y: midY)
+                        .animation(reduceMotion ? .easeInOut(duration: 0.3)
+                                   : .spring(response: 0.6, dampingFraction: 0.8),
+                                   value: busFrac)
+                    }
+                }
+            }
+            .frame(height: 36)
+            .accessibilityElement()
+            .accessibilityLabel(busIdx.map {
+                "Bus \(serviceNo), \(max(0, you - $0)) stops from your stop"
+            } ?? "Final approach to your stop")
+
+            // Earlier stops collapse into one quiet doorway to the full route.
+            if hidden > 0 {
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    push(.serviceInfo(no: serviceNo, fromStop: stopCode))
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("+\(hidden) earlier \(hidden == 1 ? "stop" : "stops") · full route")
+                            .font(ws.sans(12.5, weight: .semibold)).foregroundStyle(ws.dim)
+                        WSIcon(glyph: .chevron, size: 9, color: ws.accentSoft)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(WSCompressStyle())
+                .accessibilityLabel("\(hidden) earlier stops. Open the full route.")
+            }
+        }
     }
 
     /// "6 stops away · Seats available" — the one genuinely live line in this
@@ -804,7 +873,7 @@ struct WSTrackBusView: View {
                     Text("Approaching your stop")
                         .font(ws.sans(15, weight: .heavy)).foregroundStyle(ws.text)
                 } else {
-                    (Text("\(away)").font(ws.sans(22, weight: .heavy)).foregroundStyle(ws.text)
+                    (Text("\(away)").font(ws.mono(22, weight: .bold)).foregroundStyle(ws.text)
                      + Text(away == 1 ? " stop away" : " stops away")
                         .font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.dim))
                         .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: true))
@@ -819,64 +888,6 @@ struct WSTrackBusView: View {
             Spacer(minLength: 0)
         }
         .animation(.snappy(duration: 0.28), value: busIdx)
-    }
-
-    private func stepRow(_ r: RouteInfo, index i: Int, you: Int, pingYou: Bool = true) -> some View {
-        let stop = r.stops[i]
-        let passed = displayBusIndex.map { i < $0 } ?? false
-        let isYou = i == you
-        // Stops beyond the user's fade to 40% (design spec §6) — the journey
-        // that matters ends at your stop; the tail is context, not content.
-        let future = you >= 0 && i > you
-        let ic = wsInterchange(forStopName: stop.name)
-        return HStack(alignment: .top, spacing: 15) {
-            // rail
-            VStack(spacing: 0) {
-                Circle()
-                    .fill(isYou ? ws.accent : (passed ? ws.faint : ws.bg))
-                    .frame(width: isYou ? 15 : 13, height: isYou ? 15 : 13)
-                    .overlay(Circle().stroke(isYou ? ws.accent : (passed ? ws.text : ws.faint), lineWidth: isYou ? 3 : 2.5))
-                    // Ping the user's stop — but only when the live bus tile
-                    // isn't already pinging elsewhere in the same window
-                    // (one live signal at a time, not a wall of pulses).
-                    .background { if isYou && pingYou { WSPing(cornerRadius: 999) } }
-                    .padding(.top, 4)
-                // The rail ends at your stop — it's the journey's terminus in
-                // this card, so no dangling tail below the last row.
-                if !isYou {
-                    Rectangle().fill(passed ? ws.text : ws.rule).frame(width: 3)
-                }
-            }
-            .frame(width: 24)
-
-            if isYou {
-                youBody(stop, ic: ic)
-            } else {
-                // Any other stop on the route opens that stop's own arrivals.
-                Button {
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    push(.busStop(code: stop.code))
-                } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(stop.name)
-                                .font(ws.sans(14.5, weight: .bold))
-                                .foregroundStyle(passed ? ws.dim : ws.text)
-                                .multilineTextAlignment(.leading)
-                            Text(stop.code)
-                                .font(ws.sans(12, weight: .medium))
-                                .foregroundStyle(ws.dim)
-                            if let ic { interchangeFlag("MRT", ic.codes) }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.bottom, 13)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(WSCompressStyle())
-            }
-        }
-        .opacity(future ? 0.4 : 1)
     }
 
     private func youBody(_ stop: RouteStopLive, ic: (name: String, codes: [String])?) -> some View {
@@ -928,45 +939,6 @@ struct WSTrackBusView: View {
             ForEach(codes.prefix(3), id: \.self) { LineBullet(code: $0) }
         }
         .padding(.top, 2)
-    }
-
-    private func vehicleRow(_ r: RouteInfo) -> some View {
-        HStack(alignment: .top, spacing: 15) {
-            VStack(spacing: 0) {
-                Text(serviceNo)
-                    .font(ws.mono(12, weight: .bold)).foregroundStyle(ws.text)
-                    .frame(width: 34, height: 30)
-                    .background(ws.panel2)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(ws.accent, lineWidth: 1.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    // Radar ping behind the tile — draws the eye to the bus's
-                    // live position. Added after the clip so the ring emanates.
-                    .background(WSPing(cornerRadius: 8))
-                Rectangle().fill(ws.rule).frame(width: 3)
-            }
-            .frame(width: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Bus \(serviceNo) is here").font(ws.sans(12, weight: .bold)).foregroundStyle(ws.text)
-                // Its live GPS position sits between the two stops above and
-                // below this marker; the seat dot + phrase is the onboard
-                // crowd — the same idiom as the departure rows.
-                HStack(spacing: 6) {
-                    Text("Between these stops")
-                        .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
-                    if let load = service?.load {
-                        Text("·").font(ws.mono(11)).foregroundStyle(ws.faint)
-                        Circle()
-                            .fill(load.wsDotColor)
-                            .frame(width: 7, height: 7)
-                            .animation(.easeInOut(duration: 0.2), value: load)
-                        Text(load.wsSeatPhrase)
-                            .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.dim)
-                            .lineLimit(1).allowsTightening(true)
-                    }
-                }
-            }
-            .padding(.top, 5).padding(.bottom, 13)
-        }
     }
 
     // MARK: inline ad
@@ -1117,20 +1089,15 @@ struct WSApproachMapContent: MapContent {
         // the polyline, 2026-07-14: MKDirections geometry was buggy).
         ForEach(Array(seg.enumerated()), id: \.offset) { _, s in
             if !s.isYou {
-                Annotation("", coordinate: s.coord, anchor: .top) {
-                    VStack(spacing: 3) {
-                        WSIcon(glyph: .busSingle, size: 10, weight: .bold, color: ws.accent)
-                            .frame(width: 22, height: 22)
-                            .background(Circle().fill(.white))
-                            .overlay(Circle().stroke(ws.accent, lineWidth: 2))
-                            .shadow(color: .black.opacity(0.22), radius: 3, y: 1)
-                        Text(s.name)
-                            .font(ws.sans(10, weight: .semibold)).foregroundStyle(ws.text)
-                            .lineLimit(1)
-                            .padding(.horizontal, 6).padding(.vertical, 2.5)
-                            .background(Capsule().fill(ws.panel.opacity(0.92)))
-                            .overlay(Capsule().stroke(ws.rule, lineWidth: 1))
-                    }
+                // Node only, no name capsule — six named nodes cluttered the
+                // overlay; the names carry no decision weight here (owner
+                // 2026-07-19). "Your stop" and the live bus stay labelled.
+                Annotation("", coordinate: s.coord, anchor: .center) {
+                    WSIcon(glyph: .busSingle, size: 10, weight: .bold, color: ws.accent)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(.white))
+                        .overlay(Circle().stroke(ws.accent, lineWidth: 2))
+                        .shadow(color: .black.opacity(0.22), radius: 3, y: 1)
                 }
                 .annotationTitles(.hidden)
             }

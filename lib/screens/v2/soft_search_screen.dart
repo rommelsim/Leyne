@@ -108,10 +108,12 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   void _onFocusChanged() => setState(() {});
 
   void _onQueryChanged() {
-    // Reset the category filter on every new query so results from a prior
-    // search don't leave the user looking at an empty filtered view.
-    setState(() => _filter = _SearchFilter.all);
     final hasQuery = _ctrl.text.trim().isNotEmpty;
+    // Preserve the user's category filter while they refine the query;
+    // only reset to All when the query is cleared.
+    setState(() {
+      if (!hasQuery) _filter = _SearchFilter.all;
+    });
     if (hasQuery && !_loggedSearchSession) {
       _loggedSearchSession = true;
       AnalyticsService.searchPerformed();
@@ -262,9 +264,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       child: TextField(
         controller: _ctrl,
         focusNode: _focus,
-        // No autofocus — the keyboard opens only when the user taps the field,
-        // not the moment the Search tab opens (user-reported).
-        autofocus: false,
+        // Autofocus when Search opens from the Home pill — the user already
+        // signalled intent to type. (Search is no longer a tab.)
+        autofocus: true,
         keyboardType: TextInputType.text,
         autocorrect: false,
         onChanged: (_) => _onQueryChanged(),
@@ -882,7 +884,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       return _emptyHint(
         context,
         'No bus stops within ${_radiusLabel(radius)} of ${geo.label}.',
-        'Widen the search radius in Settings.',
+        'Try a different postal code or widen your search.',
       );
     }
     final children = <Widget>[

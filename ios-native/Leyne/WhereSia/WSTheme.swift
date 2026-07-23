@@ -50,6 +50,12 @@ struct WSTheme: Equatable {
     /// Container tint behind a "Now" chip (solid, pre-blended — no opacity
     /// stacking over panels).
     let nowFill: Color
+    /// Amber — DISRUPTION STATUS ONLY (transit-standard: amber = delays),
+    /// always paired with a word, never decoration. Like `now`, its power is
+    /// scarcity: when service is normal, no amber appears anywhere.
+    let warn: Color
+    /// Container tint behind a disruption line (solid, pre-blended).
+    let warnFill: Color
 
     // ── DARK (default) ───────────────────────────────────────────────
     static let dark = WSTheme(
@@ -60,31 +66,52 @@ struct WSTheme: Equatable {
         input:  Color(wsHex: "181D24"),
         text:   Color(wsHex: "E8EAED"),
         dim:    Color(wsHex: "8A93A2"),
-        faint:  Color(wsHex: "5A626E"),
-        rule:   Color(wsHex: "242A33"),
+        // `faint` was 5A626E — only 2.83:1 on `panel`, below AA. Raised so the
+        // tertiary tier stays readable rather than merging into the board.
+        faint:  Color(wsHex: "7E8794"),   // 4.8:1 — was 5A626E at 2.83 (failed)
+        rule:   Color(wsHex: "2E3540"),
         tabbar: Color(wsHex: "12161B"),
         accent:     Color(wsHex: "005EC4"),
         accentSoft: Color(wsHex: "3B9EFF"),
         now:        Color(wsHex: "30D158"),
-        nowFill:    Color(wsHex: "17301F")
+        nowFill:    Color(wsHex: "17301F"),
+        warn:       Color(wsHex: "FFB340"),
+        warnFill:   Color(wsHex: "332711")
     )
 
     // ── LIGHT (body.light) ───────────────────────────────────────────
+    //
+    // TUNED FOR SUNLIGHT (2026-07-22). Under tropical midday glare reflected
+    // white light raises the black level and desaturates every hue toward grey,
+    // so effective contrast can fall to roughly 2:1 outdoors: only LUMINANCE
+    // gaps survive. The old ramp failed badly there — `faint` was 2.21:1
+    // (below AA outright), `dim` only 4.47:1, and `rule` 1.23:1 against `bg`
+    // (invisible in sun). Every step below is widened and measured; light fills
+    // with dark text are kept deliberately, as they survive glare better than
+    // dark fills.
     static let light = WSTheme(
         isDark: false,
         bg:     Color(wsHex: "FFFFFF"),
-        panel:  Color(wsHex: "F5F6F8"),
-        panel2: Color(wsHex: "EEF0F3"),
-        input:  Color(wsHex: "F1F2F5"),
-        text:   Color(wsHex: "14181D"),
-        dim:    Color(wsHex: "6B7280"),
-        faint:  Color(wsHex: "A2A8B2"),
-        rule:   Color(wsHex: "E6E8EC"),
+        panel:  Color(wsHex: "F1F3F6"),
+        panel2: Color(wsHex: "E3E7EC"),
+        input:  Color(wsHex: "ECEFF3"),
+        text:   Color(wsHex: "0B0E12"),   // 19.3:1 on bg — AAA, hero-number safe
+        dim:    Color(wsHex: "4C555F"),   // 6.8:1 — was 4.47 (AA-large only)
+        faint:  Color(wsHex: "646D79"),   // 4.7:1 — was A2A8B2 at 2.21 (failed)
+        rule:   Color(wsHex: "C4CBD5"),   // hairlines must stay visible in sun
         tabbar: Color(wsHex: "FFFFFF"),
-        accent:     Color(wsHex: "005EC4"),
-        accentSoft: Color(wsHex: "1F6FE0"),
-        now:        Color(wsHex: "1E9245"),
-        nowFill:    Color(wsHex: "E7F6EC")
+        accent:     Color(wsHex: "00499A"),
+        accentSoft: Color(wsHex: "0B5AC0"),
+        // `now` and `warn` both sit near 6:1 as dark-on-light text, which puts
+        // them in the same narrow luminance band — they are NOT separable in
+        // greyscale (1.02:1). That is a genuine constraint of dark-on-light AA,
+        // not an oversight: the fills below carry what luminance separation is
+        // available, and the real discriminator remains the paired WORD/icon
+        // (WCAG 1.4.1), which this app already requires everywhere.
+        now:        Color(wsHex: "0A6B31"),
+        nowFill:    Color(wsHex: "D6EBDD"),
+        warn:       Color(wsHex: "8A4B00"),
+        warnFill:   Color(wsHex: "FBF0DA")
     )
 
     static func resolve(dark: Bool) -> WSTheme { dark ? .dark : .light }

@@ -184,10 +184,10 @@ class LyneTheme {
     accent: _hex('FFFFFF'),
     live: _hex('FFFFFF'),
     liveBg: _hex('242424'),
-    warn: const Color.fromRGBO(255, 255, 255, 0.72),
-    warnBg: const Color.fromRGBO(255, 255, 255, 0.10),
-    crit: _hex('FFFFFF'),
-    critBg: const Color.fromRGBO(255, 255, 255, 0.14),
+    warn: _hex('E9B04B'),
+    warnBg: const Color.fromRGBO(233, 176, 75, 0.16),
+    crit: _hex('E96A5C'),
+    critBg: const Color.fromRGBO(233, 106, 92, 0.16),
     // Monochrome proximity tokens — white ink at varying opacities.
     // Mirrors ios-native/Leyne/Theme.swift dark variant (2.6.0+).
     // Crowd/occupancy colour is hardcoded green/amber in confidence.dart
@@ -223,10 +223,10 @@ class LyneTheme {
     accent: _hex('111111'),
     live: _hex('111111'),
     liveBg: _hex('EDEDED'),
-    warn: const Color.fromRGBO(17, 17, 17, 0.72),
-    warnBg: const Color.fromRGBO(17, 17, 17, 0.08),
-    crit: _hex('111111'),
-    critBg: const Color.fromRGBO(17, 17, 17, 0.10),
+    warn: _hex('B58A1F'),
+    warnBg: _hex('F6EBC9'),
+    crit: _hex('C44A3A'),
+    critBg: _hex('F7DAD4'),
     // Monochrome proximity tokens — #111111 ink at varying opacities.
     // Mirrors ios-native/Leyne/Theme.swift light variant (2.6.0+).
     // Crowd/occupancy colour is hardcoded green/amber in confidence.dart
@@ -379,7 +379,7 @@ class LyneTheme {
     lineHi: lineHi,
     accent: color,
     live: color,
-    liveBg: liveBg,
+    liveBg: color.withValues(alpha: isDark ? 0.14 : 0.12),
     warn: warn,
     warnBg: warnBg,
     crit: crit,

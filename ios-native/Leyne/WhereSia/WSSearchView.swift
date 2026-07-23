@@ -276,14 +276,17 @@ struct WSSearchView: View {
 
     // MARK: rows
 
-    /// Inset rounded-card container for a search row — matches the elevated
-    /// panel-card family used app-wide (routeCard, MRT header, Home cards:
-    /// radius 22 + soft shadow), not the flatter Saved/Alerts grouped-row style.
+    /// Inset rounded-card container for a search row — matches the panel-card
+    /// family used app-wide (routeCard, MRT header, Home cards: radius 22 +
+    /// hairline), not the flatter Saved/Alerts grouped-row style. Depth is a
+    /// hairline rather than a drop shadow: soft shadows disappear entirely in
+    /// direct sun, so the card edge has to be a real luminance step.
     private func searchCard<V: View>(@ViewBuilder _ content: () -> V) -> some View {
         content()
             .padding(.horizontal, 16)
             .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(ws.panel))
-            .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(ws.rule, lineWidth: 1))
             .padding(.horizontal, 16)
             .padding(.vertical, 4)
     }

@@ -129,13 +129,15 @@ struct WSMrtHomeContent: View {
 
     var body: some View {
         let _ = m.tick
+        // Home keeps only what is LIVE and decision-relevant: the nearest
+        // station, its platform crowd now + forecast, and a one-line service
+        // status. Platforms, facilities and the line map are static and
+        // already live on the station screen one tap away — stacking them
+        // here was information overload (owner, 2026-07-19).
         VStack(spacing: 14) {
             stationCard.wsEntrance(delay: 0.06)
             crowdCard.wsEntrance(delay: 0.12)
-            platformsCard.wsEntrance(delay: 0.16)
-            facilitiesCard.wsEntrance(delay: 0.20)
-            lineMapCard.wsEntrance(delay: 0.24)
-            statusCard.wsEntrance(delay: 0.28)
+            statusLine.wsEntrance(delay: 0.16)
         }
         .padding(.horizontal, 22)
         .onAppear {
@@ -210,108 +212,28 @@ struct WSMrtHomeContent: View {
         }
     }
 
-    // Two platform directions (derived line ends).
-    @ViewBuilder private var platformsCard: some View {
-        if let dirs = wsPlatformDirections(for: station) {
-            WSCard(title: "Platforms", glyph: .train) {
-                VStack(spacing: 0) {
-                    platformRow(index: 1, dest: dirs.a, letter: "A")
-                    WSRowDivider()
-                    platformRow(index: 2, dest: dirs.b, letter: "B")
-                }
-            }
+    // Service status, compressed to one quiet line — a whole card headlined
+    // "Normal service" said nothing most of the time. Disruptions still get
+    // their words; details live on the Alerts screen.
+    private var statusLine: some View {
+        // Amber = delay is pre-learned transit grammar (transit-color-
+        // semantics): a disruption is the ONE thing on Home allowed to use
+        // the warn tier — colour + word together, never colour alone.
+        HStack(spacing: 10) {
+            WSIcon(glyph: disrupted ? .bellRing : .live, size: 15, weight: .regular,
+                   color: disrupted ? ws.warn : ws.now)
+            Text(disrupted ? "Delays reported on this line — see Alerts"
+                           : "Normal service on all lines")
+                .font(ws.sans(13.5, weight: disrupted ? .semibold : .medium))
+                .foregroundStyle(disrupted ? ws.warn : ws.dim)
+                .lineLimit(2)
+            Spacer(minLength: 0)
         }
-    }
-
-    private func platformRow(index: Int, dest: String, letter: String) -> some View {
-        HStack(spacing: 12) {
-            Text("\(index)")
-                .font(ws.mono(14, weight: .bold)).foregroundStyle(ws.text)
-                .frame(width: 30, height: 30)
-                .background(Circle().stroke(ws.rule, lineWidth: 1.5))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Towards \(dest)")
-                    .font(ws.sans(15, weight: .semibold)).foregroundStyle(ws.text).lineLimit(1)
-                Text("Platform \(letter)")
-                    .font(ws.sans(12.5, weight: .medium)).foregroundStyle(ws.dim)
-            }
-            Spacer(minLength: 8)
-        }
-        .padding(.vertical, 12)
-    }
-
-    private var facilitiesCard: some View {
-        WSCard(title: "Station facilities", glyph: .info) { WSStationFacilitiesGrid() }
-    }
-
-    // Short line map — the current station framed by its neighbours, derived
-    // from code order. Bullet-coloured rail line down the left.
-    @ViewBuilder private var lineMapCard: some View {
-        if let map = wsLineNeighbors(around: station), map.items.count > 1 {
-            let colour = WSLine.color(forStationCode: map.items.first?.code ?? "")
-            WSCard(title: "Line map", glyph: .map) {
-                VStack(spacing: 0) {
-                    ForEach(Array(map.items.enumerated()), id: \.element.code) { i, item in
-                        HStack(spacing: 14) {
-                            // Rail rail + node.
-                            ZStack {
-                                Rectangle().fill(colour)
-                                    .frame(width: 3)
-                                    .padding(.top, i == 0 ? 18 : 0)
-                                    .padding(.bottom, i == map.items.count - 1 ? 18 : 0)
-                                Circle()
-                                    .fill(item.current ? colour : ws.bg)
-                                    .frame(width: item.current ? 13 : 10,
-                                           height: item.current ? 13 : 10)
-                                    .overlay(Circle().stroke(colour, lineWidth: 2.5))
-                            }
-                            .frame(width: 16)
-                            Text(item.code)
-                                .font(ws.mono(12, weight: .bold))
-                                .foregroundStyle(item.current ? ws.text : colour)
-                                .frame(width: 44, alignment: .leading)
-                            Text(item.name)
-                                .font(ws.sans(14.5, weight: item.current ? .bold : .medium))
-                                .foregroundStyle(item.current ? ws.text : ws.dim)
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .frame(height: 40)
-                        .background {
-                            if item.current {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(ws.panel2)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Service status — Train Service Alerts (already fetched).
-    private var statusCard: some View {
-        WSCard(title: "Service status", glyph: .alerts) {
-            HStack(alignment: .top, spacing: 12) {
-                WSIcon(glyph: disrupted ? .bellRing : .live, size: 18, weight: .regular,
-                       color: disrupted ? ws.text : ws.now)
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(disrupted ? "Service disruption" : "Normal service")
-                        .font(ws.sans(16, weight: .heavy)).foregroundStyle(ws.text)
-                    Text(disrupted
-                         ? "Delays reported on this line. Tap Alerts for details."
-                         : "All train services are running normally.")
-                        .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Updated \(WSFmt.upd(Date(), use24h: m.use24h))")
-                        .font(ws.sans(12, weight: .medium)).foregroundStyle(ws.faint)
-                        .padding(.top, 2)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 4)
-        }
+        .padding(.horizontal, 18).padding(.vertical, 13)
+        .background(disrupted ? ws.warnFill : ws.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .animation(.easeInOut(duration: 0.25), value: disrupted)
+        .accessibilityElement(children: .combine)
     }
 
     private func sentenceCase(_ s: String) -> String {
@@ -351,8 +273,16 @@ private struct WalkLineMRT: View {
     var body: some View {
         HStack(spacing: 8) {
             WSIcon(glyph: .walk, size: 13, weight: .medium, color: ws.dim)
-            Text(distanceM > 0 ? "\(walkMin) min walk  ·  \(fmtDistance(distanceM))" : "Nearby")
+            Text(text)
                 .font(ws.sans(13.5, weight: .medium)).foregroundStyle(ws.dim)
         }
+    }
+    /// Same sanity clamp as Home's bus WalkLine: no walk minutes beyond a
+    /// plausible walk, no astronomical numbers from a far-off/stale GPS fix.
+    private var text: String {
+        guard distanceM > 0 else { return "Nearby" }
+        if distanceM > 50_000 { return "Far from here" }
+        guard walkMin <= 60 else { return "\(fmtDistance(distanceM)) away" }
+        return "\(walkMin) min walk  ·  \(fmtDistance(distanceM))"
     }
 }

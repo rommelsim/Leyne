@@ -606,62 +606,6 @@ struct AboutView: View {
     }
 }
 
-// MARK: - WhatsNewView
-
-struct WhatsNewView: View {
-    let entry: WhatsNewEntry
-    let onDismiss: () -> Void
-    @Environment(AppModel.self) var m: AppModel
-    private var t: Theme { m.t }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("What's new")
-                        .font(t.mono(11, weight: .medium))
-                        .tracking(1.4)
-                        .foregroundStyle(t.dim)
-                        .padding(.horizontal, 26).padding(.top, 32)
-
-                    Text(entry.headline)
-                        .font(t.sans(28, weight: .semibold))
-                        .foregroundStyle(t.fg)
-                        .padding(.horizontal, 26).padding(.top, 8).padding(.bottom, 28)
-
-                    ForEach(Array(entry.items.enumerated()), id: \.offset) { _, item in
-                        HStack(alignment: .top, spacing: 16) {
-                            ZStack {
-                                Circle().fill(t.accent.opacity(0.15))
-                                    .frame(width: 40, height: 40)
-                                Image(systemName: item.icon)
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundStyle(t.accent)
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.title)
-                                    .font(t.sans(15, weight: .semibold))
-                                    .foregroundStyle(t.fg)
-                                Text(item.body)
-                                    .font(t.sans(13)).foregroundStyle(t.dim)
-                                    .lineSpacing(3)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 22).padding(.bottom, 22)
-                    }
-                }
-            }
-            Button(action: onDismiss) {
-                Text("Continue")
-                    .font(t.sans(15, weight: .semibold))
-                    .foregroundStyle(t.contrastFg)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(t.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-            }
-            .padding(.horizontal, 22).padding(.vertical, 22)
-        }
-        .background(t.bg.ignoresSafeArea())
-    }
-}
+// (WhatsNewView deleted 2026-07-19 — the auto-shown What's New modal was
+// removed from the launch flow on 2026-07-13 and the view had no remaining
+// call sites; kChangelog stays as the release-notes data source.)

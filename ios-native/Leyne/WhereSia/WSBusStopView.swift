@@ -29,9 +29,9 @@ struct WSBusStopView: View {
         let _ = m.tick
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // Same composition as Home (owner 2026-07-17): a header card,
-                // then ONE ROUNDED CARD PER SERVICE — not divider rows inside
-                // a single panel — so both screens share the row design.
+                // Same composition as Home: a header card, then the services
+                // as ONE grouped board panel — divider rows inside a single
+                // rounded surface — so both screens share the board grammar.
                 VStack(alignment: .leading, spacing: 0) {
                     Text(store.stopName(code))
                         .font(ws.sans(25, weight: .heavy)).foregroundStyle(ws.text)
@@ -113,15 +113,14 @@ struct WSBusStopView: View {
         case .loaded(let services):
             // Row reorder springs (anim spec) — keyed by service number so
             // a departed bus's removal moves the rest up naturally.
-            VStack(spacing: 10) {
+            VStack(spacing: 0) {
                 ForEach(Array(services.enumerated()), id: \.element.no) { index, svc in
+                    if index > 0 { WSRowDivider().padding(.leading, 18) }
                     WSDepartureRow(service: svc, stopCode: code, showsVehicleIcons: true)
                         .padding(.horizontal, 18)
                         .background(ws.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .contentShape(.contextMenuPreview,
-                                      RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .wsEntrance(delay: 0.05 + Double(index) * 0.04)
+                                      RoundedRectangle(cornerRadius: 14, style: .continuous))
                         // Long-press: set the arrival alert or favourite the
                         // service without drilling into Track Bus first.
                         .contextMenu {
@@ -141,7 +140,10 @@ struct WSBusStopView: View {
                         }
                 }
             }
+            .background(ws.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .padding(.horizontal, 22).padding(.top, 10)
+            .wsEntrance(delay: 0.05)
             .animation(.spring(response: 0.35, dampingFraction: 0.85),
                        value: services.map(\.no))
         case .empty:
@@ -149,14 +151,15 @@ struct WSBusStopView: View {
         case .error(let msg):
             stateCard(msg)
         default:
-            VStack(spacing: 10) {
-                ForEach(0..<4, id: \.self) { _ in
+            VStack(spacing: 0) {
+                ForEach(0..<4, id: \.self) { i in
+                    if i > 0 { WSRowDivider().padding(.leading, 18) }
                     WSSkeletonRow()
                         .padding(.horizontal, 18).padding(.vertical, 10)
-                        .background(ws.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
             }
+            .background(ws.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .padding(.horizontal, 22).padding(.top, 10)
         }
     }

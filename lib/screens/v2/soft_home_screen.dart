@@ -79,6 +79,14 @@ class _WeatherItem extends _Item {}
 
 class _HeaderItem extends _Item {}
 
+/// "Next bus" hero card — the soonest live arrival across the stops shown on
+/// Home, promoted above the list so the first glance answers "what now?".
+class _NextBusItem extends _Item {
+  _NextBusItem(this.stop, this.service);
+  final NearbyStop stop;
+  final Service service;
+}
+
 /// Tap-to-search pill — mirrors WSHomeView.swift's `searchBar`: sits directly
 /// under the header/title, above everything else (including the MRT strip).
 /// Not an inline TextField — the whole pill is a button that pushes the real
@@ -487,28 +495,63 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     required List<NearbyStop> nearby,
     required int hiddenCount,
   }) {
+    // Stops the list will show (capped at 6). Nearby first; when there's no
+    // location fix, fall back to saved stops.
+    final List<NearbyStop> display;
     if (nearby.isEmpty) {
       final pins = AppModel.shared.pins;
-      if (pins.isNotEmpty) {
-        for (var i = 0; i < pins.length && i < 6; i++) {
-          if (i > 0) items.add(_GapItem(14));
-          items.add(_BusStopCardItem(_savedStop(pins[i].code)));
-        }
-        if (LocationService.shared.lastLocation == null) {
-          items.add(_GapItem(10));
-          items.add(_LocationNudgeItem());
-        }
-      } else {
-        items.add(_EmptyItem());
-      }
+      display = [
+        for (var i = 0; i < pins.length && i < 6; i++) _savedStop(pins[i].code),
+      ];
     } else {
-      for (var i = 0; i < nearby.length && i < 6; i++) {
-        if (i > 0) items.add(_GapItem(14));
-        items.add(_BusStopCardItem(nearby[i]));
-      }
+      display = nearby.take(6).toList();
+    }
+
+    if (display.isEmpty) {
+      items.add(_EmptyItem());
+      items.add(_GapItem(14));
+      items.add(_NearbyDoorItem());
+      return;
+    }
+
+    // Promote the soonest live arrival to a hero card above the list.
+    final hero = _nextBus(display);
+    if (hero != null) {
+      items.add(hero);
+      items.add(_GapItem(14));
+    }
+
+    for (var i = 0; i < display.length; i++) {
+      if (i > 0) items.add(_GapItem(14));
+      items.add(_BusStopCardItem(display[i]));
+    }
+    if (nearby.isEmpty && LocationService.shared.lastLocation == null) {
+      items.add(_GapItem(10));
+      items.add(_LocationNudgeItem());
     }
     items.add(_GapItem(14));
     items.add(_NearbyDoorItem());
+  }
+
+  /// Soonest arrival across [stops] — the hero card's subject. Null when no
+  /// stop has live arrivals yet.
+  _NextBusItem? _nextBus(List<NearbyStop> stops) {
+    final now = DateTime.now();
+    NearbyStop? bestStop;
+    Service? best;
+    var bestSec = 1 << 30;
+    for (final stop in stops) {
+      for (final svc in DataStore.shared.servicesFor(stop.stopCode)) {
+        final sec = SoftDepartureRow.liveEtaSec(svc, now);
+        if (sec < bestSec) {
+          bestSec = sec;
+          best = svc;
+          bestStop = stop;
+        }
+      }
+    }
+    if (best == null || bestStop == null) return null;
+    return _NextBusItem(bestStop, best);
   }
 
   /// MRT mode: the nearest station's full card stack, or a quiet prompt when
@@ -573,6 +616,14 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       _HeaderItem() => _header(context),
       _SearchBarItem() => _searchBar(context),
       _SegmentedItem() => _modeSegmented(context),
+      _NextBusItem(:final stop, :final service) => RepaintBoundary(
+        child: _NextBusHeroCard(
+          stop: stop,
+          service: service,
+          onOpen: () => widget.onOpenBus(stop.stopCode, service.no),
+          onPeek: () => _showStopPeek(context, stop),
+        ),
+      ),
       _BusStopCardItem(:final stop) => RepaintBoundary(
         child: _BusStopCard(
           stop: stop,
@@ -1035,6 +1086,17 @@ class _BusStopCardState extends State<_BusStopCard> {
                           : Icons.bookmark_outline_rounded,
                       size: 20,
                       color: pinned ? t.fg : t.dim,
+                    ),
+                  ),
+                  // Visible affordance for the quick-actions sheet — the
+                  // long-press peek alone was undiscoverable.
+                  IconButton(
+                    onPressed: () => _showStopPeekFor(context, stop),
+                    tooltip: 'Stop options',
+                    icon: Icon(
+                      Icons.more_horiz_rounded,
+                      size: 20,
+                      color: t.dim,
                     ),
                   ),
                 ],
@@ -1868,13 +1930,147 @@ class _StopPeekSheet extends StatelessWidget {
   }
 }
 
+// ─── Next-bus hero card ──────────────────────────────────────────────────────
+
+/// Promoted "what now" card above the stop list: soonest live arrival across
+/// the stops Home shows. Tints `liveBg` when the bus is imminent so the
+/// glance-path is hero → list. Tap opens the bus screen; `⋯` opens the same
+/// quick-actions sheet as the long-press peek.
+class _NextBusHeroCard extends StatelessWidget {
+  const _NextBusHeroCard({
+    required this.stop,
+    required this.service,
+    required this.onOpen,
+    required this.onPeek,
+  });
+
+  final NearbyStop stop;
+  final Service service;
+  final VoidCallback onOpen;
+  final VoidCallback onPeek;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.t;
+    final now = DateTime.now();
+    final sec = service.arrivalDate != null
+        ? service.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
+        : service.etaSec;
+    final arriving = sec < 120;
+    final etaBig = sec < 60 ? 'Now' : '${(sec / 60).ceil()}';
+    final following = service.followingSec;
+    final stopName = stop.stopName.isEmpty ? stop.stopCode : stop.stopName;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: arriving ? t.liveBg : t.surfaceHi,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'NEXT BUS',
+                style: t
+                    .mono(10, weight: FontWeight.w600, color: t.dim)
+                    .copyWith(letterSpacing: 0.8),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: 36,
+                height: 36,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: onPeek,
+                  tooltip: 'Stop options',
+                  icon: Icon(
+                    Icons.more_horiz_rounded,
+                    size: 20,
+                    color: t.dim,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: onOpen,
+            borderRadius: BorderRadius.circular(LyneRadius.md),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  ServiceBadge(svc: service.no, size: ServiceBadgeSize.lg),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          service.dest.isEmpty
+                              ? 'Bus ${service.no}'
+                              : service.dest,
+                          style: t.sans(
+                            17,
+                            weight: FontWeight.w700,
+                            color: t.fg,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        OccupancyLabel(load: service.load),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        etaBig,
+                        style: t.mono(
+                          44,
+                          weight: FontWeight.w600,
+                          color: t.fg,
+                        ),
+                      ),
+                      if (sec >= 60)
+                        Text('min', style: t.mono(12, color: t.dim)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            [
+              if (following > 0) 'then ${(following / 60).ceil()} min',
+              'from $stopName',
+            ].join('  ·  '),
+            style: t.sans(13, color: t.dim),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Home header: greeting + live clock (mirrors WSGreetingHero) ────────────
 
-/// Time-of-day greeting over a live "Sun, 13 Jul · 7:35 PM" headline, the
-/// Material take on WSGradientHero.swift's WSGreetingHero. Re-renders on the
-/// minute (the headline shows minutes only) and honours the app-wide 12/24h
-/// setting via [fmtClock]. intl isn't a direct pubspec dependency, so the
-/// date part is formatted manually.
+/// Compact one-line header: "Good afternoon · Sun, 13 Jul · 7:35 PM". The
+/// old two-line greeting + headline was removed so arrivals own the top of
+/// Home. Re-renders on the minute (the line shows minutes only) and honours
+/// the app-wide 12/24h setting via [fmtClock]. intl isn't a direct pubspec
+/// dependency, so the date part is formatted manually.
 class _ClockHeader extends StatefulWidget {
   const _ClockHeader();
 
@@ -1935,18 +2131,14 @@ class _ClockHeaderState extends State<_ClockHeader> {
   Widget build(BuildContext context) {
     final t = context.t;
     final now = DateTime.now();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(_greeting(now), style: t.sans(17, color: t.dim)),
-        const SizedBox(height: 2),
-        Text(
-          _clockLine(now),
-          // 26/w700 matches the previous title (and iOS's 27-heavy at the
-          // same hierarchy position).
-          style: t.sans(26, weight: FontWeight.w700, color: t.fg),
-        ),
-      ],
+    // Compact one-liner: greeting + date + time in a single dim row. The
+    // previous two-line headline pushed the first arrival card ~90px down;
+    // arrivals own the top of Home now.
+    return Text(
+      '${_greeting(now)}  ·  ${_clockLine(now)}',
+      style: t.sans(13, weight: FontWeight.w500, color: t.dim),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

@@ -44,7 +44,7 @@ Color etaColor({
 Color occupancyColor(Load? load, LyneTheme t) {
   switch (load) {
     case Load.sea:
-      return const Color(0xFF34C759); // system green
+      return const Color(0xFF1F8A45); // darker, accessible green on light surfaces
     case Load.sda:
       return const Color(0xFFFF9500); // system orange/amber
     case Load.lsd:

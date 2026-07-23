@@ -251,7 +251,7 @@ private struct StopMarker: View {
     var selected: Bool
     @Environment(\.ws) private var ws
     var body: some View {
-        WSIcon(glyph: .busSingle, size: selected ? 12 : 9,
+        WSIcon(glyph: .busStop, size: selected ? 12 : 9,
                weight: .regular, color: selected ? ws.text : ws.dim)
             .frame(width: selected ? 28 : 20, height: selected ? 28 : 20)
             .background(Circle().fill(ws.panel))
@@ -327,7 +327,9 @@ private struct WSMapStopCard: View {
     var body: some View {
         let _ = m.tick   // live per-second countdowns
         let services = store.servicesFor(code)
-        let soonest = services
+        // Departed buses excluded — they clamp to 0s and would otherwise sort
+        // to the front as a stuck "Now" (see wsIsDeparted).
+        let soonest = wsLiveServices(services)
             .sorted { wsLiveETASec($0) < wsLiveETASec($1) }
             .prefix(3)
 
