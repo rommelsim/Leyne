@@ -16,7 +16,33 @@ enum AppGroup {
     static let pinsKey = "leyne.pins.shared"
     static let nearbyKey = "leyne.nearby.shared"
     static let favsKey = "leyne.favs.shared"
+    /// Stop count last written to `stopIndexURL` — the cheap "is the file
+    /// already current?" guard, so we rewrite ~400KB once per dataset change
+    /// rather than on every launch.
+    static let stopIndexCountKey = "leyne.stopindex.count"
     static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
+
+    static var container: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id)
+    }
+    /// The whole bus-stop directory (code + name + coordinates), shared so the
+    /// widget can resolve the NEAREST stop itself instead of being spoon-fed
+    /// one by the app. Far too big for UserDefaults — it lives as a file in
+    /// the group container.
+    static var stopIndexURL: URL? {
+        container?.appendingPathComponent("stopindex.json")
+    }
+}
+
+/// One bus stop in the shared directory. Keys are single letters because this
+/// is ~5,000 records: the difference between the long names and these is a
+/// couple of hundred KB on disk and in the widget's decode budget.
+/// Mirrors `WStopPin` in the extension.
+struct SharedStopPin: Codable {
+    let c: String   // BusStopCode
+    let n: String   // Description
+    let y: Double   // Latitude
+    let x: Double   // Longitude
 }
 
 /// Minimal pinned-stop record the Home Screen widget reads (it can't see the
@@ -33,6 +59,9 @@ struct SharedNearbyStop: Codable, Identifiable, Hashable {
     let id: String      // bus stop code
     let name: String
     let walkMin: Int
+    /// Straight-line metres, so the widget can print the same "· 180m" the
+    /// stop screen does instead of walk minutes alone.
+    let distanceM: Int
 }
 
 /// A favourited service, pre-resolved to a concrete stop + the route's

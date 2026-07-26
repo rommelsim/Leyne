@@ -8,6 +8,28 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## 2.9.4 (build 31) · iOS · branch `design-greendark` · 2026-07-26
+
+Soft-blue "4b" field-test pass. Version jumped from 2.9.0 to 2.9.4 because
+2.9.3 was already approved on the store — the 2.9.0 train is closed.
+
+- **Nearby map** — opens with a fly-in from the neighbourhood down to street
+  level; bus stops are blue bus-stop signs, MRT/LRT stations show their own
+  code in their own line colour (EW20 green), and "you" is a compass arrow
+  rather than a dot. Compass + fine GPS run only while the map is open.
+- **Stop detail** — the standalone route card is gone; tapping a service
+  opens a sheet with its NEXT/THEN/LATER board, crowd, Alert me, the full
+  route timeline and Favourite. Every service now appears in All services.
+  "Walk here" is a filled button carrying the walk time into Apple Maps.
+- **Crowd wording** — "Seats" / "Standing" became "Seats available" /
+  "Standing only" / "Almost full"; the bare words read as unexplained.
+- **MRT station** — distance moved under the station name, crowd spoken as a
+  word, a gently bouncing "Tap a station to open it" hint, and a lead-in on
+  the crowd forecast; the "now" column no longer knocks the chart out of line.
+- **Fixes** — card shadows no longer fall on the rows inside a card (every
+  row appeared to be cut out); no white bar when switching tabs; widget
+  follows you to a new location and shows the distance to the stop.
+
 ## Unreleased · iOS · branch `design-greendark` · 2026-07-24
 
 **2026-07-24 — not yet built:** Full "Departly green-dark" redesign of the
@@ -72,6 +94,37 @@ is first archived.
   screens (Stop, MRT station, Search, Saved, Alerts, widgets/Live Activity)
   still read the green-dark palette — full pass + version bump + changelog
   reconciliation still needed before this is archived.
+
+## Unreleased · Android · branch `design-greendark` · 2026-07-26
+
+**2026-07-26 — not yet built:** Feature-parity sweep against the iOS WhereSia
+screens, closing the gaps opened by the 2026-07-25/26 owner walkthrough that
+landed on iOS only. Design stays Material You — this pass is information
+hierarchy, missing features and navigation, not chrome. Maps remain iOS-only.
+
+- **Nearby / Saved heroes rebuilt** — the stop NAME is the card title with its
+  next three DISTINCT services as a board underneath; the countdown ring and
+  the "Bus 165 → …" title are gone (the bus was the biggest text on a card
+  about a stop). Saved keeps "Leave in X min" as a capsule.
+- **Stop metadata format unified** — `Stop 41101 · 2 min walk · 189m away`
+  everywhere (Nearby hero + rows, Saved cards). A bare 5-digit code no longer
+  prints alone.
+- **Nearby order** — filter chips moved BELOW the hero; the duplicate
+  "Closest to you" LIVE/updated header is gone (the screen caption already
+  carries freshness); sections renamed "Nearby stops" / "MRT stations"; the
+  MRT carousel is now a 2-up grid so all four stations read at once.
+- **Saved marks** — every saved stop / station / line card carries a star chip,
+  so the list no longer looks identical to Nearby.
+- **Stop identity card** — stop code, walk time and distance as three LABELLED
+  facts in one card, with the MRT interchange as its own chevron row.
+- **Stop closed/error state** — one composed card: today's FIRST & LAST BUS per
+  service, plus "Walk here" (walking directions via the user's maps app — new
+  on Android), "Save this stop", and "Try again" on a failed fetch.
+- **Track Bus screen retired** (iOS parity) — notification taps, deep links and
+  saved lines now open the Stop view with the service pinned in its hero
+  instead of stacking a second route screen; a bus SEARCH result opens Service
+  Info. `lib/screens/v2/soft_bus_screen.dart` deleted (was unreachable after
+  the rewire).
 
 ## Departly 3.0.0 · Android (55) · 2026-07-04
 

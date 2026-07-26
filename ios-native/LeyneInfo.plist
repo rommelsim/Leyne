@@ -234,18 +234,11 @@
 			<string>3qcr597p9d.skadnetwork</string>
 		</dict>
 	</array>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Inter-Regular.ttf</string>
-		<string>Inter-Medium.ttf</string>
-		<string>Inter-SemiBold.ttf</string>
-		<string>Inter-Bold.ttf</string>
-		<string>Inter-ExtraBold.ttf</string>
-		<string>IBMPlexMono-Regular.ttf</string>
-		<string>IBMPlexMono-Medium.ttf</string>
-		<string>IBMPlexMono-SemiBold.ttf</string>
-		<string>IBMPlexMono-Bold.ttf</string>
-	</array>
+	<!-- UIAppFonts removed 2026-07-26: Departly is SF throughout (WSTheme.sans /
+	     .mono, wSans / wMono in the widget extension). Nothing calls
+	     Font.custom / UIFont(name:) anymore, so the bundled Inter + IBM Plex
+	     Mono faces were deleted along with this registration — leaving them in
+	     let a stale build render the widget in the old typeface. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

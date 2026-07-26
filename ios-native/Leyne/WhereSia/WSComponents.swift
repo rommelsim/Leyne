@@ -80,17 +80,31 @@ struct WSTabEntrance: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
     func body(content: Content) -> some View {
-        content
-            .opacity(shown ? 1 : 0)
-            // Small rise + a hair of scale: enough to read as a change of
-            // place, short enough not to sit between the user and the data.
-            .offset(y: shown ? 0 : 8)
-            .scaleEffect(shown ? 1 : 0.985, anchor: .center)
-            .onAppear {
-                if reduceMotion { shown = true }
-                else { withAnimation(SoftMotion.drift) { shown = true } }
-            }
-            .onDisappear { shown = false }
+        // The ground sits BEHIND the animation, never inside it.
+        //
+        // The entrance used to transform the whole tab, ground included. A
+        // `scaleEffect` establishes a transformed layer, which clips the tab
+        // background's `.ignoresSafeArea()` bleed — so for the length of the
+        // animation nothing painted the top safe-area inset and the TabView
+        // container's own (white) background showed through as a bar under
+        // the status bar, vanishing exactly when the animation finished
+        // (owner 2026-07-26: "slight white bar at the top… then it fades
+        // away"). Painting the ground here, outside the animated layer,
+        // means there is never an unpainted frame to see through.
+        ZStack {
+            SoftBlue.bg.ignoresSafeArea()
+            content
+                .opacity(shown ? 1 : 0)
+                // Small rise + a hair of scale: enough to read as a change of
+                // place, short enough not to sit between the user and the data.
+                .offset(y: shown ? 0 : 8)
+                .scaleEffect(shown ? 1 : 0.985, anchor: .center)
+        }
+        .onAppear {
+            if reduceMotion { shown = true }
+            else { withAnimation(SoftMotion.drift) { shown = true } }
+        }
+        .onDisappear { shown = false }
     }
 }
 

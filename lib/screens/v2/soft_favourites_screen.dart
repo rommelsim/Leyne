@@ -310,120 +310,72 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         ? allSvcs.where((s) => tracked.contains(s.no)).toList()
         : allSvcs;
     final stopName = DataStore.shared.stopName(code);
-    if (services.isEmpty) {
-      return _UrgentPick(
-        sec: null,
-        eyebrowName: stopName.isEmpty ? code : stopName,
-        title: 'No live arrivals right now',
-        secondaryLine: null,
-        onOpen: () => widget.onOpenStop(code),
-      );
-    }
+    // The user's own nickname wins over the LTA description (iOS parity).
+    final name = pin.nickname.isNotEmpty
+        ? pin.nickname
+        : (stopName.isEmpty ? code : stopName);
+
+    // Shared metadata format (ui-checklist §2): STOP · MIN WALK · AWAY. Walk
+    // time and distance both need a location fix; without one the line
+    // degrades to the labelled code rather than guessing.
+    final walkMin = nearestDistanceM == null
+        ? null
+        : walkMinutesFor(nearestDistanceM);
+    final meta = stopCodeLabel(
+      code,
+      suffix: (walkMin != null && nearestDistanceM != null)
+          ? '$walkMin min walk · ${fmtDistance(nearestDistanceM.round())} away'
+          : null,
+    );
 
     final now = DateTime.now();
     final sorted = [...services]
       ..sort((a, b) => _liveEtaSec(a, now).compareTo(_liveEtaSec(b, now)));
-    final soonest = sorted.first;
-    final sec = _liveEtaSec(soonest, now);
 
-    // "Leave in X min · Y min walk": X = ETA − walk time, walk at 5 km/h
-    // (`walkMinutesFor`, the same formula Nearby uses). Slack ≤ 0 → "Leave
-    // now" with no walk suffix. Walk time is only knowable when we have a
-    // GPS-derived distance to this specific stop — without it, fall back to
-    // the plain "then …" next-bus line so the hero never states a walk time
-    // it can't back up.
-    String? decisionLine;
-    if (nearestDistanceM != null) {
-      final walkMin = walkMinutesFor(nearestDistanceM);
-      final etaMin = (sec / 60).ceil();
-      final slack = etaMin - walkMin;
-      decisionLine = slack <= 0 ? 'Leave now' : 'Leave in $slack min · $walkMin min walk';
-    } else if (sorted.length > 1) {
-      final next = sorted[1];
-      final nextMins = (_liveEtaSec(next, now) / 60).ceil().clamp(0, 999);
-      decisionLine = 'then ${next.no} · $nextMins min';
+    // Next three DISTINCT services — a feed repeat of the same bus is noise
+    // when the question is "which bus can I take" (§2).
+    final seen = <String>{};
+    final board = <({String no, String dest, String etaBig})>[
+      for (final s in sorted)
+        if (seen.add(s.no))
+          (no: s.no, dest: s.dest, etaBig: fmtEta(_liveEtaSec(s, now)).big),
+    ].take(3).toList();
+
+    // "Leave in X min": X = ETA − walk time, walk at 5 km/h (`walkMinutesFor`,
+    // the same formula Nearby uses). Slack ≤ 0 → "Leave now". The walk minutes
+    // this used to repeat now live in the shared meta line above.
+    String? decision;
+    if (walkMin != null && board.isNotEmpty) {
+      final slack = (_liveEtaSec(sorted.first, now) / 60).ceil() - walkMin;
+      decision = slack <= 0 ? 'Leave now' : 'Leave in $slack min';
     }
 
     return _UrgentPick(
-      sec: sec,
-      eyebrowName: stopName.isEmpty ? code : stopName,
-      title: soonest.dest.isEmpty
-          ? 'Bus ${soonest.no}'
-          : 'Bus ${soonest.no} → ${soonest.dest}',
-      secondaryLine: decisionLine,
+      name: name,
+      meta: meta,
+      board: board,
+      decision: decision,
       onOpen: () => widget.onOpenStop(code),
     );
   }
 
   Widget _upNextHero(_UrgentPick pick) {
-    final sec = pick.sec;
-    if (sec == null) {
-      // No live arrivals at the picked stop right now (spec item 8): the
-      // hero still shows — never suppressed — but drops the ring/CTA
-      // entirely rather than fabricating a countdown. Mirrors iOS
-      // WSSavedView's `savedHero` fallback branch (no `SoftCountdownRing`).
-      return Semantics(
-        button: true,
-        label: 'Open ${pick.eyebrowName}, no live arrivals right now',
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
-            onTap: pick.onOpen,
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                gradient: SoftBlue.heroGradient,
-                borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
-                boxShadow: SoftBlue.heroShadow,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'UP NEXT · ${pick.eyebrowName}'.toUpperCase(),
-                    style: SoftBlue.sans(
-                      10.5,
-                      weight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.85),
-                    ).copyWith(letterSpacing: 0.5),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    pick.title,
-                    style: SoftBlue.sans(
-                      14,
-                      weight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
     return Semantics(
       button: true,
-      label: 'Open ${pick.eyebrowName}',
-      child: SoftHeroCard(
-        eyebrow: 'UP NEXT · ${pick.eyebrowName}',
-        title: pick.title,
-        etaSeconds: sec,
-        secondaryLine: pick.secondaryLine,
-        ctaLabel: 'Open',
-        onCta: pick.onOpen,
+      label: pick.board.isEmpty
+          ? 'Open ${pick.name}, no live arrivals right now'
+          : 'Open ${pick.name}',
+      child: SoftBoardHeroCard(
+        title: pick.name,
+        meta: pick.meta,
+        board: pick.board,
+        decision: pick.decision,
+        ctaLabel: 'Open stop',
         onTap: pick.onOpen,
       ),
     );
   }
+
 
   // ── Arrival resolution for the Lines section ────────────────────────────
 
@@ -1140,32 +1092,39 @@ class _Resolved {
 
 // ─── Most-urgent hero candidate ─────────────────────────────────────────────
 
-/// The "Up next" hero candidate — the nearest saved stop's soonest live
-/// service (spec item 5). See `_SoftFavouritesScreenState._upNext`.
+/// The "Up next" hero candidate — the nearest saved stop and its own mini
+/// departure board (spec item 5). See `_SoftFavouritesScreenState._upNext`.
+///
+/// Restructured 2026-07-25 to match iOS `WSSavedView.savedHero`: the saved
+/// STOP names the card and the buses follow it as a board. The countdown ring
+/// came out for the same reason it did on Nearby — it spent a third of the
+/// card on one bus's number while the other departures at that stop had
+/// nowhere to go.
 class _UrgentPick {
   const _UrgentPick({
-    required this.sec,
-    required this.eyebrowName,
-    required this.title,
-    required this.secondaryLine,
+    required this.name,
+    required this.meta,
+    required this.board,
+    required this.decision,
     required this.onOpen,
   });
 
-  /// Live seconds-to-arrival — the ranking key across all candidates. Null
-  /// when the picked stop has no live service right now (spec item 8): the
-  /// hero still renders — "No live arrivals right now" — rather than being
-  /// suppressed, matching iOS WSSavedView's `savedHero` fallback branch.
-  final int? sec;
+  /// The stop's nickname if the user set one, else its name — this is the
+  /// card's TITLE. Place first, then departures (ui-checklist §2).
+  final String name;
 
-  /// Stop or "at {stop}" identity for the hero eyebrow, e.g. "Woodlands Int".
-  final String eyebrowName;
+  /// `Stop 11119 · 1 min walk · 68m away`, built by `stopCodeLabel`.
+  final String meta;
 
-  /// e.g. "Bus 170 → Woodlands", or "No live arrivals right now" when [sec]
-  /// is null.
-  final String title;
+  /// Up to three DISTINCT services at that stop, soonest first. Empty when
+  /// the feed has nothing running — the hero still renders (never suppressed)
+  /// with "No live arrivals right now".
+  final List<({String no, String dest, String etaBig})> board;
 
-  /// e.g. "then 858 · 12 min", or null when there's no second reading.
-  final String? secondaryLine;
+  /// The one line on this card that's a decision rather than data:
+  /// "Leave now" / "Leave in 4 min". Null without a location fix — the hero
+  /// never states a walk time it can't back up.
+  final String? decision;
 
   final VoidCallback onOpen;
 }
@@ -1258,19 +1217,20 @@ class _StopCard extends StatelessWidget {
     // Distance appended when GPS + this stop's geo position are both known
     // (spec item 5: "distance shown in the meta line") — omitted rather than
     // faked when either is unavailable.
-    String? distanceLabel;
+    // Shared metadata format (ui-checklist §2): MIN WALK · METRES, after the
+    // labelled code. With no location fix there's neither, so the road name
+    // stands in as the "where" rather than leaving the line blank — matching
+    // iOS WSSavedView.savedStopCard's `meta`.
+    String? metaSuffix;
     final loc = LocationService.shared.lastLocation;
     final latLon = DataStore.shared.stopLatLon(code);
     if (loc != null && latLon != null) {
-      distanceLabel = fmtDistance(
-        haversine(loc.lat, loc.lon, latLon.lat, latLon.lon).round(),
-      );
+      final d = haversine(loc.lat, loc.lon, latLon.lat, latLon.lon);
+      metaSuffix = '${walkMinutesFor(d)} min walk · ${fmtDistance(d.round())}';
+    } else if (road.isNotEmpty) {
+      metaSuffix = road.toUpperCase();
     }
-    final subtitle = [
-      code,
-      if (road.isNotEmpty) road.toUpperCase(),
-      ?distanceLabel,
-    ].join(' · ');
+    final subtitle = stopCodeLabel(code, suffix: metaSuffix);
 
     // Service list — respects a pin's tracked subset when set (Android-only
     // per-pin bus selection; iOS's Saved view always shows every service at
@@ -1310,11 +1270,27 @@ class _StopCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                       ],
-                      Text(
-                        stopName,
-                        style: t.sans(17, weight: FontWeight.w600, color: t.fg),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      // The star chip states "this is saved" on the card
+                      // itself. Without it the Saved list was visually
+                      // identical to the Nearby list and the state was implied
+                      // only by which tab you were on (iOS parity, 2026-07-25).
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              stopName,
+                              style: t.sans(
+                                17,
+                                weight: FontWeight.w600,
+                                color: t.fg,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const SoftSavedMark(),
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -1430,11 +1406,23 @@ class _StationCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      station.name,
-                      style: t.sans(17, weight: FontWeight.w600, color: t.fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            station.name,
+                            style: t.sans(
+                              17,
+                              weight: FontWeight.w600,
+                              color: t.fg,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const SoftSavedMark(),
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1502,11 +1490,23 @@ class _LineCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      destText,
-                      style: t.sans(15, weight: FontWeight.w700, color: t.fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            destText,
+                            style: t.sans(
+                              15,
+                              weight: FontWeight.w700,
+                              color: t.fg,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const SoftSavedMark(),
+                      ],
                     ),
                     const SizedBox(height: 3),
                     Text(

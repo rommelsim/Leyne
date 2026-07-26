@@ -400,7 +400,7 @@ struct WSSavedView: View {
             else { push(.serviceInfo(no: fav.no, fromStop: nil)) }
         } label: {
             HStack(spacing: 12) {
-                SoftServiceTile(no: fav.no, size: 15)
+                SoftServiceTile(no: fav.no, size: 15, width: 62)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(svc?.dest ?? "Bus \(fav.no)")
@@ -414,8 +414,10 @@ struct WSSavedView: View {
                 Spacer()
                 if let svc {
                     let eta = fmtETA(wsLiveETASec(svc))
-                    Text(eta.big == "Arr" ? "Arr" : "\(eta.big) min")
-                        .font(ws.sans(12.5, weight: .bold)).monospacedDigit()
+                    let arriving = eta.big == "Arr"
+                    // "Now", app-wide — see SoftBusTimePill.
+                    Text(arriving ? "Now" : "\(eta.big) min")
+                        .font(ws.sans(12.5, weight: arriving ? .heavy : .bold)).monospacedDigit()
                         .foregroundStyle(SoftBlue.chipInk)
                         .padding(.horizontal, 11).padding(.vertical, 6)
                         .background(SoftBlue.chipBg,

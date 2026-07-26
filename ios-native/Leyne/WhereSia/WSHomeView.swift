@@ -223,10 +223,28 @@ struct WSHomeView: View {
     /// The freshness line. The title and the two actions moved to the system
     /// nav bar, so all that's left of the old header is the one fact the nav
     /// bar can't carry: where this data is anchored and how old it is.
+    /// The LIVE chip earns its place here rather than being decoration: with
+    /// minute-resolution ETAs, a stop can sit visually unchanged for a full
+    /// minute, and the screen then reads as a printed sheet — "as if I'm
+    /// reading a piece of paper with no form of being live at all" (owner
+    /// 2026-07-26). The breathing dot is the only thing on Nearby that moves
+    /// between refreshes, so it is what says the app is still working. It is
+    /// shown ONLY when we actually have a refresh timestamp to stand behind —
+    /// claiming "LIVE" over stale or absent data would be the loud dishonesty
+    /// the whole design avoids.
     private var softCaptionRow: some View {
-        Text(softCaption)
-            .font(ws.sans(12.5, weight: .medium)).foregroundStyle(SoftBlue.sub)
-            .lineLimit(1)
+        HStack(spacing: 8) {
+            if hasLiveData { SoftLiveChip() }
+            Text(softCaption)
+                .font(ws.sans(12.5, weight: .medium)).foregroundStyle(SoftBlue.sub)
+                .lineLimit(1)
+                .contentTransition(.numericText())
+        }
+    }
+
+    /// True once any nearby stop has a real refresh timestamp behind it.
+    private var hasLiveData: Bool {
+        store.newestRefresh(amongst: store.nearby.map(\.stopCode)) != nil
     }
 
     private var softChips: some View {
@@ -1130,6 +1148,9 @@ private struct SoftStopRow: View {
     @Environment(DataStore.self) private var store: DataStore
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One-shot dip when this row's stop takes fresh arrivals.
+    @State private var rowPulse = false
 
     private var isPinned: Bool { m.pins.contains { $0.code == stop.stopCode } }
 
@@ -1163,12 +1184,23 @@ private struct SoftStopRow: View {
                 if let s = wsSoonest(store.servicesFor(stop.stopCode)) {
                     SoftBusTimePill(no: s.no, etaBig: fmtETA(wsLiveETASec(s)).big,
                                     noWidth: 46, timeWidth: 56)
+                        // Every row dips and recovers when ITS stop refreshes,
+                        // the same one-shot the hero has always had. A list
+                        // that visibly takes new data can't be mistaken for a
+                        // static page, and the motion is honest: it happens
+                        // when, and only when, something actually arrived.
+                        .opacity(rowPulse ? 0.45 : 1)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(SoftPressStyle())
+        .onChange(of: store.lastRefresh(stop.stopCode)) { _, _ in
+            guard !reduceMotion else { return }
+            rowPulse = true
+            withAnimation(.easeOut(duration: 0.7)) { rowPulse = false }
+        }
         .contextMenu {
             Button {
                 if let i = m.pins.firstIndex(where: { $0.code == stop.stopCode }) {

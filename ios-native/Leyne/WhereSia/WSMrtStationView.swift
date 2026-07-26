@@ -73,6 +73,18 @@ struct WSMrtStationView: View {
         return "\(fmtDistance(Int(d.rounded()))) away"
     }
 
+    /// "2 min walk · 51m away" — how far this station is, in the app's
+    /// standard order. Both halves or neither: a walk time without a distance
+    /// (or the reverse) is the vaguer half of the same fact.
+    private var proximityLine: String? {
+        guard let loc = LocationManager.shared.location else { return nil }
+        let d = haversine(loc.coordinate.latitude, loc.coordinate.longitude,
+                          station.lat, station.lon)
+        guard d <= 50_000 else { return nil }
+        let walk = max(1, Int((d / 80).rounded()))
+        return "\(walk) min walk · \(fmtDistance(Int(d.rounded()))) away"
+    }
+
     /// How long the navigation push takes to settle. Entrance animations wait
     /// this out, otherwise they play behind the slide and are never seen.
     private let pushSettle: Double = 0.28
@@ -156,11 +168,6 @@ struct WSMrtStationView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let distanceCaption {
-                Text(distanceCaption)
-                    .font(ws.sans(12)).monospacedDigit().foregroundStyle(SoftBlue.sub)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
             // Station codes sit INLINE with the name, not on their own row
             // below it. Stacked, the amber CC20 pill landed ~30pt above the
             // amber CCL pill on the first line card and the two read as one
@@ -177,6 +184,19 @@ struct WSMrtStationView: View {
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
                 Text("MRT").font(ws.sans(13, weight: .medium)).foregroundStyle(SoftBlue.sub)
                 Spacer(minLength: 0)
+            }
+
+            // Distance belongs TO the station, so it sits under the station's
+            // name as its property. It used to be a centred caption ABOVE the
+            // name, which dropped "51m away" into the gap between the nav
+            // bar's "MRT STATION" eyebrow and the title — text stranded
+            // between two things it belonged to neither of (owner
+            // 2026-07-26). Same "N min walk · Xm" wording the bus stop card
+            // and the widget use.
+            if let proximity = proximityLine {
+                Text(proximity)
+                    .font(ws.sans(12.5, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(SoftBlue.sub)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -372,9 +392,19 @@ struct WSMrtStationView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SoftSectionHead(title: "Crowd forecast")
                 VStack(alignment: .leading, spacing: 6) {
+                    // A bare bar chart of unlabelled heights answers nothing:
+                    // low WHAT (owner 2026-07-26)? Say what is being measured
+                    // and which way is worse, before the chart — the reader
+                    // shouldn't have to infer a scale from the picture.
+                    Text("How crowded the platform is expected to be — taller means busier.")
+                        .font(ws.sans(11.5, weight: .medium))
+                        .foregroundStyle(SoftBlue.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+
                     HStack(alignment: .bottom, spacing: 6) {
                         ForEach(forecast) { p in
-                            SoftForecastBar(fraction: p.fraction, time: p.time, isNow: p.isNow)
+                            SoftForecastBar(fraction: p.fraction, time: p.time,
+                                            isNow: p.isNow, level: p.level)
                         }
                     }
                     .padding(.top, 8)
@@ -508,6 +538,30 @@ private struct SoftLineMapStrip: View {
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.5), value: grown)
                 }
             }
+
+            // The neighbouring nodes have always been buttons, but nothing on
+            // screen said so — a diagram reads as a picture until told
+            // otherwise (owner 2026-07-26). One quiet line is enough; it is
+            // dropped at a terminus-only window where there is nothing else
+            // to tap.
+            if window.count > 1 {
+                HStack(spacing: 4) {
+                    Image(systemName: "hand.tap.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        // A hint that never moves is a hint people stop
+                        // seeing. One small bounce every few seconds catches
+                        // the eye on a glance without ever becoming a
+                        // flashing thing to ignore (owner 2026-07-26).
+                        .symbolEffect(.bounce,
+                                      options: .repeat(.periodic(delay: 4.5)),
+                                      isActive: !reduceMotion)
+                    Text("Tap a station to open it")
+                        .font(ws.sans(10.5, weight: .medium))
+                }
+                .foregroundStyle(SoftBlue.sub)
+                .padding(.top, 2)
+                .accessibilityHidden(true)   // each node already says its own name
+            }
         }
         .onAppear { grown = true }
     }
@@ -561,10 +615,15 @@ private struct SoftLineMapStrip: View {
 
                 // Crowd rides THIS station's node — LTA publishes it per
                 // station, so it belongs to the place, not to a direction.
+                // "Low" on its own answered nothing — low WHAT (owner
+                // 2026-07-26)? It's how crowded this station is right now, so
+                // the chip says so. Colour still carries the severity, but the
+                // word never depends on the colour being understood.
                 if isCurrent, crowd != .unknown {
-                    Text(crowd.wsWord)
+                    Text("\(crowd.wsWord) crowd")
                         .font(ws.sans(9.5, weight: .bold))
                         .foregroundStyle(crowdColor)
+                        .lineLimit(1).minimumScaleFactor(0.8)
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(crowdColor.opacity(0.12), in: Capsule())
                 }
@@ -598,6 +657,9 @@ private struct SoftForecastBar: View {
     let fraction: CGFloat
     let time: String
     var isNow: Bool = false
+    /// Named under the "now" bar, so the chart's scale is anchored to a word
+    /// at least once instead of leaving every height to interpretation.
+    var level: CrowdLevel = .unknown
     @Environment(\.ws) private var ws
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
@@ -618,9 +680,23 @@ private struct SoftForecastBar: View {
                         .stroke(isNow ? SoftBlue.ink : .clear, lineWidth: 1.5)
                         .padding(-3)
                 )
-            Text(time).font(ws.mono(10)).foregroundStyle(SoftBlue.sub)
+            VStack(spacing: 1) {
+                Text(time).font(ws.mono(10)).foregroundStyle(SoftBlue.sub)
+                // The word line is ALWAYS laid out, even when blank. Only the
+                // "now" column has something to say there, and rendering it
+                // conditionally made that column one line taller — which, in
+                // a bottom-aligned row, pushed its bar up and its time label
+                // out of line with the rest (owner 2026-07-26).
+                Text(isNow && level != .unknown ? level.wsWord : " ")
+                    .font(ws.sans(9.5, weight: .bold))
+                    .foregroundStyle(isNow ? SoftBlue.ink : .clear)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(level == .unknown ? time
+                            : "\(time), \(level.wsWord) crowd")
         .onAppear {
             if reduceMotion { shown = true }
             else { withAnimation(SoftMotion.drift) { shown = true } }

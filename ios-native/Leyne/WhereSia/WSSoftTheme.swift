@@ -78,10 +78,18 @@ struct SoftPressStyle: ButtonStyle {
 extension View {
     /// Floating white card: radius 20 continuous, soft ambient shadow.
     func softCard(radius: CGFloat = 20) -> some View {
+        // The shadow belongs to the CARD SHAPE, not to the card's contents.
+        // As a plain `.shadow` on self it also fell on every opaque child the
+        // card contains, so a list of rows drew a drop shadow around each row
+        // — the "weird cut out" on every row of All services (owner
+        // 2026-07-26, three times). Shadowing the background shape alone
+        // leaves the contents flat, which is what a single card should be.
         self
-            .background(SoftBlue.card,
-                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .shadow(color: SoftBlue.shadow, radius: 9, y: 6)
+            .background {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(SoftBlue.card)
+                    .shadow(color: SoftBlue.shadow, radius: 9, y: 6)
+            }
     }
 }
 
@@ -121,15 +129,25 @@ struct SoftSectionHead: View {
 struct SoftServiceTile: View {
     var no: String
     var size: CGFloat = 13
+    /// Fixed tile width. In a COLUMN of rows this must be set: sized to its
+    /// content, "961M" makes a visibly wider pill than "93", and because the
+    /// tile is the row's leading element every following column — destination,
+    /// crowd word — starts at a different x on every row (owner 2026-07-26).
+    /// A fixed width makes the tiles identical and the text after them align.
+    var width: CGFloat? = nil
     @Environment(\.ws) private var ws
 
     var body: some View {
         Text(no)
             .font(ws.sans(size, weight: .heavy))
             .foregroundStyle(SoftBlue.chipInk)
+            .lineLimit(1)
+            // Long numbers shrink INSIDE the fixed tile rather than widening it.
+            .minimumScaleFactor(0.65)
             .padding(.horizontal, size * 0.5)
             .padding(.vertical, size * 0.3)
-            .frame(minWidth: size * 2.6)
+            .frame(minWidth: width == nil ? size * 2.6 : nil)
+            .frame(width: width)
             .background(SoftBlue.chipBg,
                         in: RoundedRectangle(cornerRadius: size * 0.5, style: .continuous))
     }
@@ -149,15 +167,24 @@ struct SoftBusTimePill: View {
     var timeWidth: CGFloat? = nil
     @Environment(\.ws) private var ws
 
+    private var arriving: Bool { etaBig == "Arr" }
+
     var body: some View {
         HStack(spacing: 0) {
             segment(no, weight: .heavy,
                     ink: onGradient ? .white : SoftBlue.chipInk,
                     bg: onGradient ? Color.white.opacity(0.32) : SoftBlue.chipBg,
                     width: noWidth)
-            segment(etaBig == "Arr" ? "Arr" : "\(etaBig) min", weight: .semibold,
-                    ink: onGradient ? .white : SoftBlue.ink,
-                    bg: onGradient ? Color.white.opacity(0.12) : SoftBlue.chipBg.opacity(0.45),
+            // Arriving: the WORD becomes "Now" (an abbreviation reads as a
+            // word, not a clock value) and the segment takes accent ink at a
+            // heavier weight, so a row that needs your legs is distinguishable
+            // from "7 min" at a glance. No motion down here — a stop with
+            // three arriving buses would otherwise pulse three times over.
+            segment(arriving ? "Now" : "\(etaBig) min",
+                    weight: arriving ? .heavy : .semibold,
+                    ink: onGradient ? .white : (arriving ? SoftBlue.chipInk : SoftBlue.ink),
+                    bg: onGradient ? Color.white.opacity(arriving ? 0.22 : 0.12)
+                                   : SoftBlue.chipBg.opacity(arriving ? 0.9 : 0.45),
                     width: timeWidth)
         }
         .clipShape(Capsule())
@@ -207,6 +234,9 @@ struct SoftHeroBoardRow: View {
             time
                 .contentTransition(.numericText(countsDown: true))
                 .opacity(pulse ? 0.5 : 1)
+                // LEAD row only: below it the arrival isn't the card's answer,
+                // and three breathing rows would read as decoration.
+                .softArrivalPulse(lead && etaBig == "Arr")
         }
         .foregroundStyle(.white)
         .padding(.vertical, lead ? 7 : 5)
@@ -344,6 +374,81 @@ struct SoftPulseDot: View {
                 guard !reduceMotion else { return }
                 withAnimation(SoftMotion.breathe) { dimmed = true }
             }
+    }
+}
+
+/// Pulses the ARRIVING VALUE ITSELF — the "Now" that replaced the ETA.
+///
+/// This started life as a separate "ARRIVING" capsule, which was wrong: on
+/// the stop hero it added a fourth element to the NEXT slot only, so that
+/// slot's crowd chip sat a row lower than THEN's and LATER's and the board
+/// lost its alignment (owner 2026-07-26 — "why put it on top of the crowd
+/// indicator… literally you can just pulsate the Arr"). Pulsing the existing
+/// word costs no layout at all, so every slot keeps its shape.
+///
+/// The motion is a FINITE opacity breath:
+/// - §5 of the design doc bans glows and pulsing dots for urgency, allowing
+///   only "animate the opacity subtly (1s ease-in-out), never colour-shift
+///   or glow". This is that.
+/// - Three breaths (~3s), not forever. WCAG 2.2.2 requires a pause/stop/hide
+///   control for automatic motion running past five seconds beside other
+///   content; stopping short of it means there is nothing to gate. Apple's
+///   Reduced Motion guidance agrees — stop "ongoing motion", and replace
+///   meaningful animation rather than delete it, so Reduce Motion keeps the
+///   word (and its accent colour) with no movement.
+/// - The word carries the message alone (HIG: motion is never the only
+///   channel), so missing the pulse costs nothing.
+private struct SoftArrivalPulse: ViewModifier {
+    let active: Bool
+    @State private var dimmed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active && dimmed ? 0.45 : 1)
+            .onAppear { start() }
+            .onChange(of: active) { _, _ in start() }
+    }
+
+    private func start() {
+        guard active, !reduceMotion else { dimmed = false; return }
+        // 6 half-cycles at 0.5s = three full breaths, then it rests opaque
+        // for as long as the bus is arriving.
+        withAnimation(.easeInOut(duration: 0.5).repeatCount(6, autoreverses: true)) {
+            dimmed = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.05) { dimmed = false }
+    }
+}
+
+extension View {
+    /// Breathe this ETA three times when the bus is arriving. No-op otherwise.
+    func softArrivalPulse(_ active: Bool) -> some View {
+        modifier(SoftArrivalPulse(active: active))
+    }
+}
+
+/// "LIVE" — a breathing dot + the word, for a screen whose data is refreshing
+/// underneath it.
+///
+/// Nearby reads as a dead sheet of paper when nothing on it moves: minute-
+/// resolution ETAs change every 60s at best, so between refreshes there is
+/// no evidence the app is doing anything at all (owner 2026-07-26). The dot
+/// is the ambient proof; `SoftPulseDot` is the already-sanctioned 4b pulse
+/// (Alerts uses it), and Reduce Motion renders it as a static dot.
+struct SoftLiveChip: View {
+    @Environment(\.ws) private var ws
+    var body: some View {
+        HStack(spacing: 4) {
+            SoftPulseDot(color: SoftBlue.blue, size: 5.5)
+            Text("LIVE")
+                .font(ws.sans(9.5, weight: .heavy)).kerning(0.6)
+                .foregroundStyle(SoftBlue.chipInk)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(SoftBlue.chipBg, in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Live data")
     }
 }
 

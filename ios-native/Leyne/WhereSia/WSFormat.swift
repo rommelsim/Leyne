@@ -17,12 +17,15 @@ extension Load {
         case .lsd: return 1.0
         }
     }
-    /// Full word for legends / VoiceOver: Seats · Standing · Limited.
+    /// How full the bus is, said in full. A bare "Seats" / "Standing" left
+    /// people asking what the word was even about (owner 2026-07-26) — the
+    /// label has to carry its own meaning, since nothing next to it explains
+    /// that this line is about the crowd on board.
     var wsWord: String {
         switch self {
-        case .sea: return "Seats"
-        case .sda: return "Standing"
-        case .lsd: return "Limited"
+        case .sea: return "Seats available"
+        case .sda: return "Standing only"
+        case .lsd: return "Almost full"
         }
     }
     /// Lower-case sentence phrase for the Stop hero's crowd row (design:

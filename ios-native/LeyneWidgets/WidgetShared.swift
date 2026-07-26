@@ -22,6 +22,7 @@
 import WidgetKit
 import SwiftUI
 import UIKit
+import CoreLocation
 
 func wHex(_ hex: UInt32, alpha: CGFloat = 1) -> Color {
     Color(red: Double((hex & 0xFF0000) >> 16) / 255,
@@ -115,6 +116,14 @@ func wMono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
 enum WGroup {
     static let id        = "group.com.leyne"        // must match LeyneWidgets.entitlements
     static let nearbyKey = "leyne.nearby.shared"     // [WNearbyStop]
+
+    /// The full stop directory the app publishes (see DataStore's
+    /// `mirrorStopIndexToWidget`). A file, not a defaults key — it's ~5,000
+    /// records.
+    static var stopIndexURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id)?
+            .appendingPathComponent("stopindex.json")
+    }
 }
 
 private func decode<T: Decodable>(_ key: String, _ type: [T].Type) -> [T] {
@@ -131,8 +140,137 @@ struct WNearbyStop: Codable, Identifiable, Hashable {
     let id: String      // bus stop code
     let name: String
     let walkMin: Int
+    /// Straight-line metres. Optional ON PURPOSE: a build published by an
+    /// older app version has no such key, and a non-optional field would fail
+    /// the whole decode and blank the widget until the app next ran.
+    var distanceM: Int? = nil
+}
+
+/// "180m" / "1.2km" — the app's `fmtDistance`, duplicated here because the
+/// extension can't import the app module. Keep the two in step.
+func wFmtDistance(_ m: Int) -> String {
+    if m < 1000 { return "\(m)m" }
+    let km = Double(m) / 1000
+    return km < 10 ? String(format: "%.1fkm", km) : "\(Int(km.rounded()))km"
 }
 func loadNearby() -> [WNearbyStop] { decode(WGroup.nearbyKey, [WNearbyStop].self) }
+
+// ─── Resolving the nearest stop in the EXTENSION ─────────────────────
+// The app-published `loadNearby()` list is a snapshot of wherever the app
+// last had a location fix. It is the fallback, not the source of truth:
+// on its own it froze the widget on the stop you were at the last time you
+// opened Departly (owner 2026-07-26 — "if I go to another location, the
+// widget does not update itself to show the nearest bus stop").
+//
+// With `NSWidgetWantsLocation` in this extension's Info.plist the widget
+// gets its own fix AND the system reloads the timeline by itself when you
+// move a significant distance — which is precisely the missing trigger.
+
+/// One stop in the shared directory. Mirrors `SharedStopPin` in the app;
+/// the single-letter keys are the app's, kept for size.
+struct WStopPin: Codable {
+    let c: String, n: String
+    let y: Double, x: Double
+}
+
+func loadStopIndex() -> [WStopPin] {
+    guard let url = WGroup.stopIndexURL,
+          let d = try? Data(contentsOf: url),
+          let v = try? JSONDecoder().decode([WStopPin].self, from: d)
+    else { return [] }
+    return v
+}
+
+/// Metres between two coordinates. Same formula the app uses so the widget's
+/// walk estimate can't disagree with the one on the stop screen.
+func wHaversine(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
+    let r = 6_371_000.0
+    let dLat = (lat2 - lat1) * .pi / 180
+    let dLon = (lon2 - lon1) * .pi / 180
+    let a = sin(dLat / 2) * sin(dLat / 2)
+        + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180) * sin(dLon / 2) * sin(dLon / 2)
+    return r * 2 * atan2(sqrt(a), sqrt(1 - a))
+}
+
+/// The closest stop to `loc` in the shared directory, with walk minutes at
+/// ~80 m/min — the app's rate (`DataStore.updateNearby`), so the widget and
+/// the app never quote different numbers for the same stop.
+func wNearestStop(to loc: CLLocation, in index: [WStopPin]) -> WNearbyStop? {
+    let here = loc.coordinate
+    var best: (pin: WStopPin, d: Double)?
+    for p in index {
+        let d = wHaversine(here.latitude, here.longitude, p.y, p.x)
+        if best == nil || d < best!.d { best = (p, d) }
+    }
+    guard let best else { return nil }
+    return WNearbyStop(id: best.pin.c, name: best.pin.n,
+                       walkMin: max(1, Int((best.d / 80).rounded())),
+                       distanceM: Int(best.d.rounded()))
+}
+
+/// One-shot location for a timeline pass.
+///
+/// Uses the containing app's authorization — the widget never prompts, and
+/// `isAuthorizedForWidgetUpdates` is the documented gate for whether this
+/// extension may read location at all. A cached fix under 5 minutes old is
+/// used as-is; otherwise we ask for one and give up after 6s so a timeline
+/// pass can never hang on a GPS that isn't coming (WidgetKit budgets these
+/// tightly, and a stale-but-rendered widget beats a blank one).
+final class WLocator: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+    static let shared = WLocator()
+    private let mgr = CLLocationManager()
+    private var cont: CheckedContinuation<CLLocation?, Never>?
+
+    /// Whether this extension may read location at all — the app's
+    /// authorization, surfaced by Core Location for widget use.
+    var isAuthorized: Bool { mgr.isAuthorizedForWidgetUpdates }
+
+    /// A fix Core Location already has, if it's fresh enough to trust. Lets
+    /// the snapshot path stay synchronous.
+    func cachedLocation(maxAge: TimeInterval) -> CLLocation? {
+        guard isAuthorized, let l = mgr.location,
+              l.timestamp.timeIntervalSinceNow > -maxAge else { return nil }
+        return l
+    }
+
+    private func request() async -> CLLocation? {
+        guard isAuthorized else { return nil }
+        if let l = mgr.location, l.timestamp.timeIntervalSinceNow > -300 { return l }
+        return await withCheckedContinuation { c in
+            cont = c
+            mgr.delegate = self
+            mgr.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            mgr.requestLocation()
+        }
+    }
+
+    /// `request()` bounded by a 6-second deadline.
+    func current() async -> CLLocation? {
+        await withTaskGroup(of: CLLocation?.self) { group in
+            group.addTask { await self.request() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private func finish(_ loc: CLLocation?) {
+        guard let c = cont else { return }   // resume exactly once
+        cont = nil
+        c.resume(returning: loc)
+    }
+
+    func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
+        finish(locs.last)
+    }
+    func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {
+        finish(nil)
+    }
+}
 
 // ─── Self-contained LTA Bus Arrival v3 client ────────────────────────
 // Same live source the app uses. Captures the GPS `Monitored` flag per
@@ -360,68 +498,100 @@ struct WServiceBadge: View {
     }
 }
 
-/// One arrival tile in the medium-widget board: rounded-13 tile, soonest
-/// bus lit blue (accent .10 fill / accent .30 border / 17px heavy ETA),
-/// every other bus neutral (near-white .035 fill / hairline border / ink
-/// ETA — same 17px heavy weight, only the colour tells them apart).
-/// Shows the service chip, the ETA, and the crowd read underneath.
-struct WArrivalTile: View {
+/// One bus per LINE, not per column (owner 2026-07-26, "a lot of space
+/// wasted… middle area a lot of empty space").
+///
+/// The previous layout gave each bus a tall narrow tile and stacked chip /
+/// ETA / crowd inside it with a flexible gap above AND below the ETA. On a
+/// 364×170 medium widget that tile is ~105×114pt carrying ~57pt of content,
+/// so ~26pt of nothing got injected twice into every bus — and the row still
+/// only showed one arrival each, discarding the `eta2`/`eta3` the timeline
+/// had already fetched.
+///
+/// A full-width line fixes both axes at once: the card's 332pt of width
+/// carries identity on the left and the answer on the right (F-scan), the
+/// three lines split the available height between them so there is no dead
+/// band anywhere, and the space reclaimed from the tile gutters pays for the
+/// follow-on arrivals. Three lines × three numbers instead of three × one.
+///
+/// Columns are fixed-width and trailing-aligned on purpose: the ETAs of all
+/// three buses line up vertically, so the gap between the crowd read and the
+/// numbers reads as board structure rather than as emptiness.
+struct WArrivalRow: View {
     let row: WLTA.Row
     let soonest: Bool
 
+    private var arriving: Bool { etaLabel(row.eta1) == "Arr" }
+
+    /// "then 9 · 17" — the arrivals after the hero one. Omitted entirely when
+    /// LTA gives us nothing (never padded with guesses), and the unit is left
+    /// to the hero's "min" so the faint column stays short.
+    private var followText: String {
+        let more = [row.eta2, row.eta3].compactMap { $0 }.filter { $0 > 0 }
+        guard !more.isEmpty else { return "" }
+        return "then " + more.prefix(2).map(String.init).joined(separator: " · ")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            // Full-size badge (not `compact`) — the spec's chip is 10.5pt,
-            // which is WServiceBadge's default size, not its compact 9.5pt.
+        HStack(spacing: 0) {
+            // Identity, hard left, never truncated. Full-size badge (not
+            // `compact`) — the spec's chip is 10.5pt.
             WServiceBadge(no: row.id)
+                .frame(minWidth: 44, alignment: .leading)
 
-            // The ETA sits between two flexible gaps so it centres in whatever
-            // height the tile is given, and the crowd read pins to the bottom
-            // edge. Previously the stack was top-packed at its natural height
-            // and the widget's spare vertical space collected as one dead band
-            // under the row (owner 2026-07-25, "widget looks awful").
-            Spacer(minLength: 2)
+            WCrowdDots(load: row.load1)
+                .padding(.leading, 2)
 
+            Spacer(minLength: 8)
+
+            Text(followText)
+                .font(wSans(10.5, .medium))
+                .foregroundStyle(wFaint)
+                .lineLimit(1)
+                .frame(width: 62, alignment: .trailing)
+
+            // The answer — hero ETA, hard right, same trailing column on
+            // every line.
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
-                    .font(wMono(etaLabel(row.eta1) == "Arr" ? 15 : 20, .heavy))
+                    .font(wMono(arriving ? 16 : 21, .heavy))
                     .foregroundStyle(soonest ? wAccentBlue : wFg)
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
-                if etaLabel(row.eta1) != "Arr" {
+                if !arriving {
                     Text("min").font(wSans(9.5, .medium)).foregroundStyle(wDim)
                 }
             }
             .contentTransition(.numericText(countsDown: true))
-
-            Spacer(minLength: 2)
-
-            WCrowdDots(load: row.load1)
+            .frame(width: 66, alignment: .trailing)
         }
-        .padding(.horizontal, 11).padding(.vertical, 10)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(soonest ? wAccentBlue.opacity(0.10) : Color.black.opacity(0.035),
-                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
             .stroke(soonest ? wAccentBlue.opacity(0.30) : Color.black.opacity(0.07), lineWidth: 1))
     }
 }
 
-/// Up to three `WArrivalTile`s side by side — the medium-widget hero row.
+/// The medium-widget board: up to three `WArrivalRow`s stacked, each greedy
+/// in height so they divide the card's remaining space evenly — whatever is
+/// left over becomes row padding rather than one dead band.
+///
 /// "Soonest" is determined by the lowest `eta1`, NOT list position — the
 /// caller (LeyneNearbyWidget) passes rows already sorted soonest-first, but
 /// this stays index-independent on purpose so it can't accent-highlight the
-/// wrong tile if that ever changes.
-struct WArrivalTileRow: View {
+/// wrong bus if that ever changes.
+struct WArrivalBoard: View {
     let rows: [WLTA.Row]
     private var soonestID: String? {
         rows.min { ($0.eta1 ?? .max) < ($1.eta1 ?? .max) }?.id
     }
     var body: some View {
         let soonest = soonestID
-        HStack(spacing: 9) {
+        VStack(spacing: 6) {
             ForEach(Array(rows.prefix(3))) { row in
-                WArrivalTile(row: row, soonest: row.id == soonest)
+                WArrivalRow(row: row, soonest: row.id == soonest)
             }
         }
     }

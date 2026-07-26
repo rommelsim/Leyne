@@ -228,6 +228,9 @@ final class DataStore {
                 stopByCode = Dictionary(s.map { ($0.BusStopCode, $0) }) { a, _ in a }
                 services = v
                 referenceState = .ready
+                // Hand the directory to the widget so it can find the nearest
+                // stop on its own, even when the app never runs.
+                mirrorStopIndexToWidget()
                 // Cold-start race: if the first location fix beat this bootstrap,
                 // the nearby list was derived from an empty stop directory and the
                 // arrival prefetch ran on nothing. Re-derive AND re-prefetch here —
@@ -455,12 +458,48 @@ final class DataStore {
         guard codes != lastPublishedNearby else { return }
         lastPublishedNearby = codes
         let shared = top.map {
-            SharedNearbyStop(id: $0.stopCode, name: $0.stopName, walkMin: $0.walkMin)
+            SharedNearbyStop(id: $0.stopCode, name: $0.stopName,
+                             walkMin: $0.walkMin, distanceM: $0.distanceM)
         }
         if let d = try? JSONEncoder().encode(Array(shared)) {
             AppGroup.defaults?.set(d, forKey: AppGroup.nearbyKey)
         }
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// Publishes the whole stop directory (code + name + coordinates) to the
+    /// App Group so the widget can resolve the nearest stop ITSELF.
+    ///
+    /// Without this the widget's stop could only ever change while the app was
+    /// open and receiving location: `updateNearby` runs in the app, and
+    /// `mirrorNearbyToWidget` was the only thing that ever moved the widget.
+    /// Travel somewhere new without launching Departly and the widget kept
+    /// showing the stop you left — and kept fetching genuinely live arrivals
+    /// for it, so it looked fresh while being wrong (owner 2026-07-26).
+    ///
+    /// Written once per dataset (guarded on the stop count) and off the main
+    /// actor: it's ~5,000 records / a few hundred KB.
+    private func mirrorStopIndexToWidget() {
+        guard let url = AppGroup.stopIndexURL, !stopByCode.isEmpty else { return }
+        let count = stopByCode.count
+        if AppGroup.defaults?.integer(forKey: AppGroup.stopIndexCountKey) == count,
+           FileManager.default.fileExists(atPath: url.path) { return }
+        let pins = stopByCode.values.map {
+            SharedStopPin(c: $0.BusStopCode, n: $0.Description,
+                          y: $0.Latitude, x: $0.Longitude)
+        }
+        Task.detached(priority: .utility) {
+            guard let data = try? JSONEncoder().encode(pins) else { return }
+            do {
+                try data.write(to: url, options: .atomic)
+                AppGroup.defaults?.set(count, forKey: AppGroup.stopIndexCountKey)
+                // The widget can act on its own location from here on.
+                WidgetCenter.shared.reloadAllTimelines()
+            } catch {
+                // Non-fatal: the widget falls back to the app-published
+                // nearby list, i.e. exactly the old behaviour.
+            }
+        }
     }
 
     // ─── Live arrivals ────────────────────────────────────

@@ -21,7 +21,6 @@ import 'data/lta_config.dart';
 import 'data/mrt_geo.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/onboarding_screen.dart';
-import 'screens/v2/soft_bus_screen.dart';
 import 'screens/v2/soft_root.dart';
 import 'screens/v2/soft_stop_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
@@ -96,40 +95,21 @@ void main() async {
     if (navigator == null) return;
     final code = stopCode;
     final no = busNo;
-    // Push the Soft stop screen on the root navigator. If the
-    // payload identifies a specific bus, follow with a SoftBusScreen
-    // push so the user lands directly on the tracking view.
+    // ONE push: the Stop screen with the notified service already featured
+    // in its hero. It used to push Stop and then stack a SoftBusScreen on top
+    // — iOS retired that second screen (WSRoot: "notification taps land on the
+    // Stop view with the tapped service pinned as the hero"), and the extra
+    // level meant Back from a notification took two taps to reach the app.
     navigator.push(
       MaterialPageRoute(
         builder: (_) => SoftStopScreen(
           stopCode: code,
+          initialService: no,
           onBack: () => navigator.pop(),
-          onOpenBus: (svc) => navigator.push(
-            MaterialPageRoute(
-              builder: (_) => SoftBusScreen(
-                stopCode: code,
-                svc: svc,
-                onBack: () => navigator.pop(),
-              ),
-            ),
-          ),
           onSeeAll: () {},
         ),
       ),
     );
-    if (no != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        navigator.push(
-          MaterialPageRoute(
-            builder: (_) => SoftBusScreen(
-              stopCode: code,
-              svc: no,
-              onBack: () => navigator.pop(),
-            ),
-          ),
-        );
-      });
-    }
   };
   // Initialize the local-notifications plugin (tz database + Android
   // channel) so AppModel can schedule arrival alerts as soon as a pinned

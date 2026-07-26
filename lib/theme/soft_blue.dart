@@ -346,18 +346,159 @@ class SoftIconButton extends StatelessWidget {
   }
 }
 
+/// The app-wide stop metadata string: `Stop 41101 · 2 min walk · 189m away`.
+///
+/// Ported from iOS `wsStopCodeLabel(_:suffix:)` (WSFormat.swift). The "Stop "
+/// prefix is not decoration — a bare 5-digit number is ambiguous next to bus
+/// numbers and MRT line codes, so the code NEVER prints alone (ui-checklist
+/// §2). [suffix] carries the walk/distance fragment when a location fix is
+/// available; without one the label degrades to the labelled code rather than
+/// guessing.
+String stopCodeLabel(String code, {String? suffix}) {
+  if (suffix == null || suffix.isEmpty) return 'Stop $code';
+  return 'Stop $code · $suffix';
+}
+
 /// Monospaced "Stop {code}" caption — the small identity fragment used in
-/// row sublines throughout (bus stop code, station code).
+/// row sublines throughout (bus stop code, station code). [suffix] appends the
+/// shared walk/distance fragment via [stopCodeLabel].
 class SoftStopCode extends StatelessWidget {
-  const SoftStopCode(this.code, {super.key, this.color});
+  const SoftStopCode(this.code, {super.key, this.color, this.suffix});
   final String code;
   final Color? color;
+  final String? suffix;
 
   @override
   Widget build(BuildContext context) {
     return Text(
-      'Stop $code',
+      stopCodeLabel(code, suffix: suffix),
       style: SoftBlue.mono(11.5, weight: FontWeight.w500, color: color ?? SoftBlue.sub),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+/// "This card is saved" mark — a filled star chip that sits directly after a
+/// name on any Saved-tab card. Ported from iOS `WSSavedView.savedMark`
+/// (2026-07-25): the Favourites list was visually identical to the Nearby
+/// list, so nothing on a card said it was saved — the state was implied only
+/// by which tab you were on.
+class SoftSavedMark extends StatelessWidget {
+  const SoftSavedMark({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Saved',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+        decoration: BoxDecoration(
+          color: SoftBlue.chipBg,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Icon(Icons.star_rounded, size: 11, color: SoftBlue.chipInk),
+      ),
+    );
+  }
+}
+
+/// One row of a hero card's mini departure board: service number · destination
+/// · big ETA. Ported from iOS `SoftHeroBoardRow` (WSSoftTheme.swift).
+///
+/// The board replaced the countdown ring on both hero cards (owner
+/// 2026-07-25): the ring spent a third of the card stating ONE number that
+/// belonged to only one of the several buses at the stop, and forced every
+/// other departure into a cramped "then …" strip. Three services with their
+/// own destinations and their own times is strictly more of the answer in the
+/// same space. [lead] emphasises the soonest slot with WEIGHT and opacity
+/// only — never a larger size, which would break row alignment (§3).
+class SoftHeroBoardRow extends StatelessWidget {
+  const SoftHeroBoardRow({
+    super.key,
+    required this.no,
+    required this.dest,
+    required this.etaBig,
+    this.lead = false,
+  });
+
+  final String no;
+  final String dest;
+
+  /// `fmtEta(...).big` — "Arr" or a minutes digit string.
+  final String etaBig;
+  final bool lead;
+
+  @override
+  Widget build(BuildContext context) {
+    // Every ETA carries a unit, and "Arr" is banned in board contexts — print
+    // "Now" (ui-checklist §2).
+    final isNow = etaBig == 'Arr';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 46,
+            child: Text(
+              no,
+              style: SoftBlue.sans(
+                14,
+                weight: FontWeight.w800,
+                color: Colors.white,
+                tabular: true,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              dest,
+              style: SoftBlue.sans(
+                12.5,
+                weight: FontWeight.w600,
+                color: Colors.white.withValues(alpha: lead ? 0.95 : 0.72),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Fixed-width time column so the board's numbers align down the card
+          // regardless of "Now" vs "12 min" (§3).
+          SizedBox(
+            width: 62,
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: isNow ? 'Now' : etaBig,
+                    style: SoftBlue.sans(
+                      17,
+                      weight: lead ? FontWeight.w800 : FontWeight.w700,
+                      color: Colors.white.withValues(alpha: lead ? 1 : 0.8),
+                      tabular: true,
+                    ),
+                  ),
+                  if (!isNow)
+                    TextSpan(
+                      text: ' min',
+                      style: SoftBlue.sans(
+                        10.5,
+                        weight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: lead ? 0.8 : 0.62),
+                      ),
+                    ),
+                ],
+              ),
+              textAlign: TextAlign.right,
+              maxLines: 1,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1023,10 +1164,206 @@ class _RingPainter extends CustomPainter {
       oldDelegate.fraction != fraction || oldDelegate.tipAngle != tipAngle;
 }
 
+/// Gradient "board" hero — the 2026-07-25 hero for Nearby and Saved, ported
+/// from iOS `SoftHeroCard` / `WSSavedView.savedHero`.
+///
+/// PLACE FIRST, THEN DEPARTURES (ui-checklist §2). The card used to lead with
+/// the soonest bus ("Bus 165 · Hougang Ctrl Int") while the stop name sat
+/// above it in 14pt — so the biggest words on the screen answered a question
+/// the user hadn't asked yet. WHERE am I standing comes before WHICH bus, so
+/// the stop name is the title and the buses follow it as a board.
+///
+/// [decision] is the one line on the card that isn't data ("Leave in 4 min" on
+/// Saved); it gets its own capsule rather than becoming a fourth field on a
+/// metadata line nobody would read that far into.
+class SoftBoardHeroCard extends StatelessWidget {
+  const SoftBoardHeroCard({
+    super.key,
+    required this.title,
+    required this.meta,
+    required this.board,
+    this.decision,
+    this.ctaLabel,
+    this.onTap,
+    this.onLongPress,
+    this.emptyLabel = 'No live arrivals right now',
+  });
+
+  /// The STOP NAME — never a bus number.
+  final String title;
+
+  /// `Stop 41101 · 2 min walk · 189m away`, built by [stopCodeLabel].
+  final String meta;
+
+  /// Up to three DISTINCT services, soonest first. A feed repeat of the same
+  /// bus is noise when the question is "which bus can I take" (§2).
+  final List<({String no, String dest, String etaBig})> board;
+
+  /// Optional decision capsule, e.g. "Leave in 4 min".
+  final String? decision;
+  final String? ctaLabel;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  /// Missing data gets a sentence, not blank columns (§3).
+  final String emptyLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final card = Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: SoftBlue.heroGradient,
+        borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
+        boxShadow: SoftBlue.heroShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Title block. The glyph carries "bus stop", so no eyebrow row has
+          // to spell it out; on Nearby the closest stop is self-evidently the
+          // closest, so there's no "CLOSEST" label either.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.20),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.directions_bus_rounded,
+                  size: 16,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: SoftBlue.sans(
+                        21,
+                        weight: FontWeight.w800,
+                        color: Colors.white,
+                      ).copyWith(letterSpacing: -0.3),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      meta,
+                      style: SoftBlue.sans(
+                        11.5,
+                        weight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.8),
+                        tabular: true,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (decision != null) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.20),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          decision!,
+                          style: SoftBlue.sans(
+                            11,
+                            weight: FontWeight.w700,
+                            color: Colors.white,
+                            tabular: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (board.isEmpty)
+            Text(
+              emptyLabel,
+              style: SoftBlue.sans(
+                14,
+                weight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            )
+          else
+            for (var i = 0; i < board.length; i++) ...[
+              if (i > 0)
+                Container(height: 1, color: Colors.white.withValues(alpha: 0.20)),
+              SoftHeroBoardRow(
+                no: board[i].no,
+                dest: board[i].dest,
+                etaBig: board[i].etaBig,
+                lead: i == 0,
+              ),
+            ],
+          if (ctaLabel != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.45)),
+              ),
+              child: Text(
+                ctaLabel!,
+                style: SoftBlue.sans(
+                  12,
+                  weight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    if (onTap == null && onLongPress == null) return card;
+    // The whole card is the tap target — a card that represents a destination
+    // is tappable as a whole, not only via its CTA (ui-checklist §7).
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: card,
+      ),
+    );
+  }
+}
+
 /// Gradient hero card — ONE per screen, non-negotiable (spec §4). Layout:
 /// eyebrow ("CLOSEST · STOP NAME") → title (bus + dest) → "then …" line →
 /// ring trailing. The hero's own tinted shadow is the only exception to the
 /// single shadow recipe.
+///
+/// SUPERSEDED on Nearby and Saved by [SoftBoardHeroCard] (owner 2026-07-25 —
+/// the ring came out). Still used where a single-value countdown is the whole
+/// answer.
 class SoftHeroCard extends StatelessWidget {
   const SoftHeroCard({
     super.key,

@@ -38,6 +38,8 @@ struct WSBusStopView: View {
     @State private var featuredNo: String? = nil
     @State private var seededInitial = false
     @State private var routeExpanded = false
+    /// The bus sheet starts half-height and grows to full when the route opens.
+    @State private var sheetDetent: PresentationDetent = .medium
     /// Route timeline normally starts at the bus's position; this reveals
     /// every stop back to the route's origin (owner request 2026-07-25).
     @State private var showPreviousStops = false
@@ -51,6 +53,8 @@ struct WSBusStopView: View {
     /// "updated 2s ago" caption is gone (owner decision); the data itself
     /// signals its own freshness instead.
     @State private var dataPulse = false
+    /// Service number whose detail sheet is open, nil when none.
+    @State private var sheetNo: String?
 
     private var isPinned: Bool { m.pins.contains { $0.code == code } }
     /// The feed answered and there is genuinely nothing running here.
@@ -87,18 +91,15 @@ struct WSBusStopView: View {
                     // section's own bare sentence underneath, the same words
                     // twice with different padding, which is what read as
                     // "items randomly placed" (owner 2026-07-25).
-                    if let feature = featured {
-                        heroCard(feature)
-                            .id(feature.no)
-                            .padding(.horizontal, 18).padding(.top, 14)
-                            .transition(reduceMotion ? .opacity :
-                                .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
-                                            removal: .opacity))
-                        routeCard(feature)
-                            .padding(.horizontal, 18).padding(.top, 10)
-
+                    if featured != nil {
+                        // The route card used to sit here, between the stop
+                        // card and the list, showing whichever service was
+                        // soonest. It answered a question nobody asks at this
+                        // point — you look for A BUS first — so it moved into
+                        // that bus's sheet, where the route is what you came
+                        // for (owner 2026-07-26).
                         allServicesSection
-                            .padding(.top, 18)
+                            .padding(.top, 14)
                     } else {
                         heroPlaceholder.padding(.horizontal, 18).padding(.top, 14)
                     }
@@ -137,6 +138,16 @@ struct WSBusStopView: View {
         }
         .sensoryFeedback(.impact(weight: .light), trigger: isPinned)
         .sensoryFeedback(.success, trigger: refreshTick)
+        // Medium detent first: the board answers the question without hiding
+        // the list it came from; drag up for the rest.
+        .sheet(item: Binding(get: { sheetNo.map(WSSheetService.init) },
+                             set: { sheetNo = $0?.id
+                                    if $0 == nil { routeExpanded = false } })) { item in
+            serviceSheet(item.id)
+                .presentationDetents([.medium, .large], selection: $sheetDetent)
+                .presentationDragIndicator(.visible)
+                .presentationBackground(SoftBlue.bg)
+        }
         .animation(reduceMotion ? nil : SoftMotion.flow, value: featuredNo)
         .onAppear {
             if !seededInitial {
@@ -201,13 +212,53 @@ struct WSBusStopView: View {
             HStack(spacing: 0) {
                 factCell(icon: "number", value: code, label: "Stop")
                 factDivider
-                factCell(icon: "figure.walk",
-                         value: walkMinutes.map { "\($0) min" } ?? "—", label: "Walk")
+                factCell(icon: "figure.walk", value: walkValue, label: "Walk")
                 factDivider
-                factCell(icon: "location",
-                         value: distanceM.map { fmtDistance($0) } ?? "—", label: "Away")
+                factCell(icon: "location", value: distanceValue, label: "Away")
             }
             .padding(.vertical, 12)
+
+            // Directions. The "Walk here" action existed only inside the
+            // arrivals EMPTY state, so on a normal stop — the 99% case — there
+            // was no way to navigate to it at all (owner 2026-07-26). It
+            // belongs here: the card already answers "how far", and this is
+            // the action that follows from that answer. Same full-width
+            // row-with-a-chevron pattern as the interchange below it, because
+            // both mean "this takes you somewhere else".
+            // A real BUTTON, not a sentence with a chevron (owner 2026-07-26:
+            // "don't put a string of text and call it a day"). Filled accent
+            // capsule, white ink, the direction arrow in its own translucent
+            // tile, and the walk time carried inside the button so the action
+            // states its own cost. This is the card's one action, so it gets
+            // the card's one piece of solid colour.
+            Button(action: openDirections) {
+                HStack(spacing: 10) {
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.22),
+                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Walk here")
+                            .font(ws.sans(14, weight: .bold))
+                        Text(walkMinutes.map { "\($0) min · Apple Maps" } ?? "Apple Maps")
+                            .font(ws.sans(11, weight: .medium)).opacity(0.85)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .opacity(0.9)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(SoftBlue.blue,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(SoftPressStyle())
+            .padding(.horizontal, 12).padding(.bottom, 12)
+            .accessibilityLabel("Walk here — directions to this stop in Apple Maps")
 
             if let ic = interchange {
                 SoftRowDivider(inset: 0)
@@ -264,20 +315,35 @@ struct WSBusStopView: View {
             .frame(width: 1, height: 30)
     }
 
-    /// Straight-line metres to this stop; nil without a fix, when you're
-    /// basically AT the stop (<50 m — "26m away" is noise, owner 2026-07-24),
-    /// or beyond ~50 km, where "away" stops being navigation information.
+    /// Straight-line metres to this stop; nil only when we genuinely can't
+    /// say — no fix, or beyond ~50 km, where "away" stops being navigation
+    /// information.
+    ///
+    /// The old <50 m cut-off is gone for the fact card (owner 2026-07-26:
+    /// "if the distance is super near, don't put Walk — put the distance in
+    /// metres and time to walk there"). Suppressing the number when you're
+    /// close was exactly backwards: near the stop is when the metres matter
+    /// most, and a card built to hold three facts shouldn't blank two of them
+    /// at the moment they're most relevant. `distanceLabel` — the floating
+    /// caption the 50 m rule was actually written for — keeps its own cut-off
+    /// below.
     private var distanceM: Int? {
         guard let loc = location.location, let stop = store.stopByCode[code] else { return nil }
         let m = Int(haversine(loc.coordinate.latitude, loc.coordinate.longitude,
                               stop.Latitude, stop.Longitude).rounded())
-        return (m > 50 && m <= 50_000) ? m : nil
+        return m <= 50_000 ? m : nil
     }
 
     /// Walk minutes at ~80 m/min — the same rate Nearby and Saved use.
     private var walkMinutes: Int? {
         distanceM.map { max(1, Int((Double($0) / 80).rounded())) }
     }
+
+    // With the 50 m suppression lifted these are real numbers whenever there
+    // is a fix at all — including, and especially, when you're standing at
+    // the stop. "—" now means one thing only: we genuinely don't know.
+    private var walkValue: String { walkMinutes.map { "\($0) min" } ?? "—" }
+    private var distanceValue: String { distanceM.map(fmtDistance) ?? "—" }
 
     private var distanceLabel: String? {
         guard let loc = location.location, let stop = store.stopByCode[code] else { return nil }
@@ -298,101 +364,160 @@ struct WSBusStopView: View {
         else { m.pins.append(Pin(code: code, nickname: "")) }
     }
 
-    // MARK: - Hero card
+    // MARK: - Service sheet
 
+    /// One bus, in depth — the sheet a row tap opens.
+    ///
+    /// This is the old hero card's departure board, moved rather than lost:
+    /// the board itself was good, it just shouldn't have been sitting at the
+    /// top of the screen permanently promoting one service (owner
+    /// 2026-07-26). As a bottom sheet it appears only when asked for, keeps
+    /// the list underneath in place, and is dismissed by the gesture every
+    /// iOS user already knows.
     @ViewBuilder
-    private func heroCard(_ svc: Service) -> some View {
-        let entries = pillEntries(svc)
-        let alerted = m.alert(kind: .arrival, busNo: svc.no, stopCode: code) != nil
+    private func serviceSheet(_ no: String) -> some View {
+        if let svc = (services ?? []).first(where: { $0.no == no }) {
+            let entries = pillEntries(svc)
+            let alerted = m.alert(kind: .arrival, busNo: svc.no, stopCode: code) != nil
 
-        // The screen's ONE gradient hero — deliberately a DIFFERENT design
-        // from Nearby's ring hero (owner 2026-07-25): Nearby is the 0.5-s
-        // glance, so it gets the countdown ring; here the user has committed
-        // to a stop and wants DEPTH, so the hero is a three-slot departure
-        // board — each incoming bus with its own big time and its own crowd
-        // word (data the ring design threw away into a "then 3, 7 min" line).
-        VStack(alignment: .leading, spacing: 14) {
-            // Row 1: number tile · destination · Alert-me pill
-            HStack(alignment: .center, spacing: 12) {
-                Text(svc.no)
-                    .font(ws.sans(19, weight: .heavy)).foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .frame(width: 46, height: 46)
-                    .background(Color.white.opacity(0.22),
-                                in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            ScrollView {
+                // Breathing room throughout (owner 2026-07-26): identity,
+                // board and actions were sitting shoulder to shoulder. 20pt
+                // between blocks, 18pt card padding, 12pt between the board's
+                // own rows — one step up from the in-page cards, because a
+                // sheet is read at arm's length with nothing else on screen.
+                VStack(alignment: .leading, spacing: 20) {
+                    // Row 1: number tile · destination · Alert-me pill
+                    HStack(alignment: .center, spacing: 12) {
+                        Text(svc.no)
+                            .font(ws.sans(19, weight: .heavy)).foregroundStyle(.white)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .frame(width: 46, height: 46)
+                            .background(Color.white.opacity(0.22),
+                                        in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("to \(svc.dest)")
+                                .font(ws.sans(14, weight: .bold)).lineLimit(1)
+                            let road = store.roadName(code)
+                            if !road.isEmpty {
+                                Text("via \(road)").font(ws.sans(11)).opacity(0.85).lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 6)
+                        // One tap arms/disarms — no confirm sheet in between;
+                        // the pill's state flip + haptic ARE the feedback.
+                        alertPill(alerted: alerted) {
+                            _ = m.toggleArrivalAlert(busNo: svc.no, stopCode: code,
+                                                     stopName: store.stopName(code), dest: svc.dest)
+                        }
+                    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("to \(svc.dest)")
-                        .font(ws.sans(14, weight: .bold))
-                        .lineLimit(1)
-                    let road = store.roadName(code)
-                    if !road.isEmpty {
-                        Text("via \(road)").font(ws.sans(11)).opacity(0.85).lineLimit(1)
+                    // Row 2: NEXT / THEN / LATER. Every slot uses the same type
+                    // sizes so labels, times and crowd chips each sit on one
+                    // line across the board; NEXT is emphasised by opacity, not
+                    // by being a size bigger.
+                    let slots = Array(entries.prefix(3))
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(slots.enumerated()), id: \.offset) { i, entry in
+                            if i > 0 { boardDivider }
+                            VStack(alignment: .leading, spacing: 9) {
+                                Text(i == 0 ? "NEXT" : i == 1 ? "THEN" : "LATER")
+                                    .font(ws.sans(10, weight: .bold)).kerning(0.6)
+                                    .opacity(i == 0 ? 0.85 : 0.6)
+                                boardTime(entry.eta.big)
+                                    .contentTransition(.numericText(countsDown: true))
+                                    .opacity(i == 0 ? 1 : 0.88)
+                                    .softArrivalPulse(i == 0 && entry.eta.big == "Arr")
+                                crowdChip(entry.load)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.trailing, i == slots.count - 1 ? 0 : 10)
+                            .padding(.leading, i == 0 ? 0 : 16)
+                        }
+                        // Only ONE bus timed: say so rather than leaving two
+                        // dead columns of gradient. LTA simply has nothing more.
+                        if slots.count == 1 {
+                            boardDivider
+                            Text("No later bus timed yet")
+                                .font(ws.sans(12, weight: .medium)).opacity(0.75)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.leading, 14)
+                        }
                     }
                 }
-                Spacer(minLength: 6)
+                .foregroundStyle(.white)
+                .padding(18)
+                .background(SoftBlue.heroGradient,
+                            in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .padding(.horizontal, 18).padding(.top, 14)
 
-                // One tap arms/disarms — no confirm sheet in between (owner
-                // 2026-07-25); the pill's state flip + haptic ARE the feedback.
-                alertPill(alerted: alerted) {
-                    _ = m.toggleArrivalAlert(busNo: svc.no, stopCode: code,
-                                             stopName: store.stopName(code), dest: svc.dest)
-                }
-            }
-
-            // Row 2: the departure board. Three equal slots — NEXT / THEN /
-            // LATER — separated by hairlines; each slot is time + that bus's
-            // own crowd word (honest "—" when LTA sends no occupancy).
-            //
-            // Ordinals ("2ND", "3RD") were dropped (owner 2026-07-25): stacked
-            // over a bare "Arr" and a bare "Seats" they read as one confusing
-            // three-word column. Now the label is plain sequence language, the
-            // time slot always carries a value the eye can size ("Now" beats
-            // the "Arr" abbreviation), and crowd is demoted onto its own chip
-            // — gauge first, word second — so it can't be mistaken for part of
-            // the number stack.
-            // Alignment (owner 2026-07-25, "why is the items on the card not
-            // aligned"): every slot uses the SAME type sizes, so the labels,
-            // the times and the crowd chips each sit on one line across the
-            // board. NEXT is emphasised by full opacity and its own weight,
-            // never by being a size bigger — a bigger first column threw all
-            // three rows out of alignment. Slot columns share the width
-            // equally, so the dividers land at fixed thirds/halves.
-            let slots = Array(entries.prefix(3))
-            HStack(alignment: .top, spacing: 0) {
-                ForEach(Array(slots.enumerated()), id: \.offset) { i, entry in
-                    if i > 0 { boardDivider }
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(i == 0 ? "NEXT" : i == 1 ? "THEN" : "LATER")
-                            .font(ws.sans(10, weight: .bold)).kerning(0.6)
-                            .opacity(i == 0 ? 0.85 : 0.6)
-                        boardTime(entry.eta.big)
-                            .contentTransition(.numericText(countsDown: true))
-                            .opacity(i == 0 ? (dataPulse ? 0.5 : 1) : 0.88)
-                        crowdChip(entry.load)
+                // Actions for THIS bus. The route opens BEHIND the sheet so
+                // the timeline gets the full screen rather than half of it.
+                // Favouriting lives here now that the rows no longer carry a
+                // context menu (see ServiceRow).
+                VStack(spacing: 0) {
+                    Button {
+                        let expand = !routeExpanded
+                        if !expand { showPreviousStops = false }
+                        if reduceMotion { routeExpanded = expand }
+                        else { withAnimation(SoftMotion.flow) { routeExpanded = expand } }
+                        if expand {
+                            featuredNo = svc.no
+                            sheetDetent = .large   // the timeline needs the room
+                            Task { await loadRoute(for: svc.no) }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            WSIcon(glyph: .map, size: 14, color: SoftBlue.blue)
+                            Text(routeExpanded ? routeToggleTitle(svc) : "View route")
+                                .font(ws.sans(14, weight: .semibold))
+                                .foregroundStyle(SoftBlue.ink)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Image(systemName: routeExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(SoftBlue.blue)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 16)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, i == 0 ? 0 : 14)
+                    .buttonStyle(SoftPressStyle())
+
+                    // The route opens HERE, under the bus it belongs to,
+                    // rather than on a separate card back on the stop screen.
+                    if routeExpanded {
+                        routeTimeline(for: svc.no)
+                            .padding(.horizontal, 16).padding(.bottom, 14)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .move(edge: .top)),
+                                removal: .opacity))
+                    }
+
+                    SoftRowDivider(inset: 16)
+
+                    let fav = m.isFavService(no: svc.no, stop: code)
+                    Button { m.toggleFavService(no: svc.no, stop: code) } label: {
+                        HStack(spacing: 8) {
+                            WSIcon(glyph: fav ? .bookmarkFilled : .bookmark, size: 14,
+                                   color: SoftBlue.blue)
+                            Text(fav ? "Saved to Favourites" : "Favourite bus \(svc.no)")
+                                .font(ws.sans(14, weight: .semibold))
+                                .foregroundStyle(SoftBlue.ink)
+                            Spacer(minLength: 8)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 16)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(SoftPressStyle())
                 }
-                // Only ONE bus timed: say so rather than leaving two dead
-                // columns of gradient (owner 2026-07-25: "I can't even see
-                // the other information"). LTA simply has nothing further.
-                if slots.count == 1 {
-                    boardDivider
-                    Text("No later bus timed yet")
-                        .font(ws.sans(12, weight: .medium)).opacity(0.75)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 14)
-                }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .softCard(radius: 16)
+                .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 18)
             }
+            .background(SoftBlue.bg)
+            .sensoryFeedback(.success, trigger: alerted)
         }
-        .foregroundStyle(.white)
-        .padding(16)
-        .background(SoftBlue.heroGradient,
-                    in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: SoftBlue.blue.opacity(0.30), radius: 13, y: 8)
-        .sensoryFeedback(.success, trigger: alerted)
     }
 
     /// Hairline between board slots.
@@ -403,9 +528,9 @@ struct WSBusStopView: View {
     }
 
     /// Board slot time: heavy numeral + small "min" unit, ONE size for every
-    /// slot so the three times share a baseline. The arrived state prints
-    /// "Now" rather than the "Arr" abbreviation — in a stacked slot "Arr" read
-    /// as a word in a column of words, not as a time. "—" stands alone.
+    /// slot so the three times share a baseline. "Now", not the "Arr"
+    /// abbreviation — in a stacked slot "Arr" read as a word in a column of
+    /// words, not as a time. "—" stands alone.
     private func boardTime(_ big: String) -> Text {
         guard big != "Arr" else {
             return Text("Now").font(ws.sans(27, weight: .heavy))
@@ -416,11 +541,8 @@ struct WSBusStopView: View {
     }
 
     /// Crowd for one board slot: a 3-segment gauge plus the word, on a tinted
-    /// capsule. The chip is the thing that separates crowd from the time above
-    /// it — three bare "Seats" words stacked under three numbers read as a
-    /// second, meaningless row of data (owner 2026-07-25). No occupancy from
-    /// LTA prints "No data" rather than a bare dash, so the empty gauge is
-    /// never mistaken for "empty bus".
+    /// capsule. No occupancy from LTA prints "No data" rather than a bare
+    /// dash, so an empty gauge is never mistaken for "empty bus".
     @ViewBuilder
     private func crowdChip(_ load: Load?) -> some View {
         HStack(spacing: 5) {
@@ -437,52 +559,44 @@ struct WSBusStopView: View {
                 .lineLimit(1).minimumScaleFactor(0.8)
         }
         .padding(.horizontal, 7).padding(.vertical, 3)
-        .background(Color.white.opacity(0.16),
-                    in: Capsule(style: .continuous))
+        .background(Color.white.opacity(0.16), in: Capsule(style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(load.map { "Crowd: \($0.wsWord)" } ?? "Crowd unknown")
     }
 
-    /// Route disclosure — its own white card below the hero (the timeline
-    /// inside the gradient card was too heavy for the 4b hero).
-    @ViewBuilder
-    private func routeCard(_ svc: Service) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                let expand = !routeExpanded
-                if !expand { showPreviousStops = false }   // fresh view next open
-                if reduceMotion { routeExpanded = expand } else {
-                    withAnimation(SoftMotion.flow) { routeExpanded = expand }
-                }
-                if expand {
-                    // Pin the hero on this service while the route is open —
-                    // the auto "soonest" swap used to switch services mid-
-                    // scroll and flash "Loading route…" (owner-reported).
-                    featuredNo = svc.no
-                    Task { await loadRoute(for: svc.no) }
-                }
-            } label: {
-                HStack {
-                    Text(routeToggleTitle(svc))
-                        .font(ws.sans(13, weight: .semibold)).foregroundStyle(SoftBlue.ink)
-                    Spacer()
-                    Text(routeExpanded ? "Hide route ▴" : "View route ▾")
-                        .font(ws.sans(12, weight: .semibold)).foregroundStyle(SoftBlue.blue)
-                }
-                .contentShape(Rectangle())
+    /// Arm/disarm the arrival alert. Solid white capsule when armed (maximum
+    /// contrast on the gradient), translucent when resting.
+    private func alertPill(alerted: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: alerted ? "bell.fill" : "bell")
+                    .font(.system(size: 10, weight: .bold))
+                Text(alerted ? "Alert on" : "Alert me")
+                    .font(ws.sans(11.5, weight: .bold))
             }
-            .buttonStyle(SoftPressStyle())
-
-            if routeExpanded {
-                routeTimeline(for: svc.no)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .top)),
-                        removal: .opacity))
-            }
+            .foregroundStyle(alerted ? SoftBlue.blue : .white)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(alerted ? Color.white : Color.white.opacity(0.22), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(alerted ? 0 : 0.45), lineWidth: 1))
         }
-        .padding(16)
-        .softCard()
+        .buttonStyle(SoftPressStyle())
     }
+
+    // MARK: - (hero card removed)
+    //
+    // The gradient "featured bus" card — one service with its NEXT / THEN /
+    // LATER board, crowd chips and the Alert-me pill — was removed on
+    // 2026-07-26 (owner). The stop screen now goes header → route → ALL
+    // SERVICES, where every service already carries the same ETA + crowd,
+    // rather than promoting one of them into a card twice the height.
+    //
+    // Arrival alerts did NOT go with it: each ALL SERVICES row still arms one
+    // by swipe (`notifyAction`) or long-press context menu.
+
+    // `routeCard` (the standalone route disclosure that sat between the stop
+    // card and All services) was DELETED 2026-07-26 — the route now lives in
+    // the bus's own sheet. `routeTimeline` / `routeToggleTitle` stayed: the
+    // sheet uses them.
 
     /// The stop's ONE empty / loading / error state.
     ///
@@ -549,7 +663,7 @@ struct WSBusStopView: View {
                     ForEach(Array(stopWindows.enumerated()), id: \.offset) { i, row in
                         let pair = todaysPair(row.window)
                         HStack(spacing: 10) {
-                            SoftServiceTile(no: row.service, size: 12)
+                            SoftServiceTile(no: row.service, size: 12, width: 50)
                             Spacer(minLength: 8)
                             // Fixed-width columns so the times line up down the
                             // list rather than drifting with each label.
@@ -659,24 +773,6 @@ struct WSBusStopView: View {
         item.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking
         ])
-    }
-
-    /// Sits ON the gradient hero: armed = solid white capsule with blue text
-    /// (maximum contrast against the gradient), resting = translucent white.
-    private func alertPill(alerted: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: alerted ? "bell.fill" : "bell")
-                    .font(.system(size: 10, weight: .bold))
-                Text(alerted ? "Alert on" : "Alert me")
-                    .font(ws.sans(11.5, weight: .bold))
-            }
-            .foregroundStyle(alerted ? SoftBlue.blue : .white)
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(alerted ? Color.white : Color.white.opacity(0.22), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(alerted ? 0 : 0.45), lineWidth: 1))
-        }
-        .buttonStyle(SoftPressStyle())
     }
 
 
@@ -914,7 +1010,10 @@ struct WSBusStopView: View {
     @ViewBuilder private var allServicesSection: some View {
         switch store.arrivals[code] {
         case .loaded(let all):
-            let rest = all.filter { $0.no != featured?.no }
+            // EVERY service, including the soonest. It used to be filtered out
+            // because the hero card was already showing it; with the hero gone
+            // that filter silently hid the most useful bus at the stop.
+            let rest = all
             if !rest.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("All services")
@@ -924,15 +1023,25 @@ struct WSBusStopView: View {
                         ForEach(Array(rest.enumerated()), id: \.element.id) { i, svc in
                             ServiceRow(svc: svc, code: code,
                                        entries: pillEntries(svc),
+                                       // Tapping a row opens that bus in a
+                                       // bottom sheet. It used to promote the
+                                       // service into the hero card — with the
+                                       // hero removed the tap changed something
+                                       // above the fold and read as doing
+                                       // nothing at all (owner 2026-07-26).
                                        onPromote: {
-                                           routeExpanded = false   // stale route belongs to the old hero
+                                           routeExpanded = false
                                            showPreviousStops = false
-                                           if reduceMotion { featuredNo = svc.no }
-                                           else { withAnimation(SoftMotion.flow) { featuredNo = svc.no } }
+                                           sheetDetent = .medium
+                                           sheetNo = svc.no
                                        })
                             if i < rest.count - 1 { SoftRowDivider(inset: 64) }
                         }
                     }
+                    // Clip first: the rows draw their own opaque backgrounds,
+                    // so without this the top/bottom row's square corners sit
+                    // proud of the card's rounded ones.
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .softCard(radius: 16)
                     .padding(.horizontal, 18)
                 }
@@ -1025,20 +1134,13 @@ private struct ServiceRow: View {
                         onPromote()
                     }
                 }
-                .contextMenu {
-                    Button {
-                        _ = m.toggleArrivalAlert(busNo: svc.no, stopCode: code,
-                                                 stopName: store.stopName(code), dest: svc.dest)
-                    } label: {
-                        Label(alerted ? "Cancel arrival alert" : "Alert me 1 stop before",
-                              systemImage: alerted ? "bell.slash" : "bell")
-                    }
-                    let fav = m.isFavService(no: svc.no, stop: code)
-                    Button { m.toggleFavService(no: svc.no, stop: code) } label: {
-                        Label(fav ? "Unfavourite bus \(svc.no)" : "Favourite bus \(svc.no)",
-                              systemImage: fav ? "star.slash" : "star")
-                    }
-                }
+                // NO context menu on these rows (owner 2026-07-26, twice).
+                // A `.contextMenu` outside a List gets its own rounded,
+                // shadowed platter at rest, so every row inside this flush
+                // list showed rounded "cut outs" at its edges — setting an
+                // explicit `.contextMenuPreview` shape did not suppress it.
+                // Both of its actions have better homes: Notify is the swipe
+                // tray, Favourite is in the row's sheet.
         }
         .clipped()
     }
@@ -1072,7 +1174,11 @@ private struct ServiceRow: View {
         // it's now a bell badge, the same glyph the alert controls use.
         HStack(spacing: 12) {
             ZStack(alignment: .topTrailing) {
-                SoftServiceTile(no: svc.no, size: 14)
+                // Fixed width — every row's tile is identical, so the
+                // destination and crowd word below it start on one line down
+                // the whole list. 58pt holds the longest SG service ("961M")
+                // at full size; anything longer scales inside the tile.
+                SoftServiceTile(no: svc.no, size: 14, width: 58)
                 if alerted {
                     // Armed-alert badge — solid blue circle + white bell
                     // (spec porting table; replaces the mint bell badge).
@@ -1097,9 +1203,14 @@ private struct ServiceRow: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 let big = entries.first?.eta.big ?? "—"
-                Text(big == "Arr" || big == "—" ? big : "\(big) min")
-                    .font(ws.sans(17, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(SoftBlue.ink)
+                let arriving = big == "Arr"
+                // "Now", not "Arr" — the same word the hero and the pills use,
+                // so one state has one name app-wide. Accent ink + heavier
+                // weight are the row-level tell; the pulsing chip stays on the
+                // hero, or a busy stop would flicker in three places at once.
+                Text(arriving ? "Now" : big == "—" ? big : "\(big) min")
+                    .font(ws.sans(17, weight: arriving ? .heavy : .bold)).monospacedDigit()
+                    .foregroundStyle(arriving ? SoftBlue.chipInk : SoftBlue.ink)
                     .contentTransition(.numericText())
                 if !later.isEmpty {
                     Text("then \(later.joined(separator: ", ")) min")
@@ -1196,3 +1307,6 @@ private struct WSHorizontalPan: UIGestureRecognizerRepresentable {
         }
     }
 }
+
+/// Identifiable wrapper so a service number can drive `.sheet(item:)`.
+private struct WSSheetService: Identifiable { let id: String }

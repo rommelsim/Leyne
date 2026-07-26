@@ -84,6 +84,11 @@ struct WSRoot: View {
             .badge(m.unseenAlertCount)
         }
         .tint(SoftBlue.blue)
+        // The TabView's own container background is the system's (white in
+        // light mode) and sits ABOVE RootView's ground, so any frame where a
+        // tab isn't painting its own background revealed white. Tint the
+        // container itself — belt and braces with WSTabEntrance's ground.
+        .background(SoftBlue.bg.ignoresSafeArea())
         .sensoryFeedback(.selection, trigger: tab)
         .environment(\.ws, ws)
         .sheet(isPresented: $showSearch) {

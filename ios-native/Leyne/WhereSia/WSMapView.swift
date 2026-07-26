@@ -47,12 +47,27 @@ struct WSMapView: View {
     @State private var camera: MapCameraPosition = .region(Self.islandRegion)
     @State private var region: MKCoordinateRegion = Self.islandRegion
     @State private var selection: WSMapSelection? = nil
+    /// The map's own rotation, so the user arrow can point at true north
+    /// even after the user twists the map.
+    @State private var mapHeading: Double = 0
+    /// The open-the-map zoom (wide → your street) runs exactly once per visit.
+    @State private var didFlyIn = false
 
     /// Whole-island fallback when location is off — the map is still a
     /// browse surface without a blue dot.
     private static let islandRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 1.3421, longitude: 103.8198),
         span: MKCoordinateSpan(latitudeDelta: 0.30, longitudeDelta: 0.42))
+
+    /// Where the open-the-map flight lands: ~450 m across, i.e. street level —
+    /// close enough to read individual stop signs and station exits (owner
+    /// reference screenshot, 2026-07-26), never tighter than that.
+    private static let arrivalSpan = MKCoordinateSpan(latitudeDelta: 0.004,
+                                                      longitudeDelta: 0.004)
+    /// Where it takes off from — high enough that the descent reads as "this
+    /// is where you are on the island", not as a jump cut.
+    private static let departureSpan = MKCoordinateSpan(latitudeDelta: 0.075,
+                                                        longitudeDelta: 0.075)
 
     /// Above this span, per-stop markers would be confetti — bus stops hide
     /// behind a "zoom in" hint and only the rail network stays visible.
@@ -93,6 +108,9 @@ struct WSMapView: View {
         .navigationTitle(areaTitle)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: bootstrap)
+        .onDisappear { location.stopHeading() }
+        // First fix can land after the screen does; the entrance waits for it.
+        .onChange(of: location.location?.coordinate.latitude) { _, _ in flyToUser() }
         // The freshness window inside ensureArrivals turns the per-second
         // tick into an actual refetch ~every 25s for the open card.
         .onChange(of: m.tick) { _, _ in
@@ -126,7 +144,18 @@ struct WSMapView: View {
         let stops = visibleStops
         let compact = region.span.latitudeDelta >= Self.bulletSpan
         return Map(position: $camera, scope: mapScope) {
-            UserAnnotation()
+            // Custom user mark instead of MapKit's plain dot (owner
+            // 2026-07-26): a dot says where you are, an arrow also says which
+            // way you are facing — which is the half of the question that
+            // decides whether the stop is in front of you or behind you. Falls
+            // back to a dot while the compass has nothing to say.
+            if let here = location.location?.coordinate {
+                Annotation("You", coordinate: here, anchor: .center) {
+                    WSUserMark(heading: location.headingDegrees,
+                               mapHeading: mapHeading)
+                }
+                .annotationTitles(.hidden)
+            }
 
             ForEach(MrtGeo.all) { st in
                 Annotation(st.name, coordinate: st.coordinate, anchor: .center) {
@@ -198,6 +227,7 @@ struct WSMapView: View {
         .mapControlVisibility(.hidden)
         .onMapCameraChange(frequency: .onEnd) { ctx in
             region = ctx.region
+            mapHeading = ctx.camera.heading
         }
     }
 
@@ -305,11 +335,32 @@ struct WSMapView: View {
 
     private func bootstrap() {
         location.start()
-        if let here = location.location?.coordinate {
-            let r = MKCoordinateRegion(center: here,
-                span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.012))
-            camera = .region(r)
-            region = r
+        location.startHeading()
+        flyToUser()
+    }
+
+    /// The entrance (owner 2026-07-26): open high over your neighbourhood, then
+    /// descend to street level. It is one continuous camera move rather than a
+    /// cut so you can see WHERE you landed — the same trick Maps uses when you
+    /// tap the locate button from a wide view.
+    ///
+    /// If there is no fix yet the flight waits (see `.onChange(of:
+    /// location.location)`) instead of flying to the island fallback and then
+    /// jumping — a wrong first frame is worse than a late one.
+    private func flyToUser() {
+        guard !didFlyIn, let here = location.location?.coordinate else { return }
+        didFlyIn = true
+        let takeoff = MKCoordinateRegion(center: here, span: Self.departureSpan)
+        camera = .region(takeoff)
+        region = takeoff
+        // A beat on the wide frame, so the descent has something to descend
+        // FROM; without it SwiftUI coalesces both regions into one layout pass.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            let landing = MKCoordinateRegion(center: here, span: Self.arrivalSpan)
+            withAnimation(.easeInOut(duration: 1.0)) {
+                camera = .region(landing)
+            }
+            region = landing
         }
     }
 
@@ -397,6 +448,43 @@ struct WSMapView: View {
 
 // MARK: - Markers
 
+/// "You", as a facing arrow. `heading` is degrees clockwise from true north
+/// (nil = no compass fix yet); `mapHeading` is the map's own rotation, so the
+/// arrow keeps pointing at the real world after the user twists the map.
+private struct WSUserMark: View {
+    let heading: Double?
+    let mapHeading: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(SoftBlue.blue.opacity(0.18))
+                .frame(width: 40, height: 40)
+            if let heading {
+                Image(systemName: "location.north.fill")
+                    .font(.system(size: 15, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(SoftBlue.blue, in: Circle())
+                    .overlay(Circle().stroke(.white, lineWidth: 2.5))
+                    .rotationEffect(.degrees(heading - mapHeading))
+                    // No spring: a compass that overshoots reads as drift.
+                    .animation(.easeOut(duration: 0.25), value: heading)
+            } else {
+                // Compass not ready (or unavailable) — fall back to the dot
+                // everyone already knows rather than pointing somewhere wrong.
+                Circle()
+                    .fill(SoftBlue.blue)
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().stroke(.white, lineWidth: 2.5))
+            }
+        }
+        .shadow(color: SoftBlue.shadow, radius: 5, y: 2)
+        .allowsHitTesting(false)
+        .accessibilityLabel("Your location")
+    }
+}
+
 /// Bus-stop dot with a deliberate weight hierarchy (field test 2026-07-24 —
 /// equal-weight dots read as noise): the SELECTED or NEAREST stop is larger
 /// and fully SoftBlue.blue; every other stop is a small, muted dot. The few
@@ -408,20 +496,28 @@ private struct StopMarker: View {
     @Environment(\.ws) private var ws
 
     private var emphasized: Bool { selected || nearest }
-    /// Bus stops are INK, never blue (owner 2026-07-25): MapKit's user-location
-    /// dot is system blue, and a map full of blue dots made "where I am" and
-    /// "a bus stop" the same mark. Blue on this screen now means you.
-    private var dotColor: Color { SoftBlue.ink }
+    /// Bus stops are BLUE and carry the bus-stop sign (owner 2026-07-26). The
+    /// earlier ink dot existed to stay out of the user-location dot's way —
+    /// that clash is gone now that "you" is an arrow, and a stop that looks
+    /// like a stop beats a stop that looks like a generic point.
+    private var tint: Color { SoftBlue.blue }
 
     var body: some View {
         VStack(spacing: 3) {
-            Circle()
-                .fill(dotColor.opacity(emphasized ? 1 : 0.55))
-                .frame(width: emphasized ? 17 : 9, height: emphasized ? 17 : 9)
-                .overlay(Circle().stroke(.white.opacity(emphasized ? 0.9 : 0.6),
-                                          lineWidth: emphasized ? 2 : 1))
-                .shadow(color: SoftBlue.shadow, radius: emphasized ? 6 : 2)
-                .background { if selected { WSPing(color: SoftBlue.ink) } }
+            ZStack {
+                RoundedRectangle(cornerRadius: emphasized ? 7 : 5, style: .continuous)
+                    .fill(tint.opacity(emphasized ? 1 : 0.9))
+                    .frame(width: emphasized ? 24 : 16, height: emphasized ? 24 : 16)
+                    .overlay(RoundedRectangle(cornerRadius: emphasized ? 7 : 5,
+                                              style: .continuous)
+                        .stroke(.white.opacity(emphasized ? 0.95 : 0.75),
+                                lineWidth: emphasized ? 2 : 1.5))
+                    .shadow(color: SoftBlue.shadow, radius: emphasized ? 6 : 2, y: 1)
+                Image(systemName: "bus.fill")
+                    .font(.system(size: emphasized ? 12 : 8.5, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            .background { if selected { WSPing(cornerRadius: 7, color: tint) } }
             if let label {
                 Text(label)
                     .font(ws.sans(9.5, weight: .semibold))
@@ -480,21 +576,29 @@ private struct MrtMarker: View {
                     .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
                     .shadow(color: SoftBlue.shadow, radius: 3, y: 1)
             } else {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(lineColor)
-                    .frame(width: 20, height: 20)
-                    .overlay(
-                        Text("M")
-                            .font(.system(size: 11, weight: .bold))
+                // The station's own code in its own line colour (owner
+                // 2026-07-26) — "EW20" green is the sign hanging in the
+                // station, so it needs no legend. An interchange shows both
+                // codes side by side, exactly as the real signage does.
+                HStack(spacing: 0) {
+                    ForEach(Array(station.codes.prefix(2)), id: \.self) { code in
+                        Text(code)
+                            .font(.system(size: 10, weight: .heavy))
+                            .monospacedDigit()
                             .foregroundStyle(.white)
-                    )
-                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(.white.opacity(selected ? 0.95 : 0.6), lineWidth: selected ? 2 : 1))
-                    .background { if selected { WSPing(cornerRadius: 6, color: lineColor) } }
-                    .shadow(color: SoftBlue.shadow, radius: 4, y: 1)
+                            .padding(.horizontal, 5).padding(.vertical, 3)
+                            .background(WSLine.color(forStationCode: code))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(.white.opacity(selected ? 0.95 : 0.7), lineWidth: selected ? 2 : 1.2))
+                .background { if selected { WSPing(cornerRadius: 6, color: lineColor) } }
+                .shadow(color: SoftBlue.shadow, radius: 4, y: 1)
+                .fixedSize()
             }
         }
-        .frame(width: 34, height: 34)
+        .frame(minWidth: 34, minHeight: 34)
         .contentShape(Rectangle())
     }
 }

@@ -5,8 +5,9 @@
 //
 // Medium (.systemMedium) ONLY — the widget lineup is exactly one widget in
 // one size (owner directive, 2026-07-24). The rich live board: up to three
-// arrival tiles plus an honest "updated Xs/min ago" caption, so the ETAs it
-// DOES show are always paired with how fresh they are.
+// full-width arrival lines (bus · crowd · next · the two after it) plus an
+// honest "updated Xs/min ago" caption, so the ETAs it DOES show are always
+// paired with how fresh they are.
 //
 // The app publishes the nearby stop list to the App Group whenever it gets a
 // fresh location fix (no location is read in the extension); the widget
@@ -15,6 +16,7 @@
 
 import WidgetKit
 import SwiftUI
+import CoreLocation
 
 // ─── Entry ───────────────────────────────────────────────
 struct NearestEntry: TimelineEntry {
@@ -31,7 +33,8 @@ struct NearestEntry: TimelineEntry {
 
 // A representative stop for the gallery preview + redacted placeholder. Only
 // ever shown with `isSample: true`, so its code is never used for navigation.
-private let sampleStop = WNearbyStop(id: "00000", name: "Opp Blk 123", walkMin: 2)
+private let sampleStop = WNearbyStop(id: "00000", name: "Opp Blk 123",
+                                     walkMin: 2, distanceM: 180)
 private let sampleRows: [WLTA.Row] = [.init(id: "48", eta1: 1, eta2: 9, mon1: true, load1: .seats),
                                       .init(id: "93", eta1: 4, eta2: 12, mon1: true, load1: .standing),
                                       .init(id: "17", eta1: 11, eta2: 22, mon1: true, load1: .packed)]
@@ -43,6 +46,38 @@ private func soonestRows(_ rows: [WLTA.Row]) -> [WLTA.Row] {
     Array(rows.filter { $0.eta1 != nil }
         .sorted { ($0.eta1 ?? 999) < ($1.eta1 ?? 999) }
         .prefix(3))
+}
+
+// ─── Which stop is "nearest" ─────────────────────────────
+// Location first, app snapshot second.
+//
+// The widget used to take `loadNearby().first` — the stop the APP last
+// resolved. That only ever changes while Departly is open with a location
+// fix, so travelling somewhere new without launching the app left the widget
+// pinned to the stop you'd left, still refreshing real arrivals for it
+// (owner 2026-07-26). Now the extension resolves the nearest stop from its
+// own fix against the shared directory, and only falls back to the app's
+// snapshot when it has no location (permission off, no fix in time) or the
+// directory hasn't been published yet — i.e. the old behaviour is the floor,
+// never the ceiling.
+
+/// Async path — used by the timeline, where we can afford to wait for a fix.
+private func resolvedStop() async -> WNearbyStop? {
+    if let loc = await WLocator.shared.current() {
+        let index = loadStopIndex()
+        if let nearest = wNearestStop(to: loc, in: index) { return nearest }
+    }
+    return loadNearby().first
+}
+
+/// Synchronous path for `getSnapshot`, which must return fast: use a cached
+/// fix if one is already sitting there, otherwise the app's snapshot.
+private func resolvedStopFast() -> WNearbyStop? {
+    if let loc = WLocator.shared.cachedLocation(maxAge: 600),
+       let nearest = wNearestStop(to: loc, in: loadStopIndex()) {
+        return nearest
+    }
+    return loadNearby().first
 }
 
 // ─── Provider ────────────────────────────────────────────
@@ -59,7 +94,7 @@ struct NearestProvider: TimelineProvider {
     // No network here: snapshots must return fast, so real data appears
     // without rows and the first timeline pass fills them in.
     func getSnapshot(in context: Context, completion: @escaping (NearestEntry) -> Void) {
-        if let real = loadNearby().first {
+        if let real = resolvedStopFast() {
             completion(NearestEntry(date: .now, stop: real))
         } else if context.isPreview {
             completion(NearestEntry(date: .now, stop: sampleStop, rows: sampleRows, isSample: true))
@@ -73,7 +108,7 @@ struct NearestProvider: TimelineProvider {
     // actual cadence); a 30-minute backstop when there's nothing to show.
     func getTimeline(in context: Context, completion: @escaping (Timeline<NearestEntry>) -> Void) {
         Task {
-            let stop = loadNearby().first
+            let stop = await resolvedStop()
             var rows: [WLTA.Row] = []
             if let stop { rows = soonestRows(await WLTA.arrivals(stop: stop.id)) }
             let entry = NearestEntry(date: .now, stop: stop, rows: rows)
@@ -84,7 +119,16 @@ struct NearestProvider: TimelineProvider {
     }
 }
 
-// ─── Medium — live board: header + up to 3 arrival tiles ──
+// ─── Medium — live board: header + up to 3 arrival lines ──
+
+/// "· 2 min walk · 180m". The metres are dropped, not faked, when the entry
+/// came from an older app payload that never carried them.
+private func metaLine(_ stop: WNearbyStop) -> String {
+    var s = "· \(stop.walkMin) min walk"
+    if let m = stop.distanceM { s += " · \(wFmtDistance(m))" }
+    return s
+}
+
 private struct MediumNearestView: View {
     let entry: NearestEntry
 
@@ -104,6 +148,21 @@ private struct MediumNearestView: View {
                         .foregroundStyle(wFg)
                         .lineLimit(1)
                         .layoutPriority(1)
+                    // Walk time AND metres — the other half of "can I still
+                    // catch it", in the app's own order and format (Saved and
+                    // the stop screen both read "N min walk · Xm"). Sits in
+                    // what used to be empty slack between the name and the
+                    // freshness caption.
+                    //
+                    // Lower layout priority than the name and allowed to
+                    // shrink: on a long stop name the metrics give way, the
+                    // identity never truncates.
+                    Text(metaLine(stop))
+                        .font(wSans(10.5, .medium))
+                        .foregroundStyle(wDim)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .layoutPriority(0.5)
                     Spacer(minLength: 6)
                     WUpdatedCaption(date: entry.date)
                 }
@@ -113,9 +172,9 @@ private struct MediumNearestView: View {
                         .font(wSans(12, .medium)).foregroundStyle(wDim)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
-                    // Fills the remaining height so the tiles ARE the card —
-                    // no dead band underneath.
-                    WArrivalTileRow(rows: entry.rows)
+                    // Fills the remaining height so the board IS the card —
+                    // the three lines split it between them, no dead band.
+                    WArrivalBoard(rows: entry.rows)
                         .frame(maxHeight: .infinity)
                 }
             }
