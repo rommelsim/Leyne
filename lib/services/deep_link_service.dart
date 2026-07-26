@@ -172,7 +172,6 @@ class DeepLinkService {
         stopCode: stopCode,
         initialService: busNo,
         onBack: () => nav.pop(),
-        onSeeAll: () {},
       ),
     ));
   }

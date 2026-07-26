@@ -331,12 +331,10 @@ struct WSHomeView: View {
             Task { await store.bootstrap() }
         }
         location.start()
-        // Home renders UNDERNEATH the onboarding overlay (RootView ZStack), so
-        // its onAppear runs on first launch too — requesting here fired the
-        // system location dialog over the WELCOME step, before the primer
-        // (owner-reported; also an App Store 5.1.1(iv) risk). During
-        // onboarding, the location primer owns the request.
-        if location.status == .notDetermined && !m.showOnboarding {
+        // Onboarding (and its location primer) was removed 2026-07-26, so this
+        // is now the app's only location request: Nearby is the screen that
+        // needs it, and it asks the first time the screen appears.
+        if location.status == .notDetermined {
             location.requestPermission()
         }
         if let loc = location.location { store.updateNearby(loc) }

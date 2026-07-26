@@ -9,12 +9,24 @@ import SwiftUI
 // MARK: - Bus load (per-bus occupancy)
 
 extension Load {
-    /// Gauge fill fraction — the ceiling of LTA's 3-level Load. 34 / 67 / 100 %.
-    var wsFraction: CGFloat {
+    /// Gauge fill fraction = how much ROOM IS LEFT, not how full the bus is
+    /// (owner 2026-07-26). A full gauge means "plenty of space"; a nearly
+    /// empty one means "almost none". Inverted from the original occupancy
+    /// reading, where the most packed bus drew the longest bar and so looked
+    /// like the best option at a glance.
+    ///
+    /// Renamed off `wsFraction` deliberately: the number's MEANING flipped, so
+    /// the old name would silently keep reading as "how full" at call sites.
+    /// The MRT `CrowdLevel.wsFraction` is a different quantity — platform
+    /// density, which has no notion of seats — and is unchanged.
+    ///
+    /// ALWAYS render this alongside the word, and NEVER substitute 0 for an
+    /// unknown load: under this reading an empty gauge asserts "no space".
+    var wsSpaceFraction: CGFloat {
         switch self {
-        case .sea: return 0.34
+        case .sea: return 1.0
         case .sda: return 0.67
-        case .lsd: return 1.0
+        case .lsd: return 0.34
         }
     }
     /// How full the bus is, said in full. A bare "Seats" / "Standing" left
@@ -117,11 +129,17 @@ enum WSFmt {
         return "Updated " + clock(date, use24h: use24h)
     }
 
-    /// LTA "HHmm" (e.g. "0530", past-midnight "2512") → "05:30" / "01:12".
-    static func firstLast(_ raw: String?) -> String {
+    /// LTA "HHmm" (e.g. "0530", past-midnight "2512") → "05:30" / "5:30 AM".
+    /// Honours the 12/24-hour preference like every other clock in the app —
+    /// a first/last card stuck on 24h while the boards read "5:30 AM" reads
+    /// as two different apps.
+    static func firstLast(_ raw: String?, use24h: Bool) -> String {
         guard let raw, raw.count == 4, let n = Int(raw) else { return "—" }
         let h = (n / 100) % 24
         let m = n % 100
-        return String(format: "%02d:%02d", h, m)
+        if use24h { return String(format: "%02d:%02d", h, m) }
+        let suffix = h < 12 ? "AM" : "PM"
+        let h12 = h % 12 == 0 ? 12 : h % 12
+        return String(format: "%d:%02d %@", h12, m, suffix)
     }
 }

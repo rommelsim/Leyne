@@ -175,13 +175,6 @@ final class AppModel {
         set { Store.d.set(newValue, forKey: "leyne.haptic") }
     }
 
-    // Onboarding completion. Persisted under the Flutter v2.0 key so an
-    // upgrade from Flutter → native preserves the user's onboarding flag.
-    var onboarded: Bool {
-        get { Store.bool("leyne.onboardingDone", default: false) }
-        set { Store.d.set(newValue, forKey: "leyne.onboardingDone") }
-    }
-
     // 24-hour clock display in the LIVE header. Defaults to true (SG locale).
     // 12-hour clock app-wide; no in-app toggle (the option was removed).
     var use24h: Bool {
@@ -301,7 +294,6 @@ final class AppModel {
     // onto Nearby after the system launch screen. The flag stays because the
     // ad managers still consult it as a "UI not ready" guard.
     var launching = false
-    var showOnboarding = false
     var showAdd = false
     var searchOpen = false
     var openCard: CardModel? = nil
@@ -385,7 +377,6 @@ final class AppModel {
                 self?.onTick()
             }
         }
-        showOnboarding = !onboarded
         if let s = UserDefaults.standard.string(forKey: "leyne.startTab"),
            let initial = AppTab(rawValue: s), initial != .search { tab = initial }
         syncFeedback()
@@ -875,19 +866,11 @@ final class AppModel {
         }
     }
 
-    func finishOnboarding() {
-        onboarded = true
-        showOnboarding = false
-        AnalyticsService.log(.onboardingCompleted)
-        // Pin the running version so the What's New screen doesn't fire on
-        // the user's very next launch for the version they just installed.
-        if let v = currentVersion { lastSeenVersion = v }
-    }
     func syncFeedback() { Feedback.shared.config(haptic: haptic) }
 
     // ─── Version tracking ────────────────────────────────────
     // (The once-per-update What's New screen was removed 2026-07-24 — owner
-    // call. `lastSeenVersion` persistence stays: `finishOnboarding` pins it,
+    // call. `lastSeenVersion` persistence stays: `setCurrentVersion` pins it,
     // and release notes live in CHANGELOG.md / the stores.)
 
     /// Set the running app's marketing version. Call once at boot from
@@ -896,12 +879,6 @@ final class AppModel {
         if currentVersion == v { return }
         currentVersion = v
         lastSeenVersion = v
-    }
-
-    /// Replay onboarding from Settings.
-    func resetOnboarding() {
-        onboarded = false
-        showOnboarding = true
     }
 
     /// Arrival-alert ids we've seen with the bus still inbound. Gate for
@@ -1313,10 +1290,20 @@ final class AppModel {
     ///     gap should not kill the live view. Teardown is owned by the miss-counter
     ///     / arrival-finale / removeAlert.
     private func autoTrackSoonestAlert() {
+        // Every exit below logs its reason. This method decides whether the
+        // lock screen gets a Live Activity at all, and it had six silent
+        // early-returns — when the owner reported "nothing happens when I
+        // press Alert me" there was no way to tell WHICH gate closed, so the
+        // same ground got re-guessed repeatedly. Capture with:
+        //   log stream --predicate 'subsystem == "com.leyne.Leyne"' --info
+        //
         // Needs notifications enabled and authorized.
         guard notificationsEnabled,
               notificationAuth == .authorized || notificationAuth == .provisional
-        else { return }
+        else {
+            laLog.notice("LA skip: notifications enabled=\(self.notificationsEnabled) auth=\(self.notificationAuth.rawValue) (0=notDetermined 1=denied 2=authorized 3=provisional)")
+            return
+        }
 
         // If the current tracked bus is at ETA ≤ 0 but still in the live feed,
         // it's in the arriving-now finale. Don't preempt it.
@@ -1328,6 +1315,7 @@ final class AppModel {
                 let svcs = liveServices(code: currentStop, tracked: [currentBus])
                 if let s = svcs.first, s.etaSec <= 0 {
                     // Bus is here / just past — leave the finale running.
+                    laLog.notice("LA skip: \(currentBus)@\(currentStop) in arriving-now finale")
                     return
                 }
             }
@@ -1336,9 +1324,19 @@ final class AppModel {
         // Scan all arrival alerts for the one with the smallest ETA > 0.
         var soonestAlert: BusAlert? = nil
         var soonestEta = Int.max
-        for a in alerts where a.kind == .arrival && a.enabled {
+        let armed = alerts.filter { $0.kind == .arrival && $0.enabled }
+        for a in armed {
             let svcs = liveServices(code: a.stopCode, tracked: [a.busNo])
-            guard let s = svcs.first, s.etaSec > 0 else { continue }
+            guard let s = svcs.first else {
+                // The alerted service isn't in the stop's live feed at all —
+                // arrivals not fetched for this stop yet, or LTA dropped it.
+                laLog.notice("LA skip: \(a.busNo)@\(a.stopCode) not in live feed")
+                continue
+            }
+            guard s.etaSec > 0 else {
+                laLog.notice("LA skip: \(a.busNo)@\(a.stopCode) etaSec=\(s.etaSec) (not > 0)")
+                continue
+            }
             if s.etaSec < soonestEta {
                 soonestEta = s.etaSec
                 soonestAlert = a
@@ -1347,21 +1345,31 @@ final class AppModel {
 
         guard let best = soonestAlert else {
             // No alert with a live ETA — leave whatever is running alone.
+            laLog.notice("LA skip: no armed arrival alert has a live ETA (armed=\(armed.count))")
             return
         }
 
         let desiredKey = Self.liveKey(bus: best.busNo, stopCode: best.stopCode)
         guard liveActivityKey != desiredKey else {
             // Already tracking the right bus — nothing to change.
+            laLog.notice("LA skip: already tracking \(desiredKey)")
             return
         }
 
         // Hand off to the soonest bus.
         let svcs = liveServices(code: best.stopCode, tracked: [best.busNo])
-        guard let s = svcs.first else { return }
+        guard let s = svcs.first else {
+            laLog.error("LA skip: \(best.busNo)@\(best.stopCode) vanished from feed between scan and start")
+            return
+        }
+        laLog.notice("LA starting \(desiredKey) eta=\(soonestEta)s")
         let stopName = best.stopName.isEmpty ? ds.stopName(best.stopCode) : best.stopName
         startLiveActivity(s, stopName: stopName, stopCode: best.stopCode)
     }
+
+    /// Set when a start was requested while the app was not foreground-ACTIVE.
+    /// See `startLiveActivity` for why that request can't simply be made.
+    private var pendingLiveActivityStart = false
 
     func startLiveActivity(_ s: Service, stopName: String, stopCode: String) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -1369,6 +1377,24 @@ final class AppModel {
             laLog.error("LA not enabled (Settings → \(s.no))")
             return
         }
+        // ActivityKit only permits `Activity.request` while the app is
+        // foreground-ACTIVE; anywhere else it throws "Target is not
+        // foreground" (owner-reported 2026-07-26). Two paths reached it in the
+        // wrong state: the retry after `requestAuthorization()` — the system
+        // permission dialog drops the app to `.inactive`, and the continuation
+        // resumes around its dismissal — and the 1 s `tickTask`, which is
+        // never cancelled on backgrounding.
+        //
+        // The 5 s auto-track tick would eventually have retried, but only by
+        // firing a doomed request every 5 s in the meantime, which risks
+        // ActivityKit throttling the ones that WOULD succeed. So the attempt
+        // is parked instead and replayed the moment the app is active again.
+        guard UIApplication.shared.applicationState == .active else {
+            pendingLiveActivityStart = true
+            laLog.notice("LA deferred: app not foreground-active (\(s.no))")
+            return
+        }
+        pendingLiveActivityStart = false
         // Only one Live Activity at a time — replace any other bus's.
         if liveActivity != nil { stopLiveActivity() }
         let attrs = LeyneActivityAttributes(busNo: s.no, dest: s.dest,
@@ -1607,6 +1633,16 @@ final class AppModel {
     /// and the feed has either dropped it or rolled to the following bus.
     /// The real fix is server-driven ActivityKit pushes (needs a backend);
     /// this keeps the lock screen honest the moment the user returns.
+    /// Replays a Live Activity start that ActivityKit refused because the app
+    /// wasn't foreground-active. Called on scenePhase → .active, so the lock
+    /// screen picks up the alert the user just armed instead of waiting for
+    /// the next 5 s auto-track tick.
+    func flushPendingLiveActivityStart() {
+        guard pendingLiveActivityStart else { return }
+        pendingLiveActivityStart = false
+        autoTrackSoonestAlert()
+    }
+
     func nudgeLiveActivityOnForeground() {
         guard let act = liveActivity else { return }
         Task { @MainActor [weak self] in

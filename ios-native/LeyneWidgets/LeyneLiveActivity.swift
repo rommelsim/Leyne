@@ -1,12 +1,12 @@
 // Real iOS Live Activity — lock screen + Dynamic Island.
-// "Soft blue 4b": the lock screen is a light, near-white blurred board (SF,
-// same as the app) with the darker #2E8FE0 blue as the live accent — it marks
-// the LIVE reading and the arrival moment. Those colours apply in
-// `.fullColor` rendering only; see LockScreenView's `renderingMode` note for
-// what happens in the system's accented/vibrant modes. The Dynamic Island always renders on the system's own
-// black chrome regardless of app styling, so its content uses a SEPARATE
-// dark-context pair: white/light-grey copy (wIslandFg/wIslandDim) and the
-// lighter #5CB8F2 accent (wIslandBlue) instead of the lock screen's tokens.
+// Both surfaces are DARK, and both use the same dark-context palette:
+// white/light-grey copy (wIslandFg/wIslandDim) on the lighter #5CB8F2 accent
+// (wIslandBlue). The Dynamic Island is dark because the system's chrome
+// always is; the lock screen is dark because the system re-derives Live
+// Activity colours from luminance in its accented/vibrant rendering modes,
+// and a near-white card has no headroom left to survive that (see
+// LockScreenView's `renderingMode` note). The light #2E8FE0-on-white palette
+// now belongs to the Home Screen widget alone.
 // Palette, fonts and shared atoms (WServiceBadge) come from
 // WidgetShared.swift (same extension target; the app module is unreachable).
 //
@@ -164,8 +164,8 @@ struct LeyneLiveActivity: Widget {
         ActivityConfiguration(for: LeyneActivityAttributes.self) { context in
             LockScreenView(attributes: context.attributes, state: context.state,
                            isStale: context.isStale)
-                .activityBackgroundTint(wBg)
-                .activitySystemActionForegroundColor(wFg)
+                .activityBackgroundTint(wLockBg)
+                .activitySystemActionForegroundColor(wIslandFg)
                 .widgetURL(busURL(context.attributes))
         } dynamicIsland: { context in
             DynamicIsland {
@@ -185,7 +185,10 @@ struct LeyneLiveActivity: Widget {
                             .font(wSans(12.5, .bold))
                             .foregroundStyle(wIslandFg)
                             .lineLimit(1)
-                        Text(context.attributes.stopName)
+                        // "at <stop>", not a bare name: stacked under
+                        // "to <dest>" the two read as two destinations
+                        // (owner, 2026-07-26).
+                        Text("at \(context.attributes.stopName)")
                             .font(wSans(10.5, .medium))
                             .foregroundStyle(wIslandDim)
                             .lineLimit(1)
@@ -308,20 +311,25 @@ private struct LockScreenView: View {
 
     /// The system renders Lock Screen / StandBy Live Activities in one of
     /// three modes. In `.accented` and `.vibrant` it IGNORES our colours and
-    /// re-derives everything from the view's luminance — so the hand-tuned
-    /// light-surface palette (dark ink on near-white) collapses into a flat,
-    /// unreadable wash, which is exactly what the owner photographed on
-    /// 2026-07-25 ("cannot see"). Outside `.fullColor` we hand the system the
-    /// semantic styles it knows how to render instead of fighting it.
+    /// re-derives everything from the view's luminance. The card is therefore
+    /// DARK (see `wLockBg`) and every tier here is light, so the tiers stay
+    /// distinguishable after that re-derivation instead of flattening into
+    /// one wash.
+    ///
+    /// `.secondary` is deliberately NOT used outside `.fullColor`: in vibrant
+    /// rendering it lands at an alpha low enough to disappear against the
+    /// wallpaper, which is how the countdown itself went missing (owner,
+    /// 2026-07-26 — the card showed a bare "min" with no number). Only the
+    /// quietest caption tier is allowed to drop below `.primary`.
     @Environment(\.widgetRenderingMode) private var renderingMode
     private var fullColor: Bool { renderingMode == .fullColor }
 
     /// Primary ink / accent — the countdown and the LIVE dot.
-    private var accentInk: Color { fullColor ? wAccentBlue : .primary }
-    /// Body copy.
-    private var bodyInk: Color { fullColor ? wDim : .secondary }
-    /// Captions — the quietest tier.
-    private var captionInk: Color { fullColor ? wFaint : .secondary }
+    private var accentInk: Color { fullColor ? wIslandBlue : .primary }
+    /// Body copy — headline-adjacent, must never fall to `.secondary`.
+    private var bodyInk: Color { fullColor ? wIslandFg : .primary }
+    /// Captions — the quietest tier, and the only one that may dim.
+    private var captionInk: Color { fullColor ? wIslandDim : .secondary }
 
     var body: some View {
         // Header: monogram tile + "Bus <no> · <stop>", LIVE mark trailing.
@@ -343,16 +351,17 @@ private struct LockScreenView: View {
                               ? AnyShapeStyle(LinearGradient(colors: [wAccentBlue, wIslandBlue],
                                                              startPoint: .topLeading,
                                                              endPoint: .bottomTrailing))
-                              : AnyShapeStyle(Color.primary))
+                              : AnyShapeStyle(Color.primary.opacity(0.22)))
                     Text("D")
                         .font(wSans(14, .heavy))
-                        .foregroundStyle(fullColor ? Color.white : Color.black)
+                        .foregroundStyle(fullColor ? Color.white : Color.primary)
                 }
                 .frame(width: 26, height: 26)
 
                 Text("Bus \(attributes.busNo) · \(attributes.stopName)")
                     .font(wSans(12.5, .semibold))
                     .foregroundStyle(bodyInk)
+                    .minimumScaleFactor(0.8)
                     .lineLimit(1)
                     .layoutPriority(1)
 
@@ -398,7 +407,7 @@ private struct LockScreenView: View {
                     if !state.arrived && !shouldShowTimer(state) && state.etaMinutes > 0 {
                         Text("min")
                             .font(wSans(13, .medium))
-                            .foregroundStyle(bodyInk)
+                            .foregroundStyle(captionInk)
                     }
                 }
 
@@ -414,8 +423,8 @@ private struct LockScreenView: View {
             VStack(alignment: .leading, spacing: 5) {
                 JourneyTrack(progress: journeyProgress(state), arrived: state.arrived,
                              accent: accentInk,
-                             rail: fullColor ? Color.black.opacity(0.08)
-                                             : Color.secondary.opacity(0.3))
+                             rail: fullColor ? Color.white.opacity(0.16)
+                                             : Color.primary.opacity(0.3))
                     .frame(height: 12)
 
                 HStack {

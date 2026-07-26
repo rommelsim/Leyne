@@ -541,17 +541,23 @@ struct WSBusStopView: View {
     }
 
     /// Crowd for one board slot: a 3-segment gauge plus the word, on a tinted
-    /// capsule. No occupancy from LTA prints "No data" rather than a bare
-    /// dash, so an empty gauge is never mistaken for "empty bus".
+    /// capsule. The segments count ROOM LEFT, not occupancy (see
+    /// `Load.wsSpaceFraction`) — three lit ⟹ seats, one lit ⟹ almost full.
+    ///
+    /// With no occupancy from LTA the segments are dropped entirely and the
+    /// chip says "No data". They can't simply go dark: under this reading an
+    /// unlit gauge asserts "no room", which is a claim, not an absence of one.
     @ViewBuilder
     private func crowdChip(_ load: Load?) -> some View {
         HStack(spacing: 5) {
-            HStack(spacing: 2) {
-                ForEach(0..<3, id: \.self) { seg in
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(
-                            Double(seg) < (load?.wsFraction ?? 0) * 3 - 0.1 ? 0.95 : 0.30))
-                        .frame(width: 4, height: 6)
+            if let load {
+                HStack(spacing: 2) {
+                    ForEach(0..<3, id: \.self) { seg in
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(
+                                Double(seg) < load.wsSpaceFraction * 3 - 0.1 ? 0.95 : 0.30))
+                            .frame(width: 4, height: 6)
+                    }
                 }
             }
             Text(load?.wsShort ?? "No data")
@@ -667,17 +673,17 @@ struct WSBusStopView: View {
                             Spacer(minLength: 8)
                             // Fixed-width columns so the times line up down the
                             // list rather than drifting with each label.
-                            Text(WSFmt.firstLast(pair.first))
+                            Text(WSFmt.firstLast(pair.first, use24h: m.use24h))
                                 .font(ws.mono(13, weight: .bold)).foregroundStyle(SoftBlue.ink)
                                 .frame(width: 52, alignment: .trailing)
                             Text("–").font(ws.sans(12)).foregroundStyle(SoftBlue.sub)
-                            Text(WSFmt.firstLast(pair.last))
+                            Text(WSFmt.firstLast(pair.last, use24h: m.use24h))
                                 .font(ws.mono(13, weight: .bold)).foregroundStyle(SoftBlue.ink)
                                 .frame(width: 52, alignment: .trailing)
                         }
                         .padding(.vertical, 7)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Bus \(row.service), first \(WSFmt.firstLast(pair.first)), last \(WSFmt.firstLast(pair.last))")
+                        .accessibilityLabel("Bus \(row.service), first \(WSFmt.firstLast(pair.first, use24h: m.use24h)), last \(WSFmt.firstLast(pair.last, use24h: m.use24h))")
                         if i < stopWindows.count - 1 { SoftRowDivider(inset: 0) }
                     }
                 }

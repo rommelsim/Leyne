@@ -69,6 +69,16 @@ let wIslandBlue  = wHex(0x5CB8F2)
 let wIslandFg   = Color.white
 let wIslandDim  = wHex(0xB9C6D3)
 
+/// Lock Screen Live Activity surface. DARK on purpose, unlike the Home Screen
+/// widget: the system renders Lock Screen activities in `.accented`/`.vibrant`
+/// as often as `.fullColor`, and in those modes it throws our colours away and
+/// re-derives everything from luminance. A near-white card has almost no
+/// luminance headroom left, so every tier flattened into the background and
+/// the card became unreadable (owner photographed it twice — 2026-07-25 and
+/// 2026-07-26). Light copy on a dark surface keeps its separation in all
+/// three modes, and it is what the Lock Screen's own widgets do.
+let wLockBg  = wHex(0x121A24, alpha: 0.96)
+
 // chip — the tinted service-number chip pair (spec tokens exactly): a pale
 // blue fill with a saturated blue ink, used by WServiceBadge.
 let wChipBg  = wHex(0xE4F1FC)
@@ -301,10 +311,26 @@ enum WLTA {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
     }()
+    /// Minutes until arrival, or nil when there is no usable arrival.
+    ///
+    /// This used to be `max(0, …)`, which clamped ANY past timestamp to zero —
+    /// and `etaLabel` renders zero as "Arr". A bus that left six minutes ago
+    /// was therefore displayed as *arriving now*. When LTA's feed lags (routine
+    /// in the evening) every stale row collapsed to "Arr" at once, so the
+    /// widget showed three different buses all claiming to arrive
+    /// simultaneously (owner 2026-07-26).
+    ///
+    /// A bus is only "Arr" while it is plausibly AT the stop: from 30 s out
+    /// until `goneGrace` after its estimate. Past that it is gone, and gone is
+    /// reported as absent rather than imminent — the caller promotes the next
+    /// arrival into its place.
+    private static let goneGrace: TimeInterval = -60
     private static func mins(_ s: String?) -> Int? {
         guard let s, !s.isEmpty, let d = iso.date(from: s) ?? isoFrac.date(from: s)
         else { return nil }
-        return max(0, Int((d.timeIntervalSinceNow / 60).rounded()))
+        let secondsAway = d.timeIntervalSinceNow
+        guard secondsAway > goneGrace else { return nil }
+        return max(0, Int((secondsAway / 60).rounded()))
     }
 
     struct Row: Identifiable, Hashable {
@@ -338,12 +364,29 @@ enum WLTA {
               let decoded = try? JSONDecoder().decode(Resp.self, from: data)
         else { return [] }
         return decoded.Services
-            .map { Row(id: $0.ServiceNo,
-                       eta1: mins($0.NextBus.EstimatedArrival),
-                       eta2: mins($0.NextBus2.EstimatedArrival),
-                       eta3: mins($0.NextBus3.EstimatedArrival),
-                       mon1: ($0.NextBus.Monitored ?? 1) == 1,
-                       load1: WLoad(lta: $0.NextBus.Load)) }
+            .compactMap { svc -> Row? in
+                // Each of LTA's three slots resolved independently, keeping the
+                // Monitored flag and crowd Load attached to their OWN bus.
+                let slots = [svc.NextBus, svc.NextBus2, svc.NextBus3].map {
+                    (eta: mins($0.EstimatedArrival),
+                     mon: ($0.Monitored ?? 1) == 1,
+                     load: WLoad(lta: $0.Load))
+                }
+                // Drop the leading slots that have no usable arrival — a bus
+                // already gone, or one LTA gave no estimate for — so the next
+                // real arrival is promoted into the hero position. Previously
+                // a departed first bus either read as "Arr" forever or, once
+                // it resolved to nil, took the service's remaining two
+                // arrivals off the board with it.
+                let live = Array(slots.drop { $0.eta == nil })
+                guard let hero = live.first else { return nil }   // nothing left to show
+                return Row(id: svc.ServiceNo,
+                           eta1: hero.eta,
+                           eta2: live.count > 1 ? live[1].eta : nil,
+                           eta3: live.count > 2 ? live[2].eta : nil,
+                           mon1: hero.mon,
+                           load1: hero.load)
+            }
             // Number order, matching the in-app board: rows must not
             // reshuffle between refreshes.
             .sorted { a, b in
@@ -413,12 +456,20 @@ enum WLoad: String {
         case .packed:   return wCrowdRed
         }
     }
-    /// Filled dots out of 3, left→right severity.
-    var filledDots: Int {
+    /// Filled dots out of 3 = how much ROOM IS LEFT, not how full the bus is
+    /// (owner 2026-07-26). Three dots ⟹ plenty of space; one dot ⟹ almost
+    /// none. Inverted from the original "severity meter" reading because the
+    /// question a rider is asking at the stop is "can I get on", and a filling
+    /// bar answered it backwards — the fullest bus lit the most dots, which
+    /// looks like the best option at a glance.
+    ///
+    /// The dot COLOUR still escalates with severity (blue → amber → red), so
+    /// a packed bus reads as bad twice over: one dot, and that dot is red.
+    var spaceDots: Int {
         switch self {
-        case .seats: return 1
+        case .seats: return 3
         case .standing: return 2
-        case .packed: return 3
+        case .packed: return 1
         }
     }
 }
@@ -435,7 +486,7 @@ struct WCrowdDots: View {
                 HStack(spacing: 1.5) {
                     ForEach(0..<3, id: \.self) { i in
                         Circle()
-                            .fill(i < load.filledDots ? load.tint : wLine)
+                            .fill(i < load.spaceDots ? load.tint : wLine)
                             .frame(width: 3.5, height: 3.5)
                     }
                 }
@@ -443,6 +494,12 @@ struct WCrowdDots: View {
                     .font(wSans(size, .semibold))
                     .foregroundStyle(load.wordColor)
                     .lineLimit(1)
+                    // The crowd read is the only flexible column on the row —
+                    // everything either side of it is a fixed width. On the
+                    // smallest medium widget (329pt) the longest word,
+                    // "standing", leaves ~4pt of slack, so it degrades by
+                    // scaling rather than truncating to "standi…".
+                    .minimumScaleFactor(0.8)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Crowd: \(load.word)")
@@ -459,13 +516,41 @@ struct WCrowdDots: View {
 private let wCardRadius: CGFloat = 22
 private let wCardBorder = Color.black.opacity(0.06)
 
+// ─── Board metrics — ONE source of truth for the widget's grid ──────
+//
+// Every inset and column width on the medium widget derives from these.
+// They exist because the card previously mixed three unrelated numbers:
+// the card padded itself 16/15, each arrival row padded itself a further
+// 10, and the header padded itself not at all — so the stop name sat 10pt
+// LEFT of the service chips it labelled, and the freshness caption sat
+// 10pt right of the ETA column. Nothing lined up with anything.
+//
+// The rule now: row backgrounds span the full card width, and the header
+// carries the same interior inset as a row, so header text, service chips
+// and ETAs all sit on one vertical grid.
+
+/// Card edge → row background edge.
+let wCardInsetH: CGFloat = 14
+let wCardInsetV: CGFloat = 13
+/// Row background edge → row content. Applied to the header too.
+let wRowInsetH: CGFloat = 10
+/// The single vertical gap: header→board and row→row both use it.
+let wGap: CGFloat = 8
+/// Fixed service-chip width, so "52" and "961M" occupy the same column
+/// instead of the chip growing with the digit count.
+let wBadgeWidth: CGFloat = 38
+/// Fixed trailing columns, so the "then …" values and the hero ETAs each
+/// line up vertically across all three rows.
+let wFollowWidth: CGFloat = 74
+let wEtaWidth: CGFloat = 66
+
 extension View {
     /// Interior padding + hairline border matching the card spec. Apply
     /// AFTER content, BEFORE `.containerBackground`.
     func wCardChrome() -> some View {
         self
-            .padding(.horizontal, 16)
-            .padding(.vertical, 15)
+            .padding(.horizontal, wCardInsetH)
+            .padding(.vertical, wCardInsetV)
             .overlay(RoundedRectangle(cornerRadius: wCardRadius, style: .continuous)
                 .stroke(wCardBorder, lineWidth: 1))
     }
@@ -483,14 +568,25 @@ extension View {
 struct WServiceBadge: View {
     let no: String
     var compact = false
+    /// Pin the chip to an exact width. The board passes `wBadgeWidth` so every
+    /// row's chip is identical regardless of how many characters the service
+    /// number has — a 2-digit "52" chip next to a 3-digit "154" chip made the
+    /// column visibly ragged. Left nil elsewhere (Dynamic Island), where the
+    /// chip sizes to its content.
+    var width: CGFloat? = nil
     var body: some View {
         Text(no)
             .font(wMono(compact ? 9.5 : 10.5, .heavy))
             .foregroundStyle(wChipInk)
             .lineLimit(1)
-            .fixedSize()
+            // Fixed-width chips size the TEXT to the chip, not the other way
+            // round, so a 4-character number ("961M") shrinks slightly rather
+            // than widening the column or truncating.
+            .minimumScaleFactor(width == nil ? 1 : 0.75)
             .padding(.horizontal, 6)
-            .frame(minWidth: compact ? 24 : 30, minHeight: compact ? 18 : 21)
+            .frame(minWidth: width ?? (compact ? 24 : 30),
+                   idealWidth: width, maxWidth: width,
+                   minHeight: compact ? 18 : 21)
             .background(wChipInk.opacity(0.14), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .stroke(wChipInk.opacity(0.45), lineWidth: 1))
@@ -533,22 +629,25 @@ struct WArrivalRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: wGap) {
             // Identity, hard left, never truncated. Full-size badge (not
             // `compact`) — the spec's chip is 10.5pt.
-            WServiceBadge(no: row.id)
-                .frame(minWidth: 44, alignment: .leading)
+            WServiceBadge(no: row.id, width: wBadgeWidth)
 
             WCrowdDots(load: row.load1)
-                .padding(.leading, 2)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: wGap)
 
+            // 62pt was too tight for a two-value follow-on ("then 26 · 41"
+            // truncated to "then 26 · …" on the third row while the first row
+            // fitted), so the column now sizes for the widest real case and
+            // scales rather than clipping.
             Text(followText)
                 .font(wSans(10.5, .medium))
                 .foregroundStyle(wFaint)
                 .lineLimit(1)
-                .frame(width: 62, alignment: .trailing)
+                .minimumScaleFactor(0.8)
+                .frame(width: wFollowWidth, alignment: .trailing)
 
             // The answer — hero ETA, hard right, same trailing column on
             // every line.
@@ -563,9 +662,9 @@ struct WArrivalRow: View {
                 }
             }
             .contentTransition(.numericText(countsDown: true))
-            .frame(width: 66, alignment: .trailing)
+            .frame(width: wEtaWidth, alignment: .trailing)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, wRowInsetH)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(soonest ? wAccentBlue.opacity(0.10) : Color.black.opacity(0.035),
                     in: RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -589,7 +688,7 @@ struct WArrivalBoard: View {
     }
     var body: some View {
         let soonest = soonestID
-        VStack(spacing: 6) {
+        VStack(spacing: wGap) {
             ForEach(Array(rows.prefix(3))) { row in
                 WArrivalRow(row: row, soonest: row.id == soonest)
             }
@@ -597,17 +696,16 @@ struct WArrivalBoard: View {
     }
 }
 
-/// "3 min ago" / "12 s ago" — the widget's staleness tell. Composes a plain
-/// "ago" suffix onto a `Text(_:style: .relative)` fragment, so the caption
-/// keeps itself honest (re-renders as time passes) without a per-second
-/// refresh budget — SwiftUI ticks styled `Text` on its own schedule even
-/// inside a concatenation.
-struct WUpdatedCaption: View {
-    let date: Date
-    var body: some View {
-        (Text(date, style: .relative) + Text(" ago"))
-            .font(wSans(10, .medium))
-            .foregroundStyle(wFaint)
-            .lineLimit(1)
-    }
-}
+// The freshness caption ("3 min ago") was removed 2026-07-26 (owner). It was
+// broken in two ways at once:
+//
+//   • `Text(date, style: .relative)` emits TWO components — "1 min, 39 sec" —
+//     so with " ago" appended it overflowed `lineLimit(1)` and rendered as
+//     the meaningless "1 min, 39 s…". There is no way to ask that style for a
+//     single unit.
+//   • It put a second "1 min" directly beside "1 min walk" in the same line,
+//     where the two meant entirely unrelated things.
+//
+// It was also a staleness BANNER, which the product deliberately doesn't do:
+// timeliness is the promise, and the only permitted uncertainty tell is the
+// whisper-quiet "~" that `schedPrefix` puts on a scheduled-only ETA.

@@ -75,6 +75,10 @@ struct LeyneApp: App {
                         // A bus may have arrived while the app was suspended —
                         // end a frozen Live Activity before the user reads it.
                         model.nudgeLiveActivityOnForeground()
+                        // ...and a start ActivityKit refused while we were
+                        // inactive (e.g. behind the notification permission
+                        // dialog) can go through now.
+                        model.flushPendingLiveActivityStart()
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(500))
                             AppOpenAdManager.shared

@@ -455,7 +455,7 @@ class SoftHeroBoardRow extends StatelessWidget {
           ),
           Expanded(
             child: Text(
-              dest,
+              'to $dest',
               style: SoftBlue.sans(
                 12.5,
                 weight: FontWeight.w600,
@@ -564,7 +564,9 @@ class SoftBusTimePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final timeLabel = etaBig == 'Arr' ? 'Arr' : '$etaBig min';
+    // "Now", never "Arr" — an abbreviation here reads as a truncation (iOS
+    // SoftBusTimePill).
+    final timeLabel = etaBig == 'Arr' ? 'Now' : '$etaBig min';
     return ClipRRect(
       borderRadius: BorderRadius.circular(999),
       child: Row(

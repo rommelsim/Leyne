@@ -175,9 +175,9 @@ final class AppOpenAdManager: NSObject {
         guard !AdConfig.adsSuppressed else { return }
         guard AdConfig.started else { preload(); return }
 
-        // Never during/before onboarding, or over the launch splash.
-        guard model.onboarded, !model.showOnboarding, !model.launching else {
-            aoaLog.notice("App Open skip: onboarding/launch")
+        // Never over the launch splash.
+        guard !model.launching else {
+            aoaLog.notice("App Open skip: launch")
             return
         }
         // A notification / widget / Spotlight tap brought us here — show content.

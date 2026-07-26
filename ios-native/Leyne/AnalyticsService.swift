@@ -28,7 +28,6 @@ enum AnalyticsService {
         case alertSet(kind: String, busNo: String)
         case favouriteAdded(kind: FavKind)
         case searchPerformed
-        case onboardingCompleted
         case notificationTapped(kind: String)
 
         enum StopKind: String { case bus, mrt }
@@ -40,7 +39,6 @@ enum AnalyticsService {
             case .alertSet:            return "alert_set"
             case .favouriteAdded:      return "favourite_added"
             case .searchPerformed:     return "search_performed"
-            case .onboardingCompleted: return "onboarding_completed"
             case .notificationTapped:  return "notification_tapped"
             }
         }
@@ -53,7 +51,7 @@ enum AnalyticsService {
                 return ["kind": kind, "bus_no": busNo]
             case let .favouriteAdded(kind):
                 return ["kind": kind.rawValue]
-            case .searchPerformed, .onboardingCompleted:
+            case .searchPerformed:
                 return nil
             case let .notificationTapped(kind):
                 return ["kind": kind.isEmpty ? "unknown" : kind]

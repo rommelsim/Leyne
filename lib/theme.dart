@@ -525,6 +525,12 @@ enum MRTLine {
   /// Two-letter code used in card headers ("NE Line · disrupted").
   final String code;
 
+  /// Three-letter LTA/PCD line code — "EWL", "NSL", "NEL", "CCL", "DTL",
+  /// "TEL". The label the line BADGE carries (iOS `LineBullet(isLineCode:)`),
+  /// as opposed to [code], which is the two-letter station-code prefix. Every
+  /// catalogued line is its prefix plus "L".
+  String get pcdLineCode => '${code}L';
+
   /// Map LTA TrainServiceAlerts `Line` strings to our palette enum.
   /// Returns null for lines we haven't catalogued yet — callers fall
   /// back to a neutral marker so the alert still surfaces.

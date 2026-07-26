@@ -1,7 +1,12 @@
 // Root composition — Leyne 2.0 "Soft" UI is now the default and only
-// experience. Wraps `SoftRoot` with the launch splash, onboarding gate,
-// What's New modal, theme listener, and notification / Spotlight deep
-// link handler.
+// experience. Wraps `SoftRoot` with the launch splash, theme listener, and
+// notification / Spotlight deep link handler.
+//
+// There is no onboarding. The first-run flow (welcome → wedge → three
+// permission primers → grant summary) was removed 2026-07-26 (owner call):
+// the app now drops straight into the board and asks for each permission at
+// the moment it is actually needed — location on the Nearby screen,
+// notifications on the first arrival alert, ATT via AdConsent at launch.
 
 import SwiftUI
 
@@ -25,27 +30,7 @@ struct RootView: View {
             // (design-remake branch: the WhereSia layer replaces the previous
             // "Soft" UI as the app root; swap back to SoftRoot() to revert.)
             WSRoot()
-
-            // ── Onboarding ──────────────────────────────────
-            if m.showOnboarding {
-                OnboardingView(
-                    onRequestLocation: { LocationManager.shared.requestPermission() },
-                    onRequestNotifications: {
-                        Task { await m.setNotificationsEnabled(true) }
-                    },
-                    onRequestTracking: {
-                        // Gather UMP + ATT consent here; the summary screen's
-                        // "Enter Leyne" finishes onboarding (onFinish).
-                        Task { await AdConsent.gatherThenStart() }
-                    },
-                    onFinish: { m.finishOnboarding() }
-                )
-                .transition(.opacity)
-                .zIndex(50)
-            }
-
         }
-        .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
         // Contextual App Store review prompt — paced by PromptCenter.
         .sheet(item: $prompts.active) { prompt in
             PromptCard(prompt: prompt)
@@ -70,25 +55,23 @@ struct RootView: View {
             }
         }
         .task {
-            if !m.showOnboarding {
-                await AdConsent.gatherThenStart()
-                // Preload an App Open ad, then present it for this cold launch
-                // once it's ready (returning users only; never the first launch,
-                // and gated behind the splash + 4h cap inside the manager). Run
-                // detached so its short poll doesn't hold up the rest of launch.
-                AppOpenAdManager.shared.preload()
-                Task { await AppOpenAdManager.shared.showOnColdLaunch(model: m) }
-                // Preload an Interstitial so one is ready when the user first
-                // backs out of a Stop / Bus detail.
-                InterstitialAdManager.shared.preload()
-                let status = await NotificationsManager.shared.currentStatus()
-                if status == .notDetermined && m.notificationsEnabled {
-                    await m.setNotificationsEnabled(true)
-                }
-                // Count this launch toward the contextual review / support
-                // prompts (all pacing + caps live in PromptCenter).
-                PromptCenter.shared.noteAppOpen()
+            await AdConsent.gatherThenStart()
+            // Preload an App Open ad, then present it for this cold launch
+            // once it's ready (returning users only; never the first launch,
+            // and gated behind the splash + 4h cap inside the manager). Run
+            // detached so its short poll doesn't hold up the rest of launch.
+            AppOpenAdManager.shared.preload()
+            Task { await AppOpenAdManager.shared.showOnColdLaunch(model: m) }
+            // Preload an Interstitial so one is ready when the user first
+            // backs out of a Stop / Bus detail.
+            InterstitialAdManager.shared.preload()
+            let status = await NotificationsManager.shared.currentStatus()
+            if status == .notDetermined && m.notificationsEnabled {
+                await m.setNotificationsEnabled(true)
             }
+            // Count this launch toward the contextual review / support
+            // prompts (all pacing + caps live in PromptCenter).
+            PromptCenter.shared.noteAppOpen()
         }
         // Notification / Spotlight deep links surface as `m.openCard`; SoftRoot
         // observes this in turn and pushes Stop or Bus accordingly. We keep

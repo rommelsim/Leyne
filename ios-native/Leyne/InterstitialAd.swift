@@ -127,8 +127,8 @@ final class InterstitialAdManager: NSObject {
         // A deep link / notification drove this stack change — not a user exit.
         guard Date() >= suppressUntil else { return }
         guard AdConfig.started else { preload(); return }
-        // Never during/before onboarding, or over the launch splash.
-        guard model.onboarded, !model.showOnboarding, !model.launching else { return }
+        // Never over the launch splash.
+        guard !model.launching else { return }
         guard !isShowing else { return }
 
         exitsSinceShown += 1

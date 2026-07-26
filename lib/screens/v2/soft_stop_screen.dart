@@ -7,16 +7,18 @@
 //     has no per-stop sort control; the board is always number-sorted.
 //   • Title block: large stop name, "● LIVE" (when loaded) + code · ROAD ·
 //     Updated h:mm on one line. No walk/distance row (not in the iOS spec).
-//   • No section header text before the arrivals list (iOS goes straight
-//     from the interchange card into the service rows).
-//   • Service rows: neutral (never accent-coloured) route tile · destination
-//     + ETA on one line · deck/wheelchair/"then…"/crowd on a second line ·
-//     trailing chevron. A monitored bus under a minute out swaps the ETA for
-//     the solid accent "ARRIVING" capsule.
+//   • "All services" section header, then EVERY service (including the
+//     soonest) as one row each — no hero card, no "Show more" collapse.
+//   • Service rows: 58pt service tile · "to <dest>" + crowd word · a
+//     right-aligned ETA column ("12 min", or "Now" in chipInk when the bus is
+//     pulling in). Tapping a row opens that bus's BOTTOM SHEET — the old
+//     always-visible hero card, moved (iOS 2026-07-26): the departure board
+//     was good, it just shouldn't have sat at the top permanently promoting
+//     one service.
 //
 // All existing logic preserved: data loading, pin toggle, per-bus alerts
-// (swipe actions — the Material-idiomatic equivalent of iOS's long-press
-// context menu), notification banner, showAll/onSeeAll, refresh.
+// (swipe action — the Material-idiomatic equivalent of iOS's row swipe),
+// route timeline, refresh.
 
 import 'dart:async';
 
@@ -45,21 +47,23 @@ class SoftStopScreen extends StatefulWidget {
     super.key,
     required this.stopCode,
     required this.onBack,
-    required this.onSeeAll,
-    this.showAll = false,
     this.initialService,
     this.onTab,
     this.tabSelection,
   });
   final String stopCode;
   final VoidCallback onBack;
-  final VoidCallback onSeeAll;
-  final bool showAll;
 
-  /// Pre-pins a service into the hero card. Mirrors iOS
-  /// `WSBusStopView.initialService`: notification / widget deep links and
-  /// saved LINES open the stop with their own bus already featured, rather
-  /// than a separate Track Bus screen (retired on both platforms).
+  /// Vestigial. The list shows EVERY service now (iOS 2026-07-26 — the
+  /// "Show more" collapse and the separate see-all screen are both gone), so
+  /// neither of these does anything; they're kept on the constructor only so
+  /// the existing call sites (main.dart, soft_root.dart, deep_link_service)
+  /// keep compiling. Delete them there first, then here.
+
+  /// Opens this service's detail sheet as soon as the first load lands.
+  /// Mirrors iOS `WSBusStopView.initialService`: notification / widget deep
+  /// links and saved LINES land on the stop with their own bus already open,
+  /// rather than a separate Track Bus screen (retired on both platforms).
   final String? initialService;
 
   /// This screen itself never shows a tab bar (pushed detail screens don't —
@@ -76,21 +80,18 @@ class SoftStopScreen extends StatefulWidget {
 
 class _SoftStopScreenState extends State<SoftStopScreen>
     with WidgetsBindingObserver {
-  /// Inline expand state for the grouped arrivals list. Opened from a
-  /// "see all" entry (widget.showAll) starts expanded.
-  late bool _expanded = widget.showAll;
-
-  /// Services shown before the "Show more" expander kicks in.
-  static const int _collapsedCount = 6;
-
-  /// null = default (the soonest service). Set when an ALL SERVICES row is
-  /// tapped, promoting that service into the hero card. Seeded from
-  /// [SoftStopScreen.initialService] for deep links and saved lines. Mirrors
-  /// iOS WSBusStopView's `featuredNo`.
-  late String? _featuredNo = widget.initialService;
-
-  /// Inline "Route · N stops to `<dest>`" disclosure under the hero.
+  /// "View route" disclosure inside the open service sheet.
   bool _routeExpanded = false;
+
+  /// Rebuilds the OPEN service sheet. `showModalBottomSheet` builds its
+  /// content in its own element tree, so this screen's `setState` never
+  /// reaches it — route loads and route-toggle state have to poke it
+  /// directly. Null whenever no sheet is open.
+  VoidCallback? _sheetRebuild;
+
+  /// [SoftStopScreen.initialService] is honoured once, on the first loaded
+  /// frame — mirrors iOS `seededInitial`.
+  bool _seededInitial = false;
 
   /// Reveals every stop back to the route's origin, not just the segment
   /// from the bus's live position — mirrors iOS `showPreviousStops`.
@@ -155,7 +156,7 @@ class _SoftStopScreenState extends State<SoftStopScreen>
                 state != null && state.kind == ArrivalStateKind.loaded;
             final sorted = loaded ? _sortServices(state.services) : <Service>[];
             final isPinned = m.pinForCode(widget.stopCode) != null;
-            final featured = _featuredService(sorted);
+            if (loaded) _seedInitialService(context, sorted);
             return RefreshIndicator(
               color: t.accent,
               onRefresh: () =>
@@ -170,21 +171,12 @@ class _SoftStopScreenState extends State<SoftStopScreen>
                   // ── Title block ─────────────────────────────────────────
                   _titleBlock(context),
                   const SizedBox(height: 20),
-                  // ── Hero (featured service — soonest by default, or the
-                  // ALL SERVICES row last tapped) ─────────────────────────
-                  // Mirrors iOS WSBusStopView.heroCard: a gradient card with
-                  // that ONE service's own 3-slot NEXT/2ND/3RD departure
-                  // board (each slot its own crowd word) plus an inline
-                  // route-timeline disclosure below it. No ring on this
-                  // screen — the countdown ring is Nearby-exclusive.
-                  if (loaded && featured != null) ...[
-                    _heroCard(context, featured),
-                    const SizedBox(height: 10),
-                    _routeCard(context, featured),
-                    const SizedBox(height: 20),
-                  ],
                   // ── Arrivals section ────────────────────────────────────
-                  _arrivalSection(context, state, sorted, featured),
+                  // No hero card here any more (iOS 2026-07-26): the gradient
+                  // "featured bus" board moved into the sheet a row tap
+                  // opens, so the screen goes header → All services, and the
+                  // soonest bus is a row like every other one.
+                  _arrivalSection(context, state, sorted),
                   // No inline MREC any more — the Stop screen's single ad is
                   // the anchored banner in [SoftDetailBottomBar], mirroring
                   // iOS's wsDetailAdBanner (owner placement redesign
@@ -198,42 +190,108 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     );
   }
 
-  // ── Hero ────────────────────────────────────────────────────────────────
-  // ONE gradient hero per screen (soft-blue-design.md §4), rebuilt 2026-07-25
-  // to match iOS WSBusStopView.heroCard exactly: a single FEATURED service —
-  // soonest by default, or whichever ALL SERVICES row was last tapped
-  // (`_featuredNo`) — with row 1 (number tile · "to <dest>" · "via <road>" ·
-  // Alert-me pill) and row 2 (that service's OWN next 3 arrivals as a
-  // NEXT/2ND/3RD board, each slot its own crowd word). Deliberately NOT the
-  // old "first 3 distinct services" board — that discarded the per-bus 2nd/
-  // 3rd arrival data the LTA feed already gives us. No ring here (spec item
-  // 4b: the countdown ring is Nearby-exclusive).
+  // ── Service sheet ───────────────────────────────────────────────────────
+  // ONE bus, in depth — the sheet a row tap opens. This is the old hero
+  // card's departure board, MOVED rather than lost (iOS 2026-07-26): the
+  // board itself was good, it just shouldn't have been sitting at the top of
+  // the screen permanently promoting one service. As a bottom sheet it
+  // appears only when asked for, keeps the list underneath in place, and is
+  // dismissed by the drag every user already knows.
 
-  /// Soonest-by-default, or the row last promoted via `_featuredNo`. Mirrors
-  /// iOS `featured`.
-  Service? _featuredService(List<Service> sorted) {
-    if (sorted.isEmpty) return null;
-    if (_featuredNo != null) {
-      final hit = sorted.where((s) => s.no == _featuredNo).toList();
-      if (hit.isNotEmpty) return hit.first;
+  /// Mutates screen state AND rebuilds the open sheet. The sheet lives in the
+  /// modal route's own element tree, so plain `setState` leaves it stale.
+  void _setStateEverywhere(VoidCallback fn) {
+    if (mounted) {
+      setState(fn);
+    } else {
+      fn();
     }
-    return _soonest(sorted) ?? sorted.first;
+    _sheetRebuild?.call();
   }
 
-  /// The service with the lowest live ETA — mirrors iOS `wsSoonest`.
-  Service? _soonest(List<Service> sorted) {
-    if (sorted.isEmpty) return null;
-    final now = DateTime.now();
-    var best = sorted.first;
-    var bestSec = _liveSec(best, now);
-    for (final s in sorted.skip(1)) {
-      final sec = _liveSec(s, now);
-      if (sec < bestSec) {
-        best = s;
-        bestSec = sec;
-      }
+  /// Deep links / widget + notification taps land on the stop with their bus
+  /// already open (mirrors iOS `seededInitial`). Runs once, on the first
+  /// frame where the arrivals are loaded — the service has to exist in the
+  /// feed before there's a sheet to show for it.
+  void _seedInitialService(BuildContext context, List<Service> sorted) {
+    if (_seededInitial) return;
+    _seededInitial = true;
+    final no = widget.initialService;
+    if (no == null || !sorted.any((s) => s.no == no)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openServiceSheet(context, no);
+    });
+  }
+
+  /// Opens [no]'s detail sheet. Starts a little over half height — the board
+  /// answers the question without hiding the list it came from — and grows
+  /// toward full when the route timeline is opened.
+  void _openServiceSheet(BuildContext context, String no) {
+    _setStateEverywhere(() {
+      _routeExpanded = false;
+      _showPreviousStops = false;
+    });
+    final drag = DraggableScrollableController();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: SoftBlue.bg,
+      showDragHandle: true,
+      builder: (_) => DraggableScrollableSheet(
+        controller: drag,
+        expand: false,
+        initialChildSize: 0.55,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => StatefulBuilder(
+          builder: (context, setSheetState) {
+            _sheetRebuild = () => setSheetState(() {});
+            // The board's numbers are live, so the sheet listens to the same
+            // stores the screen does rather than freezing at open time.
+            return ListenableBuilder(
+              listenable: Listenable.merge([DataStore.shared, AppModel.shared]),
+              builder: (context, _) =>
+                  _serviceSheet(context, no, scrollController, drag),
+            );
+          },
+        ),
+      ),
+    ).whenComplete(() {
+      _sheetRebuild = null;
+      // Dismissing resets the disclosure, so the next sheet opens on the
+      // board rather than mid-timeline.
+      _setStateEverywhere(() {
+        _routeExpanded = false;
+        _showPreviousStops = false;
+      });
+    });
+  }
+
+  Widget _serviceSheet(
+    BuildContext context,
+    String no,
+    ScrollController scrollController,
+    DraggableScrollableController drag,
+  ) {
+    final state = DataStore.shared.arrivals[widget.stopCode];
+    final all = state != null && state.kind == ArrivalStateKind.loaded
+        ? state.services.where((s) => s.no == no).toList()
+        : <Service>[];
+    // The service can vanish between refreshes (last bus of the night); the
+    // sheet stays up but empty rather than throwing.
+    if (all.isEmpty) {
+      return ListView(controller: scrollController, children: const []);
     }
-    return best;
+    final svc = all.first;
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+      children: [
+        _sheetHero(context, svc),
+        const SizedBox(height: 14),
+        _sheetActionsCard(context, svc, drag),
+      ],
+    );
   }
 
   /// Up to 3 (seconds, load) pairs for ONE service — its own next/2nd/3rd
@@ -259,7 +317,11 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     return out.take(3).toList();
   }
 
-  Widget _heroCard(BuildContext context, Service featured) {
+  /// The sheet's gradient identity + departure board. Breathing room
+  /// throughout (iOS 2026-07-26): 18pt card padding and 20pt between the two
+  /// rows — one step up from the in-page cards, because a sheet is read with
+  /// nothing else on screen.
+  Widget _sheetHero(BuildContext context, Service featured) {
     final now = DateTime.now();
     final entries = _pillEntries(featured, now);
     final alerted =
@@ -271,7 +333,7 @@ class _SoftStopScreenState extends State<SoftStopScreen>
         null;
     final road = DataStore.shared.roadName(widget.stopCode);
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: SoftBlue.heroGradient,
         borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
@@ -336,28 +398,41 @@ class _SoftStopScreenState extends State<SoftStopScreen>
               _alertPill(alerted: alerted, svc: featured),
             ],
           ),
-          const SizedBox(height: 14),
-          // Row 2: the departure board — NEXT / 2ND / 3RD, each slot this
-          // service's own time + crowd word.
+          const SizedBox(height: 20),
+          // Row 2: the departure board — NEXT / THEN / LATER, each slot this
+          // service's own time + crowd gauge. Every slot uses the same type
+          // sizes so labels, times and chips sit on one line across the
+          // board; NEXT is emphasised by opacity, not by being a size bigger.
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (var i = 0; i < 3; i++) ...[
-                if (i > 0)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Container(
-                      width: 1,
-                      height: 48,
-                      color: Colors.white.withValues(alpha: 0.28),
-                    ),
-                  ),
+              for (var i = 0; i < entries.length; i++) ...[
+                if (i > 0) _boardDivider(),
                 Expanded(
                   child: Padding(
-                    padding: EdgeInsets.only(left: i == 0 ? 0 : 14),
-                    child: i < entries.length
-                        ? _boardSlot(entries[i], i)
-                        : const SizedBox.shrink(),
+                    padding: EdgeInsets.only(
+                      left: i == 0 ? 0 : 16,
+                      right: i == entries.length - 1 ? 0 : 10,
+                    ),
+                    child: _boardSlot(entries[i], i),
+                  ),
+                ),
+              ],
+              // Only ONE bus timed: say so rather than leaving two dead
+              // columns of gradient. LTA simply has nothing more.
+              if (entries.length == 1) ...[
+                _boardDivider(),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 14),
+                    child: Text(
+                      'No later bus timed yet',
+                      style: SoftBlue.sans(
+                        12,
+                        weight: FontWeight.w500,
+                        color: Colors.white.withValues(alpha: 0.75),
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -368,7 +443,17 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     );
   }
 
-  static const _ordinalLabels = ['NEXT', '2ND', '3RD'];
+  /// Hairline between board slots.
+  Widget _boardDivider() => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: Container(
+      width: 1,
+      height: 78,
+      color: Colors.white.withValues(alpha: 0.28),
+    ),
+  );
+
+  static const _ordinalLabels = ['NEXT', 'THEN', 'LATER'];
 
   Widget _boardSlot(({int sec, Load? load}) entry, int index) {
     final eta = fmtEta(entry.sec);
@@ -378,56 +463,128 @@ class _SoftStopScreenState extends State<SoftStopScreen>
       children: [
         Text(
           _ordinalLabels[index],
-          style: SoftBlue.sans(10, weight: FontWeight.bold, color: Colors.white)
-              .copyWith(letterSpacing: 0.6)
-              .copyWith(color: Colors.white.withValues(alpha: 0.7)),
+          style: SoftBlue.sans(
+            10,
+            weight: FontWeight.bold,
+            color: Colors.white.withValues(alpha: index == 0 ? 0.85 : 0.6),
+          ).copyWith(letterSpacing: 0.6),
         ),
-        const SizedBox(height: 2),
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: eta.big,
-                style: SoftBlue.mono(
-                  index == 0 ? 30 : 23,
-                  weight: FontWeight.w800,
-                  color: Colors.white,
-                ),
-              ),
-              if (eta.big != 'Arr')
+        const SizedBox(height: 9),
+        // "Now", not the "Arr" abbreviation — in a stacked slot "Arr" read as
+        // a word in a column of words, not as a time. ONE size for every slot
+        // so the three times share a baseline; later slots step back on
+        // opacity instead.
+        Opacity(
+          opacity: index == 0 ? 1 : 0.88,
+          child: Text.rich(
+            TextSpan(
+              children: [
                 TextSpan(
-                  text: ' min',
-                  style: SoftBlue.sans(
-                    index == 0 ? 12 : 11,
-                    weight: FontWeight.w600,
+                  text: eta.big == 'Arr' ? 'Now' : eta.big,
+                  style: SoftBlue.mono(
+                    27,
+                    weight: FontWeight.w800,
                     color: Colors.white,
                   ),
                 ),
-            ],
+                if (eta.big != 'Arr')
+                  TextSpan(
+                    text: ' min',
+                    style: SoftBlue.sans(
+                      12,
+                      weight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
-        Text(
-          _crowdShort(entry.load),
-          style: SoftBlue.sans(
-            11,
-            weight: FontWeight.w600,
-            color: Colors.white.withValues(alpha: 0.85),
-          ),
-        ),
+        const SizedBox(height: 9),
+        _crowdChip(entry.load),
       ],
     );
   }
 
-  /// Per-slot crowd word (spec item 1): "Seats"/"Stand"/"Full", or "—" when
-  /// unknown for that specific bus — mirrors iOS `Load.wsShort` exactly
-  /// (deliberately not `CrowdMeter`'s "Limited"/"Standing" — those are tuned
-  /// for row contexts, not the 3-across board).
+  /// Crowd for one board slot: a 3-segment gauge plus the short word, on a
+  /// tinted capsule. No occupancy from LTA prints "No data" rather than a
+  /// bare dash, so an empty gauge is never mistaken for "empty bus". Mirrors
+  /// iOS `crowdChip`.
+  Widget _crowdChip(Load? load) {
+    final fill = switch (load) {
+      Load.sea => 1,
+      Load.sda => 2,
+      Load.lsd => 3,
+      null => 0,
+    };
+    return Semantics(
+      label: load == null ? 'Crowd unknown' : 'Crowd: ${_crowdWord(load)}',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var seg = 0; seg < 3; seg++)
+              Padding(
+                padding: EdgeInsets.only(left: seg == 0 ? 0 : 2),
+                child: Container(
+                  width: 4,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(
+                      alpha: seg < fill ? 0.95 : 0.30,
+                    ),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                _crowdShort(load),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: SoftBlue.sans(
+                  10,
+                  weight: FontWeight.w600,
+                  color: Colors.white.withValues(
+                    alpha: load == null ? 0.7 : 0.95,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Per-slot crowd word: "Seats"/"Stand"/"Full", or "No data" when LTA sent
+  /// no occupancy for that specific bus — mirrors iOS `Load.wsShort`.
   String _crowdShort(Load? load) {
     return switch (load) {
       Load.sea => 'Seats',
       Load.sda => 'Stand',
       Load.lsd => 'Full',
-      null => '—',
+      null => 'No data',
+    };
+  }
+
+  /// Full crowd phrasing for the service rows — mirrors iOS `Load.wsWord`. A
+  /// bare "Seats"/"Standing" left people asking what the word was even about
+  /// (owner 2026-07-26); nothing next to it says the line is about the crowd
+  /// on board, so the label has to carry its own meaning.
+  String _crowdWord(Load? load) {
+    return switch (load) {
+      Load.sea => 'Seats available',
+      Load.sda => 'Standing only',
+      Load.lsd => 'Almost full',
+      null => 'Crowd unknown',
     };
   }
 
@@ -481,49 +638,122 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     );
   }
 
-  // ── Inline route timeline (spec item 3) ─────────────────────────────────
-  // A toggle card under the hero — "Route · N stops to <dest> / View route"
-  // — that expands into a compact timeline: the bus's live position (when
-  // known and before your stop, with a "N stops" gap), then every stop from
-  // yours to the terminus. Reuses SoftBusScreen's data model (RouteInfo /
-  // RouteStopLive / BusProgress) rather than the deleted RouteTimeline
-  // widget. Mirrors iOS WSBusStopView's `routeCard`/`routeTimeline`.
+  // ── Sheet actions card (route timeline + favourite) ─────────────────────
+  // The two things you can do with THIS bus, in one white card under the
+  // board: expand its route, or favourite it. The route used to be a card on
+  // the stop screen itself, answering a question nobody asks at that point —
+  // you look for A BUS first — so it moved in here with the bus it belongs
+  // to (iOS 2026-07-26). Favourite lives here now that the row swipe tray is
+  // down to its one action.
 
-  Widget _routeCard(BuildContext context, Service featured) {
-    final t = context.t;
+  Widget _sheetActionsCard(
+    BuildContext context,
+    Service svc,
+    DraggableScrollableController drag,
+  ) {
+    final fav = AppModel.shared.isFavService(no: svc.no, stop: widget.stopCode);
     return Container(
-      padding: const EdgeInsets.all(16),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: t.line, width: 1),
+        color: SoftBlue.card,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: SoftBlue.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            onTap: () => _toggleRoute(featured),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _routeToggleTitle(featured),
-                    style: t.sans(13, weight: FontWeight.w600, color: t.fg),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+          // "View route" collapsed, "Route · N stops to <dest>" open.
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => _toggleRoute(svc, drag),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.map_outlined, size: 15, color: SoftBlue.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _routeExpanded ? _routeToggleTitle(svc) : 'View route',
+                        style: SoftBlue.sans(
+                          14,
+                          weight: FontWeight.w600,
+                          color: SoftBlue.ink,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      _routeExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 18,
+                      color: SoftBlue.blue,
+                    ),
+                  ],
                 ),
-                Text(
-                  _routeExpanded ? 'Hide route ▴' : 'View route ▾',
-                  style: t.sans(12, weight: FontWeight.w600, color: t.accent),
-                ),
-              ],
+              ),
             ),
           ),
-          if (_routeExpanded) ...[
-            const SizedBox(height: 10),
-            _routeTimelineBody(context, featured),
-          ],
+          if (_routeExpanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: _routeTimelineBody(context, svc),
+            ),
+          // Divider inset past the leading icon, not full-bleed.
+          Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Container(height: 1, color: SoftBlue.hairline),
+          ),
+          Semantics(
+            button: true,
+            label: fav
+                ? 'Bus ${svc.no} saved to Favourites. Tap to remove.'
+                : 'Favourite bus ${svc.no} at this stop',
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _setStateEverywhere(
+                  () => AppModel.shared.toggleFavService(
+                    no: svc.no,
+                    stop: widget.stopCode,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        fav
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
+                        size: 15,
+                        color: SoftBlue.blue,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          fav
+                              ? 'Saved to Favourites'
+                              : 'Favourite bus ${svc.no}',
+                          style: SoftBlue.sans(
+                            14,
+                            weight: FontWeight.w600,
+                            color: SoftBlue.ink,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -541,18 +771,24 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     return 'Route · to ${svc.dest}';
   }
 
-  void _toggleRoute(Service featured) {
+  void _toggleRoute(Service svc, DraggableScrollableController drag) {
     final expand = !_routeExpanded;
-    setState(() {
+    _setStateEverywhere(() {
       _routeExpanded = expand;
       if (!expand) _showPreviousStops = false;
     });
     if (expand) {
-      // Pin the hero on this service while the route is open — matches iOS
-      // (the auto "soonest" swap used to flip services mid-scroll while the
-      // route was open).
-      setState(() => _featuredNo = featured.no);
-      _loadRoute(featured.no);
+      // The timeline needs the room — grow the sheet toward full rather than
+      // leaving the route to scroll inside a half-height sheet (iOS raises
+      // its detent to `.large` at the same moment).
+      if (drag.isAttached) {
+        drag.animateTo(
+          0.95,
+          duration: SoftMotion.flowDuration,
+          curve: SoftMotion.flowCurve,
+        );
+      }
+      _loadRoute(svc.no);
     }
   }
 
@@ -582,7 +818,9 @@ class _SoftStopScreenState extends State<SoftStopScreen>
       busIndex = bestIdx;
     }
     if (!mounted) return;
-    setState(() {
+    // The timeline is drawn INSIDE the sheet, so the plain setState the route
+    // used to do left it stuck on "Loading route…" forever.
+    _setStateEverywhere(() {
       _routeInfo = RouteInfo(
         stops: r.stops,
         youIndex: r.youIndex,
@@ -610,7 +848,7 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     final you = r.youIndex.clamp(0, r.stops.length - 1);
     final lines = _routeLines(r, you);
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 260),
+      constraints: const BoxConstraints(maxHeight: 230),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -653,7 +891,8 @@ class _SoftStopScreenState extends State<SoftStopScreen>
   Widget _earlierStopsRow(int count) {
     final t = context.t;
     return InkWell(
-      onTap: () => setState(() => _showPreviousStops = !_showPreviousStops),
+      onTap: () =>
+          _setStateEverywhere(() => _showPreviousStops = !_showPreviousStops),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
@@ -887,7 +1126,6 @@ class _SoftStopScreenState extends State<SoftStopScreen>
                 builder: (_) => SoftStopScreen(
                   stopCode: code,
                   onBack: () => Navigator.of(context).pop(),
-                  onSeeAll: () {},
                   onTab: widget.onTab,
                   tabSelection: widget.tabSelection,
                 ),
@@ -1060,11 +1298,96 @@ class _SoftStopScreenState extends State<SoftStopScreen>
               ),
             ),
           ),
+          // Directions. This action used to exist ONLY inside the arrivals
+          // empty state, so on a normal stop — the 99% case — there was no
+          // way to navigate to it at all (owner 2026-07-26). It belongs here:
+          // the card already answers "how far", and this is the action that
+          // follows from that answer.
+          _walkHereButton(metres),
           if (interchange != null) ...[
             Container(height: 1, color: SoftBlue.hairline),
             _interchangeRow(context, interchange),
           ],
         ],
+      ),
+    );
+  }
+
+  /// A real BUTTON, not a sentence with a chevron (owner 2026-07-26: "don't
+  /// put a string of text and call it a day"). Filled blue capsule, white
+  /// ink, the turn arrow in its own translucent tile, and the walk time
+  /// carried inside the button so the action states its own cost. This is the
+  /// identity card's one action, so it gets the card's one piece of solid
+  /// colour.
+  Widget _walkHereButton(double? metres) {
+    final mins = metres == null ? null : walkMinutesFor(metres);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Semantics(
+        button: true,
+        label: 'Walk here — directions to this stop in your maps app',
+        excludeSemantics: true,
+        child: Material(
+          color: SoftBlue.blue,
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _openDirections,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: const Icon(
+                      Icons.directions_walk_rounded,
+                      size: 15,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Walk here',
+                          style: SoftBlue.sans(
+                            14,
+                            weight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          mins == null ? 'Maps' : '$mins min · Maps',
+                          style: SoftBlue.sans(
+                            11,
+                            weight: FontWeight.w500,
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.turn_slight_right_rounded,
+                    size: 17,
+                    color: Colors.white.withValues(alpha: 0.9),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1114,15 +1437,20 @@ class _SoftStopScreenState extends State<SoftStopScreen>
   Widget _factDivider() =>
       Container(width: 1, color: SoftBlue.hairline, margin: const EdgeInsets.symmetric(vertical: 2));
 
-  /// Straight-line metres to this stop. Null without a fix, when you're
-  /// basically AT the stop (<50 m — "26m away" is noise, owner 2026-07-24), or
-  /// beyond ~50 km, where "away" stops being navigation information.
+  /// Straight-line metres to this stop. Null only when we genuinely can't say
+  /// — no fix, or beyond ~50 km, where "away" stops being navigation
+  /// information.
+  ///
+  /// The old <50 m cut-off is gone (owner 2026-07-26, ported from iOS): near
+  /// the stop is when the metres matter MOST, and a card built to hold three
+  /// facts shouldn't blank two of them at the moment they're most relevant.
+  /// "—" now means one thing only: we don't know.
   double? _distanceM() {
     final loc = LocationService.shared.lastLocation;
     final latLon = DataStore.shared.stopLatLon(widget.stopCode);
     if (loc == null || latLon == null) return null;
     final m = haversine(loc.lat, loc.lon, latLon.lat, latLon.lon);
-    return (m >= 50 && m <= 50000) ? m : null;
+    return m <= 50000 ? m : null;
   }
 
   /// The MRT interchange as its own full-width row at the foot of the identity
@@ -1197,27 +1525,20 @@ class _SoftStopScreenState extends State<SoftStopScreen>
 
   // ── Arrivals ───────────────────────────────────────────────────────────────
 
-  // No "Arrivals" header/sort-pill row: iOS goes straight from the title
-  // block (or interchange card) into the service rows with no section
-  // label at all — matches WSBusStopView exactly.
+  /// "All services" — EVERY service at this stop, including the soonest. The
+  /// soonest used to be filtered out because the hero card was already
+  /// showing it; with the hero gone that filter silently hid the most useful
+  /// bus at the stop (iOS 2026-07-26).
   Widget _arrivalSection(
     BuildContext context,
     ArrivalState? state,
     List<Service> sorted,
-    Service? featured,
   ) {
-    // The featured service is promoted into the hero — it's excluded from
-    // ALL SERVICES below rather than shown twice (spec item 2, differs from
-    // the pre-2026-07-25 Android behaviour that duplicated it in both
-    // places).
-    final rest = featured == null
-        ? sorted
-        : sorted.where((s) => s.no != featured.no).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (state == null || state.kind == ArrivalStateKind.loading)
-          _emptyCard(context, 'Loading live arrivals…', loading: true)
+          _closedStateCard(context, error: null, loading: true)
         else if (state.kind == ArrivalStateKind.empty)
           _closedStateCard(context, error: null)
         else if (state.kind == ArrivalStateKind.error)
@@ -1225,168 +1546,71 @@ class _SoftStopScreenState extends State<SoftStopScreen>
             context,
             error: state.errorMessage ?? "Couldn't reach LTA",
           )
+        // "Loaded, but nothing in it" is the same fact as `empty` — iOS
+        // folds them together (`arrivalsAreEmpty`) so a stop that answers
+        // with a zero-length list still gets the closed-stop card rather
+        // than a blank space under the header.
+        else if (sorted.isEmpty)
+          _closedStateCard(context, error: null)
         else ...[
-          ..._activeAlertRows(context),
-          if (rest.isNotEmpty) _arrivalsList(context, rest),
+          // 22pt inset overall: the page's ListView already pads 16.
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: Text(
+              'All services',
+              style: SoftBlue.sans(
+                16,
+                weight: FontWeight.bold,
+                color: SoftBlue.ink,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _arrivalsList(context, sorted),
         ],
       ],
     );
   }
 
-  /// "Watching" section — the buses at this stop the user is being notified
-  /// about. One row each: bus + destination, with a ✕ to stop watching (Undo
-  /// snackbar). The fixed "3 & 1 min" timing isn't repeated per row (it's the
-  /// same for every alert); the eyebrow says it once.
-  List<Widget> _activeAlertRows(BuildContext context) {
-    final t = context.t;
-    final mine = AppModel.shared.alerts
-        .where(
-          (a) => a.kind == AlertKind.arrival && a.stopCode == widget.stopCode,
-        )
-        .toList();
-    if (mine.isEmpty) return const [];
-    return [
-      Padding(
-        padding: const EdgeInsets.only(left: 4, bottom: 8),
-        child: Row(
-          children: [
-            Text(
-              'WATCHING',
-              style: t
-                  .mono(11, weight: FontWeight.w700, color: t.soon)
-                  .copyWith(letterSpacing: 1.2),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'alerted 3 & 1 min before',
-              style: t.mono(10, color: t.dim).copyWith(letterSpacing: 0.2),
-            ),
-          ],
-        ),
-      ),
-      Container(
-        decoration: BoxDecoration(
-          color: t.soonBg,
-          borderRadius: BorderRadius.circular(LyneRadius.md),
-        ),
-        child: Column(
-          children: [
-            for (var i = 0; i < mine.length; i++) ...[
-              if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
-                child: Row(
-                  children: [
-                    Icon(Icons.visibility_rounded, size: 18, color: t.soon),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(
-                              text: 'Bus ${mine[i].busNo}',
-                              style: t.sans(
-                                14,
-                                weight: FontWeight.w700,
-                                color: t.fg,
-                              ),
-                            ),
-                            if (mine[i].dest.isNotEmpty)
-                              TextSpan(
-                                text: '  ·  To ${mine[i].dest}',
-                                style: t.sans(13, color: t.dim),
-                              ),
-                          ],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    // Row exists only while the alert does, so a toggle is
-                    // meaningless (off → vanishes). ✕ stops watching, with Undo.
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      tooltip: 'Stop watching Bus ${mine[i].busNo}',
-                      icon: Icon(Icons.close_rounded, size: 20, color: t.dim),
-                      onPressed: () => toggleArrivalAlert(
-                        busNo: mine[i].busNo,
-                        stopCode: mine[i].stopCode,
-                        stopName: mine[i].stopName,
-                        dest: mine[i].dest,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-      const SizedBox(height: 12),
-    ];
-  }
+  // The "WATCHING" block that used to sit above the list is GONE (iOS
+  // 2026-07-26): it restated what the row's own bell badge and the sheet's
+  // "Alert on" pill already say. Armed state now lives only where the control
+  // that armed it lives.
 
   // ── Arrivals list ─────────────────────────────────────────────────────────
 
-  /// The grouped arrivals card: one row per service with hairline dividers,
-  /// then a "Show more" expander past [_collapsedCount]. Mirrors iOS
-  /// WSBusStopView's number-sorted service board.
+  /// The grouped arrivals card: one row per service, split by dividers inset
+  /// past the service tile. EVERY service, always — the "Show more" collapse
+  /// is gone (iOS shows the whole board; a stop with 14 services is a stop
+  /// with 14 rows).
   Widget _arrivalsList(BuildContext context, List<Service> sorted) {
-    final canCollapse = sorted.length > _collapsedCount;
-    final shown = (_expanded || !canCollapse)
-        ? sorted
-        : sorted.take(_collapsedCount).toList();
-
     // No mid-list MREC any more — this screen's single ad is the anchored
     // banner in [SoftDetailBottomBar] (owner placement redesign 2026-07-07).
 
     // SlidableAutoCloseBehavior: opening one row's Notify action closes any
     // other open one (shared 'arrivals' group tag).
     return SlidableAutoCloseBehavior(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _arrivalsCard(
-            context,
-            shown,
-            canCollapse: canCollapse,
-            total: sorted.length,
+      child: Material(
+        color: SoftBlue.card,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: SoftBlue.cardShadow,
           ),
-        ],
-      ),
-    );
-  }
-
-  /// One grouped arrivals card: a row per service split by hairline dividers,
-  /// plus the "Show more" expander when [canCollapse]. Pulled out of
-  /// [_arrivalsList] so the full view can render two cards with an ad between.
-  Widget _arrivalsCard(
-    BuildContext context,
-    List<Service> rows, {
-    required bool canCollapse,
-    required int total,
-  }) {
-    final t = context.t;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: t.line, width: 1),
-        ),
-        child: Column(
-          children: [
-            for (var i = 0; i < rows.length; i++) ...[
-              if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
-              _swipeNotify(context, rows[i], _busRow(context, rows[i])),
+          child: Column(
+            children: [
+              for (var i = 0; i < sorted.length; i++) ...[
+                if (i > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 64),
+                    child: Container(height: 1, color: SoftBlue.hairline),
+                  ),
+                _swipeNotify(context, sorted[i], _busRow(context, sorted[i])),
+              ],
             ],
-            if (canCollapse) ...[
-              Divider(height: 1, thickness: 1, color: t.line),
-              _showMoreRow(context, total),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -1394,20 +1618,20 @@ class _SoftStopScreenState extends State<SoftStopScreen>
 
   // ── Service row (inside the grouped card) ─────────────────────────────────
   //
-  // Neutral route tile (with a blue bell badge when armed) · destination
-  // secondary · ETA primary in a fixed-width trailing column · deck/
-  // wheelchair/"then…"/crowd (ALWAYS rendered, "—" when unknown) on a second
-  // line. Tapping the row PROMOTES that service into the hero (spec item 2)
-  // rather than navigating away; a separate trailing "Track" chevron still
-  // opens the full SoftBusScreen so the richer tracking view stays
-  // reachable. Per-bus alert/favourite management is a swipe action (the
-  // Material-idiomatic stand-in for iOS's long-press context menu).
+  // Hierarchy: fixed-width service tile (with a blue bell badge when armed) ·
+  // "to <dest>" + the crowd word · a right-aligned ETA column. At a known
+  // stop the ETA is the ANSWER, so it's the row's primary element and the
+  // destination drops to secondary. No "ARRIVING" capsule and no accent row
+  // wash — a busy stop lit up in three places at once; the arriving row says
+  // "Now" in chipInk and that's the whole tell. No "~" prefix either: iOS
+  // doesn't qualify ETAs on this screen.
+  //
+  // Tapping the row opens that bus's SHEET. It used to promote the service
+  // into the hero card — with the hero removed the tap changed something
+  // above the fold and read as doing nothing at all (owner 2026-07-26).
 
   Widget _busRow(BuildContext context, Service bus) {
-    final t = context.t;
     final now = DateTime.now();
-    final feed = Freshness.from(DataStore.shared.lastRefresh(widget.stopCode));
-    final conf = ArrivalConfidence.of(monitored: bus.monitored, feed: feed);
     final etas = _arrivalTimes(bus, now);
     final leadSec = etas.first;
     final later = etas.skip(1).map((s) => fmtEta(s).big).toList();
@@ -1418,270 +1642,184 @@ class _SoftStopScreenState extends State<SoftStopScreen>
           stopCode: widget.stopCode,
         ) !=
         null;
-    // The blue "pulling in" mark — reserved for a monitored arrival under a
-    // minute out. Matches iOS exactly: gated on `svc.monitored` only, not on
-    // feed recency (a monitored bus stays "arriving" even if the stop's feed
-    // itself has gone briefly stale). Static (no pulsing — owner-flagged as
-    // distracting on iOS; the capsule + row wash carry it instead).
+    // Gated on `bus.monitored` only, not on feed recency — a monitored bus
+    // stays "arriving" even if the stop's feed itself has gone briefly stale
+    // (matches iOS).
     final arrivingNow = bus.monitored && fmtEta(leadSec).big == 'Arr';
 
     return Semantics(
       label: 'Bus ${bus.no} to ${bus.dest}',
       hint: arrivingNow
-          ? 'Bus ${bus.no} is arriving now. Tap to feature; use Track to open.'
-          : 'Tap to feature bus ${bus.no}; use Track to open',
+          ? "Bus ${bus.no} is arriving now. Tap to open its departures."
+          : "Tap to open bus ${bus.no}'s departures",
       button: true,
-      child: InkWell(
-        onTap: () => setState(() => _featuredNo = bus.no),
-        child: Container(
-          // Margin + padding together always sum to the original 16/14 inset
-          // so non-arriving rows stay pixel-identical; only the fill colour
-          // changes. Keeps every row the same height (no divider jitter) and
-          // keeps the highlight inset from the card's own rounded edges
-          // rather than bleeding full-width (owner-flagged on iOS).
-          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          decoration: BoxDecoration(
-            color: arrivingNow
-                ? t.accent.withValues(alpha: 0.08)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            children: [
-              // Neutral tile — never colour-coded; only MRT line pills and
-              // the accent-only ARRIVING capsule carry colour on this screen.
-              // A solid blue bell badge overlays it when this service has an
-              // armed arrival alert (spec item 4).
-              _routeTileWithAlertBadge(bus.no, t, alerted: alerted),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // ETA primary (fixed-width trailing column so it aligns
-                    // down the card) · destination secondary (spec item 4).
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            bus.dest.isEmpty ? 'Bus ${bus.no}' : bus.dest,
-                            style: t.sans(
-                              14,
-                              weight: FontWeight.w500,
-                              color: t.dim,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: 64,
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: arrivingNow
-                                ? _arrivingCapsule(t)
-                                : _leadEta(t, leadSec, conf),
-                          ),
-                        ),
-                      ],
-                    ),
-                    _secondLine(t, bus, later),
-                  ],
+      child: Material(
+        color: SoftBlue.card,
+        child: InkWell(
+          onTap: () => _openServiceSheet(context, bus.no),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+            child: Row(
+              children: [
+                // Fixed width, so the destination and crowd word below it
+                // start on one line down the whole list.
+                _serviceTileWithAlertBadge(bus.no, alerted: alerted),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        bus.dest.isEmpty ? 'Bus ${bus.no}' : 'to ${bus.dest}',
+                        style: SoftBlue.sans(12.5, color: SoftBlue.sub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      _rowCrowdWord(bus.load),
+                    ],
+                  ),
                 ),
-              ),
-              // No trailing "Track" chevron. It pushed the standalone bus
-              // screen, which iOS retired (WSRoot: "notification taps open the
-              // Stop view with the service pinned — Track Bus screen retired").
-              // The row's own tap promotes the service into the hero, and the
-              // hero carries the route timeline — so the push was a second,
-              // divergent answer to a question this screen already answers.
-            ],
+                const SizedBox(width: 8),
+                _rowEtaColumn(leadSec, later, arriving: arrivingNow),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// [_routeTile] plus a small solid-blue bell overlay when this service has
-  /// an armed arrival alert at this stop (spec item 4).
-  Widget _routeTileWithAlertBadge(
-    String svc,
-    LyneTheme t, {
-    required bool alerted,
+  /// The row's trailing answer column: the lead ETA, then the following two
+  /// as "then 12, 24 min". Right-aligned in a min-width box so every row's
+  /// numerals sit on the same vertical line.
+  Widget _rowEtaColumn(
+    int leadSec,
+    List<String> later, {
+    required bool arriving,
   }) {
-    if (!alerted) return _routeTile(svc, t);
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        _routeTile(svc, t),
-        Positioned(
-          top: -5,
-          right: -5,
-          child: Container(
-            width: 16,
-            height: 16,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(color: t.accent, shape: BoxShape.circle),
-            child: Icon(
-              Icons.notifications_rounded,
-              size: 10,
-              color: t.contrastFg,
+    final big = fmtEta(leadSec).big;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 76),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // "Now", not "Arr" — the same word the sheet's board uses, so one
+          // state has one name app-wide.
+          Text(
+            arriving ? 'Now' : '$big min',
+            textAlign: TextAlign.right,
+            style: SoftBlue.mono(
+              17,
+              weight: arriving ? FontWeight.w800 : FontWeight.bold,
+              color: arriving ? SoftBlue.chipInk : SoftBlue.ink,
             ),
           ),
-        ),
-      ],
-    );
-  }
-
-  /// Second line under the destination: deck/wheelchair attrs · "then 12 ·
-  /// 24 min" (later arrivals, omitted when there are none) · crowd meter
-  /// trailing. Omitted entirely when there's nothing to show, so
-  /// schedule-only ghost rows stay single-line.
-  Widget _secondLine(LyneTheme t, Service bus, List<String> later) {
-    // Deck/wheelchair are static bus attributes, known regardless of live
-    // GPS — iOS shows them unconditionally, so no sched/monitored gate here.
-    final showAttrs = bus.wab || bus.deck != Deck.sd;
-    final showThen = later.isNotEmpty;
-    // Crowd word is ALWAYS rendered ("—" when unknown) — spec item 4,
-    // 2026-07-25 field-test decision; no longer gated on `bus.monitored`
-    // (a schedule-only ghost row used to hide the word entirely, which read
-    // as the row having nothing to say rather than an honest "—").
-    return Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child: Row(
-        children: [
-          if (showAttrs) _serviceAttrs(t, bus),
-          if (showAttrs && showThen) const SizedBox(width: 8),
-          if (showThen)
-            Flexible(
-              child: Text(
-                'then ${later.join(' · ')} min',
-                style: t.mono(11, color: t.dim),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+          if (later.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              'then ${later.join(', ')} min',
+              textAlign: TextAlign.right,
+              style: SoftBlue.mono(10.5, color: SoftBlue.sub),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-          const Spacer(),
-          _rowCrowdWord(t, bus.load),
+          ],
         ],
       ),
     );
   }
 
-  /// ALL SERVICES row crowd word — ALWAYS rendered, "—" when unknown (spec
-  /// item 4, 2026-07-25 field-test decision). Deliberately NOT the shared
-  /// [CrowdMeter] (which keeps crowd colour-neutral everywhere else per an
-  /// earlier 2026-07-03 decision): this row's word tints amber for standing
-  /// room and RED (not amber) for a full/limited bus, matching iOS
-  /// WSBusStopView's row-level `load == .sda ? amber : load == .lsd ? red :
-  /// sub` exactly.
-  Widget _rowCrowdWord(LyneTheme t, Load? load) {
+  /// Fixed-width service pill. Sized to its content, "961M" makes a visibly
+  /// wider pill than "93", and because the tile is the row's leading element
+  /// every following column would start at a different x on every row (owner
+  /// 2026-07-26) — 58pt makes them identical. Mirrors iOS `SoftServiceTile`.
+  Widget _serviceTile(String svc) {
+    return Container(
+      width: 58,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      decoration: BoxDecoration(
+        color: SoftBlue.chipBg,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        svc,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: SoftBlue.sans(
+          14,
+          weight: FontWeight.w800,
+          color: SoftBlue.chipInk,
+          tabular: true,
+        ),
+      ),
+    );
+  }
+
+  /// [_serviceTile] plus a small solid-blue bell overlay when this service
+  /// has an armed arrival alert at this stop.
+  Widget _serviceTileWithAlertBadge(String svc, {required bool alerted}) {
+    if (!alerted) return _serviceTile(svc);
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        _serviceTile(svc),
+        Positioned(
+          top: -5,
+          right: -5,
+          child: Container(
+            width: 15,
+            height: 15,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: SoftBlue.blue,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.notifications_rounded,
+              size: 9,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The row's crowd line, in FULL phrasing ("Seats available", not "Seats"
+  /// — owner 2026-07-26: nothing next to it says the line is about the crowd
+  /// on board, so the label has to carry its own meaning). Deliberately NOT
+  /// the shared [CrowdMeter], which keeps crowd colour-neutral everywhere
+  /// else: this row's word tints amber for standing room and RED for a
+  /// full/limited bus, matching iOS WSBusStopView's row-level
+  /// `load == .sda ? amber : load == .lsd ? red : sub` exactly.
+  Widget _rowCrowdWord(Load? load) {
     return Text(
-      switch (load) {
-        Load.sea => 'Seats',
-        Load.sda => 'Standing',
-        Load.lsd => 'Full',
-        null => '—',
-      },
-      style: t.mono(
+      _crowdWord(load),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: SoftBlue.sans(
         10.5,
         weight: load == Load.sea || load == null
-            ? FontWeight.w500
+            ? FontWeight.w400
             : FontWeight.w600,
         color: switch (load) {
-          Load.sda => t.warn,
-          Load.lsd => t.crit,
-          _ => t.dim,
+          Load.sda => SoftBlue.amber,
+          Load.lsd => SoftBlue.red,
+          _ => SoftBlue.sub,
         },
       ),
     );
   }
 
-  /// Solid accent "ARRIVING" capsule — the sanctioned live-accent exception,
-  /// shown in place of the ETA when the lead bus is under a minute out and
-  /// monitored by GPS.
-  Widget _arrivingCapsule(LyneTheme t) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: t.accent,
-        borderRadius: BorderRadius.circular(100),
-      ),
-      child: Text(
-        'ARRIVING',
-        style: t
-            .mono(11, weight: FontWeight.w700, color: Colors.white)
-            .copyWith(letterSpacing: 0.8),
-      ),
-    );
-  }
-
-  /// The ETA, inline on the destination's baseline: "~12 min" for a
-  /// scheduled/ghost bus, "12 min" for a monitored one, "Arr" alone with no
-  /// suffix. The "~" depends only on whether the bus is monitored — never on
-  /// feed staleness — and the numeral itself always stays full-ink
-  /// (timeliness is the promise — see feedback_timely_over_honest). Matches
-  /// iOS's inline `Text(sched ? "~" : "") + eta.big + " min"` exactly.
-  Widget _leadEta(LyneTheme t, int sec, ArrivalConfidence conf) {
-    final eta = fmtEta(sec);
-    final arriving = eta.big == 'Arr';
-    final sched = conf == ArrivalConfidence.unconfirmed;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        if (sched)
-          Text(
-            '~',
-            style: t.mono(15, weight: FontWeight.w600, color: t.dim),
-          ),
-        Text(
-          eta.big,
-          style: t.mono(19, weight: FontWeight.w700, color: t.fg),
-        ),
-        if (!arriving)
-          Text(
-            ' min',
-            style: t.mono(11, weight: FontWeight.w600, color: t.dim),
-          ),
-      ],
-    );
-  }
-
-  /// Small inline row of service attribute chips: deck type when it's not
-  /// plain single-deck, then wheelchair (WAB) — iOS's icon order. Colour is
-  /// dim/faint so it never competes with the ETA.
-  Widget _serviceAttrs(LyneTheme t, Service bus) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (bus.deck != Deck.sd)
-          Text(
-            bus.deck == Deck.dd ? 'Double-deck' : 'Bendy',
-            style: t.mono(10, color: t.faint),
-          ),
-        if (bus.deck != Deck.sd && bus.wab) const SizedBox(width: 5),
-        if (bus.wab)
-          Semantics(
-            label: 'Wheelchair accessible',
-            excludeSemantics: true,
-            child: Icon(Icons.accessible_rounded, size: 13, color: t.dim),
-          ),
-      ],
-    );
-  }
-
-  /// Wrap a bus row so swiping it RIGHT reveals Notify/Stop + Save actions
-  /// (replaces the old side bell). Tapping the row still opens the bus; the
-  /// swipe arms/removes the arrival alert or favourites the service at this
-  /// stop in one gesture, with an Undo snackbar for the alert.
+  /// Wrap a bus row so swiping it reveals its ONE action: arm/disarm the
+  /// arrival alert (with an Undo snackbar). Favouriting used to live here
+  /// too; it moved into the row's sheet (iOS 2026-07-26), so the tray is a
+  /// single 88pt-wide chip rather than a two-colour drawer.
   Widget _swipeNotify(BuildContext context, Service bus, Widget child) {
-    final t = context.t;
     final on =
         AppModel.shared.alertFor(
           kind: AlertKind.arrival,
@@ -1689,16 +1827,14 @@ class _SoftStopScreenState extends State<SoftStopScreen>
           stopCode: widget.stopCode,
         ) !=
         null;
-    final favOn = AppModel.shared.isFavService(
-      no: bus.no,
-      stop: widget.stopCode,
-    );
+    // extentRatio is a fraction of the row, so back out the 88pt iOS uses.
+    final width = MediaQuery.sizeOf(context).width;
     return Slidable(
       key: ValueKey('notify-${bus.no}'),
       groupTag: 'arrivals',
       endActionPane: ActionPane(
         motion: const DrawerMotion(),
-        extentRatio: 0.55,
+        extentRatio: width <= 0 ? 0.25 : (88 / width).clamp(0.15, 0.5),
         children: [
           SlidableAction(
             onPressed: (_) => toggleArrivalAlert(
@@ -1707,55 +1843,16 @@ class _SoftStopScreenState extends State<SoftStopScreen>
               stopName: DataStore.shared.stopName(widget.stopCode),
               dest: bus.dest,
             ),
-            backgroundColor: on ? t.surfaceHi : t.soon,
-            foregroundColor: on ? t.fg : t.onAccent,
-            icon: on ? Icons.visibility_off : Icons.visibility_rounded,
-            label: on ? 'Stop' : 'Notify',
-          ),
-          SlidableAction(
-            onPressed: (_) => AppModel.shared.toggleFavService(
-              no: bus.no,
-              stop: widget.stopCode,
-            ),
-            backgroundColor: favOn ? t.surfaceHi : t.accent,
-            foregroundColor: favOn ? t.fg : t.onAccent,
-            icon: favOn ? Icons.star_rounded : Icons.star_outline_rounded,
-            label: favOn ? 'Saved' : 'Save',
+            backgroundColor: SoftBlue.chipBg,
+            foregroundColor: SoftBlue.chipInk,
+            icon: on
+                ? Icons.notifications_active_rounded
+                : Icons.notifications_none_rounded,
+            label: on ? 'On ✓' : 'Notify',
           ),
         ],
       ),
       child: child,
-    );
-  }
-
-  /// "Show more" / "Show less" expander at the foot of the grouped card.
-  Widget _showMoreRow(BuildContext context, int total) {
-    final t = context.t;
-    return Semantics(
-      button: true,
-      label: _expanded ? 'Show fewer buses' : 'Show all $total buses',
-      child: InkWell(
-        onTap: () => setState(() => _expanded = !_expanded),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Text(
-                _expanded ? 'Show less' : 'Show more',
-                style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-              ),
-              const Spacer(),
-              Icon(
-                _expanded
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                size: 20,
-                color: t.dim,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -1788,9 +1885,9 @@ class _SoftStopScreenState extends State<SoftStopScreen>
   }
 
   // ── Route tile ─────────────────────────────────────────────────────────────
-  // Neutral, bordered, monospaced — matches iOS's `RouteTile(size: .large)`.
-  // Bus route numbers are NEVER colour-filled; colour is reserved for MRT
-  // line pills and the accent-only ARRIVING capsule.
+  // Neutral, bordered, monospaced. Only the first/last-bus timetable inside
+  // the closed-stop card still uses it — the live service rows carry the
+  // SoftBlue [_serviceTile] instead.
 
   Widget _routeTile(String svc, LyneTheme t) {
     return Container(
@@ -1831,14 +1928,36 @@ class _SoftStopScreenState extends State<SoftStopScreen>
   /// retry is offered because the data really might be one tap away. A closed
   /// stop gets no "check again" — the stop is shut, so inviting a refresh only
   /// promises something the next poll can't deliver (owner 2026-07-26).
-  Widget _closedStateCard(BuildContext context, {required String? error}) {
+  Widget _closedStateCard(
+    BuildContext context, {
+    required String? error,
+    bool loading = false,
+  }) {
     final isPinned = AppModel.shared.pinForCode(widget.stopCode) != null;
-    final windows = error == null
+    final closed = error == null && !loading;
+    final windows = closed
         ? DataStore.shared.firstLastAtStop(widget.stopCode)
         : const <({String service, String first, String last})>[];
     // Kick the route dataset if it hasn't loaded — the list fills in on the
     // next rebuild rather than staying permanently blank.
-    if (error == null && windows.isEmpty) DataStore.shared.ensureRoutes();
+    if (closed && windows.isEmpty) DataStore.shared.ensureRoutes();
+
+    // All three states share ONE shape — icon tile, headline, detail line —
+    // so they read as one system rather than a bare spinner for loading and a
+    // card for empty/error (iOS `heroPlaceholder`).
+    final (icon, headline, detail) = loading
+        ? (
+            Icons.refresh_rounded,
+            'Getting live arrivals…',
+            "Fetching this stop's departures from LTA.",
+          )
+        : error != null
+        ? (Icons.wifi_tethering_error_rounded, "Can't reach live arrivals", error)
+        : (
+            Icons.nights_stay_rounded,
+            'No buses running',
+            'Nothing is timed at this stop right now — the last bus has gone.',
+          );
 
     final use24h = AppModel.shared.use24h;
     return Container(
@@ -1851,35 +1970,38 @@ class _SoftStopScreenState extends State<SoftStopScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(22, 28, 22, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
-                  width: 34,
-                  height: 34,
+                  width: 56,
+                  height: 56,
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     color: SoftBlue.chipBg,
-                    borderRadius: BorderRadius.circular(11),
+                    shape: BoxShape.circle,
                   ),
-                  child: Icon(
-                    error == null
-                        ? Icons.nightlight_round
-                        : Icons.cloud_off_rounded,
-                    size: 16,
-                    color: SoftBlue.blue,
+                  child: Icon(icon, size: 24, color: SoftBlue.blue),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  headline,
+                  textAlign: TextAlign.center,
+                  style: SoftBlue.sans(
+                    17,
+                    weight: FontWeight.bold,
+                    color: SoftBlue.ink,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    error ??
-                        'No live arrivals right now. The last bus may have gone.',
-                    style: SoftBlue.sans(
-                      14,
-                      weight: FontWeight.w600,
-                      color: SoftBlue.ink,
-                    ),
+                const SizedBox(height: 10),
+                Text(
+                  detail,
+                  textAlign: TextAlign.center,
+                  style: SoftBlue.sans(
+                    13,
+                    weight: FontWeight.w500,
+                    color: SoftBlue.sub,
                   ),
                 ),
               ],
@@ -1959,35 +2081,39 @@ class _SoftStopScreenState extends State<SoftStopScreen>
             ],
             const SizedBox(height: 6),
           ],
-          Container(height: 1, color: SoftBlue.hairline),
-          if (error != null)
+          // Nothing to DO while the fetch is still in flight — the actions
+          // appear with the answer (iOS gates them on `!isLoading`).
+          if (!loading) ...[
+            Container(height: 1, color: SoftBlue.hairline),
+            if (error != null)
+              _emptyAction(
+                icon: Icons.refresh_rounded,
+                title: 'Try again',
+                subtitle: "Re-fetch this stop's arrivals",
+                onTap: () => DataStore.shared.refreshArrivals(widget.stopCode),
+                divider: true,
+              ),
+            // The platform escape hatch (ui-checklist §7). Android has no
+            // in-app map, so this hands the stop to whatever maps app the
+            // user has, as a WALKING destination — the same job iOS's
+            // "Directions in Apple Maps" does.
             _emptyAction(
-              icon: Icons.refresh_rounded,
-              title: 'Try again',
-              subtitle: "Re-fetch this stop's arrivals",
-              onTap: () => DataStore.shared.refreshArrivals(widget.stopCode),
+              icon: Icons.directions_walk_rounded,
+              title: 'Walk here',
+              subtitle: 'Directions in your maps app',
+              onTap: _openDirections,
               divider: true,
             ),
-          // The platform escape hatch (ui-checklist §7). Android has no in-app
-          // map, so this hands the stop to whatever maps app the user has, as
-          // a WALKING destination — the same job iOS's "Directions in Apple
-          // Maps" does.
-          _emptyAction(
-            icon: Icons.directions_walk_rounded,
-            title: 'Walk here',
-            subtitle: 'Directions in your maps app',
-            onTap: _openDirections,
-            divider: true,
-          ),
-          _emptyAction(
-            icon: isPinned ? Icons.star_rounded : Icons.star_outline_rounded,
-            title: isPinned ? 'Saved' : 'Save this stop',
-            subtitle: isPinned
-                ? "It's in your Favourites"
-                : 'Find it fast in the morning',
-            onTap: () => AppModel.shared.togglePin(widget.stopCode),
-            divider: false,
-          ),
+            _emptyAction(
+              icon: isPinned ? Icons.star_rounded : Icons.star_outline_rounded,
+              title: isPinned ? 'Saved' : 'Save this stop',
+              subtitle: isPinned
+                  ? "It's in your Favourites"
+                  : 'Find it fast in the morning',
+              onTap: () => AppModel.shared.togglePin(widget.stopCode),
+              divider: false,
+            ),
+          ],
         ],
       ),
     );
@@ -2095,37 +2221,9 @@ class _SoftStopScreenState extends State<SoftStopScreen>
     );
   }
 
-  Widget _emptyCard(
-    BuildContext context,
-    String message, {
-    bool loading = false,
-  }) {
-    final t = context.t;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-        border: Border.all(color: t.line, width: 1),
-      ),
-      child: Row(
-        children: [
-          if (loading)
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.2, color: t.dim),
-            )
-          else
-            Icon(Icons.directions_bus_rounded, color: t.dim, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(message, style: t.sans(14, color: t.fg)),
-          ),
-        ],
-      ),
-    );
-  }
+  // The separate spinner-in-a-card loading state is gone — loading is now
+  // one of [_closedStateCard]'s three faces, so the screen never swaps card
+  // shapes between "waiting" and "answered".
 
   // No footer: the title block's LIVE badge/"Updated h:mm" metaline already
   // carries provenance, and users don't care where the data comes from

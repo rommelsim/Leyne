@@ -140,9 +140,9 @@ struct WSServiceInfoView: View {
             HStack {
                 Text(key).font(ws.sans(13, weight: .semibold)).foregroundStyle(SoftBlue.sub)
                 Spacer()
-                (Text(WSFmt.firstLast(first)).foregroundStyle(SoftBlue.ink)
+                (Text(WSFmt.firstLast(first, use24h: m.use24h)).foregroundStyle(SoftBlue.ink)
                  + Text(" – ").foregroundStyle(SoftBlue.sub)
-                 + Text(WSFmt.firstLast(last)).foregroundStyle(SoftBlue.ink))
+                 + Text(WSFmt.firstLast(last, use24h: m.use24h)).foregroundStyle(SoftBlue.ink))
                     .font(ws.mono(14, weight: .bold))
             }
             .padding(.vertical, 11)

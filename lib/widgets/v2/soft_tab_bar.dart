@@ -1,6 +1,7 @@
 // SoftTabBar (Material 3) — bottom NavigationBar with pill-indicator
 // behind the active icon. Mirrors the iOS WSTabBar set exactly:
-// Home · Saved · Alerts — matching WSRoot.swift's WSTab declaration order
+// Nearby · Favourites · Alerts — matching WSRoot.swift's WSTab declaration
+// order and its tab TITLES (the enum members stay home/favourites/alerts)
 // (no Search destination in the bar — Search is reached via Home's search
 // bar → onOpenSearch, and stays a pushed route; no MRT destination either —
 // MRT stations are reached from Home's nearby-stations strip and Search,
@@ -29,7 +30,7 @@ import '../ad_banner.dart';
 // MRT tab (stations open from Home's strip / Search). SoftTab.mrt is KEPT
 // as an enum member: soft_root.dart still mounts SoftMrtScreen for it and
 // detail screens still carry it as a `tabSelection` value.
-// Android visible order: Home · Saved · Alerts.
+// Android visible order: Nearby · Favourites · Alerts.
 enum SoftTab { home, favourites, mrt, alerts, search }
 
 /// Floating white pill bottom bar (SoftBlue §4 rollout note: "bottom nav →
@@ -52,12 +53,21 @@ class SoftTabBar extends StatelessWidget {
   /// Number of unseen alerts. When > 0, the Alerts tab shows a badge dot.
   final int alertBadgeCount;
 
+  // Labels + glyphs mirror iOS WSRoot's WSTab set exactly (owner parity pass
+  // 2026-07-26): the first tab is "Nearby" (what the screen actually answers —
+  // "Home" named a place, not a question) with a location pin, and the second
+  // is "Favourites" with a star. Every destination keeps its label visible —
+  // see _PillDestination.
   static const _destinations = [
-    (icon: Icons.home_outlined, selectedIcon: Icons.home_rounded, label: 'Home'),
     (
-      icon: Icons.bookmark_outline_rounded,
-      selectedIcon: Icons.bookmark_rounded,
-      label: 'Saved',
+      icon: Icons.location_on_outlined,
+      selectedIcon: Icons.location_on_rounded,
+      label: 'Nearby',
+    ),
+    (
+      icon: Icons.star_outline_rounded,
+      selectedIcon: Icons.star_rounded,
+      label: 'Favourites',
     ),
     (
       icon: Icons.notifications_outlined,
@@ -98,7 +108,7 @@ class SoftTabBar extends StatelessWidget {
     );
   }
 
-  // Order mirrors iOS WSTabBar: Home · Saved · Alerts. Search and MRT are
+  // Order mirrors iOS WSTabBar: Nearby · Favourites · Alerts. Search and MRT are
   // deliberately absent — Search is a pushed route (SoftTab.search) and MRT
   // stations open from Home's strip / Search; see the SoftTab doc comment.
   static const _visibleTabs = [
@@ -137,7 +147,9 @@ class _PillDestination extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: label,
+      // No explicit label: every destination now renders its name, so the
+      // Text child already names the node. Setting it here as well produced a
+      // second, competing node and TalkBack read the tab twice.
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -147,7 +159,10 @@ class _PillDestination extends StatelessWidget {
             duration: SoftBlueMotion.standard,
             curve: Curves.easeOutCubic,
             margin: const EdgeInsets.symmetric(vertical: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            // 14 → 9 horizontal: every destination now carries its label (not
+            // just the selected one), so three labelled pills have to share
+            // the bar's width on a 360dp screen.
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
             decoration: BoxDecoration(
               color: selected ? SoftBlue.chipBg : Colors.transparent,
               borderRadius: BorderRadius.circular(999),
@@ -162,13 +177,22 @@ class _PillDestination extends StatelessWidget {
                         child: iconWidget,
                       )
                     : iconWidget,
-                if (selected) ...[
-                  const SizedBox(width: 7),
-                  Text(
+                // The label is ALWAYS shown (iOS parity 2026-07-26 — its tab
+                // bar labels every destination). A bar where only the active
+                // item is named makes the other two a guessing game, and the
+                // pill's width jumping on every switch read as a glitch.
+                // Flexible + ellipsis: three labels share the width, so the
+                // longest ("Favourites") shrinks rather than overflowing.
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
                     label,
-                    style: SoftBlue.sans(13, weight: FontWeight.w600, color: color),
+                    style: SoftBlue.sans(12, weight: FontWeight.w600, color: color),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
+                ),
               ],
             ),
           ),

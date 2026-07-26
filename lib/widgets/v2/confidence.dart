@@ -396,9 +396,9 @@ class CrowdMeter extends StatelessWidget {
       case Load.sea:
         return 'Seats available';
       case Load.sda:
-        return 'Standing available';
+        return 'Standing only';
       case Load.lsd:
-        return 'Limited standing';
+        return 'Almost full';
       case null:
         return 'Crowd unknown';
     }
@@ -410,9 +410,9 @@ class CrowdMeter extends StatelessWidget {
       case Load.sea:
         return 'Seats';
       case Load.sda:
-        return 'Standing';
+        return 'Stand';
       case Load.lsd:
-        return 'Limited';
+        return 'Full';
       case null:
         return '—';
     }

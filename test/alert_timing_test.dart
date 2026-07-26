@@ -3,6 +3,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lyne/data/alert_timing.dart';
+import 'package:lyne/data/models.dart';
 
 void main() {
   group('leadOptions / defaults', () {
@@ -53,6 +54,19 @@ void main() {
           'Heading to Farrer Rd Stn Exit B');
       expect(AlertTiming.arrivalBody('Farrer Rd Stn Exit B', 1),
           'Get ready — Farrer Rd Stn Exit B');
+      // With the live service in hand the body names WHICH bus (destination)
+      // and, on the final call only, how full it is — iOS AlertTiming parity.
+      expect(
+        AlertTiming.arrivalBody('Farrer Rd Stn Exit B', 3,
+            dest: 'Clementi Int', load: Load.sea),
+        'to Clementi Int · Farrer Rd Stn Exit B',
+      );
+      expect(
+        AlertTiming.arrivalBody('Farrer Rd Stn Exit B', 1,
+            dest: 'Clementi Int', load: Load.sda),
+        'Get ready — to Clementi Int · Farrer Rd Stn Exit B. '
+        'Standing room only.',
+      );
     });
     test('destination', () {
       expect(AlertTiming.destinationTitle(), 'Your stop is next');

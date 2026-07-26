@@ -283,19 +283,6 @@ class _SoftRootState extends State<SoftRoot> {
           onBack: () => _navKey.currentState?.pop(),
           onTab: _handleTab,
           tabSelection: _tab,
-          onSeeAll: () => _navKey.currentState?.push(
-            MaterialPageRoute(
-              settings: const RouteSettings(name: _kDetailRouteName),
-              builder: (_) => SoftStopScreen(
-                stopCode: code,
-                showAll: true,
-                onBack: () => _navKey.currentState?.pop(),
-                      onTab: _handleTab,
-                tabSelection: _tab,
-                onSeeAll: () {},
-              ),
-            ),
-          ),
         ),
       ),
     );

@@ -106,7 +106,6 @@ void main() async {
           stopCode: code,
           initialService: no,
           onBack: () => navigator.pop(),
-          onSeeAll: () {},
         ),
       ),
     );
