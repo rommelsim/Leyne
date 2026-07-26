@@ -277,7 +277,15 @@ struct ArrivalPill: View {
              + Text(eta.big == "Arr" ? "" : "m")
                 .font(ws.mono(10, weight: .regular))
                 .foregroundStyle(ws.dim))
-            CrowdGauge(fraction: scheduled ? 0 : (load?.wsFraction ?? 0), width: 22)
+            // Only drawn when there IS an occupancy reading. It used to fall
+            // back to `fraction: 0` for a scheduled or unknown-load bus, which
+            // was harmless while the gauge meant "how full" (empty = not
+            // crowded) but asserts the opposite now that it means "how much
+            // room is left" — an empty gauge would claim the bus is full.
+            // No reading ⟹ no gauge; the word beside it carries the state.
+            if !scheduled, let load {
+                CrowdGauge(fraction: load.wsSpaceFraction, width: 22)
+            }
             Text(scheduled ? "sched" : (load?.wsShort ?? "—"))
                 .font(ws.mono(9.5, weight: .regular))
                 .foregroundStyle(highlighted ? ws.text : ws.dim)

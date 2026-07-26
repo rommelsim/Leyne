@@ -29,7 +29,6 @@ enum AdConfig {
     ///   • `bottomAdBanner` / `overlayAdBanner` mount the banner
     ///   • `AdConsent.gatherThenStart()` runs UMP + ATT
     ///   • `MobileAds.shared.start()` initializes the SDK
-    ///   • Onboarding's "Ads" step is shown (see OnboardingView)
     ///
     /// ON — re-enabled 2026-07-07 with fresh ad units (previous units were
     /// deleted in the AdMob console). Required for the ATT prompt to appear

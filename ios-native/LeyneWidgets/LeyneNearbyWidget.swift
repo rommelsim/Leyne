@@ -134,11 +134,14 @@ private struct MediumNearestView: View {
 
     var body: some View {
         if let stop = entry.stop {
-            VStack(alignment: .leading, spacing: 9) {
+            // One gap (`wGap`) between header and board and between rows —
+            // it was 9 above the board and 6 between rows, which read as the
+            // header floating away from the thing it labels.
+            VStack(alignment: .leading, spacing: wGap) {
                 // The stop name is the widget's identity — it was 12pt grey,
                 // quieter than the ETAs it labels, and carried no sign it was
-                // a BUS stop (owner 2026-07-25). Now: the app's bus glyph, the
-                // name in full ink, freshness stays the faint trailing caption.
+                // a BUS stop (owner 2026-07-25). Now: the app's bus glyph and
+                // the name in full ink, then the walk metrics — nothing else.
                 HStack(alignment: .center, spacing: 6) {
                     Image(systemName: "bus.doubledecker")
                         .font(.system(size: 11, weight: .semibold))
@@ -150,9 +153,7 @@ private struct MediumNearestView: View {
                         .layoutPriority(1)
                     // Walk time AND metres — the other half of "can I still
                     // catch it", in the app's own order and format (Saved and
-                    // the stop screen both read "N min walk · Xm"). Sits in
-                    // what used to be empty slack between the name and the
-                    // freshness caption.
+                    // the stop screen both read "N min walk · Xm").
                     //
                     // Lower layout priority than the name and allowed to
                     // shrink: on a long stop name the metrics give way, the
@@ -163,9 +164,14 @@ private struct MediumNearestView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                         .layoutPriority(0.5)
-                    Spacer(minLength: 6)
-                    WUpdatedCaption(date: entry.date)
+                    Spacer(minLength: 0)
                 }
+                // The rows pad themselves `wRowInsetH` inside their own
+                // background; the header has no background, so it takes the
+                // same inset explicitly. Without it the stop name sat 10pt
+                // left of the service chips it labels — the card's columns
+                // agreed with each other but not with their own heading.
+                .padding(.horizontal, wRowInsetH)
 
                 if entry.rows.isEmpty {
                     Text("No live arrivals")

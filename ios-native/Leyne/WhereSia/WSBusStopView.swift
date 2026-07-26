@@ -541,17 +541,23 @@ struct WSBusStopView: View {
     }
 
     /// Crowd for one board slot: a 3-segment gauge plus the word, on a tinted
-    /// capsule. No occupancy from LTA prints "No data" rather than a bare
-    /// dash, so an empty gauge is never mistaken for "empty bus".
+    /// capsule. The segments count ROOM LEFT, not occupancy (see
+    /// `Load.wsSpaceFraction`) — three lit ⟹ seats, one lit ⟹ almost full.
+    ///
+    /// With no occupancy from LTA the segments are dropped entirely and the
+    /// chip says "No data". They can't simply go dark: under this reading an
+    /// unlit gauge asserts "no room", which is a claim, not an absence of one.
     @ViewBuilder
     private func crowdChip(_ load: Load?) -> some View {
         HStack(spacing: 5) {
-            HStack(spacing: 2) {
-                ForEach(0..<3, id: \.self) { seg in
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(
-                            Double(seg) < (load?.wsFraction ?? 0) * 3 - 0.1 ? 0.95 : 0.30))
-                        .frame(width: 4, height: 6)
+            if let load {
+                HStack(spacing: 2) {
+                    ForEach(0..<3, id: \.self) { seg in
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(
+                                Double(seg) < load.wsSpaceFraction * 3 - 0.1 ? 0.95 : 0.30))
+                            .frame(width: 4, height: 6)
+                    }
                 }
             }
             Text(load?.wsShort ?? "No data")

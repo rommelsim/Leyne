@@ -9,12 +9,24 @@ import SwiftUI
 // MARK: - Bus load (per-bus occupancy)
 
 extension Load {
-    /// Gauge fill fraction — the ceiling of LTA's 3-level Load. 34 / 67 / 100 %.
-    var wsFraction: CGFloat {
+    /// Gauge fill fraction = how much ROOM IS LEFT, not how full the bus is
+    /// (owner 2026-07-26). A full gauge means "plenty of space"; a nearly
+    /// empty one means "almost none". Inverted from the original occupancy
+    /// reading, where the most packed bus drew the longest bar and so looked
+    /// like the best option at a glance.
+    ///
+    /// Renamed off `wsFraction` deliberately: the number's MEANING flipped, so
+    /// the old name would silently keep reading as "how full" at call sites.
+    /// The MRT `CrowdLevel.wsFraction` is a different quantity — platform
+    /// density, which has no notion of seats — and is unchanged.
+    ///
+    /// ALWAYS render this alongside the word, and NEVER substitute 0 for an
+    /// unknown load: under this reading an empty gauge asserts "no space".
+    var wsSpaceFraction: CGFloat {
         switch self {
-        case .sea: return 0.34
+        case .sea: return 1.0
         case .sda: return 0.67
-        case .lsd: return 1.0
+        case .lsd: return 0.34
         }
     }
     /// How full the bus is, said in full. A bare "Seats" / "Standing" left
