@@ -30,6 +30,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
+import '../../data/models.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
 import '../../state/app_model.dart';
@@ -287,24 +288,14 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                   ),
                 ],
               ),
-              // Free bus / shuttle chips
+              // Free bus / shuttle relief badges
               if (alert.freeBus || alert.freeShuttle) ...[
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 6,
                   children: [
-                    if (alert.freeBus)
-                      _freeChip(
-                        context,
-                        icon: Icons.directions_bus_rounded,
-                        label: 'Free bus rides',
-                      ),
-                    if (alert.freeShuttle)
-                      _freeChip(
-                        context,
-                        icon: Icons.train_rounded,
-                        label: 'Free MRT shuttle',
-                      ),
+                    if (alert.freeBus) _freeBadge('FREE BUS'),
+                    if (alert.freeShuttle) _freeBadge('FREE SHUTTLE'),
                   ],
                 ),
               ],
@@ -322,7 +313,9 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _eyebrow(context, 'Lift maintenance'),
+        // It's the OUTAGE that matters to a rider, not the activity that
+        // caused it — same wording as WSAlertsView's `liftSection`.
+        _eyebrow(context, 'Lifts out of service'),
         const SizedBox(height: 10),
         if (items.isEmpty)
           _calmCard(
@@ -359,6 +352,22 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     return null;
   }
 
+  /// Pill codes for a lift outage's station. The feed only names a LINE
+  /// ("EWL"), which tells a rider nothing about where the lift is — so the
+  /// station is resolved in MrtGeo and shows its own code(s) on that line
+  /// (Clementi on the EWL → "EW23"), its first two codes when none match,
+  /// and only the raw line code when the station doesn't resolve at all.
+  /// Mirrors WSAlertsView's `stationCodes`.
+  List<String> _liftStationCodes(LiftMaintenance item) {
+    final station = _resolveLiftStation(item);
+    if (station == null) return [item.line];
+    final prefix = item.line.endsWith('L')
+        ? item.line.substring(0, item.line.length - 1)
+        : item.line;
+    final onLine = station.codes.where((c) => c.startsWith(prefix)).toList();
+    return onLine.isEmpty ? station.codes.take(2).toList() : onLine;
+  }
+
   /// One lift-outage row: line pill for identity, tappable through to the
   /// station screen when the station resolves in MrtGeo (spec item 9 —
   /// previously inert and line-less). The redundant "Lift maintenance" chip
@@ -382,7 +391,9 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                     onBack: () => Navigator.of(context).pop(),
                     onTab: widget.onTab,
                     tabSelection: SoftTab.alerts,
-                    onOpenStop: (_) {},
+                    // No handler: a no-op callback made the station's bus
+                    // rows LOOK tappable and do nothing. Left null, they
+                    // degrade honestly to info-only.
                   ),
                 ),
               ),
@@ -424,12 +435,19 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        _linePill(item.line),
+                        for (final code in _liftStationCodes(item)) ...[
+                          const SizedBox(width: 6),
+                          _linePill(code),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(item.detail, style: t.sans(12, color: t.dim)),
+                    // LTA sends this ALL CAPS; wsFacilityText sentence-cases
+                    // it so it reads like the rest of the app.
+                    Text(
+                      wsFacilityText(item.detail),
+                      style: t.sans(12, color: t.dim),
+                    ),
                   ],
                 ),
               ),
@@ -551,7 +569,7 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: _yourAlertCard(context, t, a, editing: true),
+                  child: _collapsible(a, _yourAlertCard(context, t, a)),
                 ),
                 ReorderableDragStartListener(
                   index: alerts.indexOf(a),
@@ -571,6 +589,27 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     );
   }
 
+  /// Alerts currently collapsing out of the list. Tapping "Remove" mutates
+  /// AppModel directly, so the card used to blink out of existence while a
+  /// swipe got Dismissible's slide for free. The id parks here for one
+  /// animation, the card shrinks and fades, and the model is mutated once
+  /// it's gone (owner, 2026-07-26 — "no animation, they just disappear").
+  final Set<String> _removing = {};
+  static const _removeDuration = Duration(milliseconds: 260);
+
+  void _removeAlert(String id) {
+    if (_removing.contains(id)) return;
+    setState(() => _removing.add(id));
+    Future.delayed(_removeDuration, () {
+      if (!mounted) {
+        AppModel.shared.removeAlert(id);
+        return;
+      }
+      AppModel.shared.removeAlert(id);
+      setState(() => _removing.remove(id));
+    });
+  }
+
   /// Swipe-to-delete wrapper used outside edit mode.
   Widget _yourAlertRow(BuildContext context, LyneTheme t, BusAlert a) {
     return Dismissible(
@@ -586,20 +625,33 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
         child: Icon(Icons.delete_outline_rounded, color: t.crit),
       ),
       onDismissed: (_) => AppModel.shared.removeAlert(a.id),
-      child: _yourAlertCard(context, t, a),
+      child: _collapsible(a, _yourAlertCard(context, t, a)),
+    );
+  }
+
+  /// Height + opacity collapse for a card on its way out. Alignment is
+  /// topCenter so the rows below rise into the gap rather than the card
+  /// closing on itself from both edges.
+  Widget _collapsible(BusAlert a, Widget child) {
+    final going = _removing.contains(a.id);
+    return AnimatedSize(
+      duration: _removeDuration,
+      curve: Curves.easeInOutCubic,
+      alignment: Alignment.topCenter,
+      child: AnimatedOpacity(
+        duration: _removeDuration,
+        curve: Curves.easeOut,
+        opacity: going ? 0 : 1,
+        child: going ? const SizedBox(width: double.infinity) : child,
+      ),
     );
   }
 
   /// Shared row visuals for a bus alert — route badge + stop name + subtitle
   /// ("{stop} · {lead}", or "Paused — flip on to resume" at 55% opacity) and
-  /// a pause/resume toggle. Mirrors manage_alerts_screen.dart:227-350's
-  /// _alertCard.
-  Widget _yourAlertCard(
-    BuildContext context,
-    LyneTheme t,
-    BusAlert a, {
-    bool editing = false,
-  }) {
+  /// a trailing pause/resume + Remove column. Mirrors
+  /// manage_alerts_screen.dart:227-350's _alertCard.
+  Widget _yourAlertCard(BuildContext context, LyneTheme t, BusAlert a) {
     final isDest = a.kind == AlertKind.destination;
     final title = isDest
         ? (a.dest.isNotEmpty ? a.dest : a.stopName)
@@ -695,36 +747,46 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // Explicit Remove affordance in edit mode (spec item 9,
-            // 2026-07-25) — mirrors WSAlertsView's trailing "Remove" text
-            // button (outside edit mode, deletion is swipe-to-delete only,
-            // matching iOS's `.onDelete`; edit mode is reorder-only there
-            // too, but a visible delete action alongside the drag handle is
-            // the clearer Material affordance while editing).
-            if (editing)
-              Semantics(
-                button: true,
-                label: 'Remove alert',
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () => AppModel.shared.removeAlert(a.id),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Text(
-                      'Remove',
-                      style: t.sans(12, weight: FontWeight.w600, color: t.crit),
+            // BOTH affordances, on every card, always — mirrors
+            // WSAlertsView's `yourAlertCard` trailing column. Remove used to
+            // hide behind Edit mode, which left swipe-to-delete as the only
+            // discoverable way out of an alert; it's a text button under the
+            // toggle now. Swipe and Edit-mode reordering both still work.
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Semantics(
+                  label: a.enabled ? 'Pause alert' : 'Resume alert',
+                  child: SoftToggle(
+                    value: a.enabled,
+                    onChanged: (v) => AppModel.shared.setAlertEnabled(a.id, v),
+                  ),
+                ),
+                Semantics(
+                  button: true,
+                  label: 'Remove alert',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _removeAlert(a.id),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      child: Text(
+                        'Remove',
+                        style: t.sans(
+                          12,
+                          weight: FontWeight.w600,
+                          color: SoftBlue.red,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              )
-            else
-              Semantics(
-                label: a.enabled ? 'Pause alert' : 'Resume alert',
-                child: SoftToggle(
-                  value: a.enabled,
-                  onChanged: (v) => AppModel.shared.setAlertEnabled(a.id, v),
-                ),
-              ),
+              ],
+            ),
           ],
         ),
       ),
@@ -768,27 +830,24 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     );
   }
 
-  /// Small pill chip for free-bus / free-shuttle indicators on alert cards.
-  /// Mirrors iOS SoftAlertsView.freeChip.
-  Widget _freeChip(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-  }) {
-    final t = context.t;
+  /// Uppercase amber badge for free-bus / free-shuttle relief on a disruption
+  /// card. Mirrors WSAlertsView's `freeBadge`: it's a two-word fact riders
+  /// scan for mid-disruption, so it reads as a badge in the disruption's own
+  /// colour, not a neutral icon chip with a sentence in it.
+  Widget _freeBadge(String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: t.surfaceHi,
+        color: SoftBlue.amber.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(99),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: t.dim),
-          const SizedBox(width: 4),
-          Text(label, style: t.sans(11, color: t.fg)),
-        ],
+      child: Text(
+        label,
+        style: SoftBlue.sans(
+          9,
+          weight: FontWeight.w700,
+          color: SoftBlue.amber,
+        ).copyWith(letterSpacing: 0.5),
       ),
     );
   }

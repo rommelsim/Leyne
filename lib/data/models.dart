@@ -10,10 +10,10 @@ enum Load {
   sea('Seats'),
 
   /// Standing Available.
-  sda('Standing'),
+  sda('Stand'),
 
   /// Limited Standing Available — crowded.
-  lsd('Crowded');
+  lsd('Full');
 
   const Load(this.label);
   final String label;
@@ -160,6 +160,23 @@ Eta fmtEta(int sec) {
 /// '420m', '1.2km'. Same rounding as legacy fmtDistance.
 String fmtDistance(int metres) =>
     metres < 1000 ? '${metres}m' : '${(metres / 1000).toStringAsFixed(1)}km';
+
+/// LTA writes facility text in shouty caps — "CONCOURSE - PLATFORM A". Left
+/// alone it reads as an emergency. Title-case the all-caps words and use a
+/// proper dash. Single letters ("Platform A") and already-mixed-case words are
+/// left untouched. Mirrors iOS `wsFacilityText` (WSFormat.swift).
+String wsFacilityText(String raw) {
+  final dashed = raw.replaceAll(' - ', ' – ');
+  return dashed
+      .split(' ')
+      .map((word) {
+        final letters = word.replaceAll(RegExp(r'[^A-Za-z]'), '');
+        if (letters.length < 2) return word;
+        if (word != word.toUpperCase()) return word;
+        return word[0] + word.substring(1).toLowerCase();
+      })
+      .join(' ');
+}
 
 // ─── Natural service-number ordering ───────────────────────────────────
 

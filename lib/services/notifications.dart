@@ -393,7 +393,8 @@ class NotificationsService {
         keepIds.add(_destinationIdentifier(a));
         continue;
       }
-      final arrivalDate = _liveArrivalDate(arrivals, a.stopCode, a.busNo);
+      final live = _liveService(arrivals, a.stopCode, a.busNo);
+      final arrivalDate = live?.arrivalDate;
       if (arrivalDate == null) continue;
       // Fixed dual reminder — 3 min before AND 1 min before (AlertTiming
       // .arrivalLeads). Each lead is its own scheduled notification with a
@@ -415,7 +416,12 @@ class NotificationsService {
           identifier: identifier,
           fireAt: fireAt,
           title: AlertTiming.arrivalTitle(a.busNo, lead),
-          body: AlertTiming.arrivalBody(a.stopName, lead),
+          body: AlertTiming.arrivalBody(
+            a.stopName,
+            lead,
+            dest: live?.dest,
+            load: live?.load,
+          ),
           groupKey: 'leyne.arrivals.${a.stopCode}',
         );
       }
@@ -466,7 +472,9 @@ class NotificationsService {
 
   /// Live arrival time for [busNo] at [stopCode] from the arrivals store, or
   /// null when the stop isn't loaded or the service isn't currently arriving.
-  DateTime? _liveArrivalDate(
+  /// The live service the alert is watching — carries the arrival time plus
+  /// the destination and load the notification body quotes.
+  Service? _liveService(
     Map<String, ArrivalState> arrivals,
     String stopCode,
     String busNo,
@@ -474,7 +482,7 @@ class NotificationsService {
     final state = arrivals[stopCode];
     if (state == null || state.kind != ArrivalStateKind.loaded) return null;
     for (final s in state.services) {
-      if (s.no == busNo) return s.arrivalDate;
+      if (s.no == busNo) return s;
     }
     return null;
   }

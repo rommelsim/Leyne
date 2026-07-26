@@ -67,23 +67,6 @@ import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
-// ─── Freshness helper ──────────────────────────────────────────────────────
-
-/// "Updated h:mm" from the newest successful arrivals fetch among [pins]'
-/// stop codes, or "Updated —" when none have loaded yet. Always rendered —
-/// mirrors `WSFmt.upd`'s em-dash fallback rather than omitting the meta.
-String _updatedLabel(List<Pin> pins) {
-  DateTime? newest;
-  for (final pin in pins) {
-    final ts = DataStore.shared.lastRefresh(pin.code);
-    if (ts != null && (newest == null || ts.isAfter(newest))) newest = ts;
-  }
-  if (newest == null) return 'Updated —';
-  final hhmm =
-      '${newest.hour.toString().padLeft(2, '0')}${newest.minute.toString().padLeft(2, '0')}';
-  return 'Updated ${fmtClock(hhmm, use24h: AppModel.shared.use24h)}';
-}
-
 // ─── Soonest-arrival resolution (mirrors WSData.swift wsSoonest/wsLiveETASec) ─
 
 /// Live seconds-to-arrival, recomputed from the LTA timestamp against now
@@ -160,16 +143,9 @@ StationCrowd? _crowdFor(MrtGeoStation station) {
   return null;
 }
 
-/// Crowd dot colour. Superseded 2026-07-25 (soft-blue spec item 5): "High"
-/// crowd is amber — the one semantic colour exception to the earlier
-/// 2026-07-03 "crowd is never colour-coded" rule, which stands for
-/// low/moderate (still neutral ink; only the word carries the level there).
-Color _crowdColor(CrowdLevel level, LyneTheme t) {
-  if (level == CrowdLevel.unknown) return t.faint;
-  if (level == CrowdLevel.high) return SoftBlue.amber;
-  return t.fg;
-}
-
+/// Crowd word. "High" is the only level that carries colour (amber, applied
+/// at the call site) — the one semantic exception to the 2026-07-03 "crowd is
+/// never colour-coded" rule, which still stands for low/moderate.
 String _crowdWord(CrowdLevel level) {
   switch (level) {
     case CrowdLevel.low:
@@ -370,7 +346,8 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         meta: pick.meta,
         board: pick.board,
         decision: pick.decision,
-        ctaLabel: 'Open stop',
+        // No CTA row: iOS's hero ends at the board, and the whole card is
+        // already the tap target — a button inside it just repeats itself.
         onTap: pick.onOpen,
       ),
     );
@@ -539,34 +516,16 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     );
   }
 
-  // ─── Shared section header (label · hairline rule · optional meta) ────────
-  // Mirrors WSSectionHeader: uppercase label, a hairline rule that stretches
-  // to fill the remaining row width, and an optional right-aligned meta.
+  // ─── Shared section header ───────────────────────────────────────────────
+  // Mirrors WSSavedView.swift's `sectionHead`: a bare title-case line on the
+  // ground. The uppercasing, the hairline rule and the "Updated h:mm" meta
+  // are all gone — the rule drew a box around groups that read fine without
+  // one, and the timestamp reported freshness nobody was doubting.
 
-  Widget _sectionHeader(
-    BuildContext context, {
-    required String label,
-    String? meta,
-  }) {
-    final t = context.t;
-    return Row(
-      children: [
-        Text(
-          label.toUpperCase(),
-          style: t
-              .sans(11, weight: FontWeight.w800, color: t.dim)
-              .copyWith(letterSpacing: 1.4),
-        ),
-        const SizedBox(width: 10),
-        Expanded(child: Container(height: 1, color: t.line)),
-        if (meta != null) ...[
-          const SizedBox(width: 10),
-          Text(
-            meta,
-            style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.5),
-          ),
-        ],
-      ],
+  Widget _sectionHeader({required String label}) {
+    return Text(
+      label,
+      style: SoftBlue.sans(16, weight: FontWeight.w700, color: SoftBlue.ink),
     );
   }
 
@@ -590,13 +549,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
     // `sectionHead`s, each only rendered when its group is non-empty.
     return [
       if (pins.isNotEmpty) ...[
-        SliverToBoxAdapter(
-          child: _sectionHeader(
-            context,
-            label: 'Bus stops',
-            meta: _updatedLabel(pins),
-          ),
-        ),
+        SliverToBoxAdapter(child: _sectionHeader(label: 'Bus stops')),
         const SliverToBoxAdapter(child: SizedBox(height: 10)),
         _editing
             ? _reorderablePinsSliver(context, pins)
@@ -606,7 +559,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         if (pins.isNotEmpty)
           const SliverToBoxAdapter(child: SizedBox(height: 20)),
         SliverToBoxAdapter(
-          child: _sectionHeader(context, label: 'MRT stations'),
+          child: _sectionHeader(label: 'MRT stations'),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 10)),
         _editing
@@ -829,7 +782,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   List<Widget> _linesSectionSlivers(BuildContext context) {
     final items = AppModel.shared.favServices;
     return [
-      SliverToBoxAdapter(child: _sectionHeader(context, label: 'Lines')),
+      SliverToBoxAdapter(child: _sectionHeader(label: 'Lines')),
       const SliverToBoxAdapter(child: SizedBox(height: 10)),
       _editing
           ? _reorderableLinesSliver(context, items)
@@ -1006,7 +959,19 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
             ),
           ),
           if (nearby.isNotEmpty) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 20),
+            // The rows below aren't self-explanatory without this — they look
+            // like saved stops on the screen that just said you have none
+            // (WSSavedView.swift's `emptyState` heads them the same way).
+            Text(
+              'Suggested · nearest to you',
+              style: SoftBlue.sans(
+                16,
+                weight: FontWeight.w700,
+                color: SoftBlue.ink,
+              ),
+            ),
+            const SizedBox(height: 10),
             for (final stop in nearby) ...[
               _nearestSaveRow(context, stop),
               const SizedBox(height: 8),
@@ -1127,46 +1092,6 @@ class _UrgentPick {
   final String? decision;
 
   final VoidCallback onOpen;
-}
-
-// ─── Crowd dot chip (saved MRT station rows) ───────────────────────────────
-
-/// Small trailing "● Low"-style chip for a saved station's live crowd
-/// reading. Mirrors WSSavedView.swift's WSChip(gauge:text:) at 185-187.
-class _CrowdDotChip extends StatelessWidget {
-  const _CrowdDotChip({required this.level, required this.t});
-
-  final CrowdLevel level;
-  final LyneTheme t;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: t.surfaceHi,
-        borderRadius: BorderRadius.circular(LyneRadius.full),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: _crowdColor(level, t),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            _crowdWord(level),
-            style: t.mono(10.5, weight: FontWeight.w600, color: t.dim),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// A single coloured MRT line-code chip (established Android idiom, used
@@ -1375,9 +1300,9 @@ class _SoonestColumn extends StatelessWidget {
 
 // ─── Saved MRT station card ──────────────────────────────────────────────────
 
-/// Mirrors WSSavedView.swift's `savedStationRow`: name · line-names subline
-/// (uppercased) · up to 3 coloured line-code chips · a trailing crowd chip
-/// when a live reading exists. No leading icon tile, matching iOS.
+/// Mirrors WSSavedView.swift's `savedStationCard`: name · a "line names ·
+/// High crowd" subline · up to 3 coloured line-code chips in the TRAILING
+/// slot. No leading icon tile, matching iOS.
 class _StationCard extends StatelessWidget {
   const _StationCard({required this.station, required this.onTap});
 
@@ -1400,7 +1325,7 @@ class _StationCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Column(
@@ -1425,25 +1350,45 @@ class _StationCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      _lineNames(station.codes).toUpperCase(),
-                      style: t.mono(12.5, color: t.dim),
+                    // Crowd rides INLINE on the subtitle ("Circle · High
+                    // crowd"), as in WSSavedView.swift's `savedStationCard` —
+                    // one line to read instead of a name here and a dot chip
+                    // over there. Colour only when it's real information:
+                    // High goes amber and semibold, Low/Moderate stay quiet.
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: _lineNames(station.codes)),
+                          if (showCrowd)
+                            TextSpan(
+                              text: ' · ${_crowdWord(crowd.level)} crowd',
+                              style: t.mono(
+                                12.5,
+                                weight: crowd.level == CrowdLevel.high
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: crowd.level == CrowdLevel.high
+                                    ? SoftBlue.amber
+                                    : SoftBlue.sub,
+                              ),
+                            ),
+                        ],
+                      ),
+                      style: t.mono(12.5, color: SoftBlue.sub),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 5,
-                      children: codes.map(_lineCodeChip).toList(),
                     ),
                   ],
                 ),
               ),
-              if (showCrowd) ...[
-                const SizedBox(width: 8),
-                _CrowdDotChip(level: crowd.level, t: t),
-              ],
+              // Line bullets are the TRAILING identity mark on iOS, not a
+              // second row inside the body.
+              const SizedBox(width: 8),
+              Wrap(
+                spacing: 5,
+                runSpacing: 5,
+                children: codes.map(_lineCodeChip).toList(),
+              ),
             ],
           ),
         ),
@@ -1552,26 +1497,23 @@ class _LineEtaColumn extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // iOS parity fix — same "Arr" headline bug as _SoonestColumn above:
-        // `eta.big` is always the headline, never `eta.small` ("now"/"min").
-        // Mirrors WSSavedView.swift's lineRow:
-        // `Text(eta.big) + Text(eta.big == "Arr" ? "" : "m")` — note the
-        // bare "m" suffix here (not " min") matches iOS's more compact
-        // Lines-section readout.
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: eta.big,
-                style: t.mono(17, weight: FontWeight.w700, color: t.fg),
-              ),
-              if (!arriving)
-                // 10 → 11: legibility floor (iOS's own value here is 10pt).
-                TextSpan(
-                  text: 'm',
-                  style: t.mono(11, color: t.dim),
-                ),
-            ],
+        // One tinted chip, exactly as WSSavedView.swift's `lineCard`: "Now"
+        // when the bus is pulling in (heavier weight — it's the urgent read),
+        // otherwise "<n> min". No bare "m" suffix: the app says "min"
+        // everywhere else, and the compact form only ever saved two pixels.
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            color: SoftBlue.chipBg,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Text(
+            arriving ? 'Now' : '${eta.big} min',
+            style: t.mono(
+              12.5,
+              weight: arriving ? FontWeight.w800 : FontWeight.w700,
+              color: SoftBlue.chipInk,
+            ),
           ),
         ),
         const SizedBox(height: 4),

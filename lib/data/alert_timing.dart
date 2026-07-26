@@ -8,6 +8,8 @@
 //                   boarding stop; LTA gives no per-stop times, so this is an
 //                   estimate surfaced with the quiet "~" cue).
 
+import 'models.dart';
+
 enum AlertKind { arrival, destination }
 
 class AlertTiming {
@@ -95,9 +97,46 @@ class AlertTiming {
       ? '🚍 Bus $busNo — arriving now'
       : '🕒 Bus $busNo — $leadMinutes min away';
 
-  /// Notification body — the stop, with a "get ready" nudge on the final call.
-  static String arrivalBody(String stopName, int leadMinutes) =>
-      leadMinutes <= 1 ? 'Get ready — $stopName' : 'Heading to $stopName';
+  /// Notification body — WHICH bus this is ([dest], the only thing that
+  /// disambiguates a bus number) and WHERE you catch it ([stopName]), with a
+  /// "get ready" nudge and the crowd read on the final call.
+  ///
+  /// Both extras are optional and dropped when absent rather than guessed:
+  /// legacy/unresolved alert rows carry no destination, and [load] is only
+  /// woven in on the 1-min call — occupancy on a bus still 3 minutes out is
+  /// exactly the kind of fast-changing read that's stale by the time it
+  /// matters. Mirrors iOS AlertTiming.arrivalBody, but keeps Android's own
+  /// voice (the emoji titles and "Get ready —" phrasing are a deliberate
+  /// divergence the owner asked for).
+  static String arrivalBody(
+    String stopName,
+    int leadMinutes, {
+    String? dest,
+    Load? load,
+  }) {
+    final route = dest != null ? 'to $dest · ' : '';
+    // Without a destination the heads-up would read as a bare fragment, so
+    // keep the verb that made it a sentence.
+    if (leadMinutes > 1) {
+      return dest != null ? '$route$stopName' : 'Heading to $stopName';
+    }
+    final crowd = load != null ? '. ${_crowdClause(load)}.' : '';
+    return 'Get ready — $route$stopName$crowd';
+  }
+
+  /// Confident, concrete crowd clause for the final-call body. Matches the
+  /// voice of the in-app crowd word (`Load.label`) but phrased as a sentence
+  /// fragment — mirrors iOS's `Load.notificationClause`.
+  static String _crowdClause(Load load) {
+    switch (load) {
+      case Load.sea:
+        return 'Seats are available';
+      case Load.sda:
+        return 'Standing room only';
+      case Load.lsd:
+        return "It's crowded — expect to stand";
+    }
+  }
 
   static String destinationTitle() => 'Your stop is next';
 

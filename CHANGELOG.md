@@ -8,6 +8,50 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## Unreleased · Android · branch `design-greendark` · 2026-07-26
+
+iOS↔Android parity pass. iOS was the source of truth throughout; the map
+screen stays iOS-only, and Android keeps its own extras (weather header,
+pull-to-refresh, long-press peek sheet, Undo snackbars, the Nearby ad slot,
+the MRT tab).
+
+**Nearby**
+- Title and search moved into the app bar; the in-list search pill is gone.
+- LIVE chip on the freshness caption, and the caption now counts up live.
+- Arrival times refresh on their own instead of only on pull / resume.
+- Nearby stops are one card with hairline dividers, not separate cards; the
+  trailing chevrons are gone and "View all" rides the section header.
+- The hero keeps its shape when nothing is live instead of collapsing to a
+  different card.
+- MRT tiles now read "350m · Low" and use the app's card styling.
+- Location-off state matches iOS wording and appears whenever there's no fix.
+
+**Stop**
+- Tapping a bus opens a bottom sheet with its board, route and Favourite —
+  the permanent hero and route cards are gone, and every service is listed.
+- Board slots read NEXT / THEN / LATER with a crowd gauge on each.
+- Rows show "to <destination>", the full crowd phrase, and "Now" rather than
+  an "ARRIVING" capsule.
+- Always-visible "Walk here" button; distance no longer blanks out when
+  you're standing at the stop.
+- New empty / error / loading cards with proper headlines.
+
+**MRT station**
+- Every station gets its line card, not just interchanges.
+- The crowd is stated once, on the station's own node, as "Moderate crowd".
+- Direction termini captioned on the line strip, plus a tap hint.
+- Crowd forecast gains an explainer line and a "now" label that can't
+  knock the columns out of alignment.
+- Lift maintenance text is no longer in shouting caps.
+
+**Saved / Search / Alerts**
+- "Now" instead of "Arr"; crowd wording is "Seats available" / "Standing
+  only" / "Almost full" everywhere.
+- Alerts always show Remove; lift rows name the station (EW23), not the line.
+- Arrival notifications now name the destination, and the final call says how
+  full the bus is.
+- Search: Cancel leaves the screen; hint names the formats it accepts.
+
 ## 2.9.4 (build 31) · iOS · branch `design-greendark` · 2026-07-26
 
 Soft-blue "4b" field-test pass. Version jumped from 2.9.0 to 2.9.4 because

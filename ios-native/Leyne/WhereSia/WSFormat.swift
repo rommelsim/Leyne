@@ -117,11 +117,17 @@ enum WSFmt {
         return "Updated " + clock(date, use24h: use24h)
     }
 
-    /// LTA "HHmm" (e.g. "0530", past-midnight "2512") → "05:30" / "01:12".
-    static func firstLast(_ raw: String?) -> String {
+    /// LTA "HHmm" (e.g. "0530", past-midnight "2512") → "05:30" / "5:30 AM".
+    /// Honours the 12/24-hour preference like every other clock in the app —
+    /// a first/last card stuck on 24h while the boards read "5:30 AM" reads
+    /// as two different apps.
+    static func firstLast(_ raw: String?, use24h: Bool) -> String {
         guard let raw, raw.count == 4, let n = Int(raw) else { return "—" }
         let h = (n / 100) % 24
         let m = n % 100
-        return String(format: "%02d:%02d", h, m)
+        if use24h { return String(format: "%02d:%02d", h, m) }
+        let suffix = h < 12 ? "AM" : "PM"
+        let h12 = h % 12 == 0 ? 12 : h % 12
+        return String(format: "%d:%02d %@", h12, m, suffix)
     }
 }

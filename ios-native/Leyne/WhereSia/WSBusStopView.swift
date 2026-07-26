@@ -667,17 +667,17 @@ struct WSBusStopView: View {
                             Spacer(minLength: 8)
                             // Fixed-width columns so the times line up down the
                             // list rather than drifting with each label.
-                            Text(WSFmt.firstLast(pair.first))
+                            Text(WSFmt.firstLast(pair.first, use24h: m.use24h))
                                 .font(ws.mono(13, weight: .bold)).foregroundStyle(SoftBlue.ink)
                                 .frame(width: 52, alignment: .trailing)
                             Text("–").font(ws.sans(12)).foregroundStyle(SoftBlue.sub)
-                            Text(WSFmt.firstLast(pair.last))
+                            Text(WSFmt.firstLast(pair.last, use24h: m.use24h))
                                 .font(ws.mono(13, weight: .bold)).foregroundStyle(SoftBlue.ink)
                                 .frame(width: 52, alignment: .trailing)
                         }
                         .padding(.vertical, 7)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Bus \(row.service), first \(WSFmt.firstLast(pair.first)), last \(WSFmt.firstLast(pair.last))")
+                        .accessibilityLabel("Bus \(row.service), first \(WSFmt.firstLast(pair.first, use24h: m.use24h)), last \(WSFmt.firstLast(pair.last, use24h: m.use24h))")
                         if i < stopWindows.count - 1 { SoftRowDivider(inset: 0) }
                     }
                 }

@@ -30,6 +30,14 @@ Future<void> _skipLaunchScreen(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 400));
 }
 
+/// The Nearby screen's app-bar title. The tab bar renders the word "Nearby"
+/// too (2026-07-26 parity pass: iOS tab names), so a bare `find.text` matches
+/// twice — scope it to the AppBar to keep asserting "Nearby is the top screen".
+Finder get _nearbyTitle => find.descendant(
+  of: find.byType(AppBar),
+  matching: find.text('Nearby'),
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -55,12 +63,13 @@ void main() {
     // text label — resting tabs are icon-only (each still carries its name
     // via Semantics for TalkBack). Home starts selected, so its label is the
     // only one visible; the other two are asserted by icon + semantics.
-    expect(find.text('Home'), findsOneWidget);
-    expect(find.text('Saved'), findsNothing);
-    expect(find.text('Alerts'), findsNothing);
-    expect(find.byIcon(Icons.bookmark_outline_rounded), findsOneWidget);
+    // Every destination now renders its label, not just the selected one, and
+    // the names follow iOS: Nearby · Favourites · Alerts (2026-07-26 parity).
+    expect(find.text('Favourites'), findsOneWidget);
+    expect(find.text('Alerts'), findsOneWidget);
+    expect(find.byIcon(Icons.star_outline_rounded), findsOneWidget);
     expect(find.byIcon(Icons.notifications_outlined), findsOneWidget);
-    expect(find.bySemanticsLabel('Saved'), findsAtLeastNWidgets(1));
+    expect(find.bySemanticsLabel('Favourites'), findsAtLeastNWidgets(1));
     expect(find.bySemanticsLabel('Alerts'), findsAtLeastNWidgets(1));
     // MRT lost its bottom-bar DESTINATION (2026-07-03) — but "MRT" now
     // legitimately appears as one of Home's All/Buses/MRT filter chips
@@ -69,7 +78,7 @@ void main() {
     // bottom bar's actual destinations.
 
     // The Bus (Home) tab is the initial tab — its header title is visible.
-    expect(find.text('Nearby'), findsOneWidget);
+    expect(_nearbyTitle, findsOneWidget);
 
     // Switch to Alerts; pump one frame for the tap, one for the layout.
     await tester.tap(find.byIcon(Icons.notifications_outlined));
@@ -83,7 +92,7 @@ void main() {
     // the selection.
     expect(find.text('All MRT lines running normally'), findsOneWidget);
     expect(find.text('Alerts'), findsAtLeastNWidgets(1));
-    expect(find.text('Home'), findsNothing);
+    expect(_nearbyTitle, findsNothing);
 
     // Drain the bounded App-Open-ad preload poll (15 × 800 ms chained timers
     // scheduled from SoftRoot.initState) so no timer is left pending at
@@ -110,7 +119,7 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('Nearby'), findsOneWidget); // on Home (Bus) tab
+    expect(_nearbyTitle, findsOneWidget); // on Home (Bus) tab
 
     // Open Search — no longer a bottom-bar destination, so this goes through
     // Home's own tap-to-search pill (onOpenSearch), same as a real user
@@ -121,11 +130,11 @@ void main() {
     // pill is the more realistic entry point regardless of load state.)
     // SoftRoot still PUSHES it onto the nested navigator (it is not a
     // state-swap like the other tabs), so the nested stack now has 2 routes.
-    await tester.tap(find.text('Stop, bus, MRT or postal code'));
+    await tester.tap(find.byIcon(Icons.search_rounded));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300)); // fade-through
-    expect(find.text('Find a stop, bus or place'), findsOneWidget);
-    expect(find.text('Nearby'), findsNothing); // Home is offstage below
+    expect(find.text('Stop name, 5-digit code or bus no.'), findsOneWidget);
+    expect(_nearbyTitle, findsNothing); // Home is offstage below
 
     // Simulate the hardware/3-button BACK key. handlePopRoute returns true only
     // if an in-app observer consumed it (i.e. the back did NOT escape to the OS
@@ -135,8 +144,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(handled, isTrue); // consumed in-app, not an app exit
-    expect(find.text('Find a stop, bus or place'), findsNothing);
-    expect(find.text('Nearby'), findsOneWidget); // back on Home
+    expect(find.text('Stop name, 5-digit code or bus no.'), findsNothing);
+    expect(_nearbyTitle, findsOneWidget); // back on Home
 
     // Drain the bounded App-Open-ad preload poll (see note above) so no timer
     // is left pending at teardown.
@@ -159,14 +168,14 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('Nearby'), findsOneWidget); // on Home (Bus) tab
+    expect(_nearbyTitle, findsOneWidget); // on Home (Bus) tab
 
     // Switch to the Alerts tab (a setState swap — no nested route pushed).
     await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('All MRT lines running normally'), findsOneWidget);
-    expect(find.text('Nearby'), findsNothing);
+    expect(_nearbyTitle, findsNothing);
 
     // System BACK from a non-Home tab must be consumed in-app and land on Home.
     final handledFromTab = await tester.binding.handlePopRoute();
@@ -174,7 +183,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(handledFromTab, isTrue); // NOT an app exit
     expect(find.text('All MRT lines running normally'), findsNothing);
-    expect(find.text('Nearby'), findsOneWidget); // back on Home
+    expect(_nearbyTitle, findsOneWidget); // back on Home
 
     // System BACK from Home with nothing pushed falls through to the OS (exit) —
     // handlePopRoute returns false, i.e. not consumed in-app.
@@ -204,18 +213,18 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('Nearby'), findsOneWidget); // on Home (Bus) tab
+    expect(_nearbyTitle, findsOneWidget); // on Home (Bus) tab
 
     // Home → Saved (a setState tab swap). The Saved destination becomes
     // selected (filled bookmark).
-    await tester.tap(find.byIcon(Icons.bookmark_outline_rounded));
+    await tester.tap(find.byIcon(Icons.star_outline_rounded));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400)); // fade-through
     expect(
-      find.byIcon(Icons.bookmark_rounded),
+      find.byIcon(Icons.star_rounded),
       findsAtLeastNWidgets(1),
     ); // Saved
-    expect(find.text('Nearby'), findsNothing); // Home not shown
+    expect(_nearbyTitle, findsNothing); // Home not shown
 
     // Saved → Alerts (another tab swap).
     await tester.tap(find.byIcon(Icons.notifications_outlined));
@@ -229,16 +238,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('All MRT lines running normally'), findsNothing);
     expect(
-      find.byIcon(Icons.bookmark_rounded),
+      find.byIcon(Icons.star_rounded),
       findsAtLeastNWidgets(1),
     ); // Saved
-    expect(find.text('Nearby'), findsNothing); // crucially NOT Home
+    expect(_nearbyTitle, findsNothing); // crucially NOT Home
 
     // BACK #2 retraces to Home.
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Nearby'), findsOneWidget); // back on Home
+    expect(_nearbyTitle, findsOneWidget); // back on Home
 
     // BACK #3 — history empty, on Home, nothing pushed → falls through to the
     // OS (app exit): handlePopRoute returns false (not consumed in-app).
@@ -284,7 +293,7 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('Nearby'), findsOneWidget); // Home (Bus) tab
+    expect(_nearbyTitle, findsOneWidget); // Home (Bus) tab
 
     // At the Home root with nothing pushed, BACK should exit → the OS owns it,
     // so the framework must have announced it does NOT handle back.
@@ -318,7 +327,7 @@ void main() {
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Nearby'), findsOneWidget); // back on Home
+    expect(_nearbyTitle, findsOneWidget); // back on Home
     expect(
       handlesBack.last,
       isFalse,

@@ -28,6 +28,18 @@ struct WSAlertsView: View {
     @Environment(\.wsPush) private var push
 
     @State private var editMode: EditMode = .inactive
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Every path that deletes an alert goes through here so the row leaves
+    /// the same way whichever affordance you used — swipe, Remove, or Edit.
+    /// Without the explicit `withAnimation` the row simply blinks out of
+    /// existence: `m.alerts` is @Observable state, and a mutation from a
+    /// button action carries no transaction of its own for the List to
+    /// animate against (owner, 2026-07-26).
+    private func removeAlert(_ id: BusAlert.ID) {
+        if reduceMotion { m.removeAlert(id: id) }
+        else { withAnimation(SoftMotion.flow) { m.removeAlert(id: id) } }
+    }
 
     private var isEmpty: Bool {
         m.alerts.isEmpty && store.trainAlerts.isEmpty && store.liftMaintenance.isEmpty
@@ -45,7 +57,7 @@ struct WSAlertsView: View {
                             row(editable: true) { yourAlertCard(alert) }
                         }
                         .onDelete { offsets in
-                            for id in offsets.map({ m.alerts[$0].id }) { m.removeAlert(id: id) }
+                            for id in offsets.map({ m.alerts[$0].id }) { removeAlert(id) }
                         }
                         .onMove { m.moveAlerts(fromOffsets: $0, toOffset: $1) }
                     }
@@ -78,6 +90,11 @@ struct WSAlertsView: View {
                 .scrollContentBackground(.hidden)
                 .background(SoftBlue.bg)
                 .environment(\.editMode, $editMode)
+                // Backstop: alerts can also disappear from elsewhere (the bus
+                // sheet's bell, an expiring alert), and those mutations reach
+                // this List with no transaction attached.
+                .animation(reduceMotion ? nil : SoftMotion.flow, value: m.alerts.map(\.id))
+                .sensoryFeedback(.impact(weight: .light), trigger: m.alerts.count)
                 .wsEntrance()
             }
         }
@@ -170,7 +187,7 @@ struct WSAlertsView: View {
                 .frame(width: 30, height: 30)   // layout stays dot-sized
                 .accessibilityLabel(alert.enabled ? "Pause alert" : "Resume alert")
                 Button {
-                    m.removeAlert(id: alert.id)
+                    removeAlert(alert.id)
                 } label: {
                     Text("Remove").font(ws.sans(12, weight: .semibold)).foregroundStyle(SoftBlue.red)
                         .padding(.vertical, 6).padding(.horizontal, 10)

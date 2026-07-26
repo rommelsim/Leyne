@@ -205,10 +205,12 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
           style: t.sans(28, weight: FontWeight.w700, color: t.fg),
         ),
         const Spacer(),
-        // Cancel only appears while the field is focused — it clears the query
-        // and dismisses the keyboard, but STAYS on Search (matching iOS, where
-        // Cancel does not leave the Search surface). To exit Search the user
-        // uses the bottom tab bar or system back — Cancel must not pop the route.
+        // Cancel only appears while the field is focused. It clears a typed
+        // query; on an ALREADY-empty field it leaves Search instead. iOS's
+        // Cancel is a nav-bar cancellationAction that dismisses the search
+        // sheet — here Search is a pushed route, so the equivalent is a pop.
+        // Clearing an empty field looked like a dead button and left no
+        // visible way out of the screen.
         // Uses AnimatedSwitcher so it slides+fades in and out smoothly.
         AnimatedSwitcher(
           duration: LyneMotion.short,
@@ -226,6 +228,10 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
               ? TextButton(
                   key: const ValueKey('cancel'),
                   onPressed: () {
+                    if (_ctrl.text.isEmpty) {
+                      Navigator.of(context).maybePop();
+                      return;
+                    }
                     _ctrl.clear();
                     _onQueryChanged();
                     _focus.unfocus();
@@ -273,7 +279,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
         onChanged: (_) => _onQueryChanged(),
         style: t.sans(15, weight: FontWeight.w500, color: t.fg),
         decoration: InputDecoration(
-          hintText: 'Stop, bus, MRT or postal code',
+          // Names the FORMATS, which is what the SEARCH BY card below teaches
+          // (iOS's `.searchable` prompt, verbatim).
+          hintText: 'Stop name, 5-digit code or bus no.',
           hintStyle: t.sans(15, color: t.dim),
           // Leading search icon — accent-coloured when text is present.
           prefixIcon: Padding(
@@ -356,14 +364,10 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Orientation heading — kept from the old quiet-prompt state so
-          // the resting screen still reads immediately, above whichever mix
-          // of recents/SEARCH BY/AROUND YOU is currently showing.
-          Text(
-            'Find a stop, bus or place',
-            style: SoftBlue.sans(15, weight: FontWeight.w700, color: SoftBlue.ink),
-          ),
-          const SizedBox(height: 14),
+          // No orientation heading: RECENT / SEARCH BY / AROUND YOU each
+          // label themselves, and a fourth heading above them only pushed
+          // the user's own recents further down the screen (iOS's
+          // `emptyState` opens straight on the recents card).
           if (recents.isNotEmpty) ...[
             _recentsSection(context, t, recents),
             const SizedBox(height: 20),
@@ -393,19 +397,22 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       (
         label: 'Stop or station name',
         value: nearest == null ? '' : (nearest.stopName.isEmpty ? nearest.stopCode : nearest.stopName),
+        // Fallbacks match iOS's canonical trio (WSSearchView `searchGuide`)
+        // so the two platforms teach the same three examples before a
+        // location fix lands.
         example: nearest == null
-            ? 'e.g. Woodlands Interchange'
+            ? 'e.g. Orchard Stn Exit 13'
             : (nearest.stopName.isEmpty ? nearest.stopCode : nearest.stopName),
       ),
       (
         label: 'Bus number',
         value: busNo ?? '',
-        example: busNo ?? 'e.g. 170',
+        example: busNo ?? 'e.g. 174',
       ),
       (
         label: '5-digit stop code',
         value: nearest?.stopCode ?? '',
-        example: nearest?.stopCode ?? 'e.g. 46009',
+        example: nearest?.stopCode ?? 'e.g. 09022',
       ),
       // Papercut fix (2026-07-25): label now says what a postal code
       // actually finds — previously just "Postal code" with no hint that
@@ -451,7 +458,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     // nearby stop is known (GPS fix + loaded data) — without one, `value` is
     // empty and the "Try" capsule used to render disabled/inert, even though
     // the row was still showing a perfectly usable fallback example ("e.g.
-    // Woodlands Interchange", "e.g. 170", "e.g. 46009"). Those examples are
+    // Orchard Stn Exit 13", "e.g. 174", "e.g. 09022"). Those examples are
     // real, searchable values, not placeholder junk, so "Try" now fills the
     // query with the example (stripped of its "e.g. " prefix) instead of
     // going inert.

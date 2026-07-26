@@ -69,6 +69,16 @@ let wIslandBlue  = wHex(0x5CB8F2)
 let wIslandFg   = Color.white
 let wIslandDim  = wHex(0xB9C6D3)
 
+/// Lock Screen Live Activity surface. DARK on purpose, unlike the Home Screen
+/// widget: the system renders Lock Screen activities in `.accented`/`.vibrant`
+/// as often as `.fullColor`, and in those modes it throws our colours away and
+/// re-derives everything from luminance. A near-white card has almost no
+/// luminance headroom left, so every tier flattened into the background and
+/// the card became unreadable (owner photographed it twice — 2026-07-25 and
+/// 2026-07-26). Light copy on a dark surface keeps its separation in all
+/// three modes, and it is what the Lock Screen's own widgets do.
+let wLockBg  = wHex(0x121A24, alpha: 0.96)
+
 // chip — the tinted service-number chip pair (spec tokens exactly): a pale
 // blue fill with a saturated blue ink, used by WServiceBadge.
 let wChipBg  = wHex(0xE4F1FC)
