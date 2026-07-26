@@ -39,7 +39,6 @@ final GlobalKey<ScaffoldMessengerState> lyneMessengerKey =
 const _kPinsKey = 'lyne.pins';
 const _kFavServicesKey = 'lyne.favServices'; // 2.4.0 service favourites
 const _kRecentsKey = 'lyne.recents';
-const _kOnboardingDoneKey = 'lyne.onboardingDone';
 const _kUse24hKey = 'lyne.use24h';
 const _kThemeModeKey = 'lyne.themeMode';
 const _kLocaleKey = 'lyne.locale';
@@ -47,6 +46,7 @@ const _kNotifKey = 'lyne.notifications';
 const _kSearchRadiusKey = 'lyne.searchRadiusM';
 const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
 const _kHapticsKey = 'lyne.haptics';
+const _kLocationAskedKey = 'lyne.locationAsked';
 const _kAlertsKey = 'lyne.alerts'; // JSON list of BusAlert (notifs redesign)
 const _kHiddenNearbyKey = 'lyne.hiddenNearby'; // stop codes hidden from Nearby
 const _kSavedMrtKey = 'lyne.savedMrt'; // JSON list of MrtGeoStation
@@ -163,28 +163,28 @@ class AppModel extends ChangeNotifier {
   /// live ETA labels on each tick.
   int tick = 0;
 
-  // ─── Onboarding (persisted) ───────────────────────────────
-  // True once the user has either finished or skipped the intro flow.
-  // Drives the boot routing in main.dart: first-run users see
-  // OnboardingScreen and trigger UMP/ATT from its final step; returning
-  // users skip straight to RootScaffold and AdConsent runs at startup.
-  bool _onboardingDone = false;
-  bool get onboardingDone => _onboardingDone;
+  // ─── First-run location prompt (persisted) ────────────────
+  // True once the OS location dialog has been raised at least once.
+  //
+  // This flag has to exist because Geolocator cannot tell us: on Android
+  // `checkPermission()` returns `LocationPermission.denied` BOTH when the
+  // user has refused and when the app has never asked — there is no
+  // "notDetermined" (see LocationService._toAuth; `unableToDetermine` is an
+  // error case, not first-run). Onboarding used to own the first ask, so
+  // nothing noticed. With onboarding removed (2026-07-26) a gate on
+  // `LocAuth.notDetermined` never fired, so a fresh install never requested
+  // location at all and Nearby sat permanently on its location-off card.
+  //
+  // Gating on "have WE asked" instead means: prompt once on the first Home
+  // appearance, then never nag again — the location-off card's button stays
+  // the recovery path.
+  bool _locationAsked = false;
+  bool get locationAsked => _locationAsked;
 
-  /// Mark onboarding complete (or skipped — same effect for routing).
-  void finishOnboarding() {
-    if (_onboardingDone) return;
-    _onboardingDone = true;
-    _prefs?.setBool(_kOnboardingDoneKey, true);
-    AnalyticsService.onboardingCompleted();
-    notifyListeners();
-  }
-
-  /// Clear the flag so the user can replay onboarding from Settings.
-  void resetOnboarding() {
-    _onboardingDone = false;
-    _prefs?.setBool(_kOnboardingDoneKey, false);
-    notifyListeners();
+  void markLocationAsked() {
+    if (_locationAsked) return;
+    _locationAsked = true;
+    _prefs?.setBool(_kLocationAskedKey, true);
   }
 
   // ─── Preferences (persisted) ──────────────────────────────
@@ -677,7 +677,6 @@ class AppModel extends ChangeNotifier {
   /// Call once at startup (main.dart) before any UI binds.
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
-    _onboardingDone = _prefs!.getBool(_kOnboardingDoneKey) ?? false;
     _use24h = _prefs!.getBool(_kUse24hKey) ?? false;
     final tm = _prefs!.getString(_kThemeModeKey);
     _themeMode = ThemeMode.values.firstWhere(
@@ -693,6 +692,7 @@ class AppModel extends ChangeNotifier {
     // the flag down on an explicit OS denial so the toggle never lies.
     _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? true;
     _hapticsEnabled = _prefs!.getBool(_kHapticsKey) ?? true;
+    _locationAsked = _prefs!.getBool(_kLocationAskedKey) ?? false;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
 
     final raw = _prefs!.getString(_kPinsKey);

@@ -8,9 +8,74 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
-## Unreleased · Android · branch `design-greendark` · 2026-07-26
+## Departly 3.1.0 · Android (59) · branch `design-greendark` · 2026-07-26
 
-iOS↔Android parity pass. iOS was the source of truth throughout; the map
+Artifact: `build/app/outputs/bundle/release/app-release.aab`
+
+Builds 56–58 were superseded before upload. Removing onboarding exposed
+three first-run faults on Nearby, all of which it had been hiding:
+
+- **Nearby was completely inert — no scroll, no taps.** `ensureArrivals` set
+  its loading state and called `notifyListeners()` *synchronously*, and Home
+  calls it from a build path while listening to the same store. That marked
+  the tree dirty during layout (`!_debugDoingThisLayout`), left the list child
+  unsized (`child.hasSize`), and a sliver with an unsized child can neither
+  scroll nor hit-test. Always latent; onboarding used to stand in front of
+  Home long enough for arrivals to prefetch, so the null-cache branch never
+  ran during a build. The notify is now deferred to a microtask.
+- **Location was never requested on a fresh install.** The replacement for
+  onboarding's primer was gated on `LocAuth.notDetermined`, a state Android
+  never reports — Geolocator returns `denied` both for "refused" and for
+  "never asked". First-run detection is now our own persisted
+  `lyne.locationAsked` flag, so Nearby asks once and never nags afterwards.
+- **The nearby-MRT grid crashed Nearby's layout outright.** Its 2-up rows used
+  `CrossAxisAlignment.stretch` to keep both tiles the same height, but the
+  strip sits in a `Column` inside the Nearby sliver list, so the row's own
+  height arrives unbounded — and `stretch` hands that down as a *tight*
+  `h=Infinity`. Every frame threw `BoxConstraints forces an infinite height`,
+  then a cascade of unsized-child errors on top. The row is now measured by an
+  `IntrinsicHeight` first, so the tiles still match without an infinite
+  constraint. Same masking as above: onboarding used to delay Home past the
+  point where nearby stations had resolved.
+
+**Bottom bar spacing**
+- The selected tab's pill stretched across its full third of the bar with the
+  label stranded at the left edge, and the three destinations sat at uneven
+  distances from each other. Each pill now hugs its own icon and label and
+  centres in its slot. Tap targets are unchanged at 48dp tall.
+
+Ships the parity pass below, plus three changes made on iOS the same day and
+ported here in the same cycle.
+
+**No more onboarding**
+- The first-run flow (welcome → "Always up to the minute" → permission primers
+  → grant summary) is gone on both platforms. The app opens straight onto the
+  board and asks for each permission where it is actually needed: location the
+  first time Nearby appears, notifications at boot when the toggle is on or on
+  the first alert, UMP consent at launch.
+- `onboarding_screen.dart` and its test are deleted; the `lyne.onboardingDone`
+  flag, the ad "not during onboarding" gates and the `onboarding_completed`
+  analytics event go with them.
+
+**Crowd indicator now reads room LEFT, not how full**
+- Three marks ⟹ seats, one mark ⟹ almost full. It used to fill up as the bus
+  filled up, so the most packed bus lit the most segments and looked like the
+  best option at a glance.
+- The occupancy meter's person glyphs became dots: three filled *people* can't
+  mean an empty bus.
+- With no occupancy from LTA the marks are dropped entirely rather than shown
+  unlit — an empty gauge would now assert "no room" rather than "no reading".
+
+**Departed buses no longer claim to be arriving**
+- The arrival parser clamped every past timestamp to zero, and the boards
+  render zero as "Arr" — so a bus that left six minutes ago advertised itself
+  as arriving now, and a lagging LTA feed made every stale service say "Arr"
+  at once. Departed slots are now skipped and the next real arrival is
+  promoted, carrying its own crowd level and deck type.
+
+---
+
+Parity pass (previously unreleased). iOS was the source of truth throughout; the map
 screen stays iOS-only, and Android keeps its own extras (weather header,
 pull-to-refresh, long-press peek sheet, Undo snackbars, the Nearby ad slot,
 the MRT tab).

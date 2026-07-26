@@ -125,10 +125,12 @@ class _SoftRootState extends State<SoftRoot> {
   @override
   void initState() {
     super.initState();
-    // App Open ad. SoftRoot only exists past onboarding, so mounting the
-    // listener here is the first-run gate. Preload once consent resolves, then
-    // show on every WARM foreground — this listener is created AFTER the
-    // initial cold-launch resume, so the very first launch never shows one.
+    // App Open ad. Mounting the listener here is itself the first-run gate:
+    // preload once consent resolves, then show on every WARM foreground —
+    // this listener is created AFTER the initial cold-launch resume, so the
+    // very first launch never shows one. (It used to also be gated on
+    // AppModel.onboardingDone, which went away with onboarding on 2026-07-26;
+    // the mount-order gate above is what actually protects first run.)
     // All other guards (frequency cap, notification/deep-link suppression,
     // master switches) live in the manager.
     AppOpenAdManager.instance.preloadWhenReady();

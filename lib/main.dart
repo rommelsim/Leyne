@@ -20,7 +20,6 @@ import 'data/data_store.dart';
 import 'data/lta_config.dart';
 import 'data/mrt_geo.dart';
 import 'l10n/app_localizations.dart';
-import 'screens/onboarding_screen.dart';
 import 'screens/v2/soft_root.dart';
 import 'screens/v2/soft_stop_screen.dart';
 import 'services/ad_consent.dart' show AdConsent, kTestDeviceIdentifiers;
@@ -28,7 +27,6 @@ import 'services/alerts_background.dart';
 import 'services/analytics_service.dart';
 import 'services/app_open_ad.dart';
 import 'services/deep_link_service.dart';
-import 'services/location_service.dart';
 import 'services/notifications.dart';
 import 'services/review_prompt.dart';
 import 'state/app_model.dart';
@@ -139,11 +137,9 @@ void main() async {
     );
   }
 
-  // Boot-time prompt for existing users past onboarding: if the system
-  // has never asked for POST_NOTIFICATIONS and our intent (toggle) is
-  // ON, fire the prompt now. Covers the upgrade path from versions
-  // before onboarding step 3 became an actual permission ask.
-  if (AppModel.shared.onboardingDone && AppModel.shared.notificationsEnabled) {
+  // Boot-time prompt: if the system has never asked for POST_NOTIFICATIONS
+  // and our intent (toggle) is ON, fire the prompt now.
+  if (AppModel.shared.notificationsEnabled) {
     () async {
       final status = await NotificationsService.shared.currentStatus();
       if (status == NotifPermStatus.notDetermined) {
@@ -169,13 +165,9 @@ void main() async {
   // kTestDeviceIdentifiers in ad_consent.dart with physical-device
   // hashes if you also want those to see test ads.
   //
-  // First-run users gather consent from the onboarding "Ads" step instead
-  // — running it here would race the priming screen and the OS prompts
-  // would show before the user sees the explanation. Skippers fall through
-  // to here on their next launch (AdConsent is idempotent).
-  if (AppModel.shared.onboardingDone) {
-    AdConsent.gatherThenStart(testDeviceIdentifiers: kTestDeviceIdentifiers);
-  }
+  // Runs for every launch now that onboarding (which used to own the "Ads"
+  // consent step on first run) is gone. AdConsent is idempotent.
+  AdConsent.gatherThenStart(testDeviceIdentifiers: kTestDeviceIdentifiers);
   // Subscribe to Universal Links / App Links so an external
   // https://lyne.sg/stop/12345 tap routes into DetailScreen.
   DeepLinkService.instance.start(_navigatorKey);
@@ -229,55 +221,18 @@ class LyneApp extends StatelessWidget {
   }
 }
 
-/// Routes between OnboardingScreen and RootScaffold based on persisted
-/// state. Listens to AppModel so the "Show again" entry in Settings can
-/// re-enter onboarding mid-session.
+/// The app root. There is no onboarding — the first-run flow (welcome →
+/// wedge → permission primers → grant summary) was removed 2026-07-26 (owner
+/// call, matching iOS in the same pass), so cold start goes straight to the
+/// board after the OS-level launch window and each permission is asked for at
+/// the moment it is needed: location on Home, notifications on the first
+/// alert (or at boot when the toggle is already on), UMP consent at launch.
 ///
-/// The Flutter-drawn "Departly" splash overlay is GONE (owner 2026-07-25):
-/// cold start goes straight to Home/onboarding after the OS-level launch
-/// window. Permission-prompt ordering is unaffected — onboarding's primers
-/// only fire when the user taps through to their steps.
-class _AppRoot extends StatefulWidget {
+/// The Flutter-drawn "Departly" splash overlay is likewise GONE (owner
+/// 2026-07-25).
+class _AppRoot extends StatelessWidget {
   const _AppRoot();
 
   @override
-  State<_AppRoot> createState() => _AppRootState();
-}
-
-class _AppRootState extends State<_AppRoot> {
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: AppModel.shared,
-      builder: (context, _) {
-        final onboardingDone = AppModel.shared.onboardingDone;
-        final Widget body;
-        if (onboardingDone) {
-          body = const SoftRoot();
-        } else {
-          body = OnboardingScreen(
-            // Awaited by the primer: the step advances only after the OS
-            // dialog settles, so the transition never runs (and freezes)
-            // underneath it — see OnboardingScreen.onRequestLocation.
-            onRequestLocation: () => LocationService.shared.requestAndStart(),
-            // AppModel handles the Android 13+ POST_NOTIFICATIONS prompt +
-            // alert scheduling; same await-then-advance shape as location.
-            onRequestNotifications: () =>
-                AppModel.shared.setNotificationsEnabled(true),
-            onFinish: () async {
-              // UMP consent (Android only — no ATT), then MobileAds.initialize,
-              // then dismiss onboarding. AdConsent.gatherThenStart is a no-op
-              // for ATT on Android; the dedicated ATT primer view was removed.
-              await AdConsent.gatherThenStart(
-                testDeviceIdentifiers: kTestDeviceIdentifiers,
-              );
-              AppModel.shared.finishOnboarding();
-            },
-          );
-        }
-
-        return body;
-      },
-    );
-  }
+  Widget build(BuildContext context) => const SoftRoot();
 }

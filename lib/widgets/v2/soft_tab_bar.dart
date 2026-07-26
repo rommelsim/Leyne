@@ -143,57 +143,79 @@ class _PillDestination extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? SoftBlue.chipInk : SoftBlue.sub;
-    final iconWidget = Icon(selected ? selectedIcon : icon, size: 22, color: color);
+    final iconWidget = Icon(
+      selected ? selectedIcon : icon,
+      size: 22,
+      color: color,
+    );
     return Semantics(
       button: true,
       selected: selected,
       // No explicit label: every destination now renders its name, so the
       // Text child already names the node. Setting it here as well produced a
       // second, competing node and TalkBack read the tab twice.
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(999),
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: SoftBlueMotion.standard,
-            curve: Curves.easeOutCubic,
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            // 14 → 9 horizontal: every destination now carries its label (not
-            // just the selected one), so three labelled pills have to share
-            // the bar's width on a 360dp screen.
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-            decoration: BoxDecoration(
-              color: selected ? SoftBlue.chipBg : Colors.transparent,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                badgeCount > 0
-                    ? Badge(
-                        label: Text(badgeCount > 9 ? '9+' : '$badgeCount'),
-                        backgroundColor: SoftBlue.red,
-                        child: iconWidget,
-                      )
-                    : iconWidget,
-                // The label is ALWAYS shown (iOS parity 2026-07-26 — its tab
-                // bar labels every destination). A bar where only the active
-                // item is named makes the other two a guessing game, and the
-                // pill's width jumping on every switch read as a glitch.
-                // Flexible + ellipsis: three labels share the width, so the
-                // longest ("Favourites") shrinks rather than overflowing.
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    style: SoftBlue.sans(12, weight: FontWeight.w600, color: color),
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.ellipsis,
+      //
+      // Center, so the pill HUGS its icon+label instead of being stretched to
+      // the full cell. Each destination sits in an Expanded cell (equal thirds,
+      // so the three stay evenly spaced whatever the label lengths), and an
+      // Expanded cell passes a TIGHT width down — which the AnimatedContainer
+      // adopted, painting the selected capsule across the entire third with
+      // the text stranded at its left edge. Center loosens that constraint so
+      // `mainAxisSize.min` can do its job and centres the result in the cell.
+      //
+      // Tap target is the pill rather than the whole cell: it is the bar's
+      // 64dp height less the 8dp vertical margins = 48dp tall, and the widest
+      // is well past 48dp, so it still clears the minimum.
+      child: Center(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: SoftBlueMotion.standard,
+              curve: Curves.easeOutCubic,
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              // 14 → 9 horizontal: every destination now carries its label (not
+              // just the selected one), so three labelled pills have to share
+              // the bar's width on a 360dp screen.
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected ? SoftBlue.chipBg : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  badgeCount > 0
+                      ? Badge(
+                          label: Text(badgeCount > 9 ? '9+' : '$badgeCount'),
+                          backgroundColor: SoftBlue.red,
+                          child: iconWidget,
+                        )
+                      : iconWidget,
+                  // The label is ALWAYS shown (iOS parity 2026-07-26 — its tab
+                  // bar labels every destination). A bar where only the active
+                  // item is named makes the other two a guessing game, and the
+                  // pill's width jumping on every switch read as a glitch.
+                  // Flexible + ellipsis: three labels share the width, so the
+                  // longest ("Favourites") shrinks rather than overflowing.
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: SoftBlue.sans(
+                        12,
+                        weight: FontWeight.w600,
+                        color: color,
+                      ),
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

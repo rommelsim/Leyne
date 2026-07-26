@@ -196,6 +196,20 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _warm();
       await LocationService.shared.startIfAuthorized();
+      // Onboarding (and its location primer) was removed 2026-07-26, so this
+      // is now the app's only first-run location request: Nearby is the screen
+      // that needs the permission, and it asks the first time it appears.
+      // Mirrors the iOS WSHomeView change made in the same pass.
+      //
+      // Gated on OUR OWN "have we asked" flag, not on `LocAuth`: Android's
+      // Geolocator reports a never-asked permission as `denied`, identical to
+      // a refusal, so there is no platform state to test here. Prompting on
+      // `denied` instead would re-raise the dialog on every single Home mount
+      // for anyone who said no. See AppModel.locationAsked.
+      if (!AppModel.shared.locationAsked && !LocationService.shared.authorized) {
+        AppModel.shared.markLocationAsked();
+        await _requestLocation();
+      }
       final loc = LocationService.shared.lastLocation;
       if (loc != null) {
         DataStore.shared.updateNearby(loc.lat, loc.lon);
@@ -1419,21 +1433,32 @@ class _MrtStrip extends StatelessWidget {
       children: [
         for (var row = 0; row < (shown.length + 1) ~/ 2; row++) ...[
           if (row > 0) const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var col = 0; col < 2; col++) ...[
-                if (col > 0) const SizedBox(width: 10),
-                Expanded(
-                  child: row * 2 + col < shown.length
-                      ? _MrtStationCard(
-                          entry: shown[row * 2 + col],
-                          onTap: () => onOpen(shown[row * 2 + col]),
-                        )
-                      : const SizedBox.shrink(),
-                ),
+          // IntrinsicHeight is what makes `stretch` legal here. The strip
+          // sits in a Column inside the Home SliverList, so the Row's own
+          // height arrives UNBOUNDED — and `stretch` hands its incoming
+          // maxHeight to the tiles as a tight constraint, i.e. h=Infinity,
+          // which asserts in performLayout. IntrinsicHeight measures the
+          // taller tile first and bounds the Row to that, so both tiles in
+          // a row still end up the same height (the point of `stretch`:
+          // a 1-line and a 2-line station name must not stagger the grid).
+          // Cheap at this size — two children, four tiles total.
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var col = 0; col < 2; col++) ...[
+                  if (col > 0) const SizedBox(width: 10),
+                  Expanded(
+                    child: row * 2 + col < shown.length
+                        ? _MrtStationCard(
+                            entry: shown[row * 2 + col],
+                            onTap: () => onOpen(shown[row * 2 + col]),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ],
       ],

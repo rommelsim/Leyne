@@ -61,9 +61,6 @@ class AnalyticsService {
   /// A search was performed.
   static void searchPerformed() => _log('search_performed', null);
 
-  /// Onboarding was completed (or skipped — same routing effect).
-  static void onboardingCompleted() => _log('onboarding_completed', null);
-
   /// A notification was tapped (a strong value signal for retention analysis).
   static void notificationTapped(String kind) =>
       _log('notification_tapped', {'kind': kind.isEmpty ? 'unknown' : kind});
