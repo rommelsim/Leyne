@@ -4,3 +4,4 @@
 - [SoftBusView 2.4.0 restyle](project_bus_view_restyle.md) — approaching card + next buses card + title block; behavior preserved; share button omitted (no backing action)
 - [SoftSearchView 2.4.0 restyle](project_search_view_restyle.md) — large Search title, vertical recents list, 2x2 Browse grid; mic is decorative Image not Button; Browse tiles wiring
 - [SoftFavouritesView 2.4.0 restyle](project_favourites_view_restyle.md) — large title + Edit toggle, All/Pinned/Nearby segments, FavStopCard (private), service section preserved, + Add stop row
+- [design-greendark branch state](design_greendark_branch.md) — Departly green-dark restyle: interpretation calls + WSTheme/WSComponents token state

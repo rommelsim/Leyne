@@ -29,17 +29,16 @@
 //      stops it's currently between, your stop rendered as a highlighted
 //      card (accent bar + "YOUR STOP" overline + live ETA + MRT
 //      interchange), then a collapsed tail ("Show N more stops to Y").
-//      Built directly in this file rather than via the shared
-//      `widgets/v2/route_timeline.dart` `RouteTimeline` widget — that
-//      widget's whole visual language (checkmark-passed dots, an inner
-//      "ROUTE · BUS N · stops away" header, an ALIGHT chip) is the OLD
-//      pre-WhereSia design and doesn't match WSTrackBusView's structure at
+//      Built directly in this file rather than via a shared `RouteTimeline`
+//      widget — that widget's whole visual language (checkmark-passed dots,
+//      an inner "ROUTE · BUS N · stops away" header, an ALIGHT chip) was the
+//      OLD pre-WhereSia design and didn't match WSTrackBusView's structure at
 //      all (it also duplicated this screen's own "ROUTE" header — a real
-//      double-heading bug). File ownership for this punch-list pass is
-//      scoped to this screen only, so rather than editing that shared
-//      widget this screen stopped calling it; see the end-of-task report for
-//      the resulting dead-code flag (`RouteTimeline` now has zero remaining
-//      call sites anywhere in the app — grep-verified).
+//      double-heading bug). That widget (`widgets/v2/route_timeline.dart`)
+//      had zero remaining call sites anywhere in the app and was deleted
+//      2026-07-25 (parity-audit item 12); the `SoftRouteStopState` enum it
+//      defined now lives in `data/bus_progress.dart`, the only file that
+//      still needed it.
 //      Bare on the screen background — no card — matching iOS's Route
 //      section, which is a plain VStack directly on ws.bg.
 //   4. CTA — "Alert me 1 stop before" pinned above the ad banner, the one
@@ -69,6 +68,7 @@ import '../../data/models.dart';
 import '../../data/mrt_stations.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
@@ -478,24 +478,25 @@ class _SoftBusScreenState extends State<SoftBusScreen>
   }
 
   // ── Hero card ────────────────────────────────────────────────────────
-  // Content + hierarchy ported 1:1 from WSTrackBusView's `liveCard`: a
-  // neutral route tile + "TOWARD / {dest}" leading, a LIVE/crowd status row
-  // beneath it (or a waiting message), and a big trailing ETA numeral with
-  // its unit caption. This is the one card on the whole screen.
+  // This screen's own single answer IS "next arrival at your stop" — the
+  // same shape as the Stop-detail hero — so per soft-blue-design.md §4 it
+  // MAY (and does) carry the ONE gradient hero + ring for this screen,
+  // rather than the old flat bordered card. Content/hierarchy stays ported
+  // from WSTrackBusView's `liveCard`: neutral route tile + "TOWARD /
+  // {dest}" leading, a LIVE/crowd status row beneath it (or a waiting
+  // message), and the ring showing the ETA to your stop. This is still the
+  // one card on the whole screen (anti-rule #6).
   Widget _buildHeroCard(LyneTheme t) {
     final s = _liveService();
     final now = DateTime.now();
+    final etaSec = s == null ? null : _liveEtaSec(s, now);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: t.surface,
-        // 14 matches iOS's explicit card-radius choice for this screen
-        // (WSTrackBusView comment: matches the app's card-radius family —
-        // a larger radius curved the corner so far "ROUTE" below read as
-        // misaligned against the card edge).
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.line, width: 1),
+        gradient: SoftBlue.heroGradient,
+        borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
+        boxShadow: SoftBlue.heroShadow,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -517,18 +518,20 @@ class _SoftBusScreenState extends State<SoftBusScreen>
                         children: [
                           Text(
                             'TOWARD',
-                            style: t
-                                .sans(11, weight: FontWeight.w800, color: t.dim)
-                                .copyWith(letterSpacing: 1.2),
+                            style: SoftBlue.sans(
+                              10.5,
+                              weight: FontWeight.w600,
+                              color: Colors.white.withValues(alpha: 0.85),
+                            ).copyWith(letterSpacing: 0.5),
                           ),
                           const SizedBox(height: 1),
                           Text(
                             _destText(s),
-                            style: t.sans(
-                              15.5,
+                            style: SoftBlue.sans(
+                              19,
                               weight: FontWeight.w800,
-                              color: t.fg,
-                            ),
+                              color: Colors.white,
+                            ).copyWith(letterSpacing: -0.2),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -543,15 +546,26 @@ class _SoftBusScreenState extends State<SoftBusScreen>
             ),
           ),
           const SizedBox(width: 14),
-          _heroEtaColumn(t, s, now),
+          if (etaSec == null)
+            Text(
+              '—',
+              style: SoftBlue.mono(
+                19,
+                weight: FontWeight.w800,
+                color: Colors.white.withValues(alpha: 0.85),
+              ),
+            )
+          else
+            SoftHeroRing(etaSeconds: etaSec),
         ],
       ),
     );
   }
 
-  /// The neutral "165" route tile — mirrors iOS's `RouteTile(size: .large)`:
-  /// a flat panel (not the accent-filled `ServiceBadge` used elsewhere in
-  /// the app), 46×40, mono bold.
+  /// The neutral "165" route tile inside the hero — white-tinted fill (no
+  /// stroke), matching the hero's own white-on-gradient chip language
+  /// instead of the flat-panel `t.line` border it used before the hero
+  /// became a gradient card.
   Widget _heroRouteTile(LyneTheme t) {
     return Container(
       // minWidth (not a fixed width) so a 4-char service like "961M" grows
@@ -561,15 +575,14 @@ class _SoftBusScreenState extends State<SoftBusScreen>
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: t.surfaceHi,
+        color: Colors.white.withValues(alpha: 0.20),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: t.line, width: 1),
       ),
       child: Text(
         widget.svc,
         maxLines: 1,
         softWrap: false,
-        style: t.mono(16, weight: FontWeight.w700, color: t.fg),
+        style: SoftBlue.mono(16, weight: FontWeight.w700, color: Colors.white),
       ),
     );
   }
@@ -593,71 +606,53 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     if (s == null) {
       return Text(
         'Waiting for the next bus…',
-        style: t.sans(12, weight: FontWeight.w600, color: t.dim),
+        style: SoftBlue.sans(
+          12,
+          weight: FontWeight.w600,
+          color: Colors.white.withValues(alpha: 0.85),
+        ),
       );
     }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // t.live — the Material You dynamic-colour equivalent of
-        // WSTheme's fixed `accentSoft` blue (see LyneTheme.withAccent).
-        Container(
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(color: t.live, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          'LIVE',
-          style: t
-              .mono(11, weight: FontWeight.w700, color: t.live)
-              .copyWith(letterSpacing: 1.1),
-        ),
-        const SizedBox(width: 7),
-        Text('·', style: t.mono(11, color: t.faint)),
-        const SizedBox(width: 7),
-        // The app's established crowd idiom (person-glyph triplet + word),
-        // already used on Home/Saved/Stop — kept here rather than
-        // introducing a one-off bar-style gauge to match iOS's CrowdGauge
-        // pixel-for-pixel; that would need a new shared widget in
-        // widgets/v2/confidence.dart, which is out of this file's ownership
-        // for this pass (flagged in the task report).
-        CrowdMeter(load: s.load, compact: true),
-      ],
-    );
-  }
-
-  /// Big trailing ETA numeral + unit caption, or a bare "—" placeholder —
-  /// mirrors iOS's trailing VStack exactly, including literally showing
-  /// "Arr" (not a separate "Arriving" word) at the smaller 30pt size when
-  /// the bus is at the stop.
-  Widget _heroEtaColumn(LyneTheme t, Service? s, DateTime now) {
-    if (s == null) {
-      return Text(
-        '—',
-        style: t.mono(34, weight: FontWeight.w700, color: t.faint),
-      );
-    }
-    final eta = fmtEta(_liveEtaSec(s, now));
-    final arriving = eta.big == 'Arr';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          eta.big,
-          style: t.mono(
-            arriving ? 30 : 40,
-            weight: FontWeight.w700,
-            color: t.fg,
+    // The shared CrowdMeter widget (widgets/v2/confidence.dart, out of this
+    // pass's file ownership) reads its own ink/faint/line colours from
+    // LyneTheme, tuned for a white card — not this gradient hero. Rather
+    // than let it render low-contrast ink-on-blue, the LIVE+crowd status
+    // sits on its own small solid-white chip (the same "opaque white chip
+    // on the gradient" move SoftHeroCard's own CTA button uses), so the
+    // meter keeps its normal white-surface contrast.
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: t.live, shape: BoxShape.circle),
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          arriving ? 'AT YOUR STOP' : 'MIN TO YOUR STOP',
-          style: t.mono(11, color: t.dim).copyWith(letterSpacing: 0.7),
-        ),
-      ],
+          const SizedBox(width: 5),
+          Text(
+            'LIVE',
+            style: t
+                .mono(11, weight: FontWeight.w700, color: t.live)
+                .copyWith(letterSpacing: 1.1),
+          ),
+          const SizedBox(width: 7),
+          Text('·', style: t.mono(11, color: t.faint)),
+          const SizedBox(width: 7),
+          // The app's established crowd idiom (person-glyph triplet + word),
+          // already used on Home/Saved/Stop — kept here rather than
+          // introducing a one-off bar-style gauge to match iOS's CrowdGauge
+          // pixel-for-pixel; that would need a new shared widget in
+          // widgets/v2/confidence.dart, which is out of this file's ownership
+          // for this pass (flagged in the task report).
+          CrowdMeter(load: s.load, compact: true),
+        ],
+      ),
     );
   }
 
@@ -1046,13 +1041,17 @@ class _SoftBusScreenState extends State<SoftBusScreen>
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(11),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: t.surface,
-            border: Border.all(color: t.line, width: 1),
-          ),
+      // Bare-bordered chrome → filled+shadow (anti-rule #5). The shadow
+      // container is the OUTER widget so the ClipRRect below (needed to
+      // keep the accent bar's corners rounded) doesn't clip it off.
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(11),
+          boxShadow: SoftBlue.cardShadow,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(11),
           child: IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1350,8 +1349,11 @@ class _SoftBusScreenState extends State<SoftBusScreen>
 }
 
 // ─── Circle icon button (top bar) ─────────────────────────────────────────────
-/// A flat circular icon button — surface fill + 1px border, no drop shadow
-/// (the shadow read as a grey smudge in light mode). 48×48 tap target around a
+/// A flat circular icon button — surface fill + the icon-button shadow
+/// recipe (soft-blue-design.md §3/§4: SoftIconButton chrome is filled +
+/// shadow, "no bordered/outlined variant, ever" — this screen keeps its own
+/// circular silhouette rather than adopting SoftIconButton's 40×40 square,
+/// but drops the bare 1px stroke it used before). 48×48 tap target around a
 /// 40×40 visual circle, with a circle-clipped ripple.
 class _CircleButton extends StatelessWidget {
   const _CircleButton({
@@ -1373,22 +1375,25 @@ class _CircleButton extends StatelessWidget {
         width: 48,
         height: 48,
         child: Center(
-          child: Material(
-            color: t.surface,
-            shape: const CircleBorder(),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: onTap,
-              customBorder: const CircleBorder(),
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: t.line, width: 1),
-                ),
-                alignment: Alignment.center,
-                child: child,
+          // The shadow container is the OUTER widget — a shadow painted by
+          // a descendant of the clipping Material below would be clipped
+          // off at the Material's own (same-size) bounds.
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: t.surface,
+              boxShadow: SoftBlue.iconButtonShadow,
+            ),
+            child: Material(
+              color: Colors.transparent,
+              shape: const CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: onTap,
+                customBorder: const CircleBorder(),
+                child: Center(child: child),
               ),
             ),
           ),

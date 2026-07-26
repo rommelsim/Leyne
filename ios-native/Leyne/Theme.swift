@@ -226,6 +226,8 @@ enum MRTLine: String, CaseIterable {
         }
     }
 
+    var id: String { rawValue }
+
     /// PCD (Station Crowd Density) line code for this line, e.g. "EWL".
     var pcdLineCode: String {
         switch self {

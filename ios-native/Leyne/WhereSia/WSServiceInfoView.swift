@@ -1,9 +1,17 @@
-// WhereSia — Service info (screen 6, new).
+// WhereSia — Service info (screen 6).
 //
 // Route tile + destination + operator/category, a direction segmented control,
 // then first/last bus (weekday/Sat/Sun-PH) and frequency bands (AM peak / midday
 // / PM peak / evening). There is no fixed minute timetable — the copy says so.
 // Wired to DataStore.serviceRoute (first/last) + WSServiceFreqStore (frequency).
+//
+// Soft Blue "4b" pass (docs/soft-blue-design.md): the nav-bar chrome
+// (`wsHeaderBar` + `WSHairButton`) and `RouteTile` are shared system/line-
+// identity components and stay exactly as-is — only the content below is
+// ported. Sections become `SoftCard`, the direction toggle is restyled
+// in-place as soft pills (white/ink-selected, matching WSHomeView's
+// softChip pattern) without changing its behavior, and the background
+// switches to `SoftBlue.bg`.
 
 import SwiftUI
 
@@ -32,23 +40,24 @@ struct WSServiceInfoView: View {
             VStack(alignment: .leading, spacing: 14) {
                 titleRow.padding(.top, 12)
                 if directions.count > 1 {
-                    WSSegmented(options: directions.map { "To \(shortName($0.destinationName))" },
-                                selection: $dir)
+                    directionToggle
                         .padding(.horizontal, 22)
                 }
                 firstLastCard
                 frequencyCard
                 Text("Buses run at these intervals — there’s no fixed minute timetable. For exact times, check live arrivals.")
-                    .font(ws.sans(11.5, weight: .medium)).foregroundStyle(ws.dim)
+                    .font(ws.sans(11.5, weight: .medium)).foregroundStyle(SoftBlue.sub)
                     .lineSpacing(3)
                     .padding(.horizontal, 24).padding(.top, 2)
                 Color.clear.frame(height: 16)
             }
         }
-        .wsEntrance()
-        .background(ws.bg)
+        .wsEntrance(delay: 0.28)   // wait out the push slide, else the entrance plays unseen
+        .background(SoftBlue.bg)
         .wsHeaderBar(eyebrow: "Service info", onBack: onBack) {
-            WSHairButton(glyph: m.isFavService(no: serviceNo, stop: fromStop) ? .bookmarkFilled : .bookmark) {
+            WSHairButton(glyph: m.isFavService(no: serviceNo, stop: fromStop) ? .bookmarkFilled : .bookmark,
+                         label: m.isFavService(no: serviceNo, stop: fromStop)
+                            ? "Unfavourite bus \(serviceNo)" : "Favourite bus \(serviceNo)") {
                 m.toggleFavService(no: serviceNo, stop: fromStop)
             }
         }
@@ -62,8 +71,8 @@ struct WSServiceInfoView: View {
         HStack(spacing: 13) {
             RouteTile(text: serviceNo, size: .large)
             VStack(alignment: .leading, spacing: 3) {
-                Text(destTitle).font(ws.sans(18, weight: .heavy)).foregroundStyle(ws.text)
-                Text(subtitle).font(ws.mono(11.5)).tracking(0.3).foregroundStyle(ws.dim)
+                Text(destTitle).font(ws.sans(18, weight: .heavy)).foregroundStyle(SoftBlue.ink)
+                Text(subtitle).font(ws.mono(11.5)).tracking(0.3).foregroundStyle(SoftBlue.sub)
             }
             Spacer()
         }
@@ -80,11 +89,37 @@ struct WSServiceInfoView: View {
     }
     private var categoryFallback: String { "" }
 
+    // MARK: direction toggle
+    //
+    // Same `dir` binding / behavior as the old `WSSegmented` — restyled
+    // in-place as soft pills (per WSHomeView's softChip pattern): selected =
+    // ink fill + white text, unselected = white fill + sub text, both with
+    // the one shadow recipe (§4 of the soft-blue spec: an unselected chip
+    // without the shadow reads as flat/disabled, which this isn't).
+    private var directionToggle: some View {
+        HStack(spacing: 8) {
+            ForEach(directions.indices, id: \.self) { i in
+                let on = i == dir
+                Button { dir = i } label: {
+                    Text("To \(shortName(directions[i].destinationName))")
+                        .font(ws.sans(13, weight: .semibold))
+                        .foregroundStyle(on ? .white : SoftBlue.sub)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(on ? SoftBlue.ink : SoftBlue.card))
+                        .shadow(color: SoftBlue.shadow, radius: 5, y: 3)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(SoftPressStyle())
+            }
+        }
+    }
+
     // MARK: first & last
 
     private var firstLastCard: some View {
         let w = selected?.firstLast
-        return WSCard(title: fromStop != nil ? "First & last bus · this stop" : "First & last bus · from origin") {
+        return SoftCard(title: fromStop != nil ? "First & last bus · this stop" : "First & last bus · from origin") {
             if let w {
                 VStack(spacing: 0) {
                     firstLastRow("Weekdays", w.firstWD, w.lastWD)
@@ -93,7 +128,7 @@ struct WSServiceInfoView: View {
                 }
             } else {
                 Text(loading ? "Loading…" : "First/last times weren’t published for this stop.")
-                    .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                    .font(ws.sans(13, weight: .medium)).foregroundStyle(SoftBlue.sub)
                     .padding(.vertical, 12)
             }
         }
@@ -103,36 +138,48 @@ struct WSServiceInfoView: View {
     private func firstLastRow(_ key: String, _ first: String?, _ last: String?, last isLast: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text(key).font(ws.sans(13, weight: .semibold)).foregroundStyle(ws.dim)
+                Text(key).font(ws.sans(13, weight: .semibold)).foregroundStyle(SoftBlue.sub)
                 Spacer()
-                (Text(WSFmt.firstLast(first)).foregroundStyle(ws.text)
-                 + Text(" – ").foregroundStyle(ws.dim)
-                 + Text(WSFmt.firstLast(last)).foregroundStyle(ws.text))
+                (Text(WSFmt.firstLast(first)).foregroundStyle(SoftBlue.ink)
+                 + Text(" – ").foregroundStyle(SoftBlue.sub)
+                 + Text(WSFmt.firstLast(last)).foregroundStyle(SoftBlue.ink))
                     .font(ws.mono(14, weight: .bold))
             }
             .padding(.vertical, 11)
-            if !isLast { WSRowDivider() }
+            if !isLast { SoftRowDivider(inset: 0) }
         }
     }
 
     // MARK: frequency
 
     private var frequencyCard: some View {
-        WSCard(title: "How often it runs") {
+        SoftCard(title: "How often it runs") {
             if let f = freq {
                 VStack(spacing: 0) {
-                    WSKV(key: "AM peak · 0630–0830", value: WSServiceFreq.band(f.amPeak))
-                    WSKV(key: "Midday · 0831–1659", value: WSServiceFreq.band(f.amOffpeak))
-                    WSKV(key: "PM peak · 1700–1900", value: WSServiceFreq.band(f.pmPeak))
-                    WSKV(key: "Evening · after 1900", value: WSServiceFreq.band(f.pmOffpeak), last: true)
+                    softKV("AM peak · 0630–0830", WSServiceFreq.band(f.amPeak))
+                    softKV("Midday · 0831–1659", WSServiceFreq.band(f.amOffpeak))
+                    softKV("PM peak · 1700–1900", WSServiceFreq.band(f.pmPeak))
+                    softKV("Evening · after 1900", WSServiceFreq.band(f.pmOffpeak), last: true)
                 }
             } else {
                 Text(loading ? "Loading frequency…" : "Frequency unavailable right now.")
-                    .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                    .font(ws.sans(13, weight: .medium)).foregroundStyle(SoftBlue.sub)
                     .padding(.vertical, 12)
             }
         }
         .padding(.horizontal, 22)
+    }
+
+    private func softKV(_ key: String, _ value: String, last: Bool = false) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(key).font(ws.sans(13, weight: .semibold)).foregroundStyle(SoftBlue.sub)
+                Spacer()
+                Text(value).font(ws.mono(14, weight: .bold)).foregroundStyle(SoftBlue.ink)
+            }
+            .padding(.vertical, 11)
+            if !last { SoftRowDivider(inset: 0) }
+        }
     }
 
     // MARK: load

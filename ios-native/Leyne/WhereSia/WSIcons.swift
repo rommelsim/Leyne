@@ -22,8 +22,12 @@ enum WSGlyph {
 
     var systemName: String {
         switch self {
-        case .busSingle:      return "bus"
-        case .busDouble:      return "bus.doubledecker"
+        // The app-wide bus mark (owner 2026-07-25: "change the bus icon for
+        // entire app throughout"). The generic outline "bus" read as a
+        // featureless van at 14–16pt; the double-decker silhouette is both
+        // more legible small AND the bus Singaporeans actually picture.
+        case .busSingle:      return "bus.doubledecker"
+        case .busDouble:      return "bus.doubledecker.fill"
         // SF Symbols has no articulated/"bendy" bus glyph, so we differentiate
         // deliberately within the existing outline set: the filled variant of
         // the same base symbol, distinct from busSingle's outline "bus" and

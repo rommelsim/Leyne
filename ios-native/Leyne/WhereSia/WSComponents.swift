@@ -33,7 +33,7 @@ struct CrowdGauge: View {
             }
             .onAppear {
                 if reduceMotion { shown = true }
-                else { withAnimation(.easeOut(duration: 0.6)) { shown = true } }
+                else { withAnimation(SoftMotion.drift) { shown = true } }
             }
             .accessibilityHidden(true)
     }
@@ -55,7 +55,7 @@ struct WSEntrance: ViewModifier {
             .offset(y: shown ? 0 : rise)
             .onAppear {
                 if reduceMotion { shown = true }
-                else { withAnimation(.easeOut(duration: 0.45).delay(delay)) { shown = true } }
+                else { withAnimation(SoftMotion.drift.delay(delay)) { shown = true } }
             }
     }
 }
@@ -64,6 +64,33 @@ extension View {
     /// Fade + slide-up as the view appears. `delay` staggers siblings.
     func wsEntrance(delay: Double = 0, rise: CGFloat = 12) -> some View {
         modifier(WSEntrance(delay: delay, rise: rise))
+    }
+
+    /// Entrance that REPLAYS every time the view comes back on screen. The
+    /// system tab bar swaps tabs with no transition of its own, so switching
+    /// tabs read as an instant, motionless cut (owner 2026-07-25). Apply to a
+    /// TabView's tab content — it resets on disappear, unlike `wsEntrance`,
+    /// which is a once-per-lifetime entrance.
+    func wsTabEntrance() -> some View {
+        modifier(WSTabEntrance())
+    }
+}
+
+struct WSTabEntrance: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            // Small rise + a hair of scale: enough to read as a change of
+            // place, short enough not to sit between the user and the data.
+            .offset(y: shown ? 0 : 8)
+            .scaleEffect(shown ? 1 : 0.985, anchor: .center)
+            .onAppear {
+                if reduceMotion { shown = true }
+                else { withAnimation(SoftMotion.drift) { shown = true } }
+            }
+            .onDisappear { shown = false }
     }
 }
 
@@ -79,6 +106,10 @@ struct WSPing: View {
     var cornerRadius: CGFloat = 999
     var lineWidth: CGFloat = 2
     var maxScale: CGFloat = 2.0
+    /// Overrides `ws.accentSoft` (greendark mint) — soft-blue-language
+    /// screens pass `SoftBlue.blue` here since that palette never reads
+    /// colour off `ws`.
+    var color: Color? = nil
 
     @Environment(\.ws) private var ws
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -86,7 +117,7 @@ struct WSPing: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .stroke(ws.accentSoft, lineWidth: lineWidth)
+            .stroke(color ?? ws.accentSoft, lineWidth: lineWidth)
             .scaleEffect(animate ? maxScale : 1)
             .opacity(animate ? 0 : 0.5)
             .onAppear {
@@ -294,7 +325,7 @@ struct WSLiveBadge: View {
         }
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { on = true }
+            withAnimation(SoftMotion.breathe) { on = true }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Live data")
@@ -376,26 +407,41 @@ struct WSKV: View {
 
 // MARK: - Toggle (pill)
 
+/// Native `Toggle` under the WhereSia pill skin — real switch semantics
+/// (VoiceOver "switch" trait, `.isOn` accessibility value, keyboard/Switch
+/// Control support) rather than a `Capsule` + `onTapGesture` standing in for
+/// one (owner audit 2026-07-25: native behaviour, not just native look).
 struct WSToggle: View {
     @Binding var isOn: Bool
+    var body: some View {
+        Toggle("", isOn: $isOn)
+            .labelsHidden()
+            .toggleStyle(WSPillToggleStyle())
+            .sensoryFeedback(.selection, trigger: isOn)
+    }
+}
+
+private struct WSPillToggleStyle: ToggleStyle {
     @Environment(\.ws) private var ws
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var body: some View {
-        Capsule()
-            .fill(isOn ? ws.accent : ws.panel2)
-            .overlay(Capsule().stroke(isOn ? ws.accent : ws.rule, lineWidth: 1))
-            .frame(width: 44, height: 26)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(isOn ? .white : ws.faint)
-                    .frame(width: 18, height: 18)
-                    .padding(3)
-            }
-            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: isOn)
-            .onTapGesture { isOn.toggle() }
-            .sensoryFeedback(.selection, trigger: isOn)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityValue(isOn ? "on" : "off")
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            Capsule()
+                .fill(configuration.isOn ? ws.accent : ws.panel2)
+                .overlay(Capsule().stroke(configuration.isOn ? ws.accent : ws.rule, lineWidth: 1))
+                .frame(width: 44, height: 26)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(configuration.isOn ? .white : ws.faint)
+                        .frame(width: 18, height: 18)
+                        .padding(3)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(SoftPressStyle())
+        .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: configuration.isOn)
     }
 }
 
@@ -419,7 +465,7 @@ struct WSSegmented: View {
                         .clipShape(RoundedRectangle(cornerRadius: 9))
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SoftPressStyle())
             }
         }
         .padding(4)
@@ -449,7 +495,7 @@ struct WSFilterChips: View {
                         .clipShape(RoundedRectangle(cornerRadius: 11))
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SoftPressStyle())
             }
         }
         // Fill the row and lead-align — an HStack that hugs its content gets
@@ -469,15 +515,20 @@ struct WSFilterChips: View {
 struct WSHairButton: View {
     let glyph: WSGlyph
     var filled: Bool = false
+    /// VoiceOver label — every icon-only button needs one; defaults to the
+    /// glyph's back-button case since that's the only call site that omits it.
+    var label: String? = nil
     var action: () -> Void
     @Environment(\.ws) private var ws
+    private var accessibleLabel: String { label ?? (glyph == .back ? "Back" : "") }
     var body: some View {
         Button(action: action) {
             WSIcon(glyph: glyph, size: 19)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SoftPressStyle())
+        .accessibilityLabel(accessibleLabel)
     }
 }
 
@@ -556,7 +607,7 @@ private struct WSHeaderBarChrome<Trailing: View>: ViewModifier {
                                     .move(edge: .top).combined(with: .opacity))
                         }
                     }
-                    .animation(.snappy(duration: 0.22), value: showTitle)
+                    .animation(SoftMotion.flow, value: showTitle)
                     // The bar region clips, so the moving lines slide in/out
                     // of the chrome instead of floating over content.
                     .clipped()
@@ -598,7 +649,7 @@ struct ForecastBar: View {
         .frame(maxWidth: .infinity)
         .onAppear {
             if reduceMotion { shown = true }
-            else { withAnimation(.easeOut(duration: 0.6)) { shown = true } }
+            else { withAnimation(SoftMotion.drift) { shown = true } }
         }
     }
 }

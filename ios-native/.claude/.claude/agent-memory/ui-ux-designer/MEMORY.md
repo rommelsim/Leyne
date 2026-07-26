@@ -1,0 +1,1 @@
+- [Soft Blue 4b design language](soft_blue_4b.md) — new pastel/blue design system replacing mint greendark on WhereSia screens; tokens in WSSoftTheme.swift, only Nearby implemented so far

@@ -673,6 +673,49 @@ final class DataStore {
         return set.sorted { Self.serviceNumberOrder($0, $1) }
     }
 
+    /// First/last bus at THIS stop for every service that serves it, one entry
+    /// per service (the earliest-first / latest-last across directions, since
+    /// a rider standing at the pole doesn't care which direction published it).
+    /// Drives the Stop screen's closed-for-the-night state, where "when does
+    /// this start again" is the only useful thing left to say.
+    /// Empty until the routes dataset has loaded.
+    func firstLastAtStop(_ code: String) async -> [(service: String, window: OperatingWindow)] {
+        guard let all = await loadRoutes() else { return [] }
+        var byService: [String: OperatingWindow] = [:]
+        for r in all where r.BusStopCode == code {
+            let w = OperatingWindow(firstWD: r.WD_FirstBus,   lastWD: r.WD_LastBus,
+                                    firstSat: r.SAT_FirstBus, lastSat: r.SAT_LastBus,
+                                    firstSun: r.SUN_FirstBus, lastSun: r.SUN_LastBus)
+            guard let existing = byService[r.ServiceNo] else { byService[r.ServiceNo] = w; continue }
+            byService[r.ServiceNo] = OperatingWindow(
+                firstWD:  Self.earlier(existing.firstWD, w.firstWD),
+                lastWD:   Self.later(existing.lastWD, w.lastWD),
+                firstSat: Self.earlier(existing.firstSat, w.firstSat),
+                lastSat:  Self.later(existing.lastSat, w.lastSat),
+                firstSun: Self.earlier(existing.firstSun, w.firstSun),
+                lastSun:  Self.later(existing.lastSun, w.lastSun))
+        }
+        return byService
+            .map { (service: $0.key, window: $0.value) }
+            .sorted { Self.serviceNumberOrder($0.service, $1.service) }
+    }
+
+    /// LTA writes "HHmm", "-" or "" — treat anything unparseable as absent.
+    private static func clockValue(_ s: String?) -> Int? {
+        guard let s, s.count == 4, let n = Int(s) else { return nil }
+        return n
+    }
+    private static func earlier(_ a: String?, _ b: String?) -> String? {
+        guard let av = clockValue(a) else { return b }
+        guard let bv = clockValue(b) else { return a }
+        return av <= bv ? a : b
+    }
+    private static func later(_ a: String?, _ b: String?) -> String? {
+        guard let av = clockValue(a) else { return b }
+        guard let bv = clockValue(b) else { return a }
+        return av >= bv ? a : b
+    }
+
     func route(service no: String, stopCode: String) async -> RouteInfo? {
         guard let all = await loadRoutes() else { return nil }
         // Pick the direction whose stop list contains this stop.

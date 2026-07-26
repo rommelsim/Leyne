@@ -1,7 +1,7 @@
 // SoftHomeScreen — Leyne 2.0 Home (Material 3 Android variant).
 //
 // Layout (content parity with iOS WSHomeView.swift — not a visual clone):
-//   header (live date eyebrow + "Nearby" title)
+//   header ("Nearby" title + "<area> · updated <when>" caption, spec item 3a)
 //   → MRT strip (nearest stations, always visible when located)
 //   → "Closest to you" section (1 highlighted card; its eyebrow carries the
 //     ● LIVE badge + right-aligned "Updated h:mm", like iOS's BUS STOPS
@@ -30,6 +30,7 @@ import '../../data/weather_store.dart';
 import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/alert_actions.dart';
 import '../../widgets/v2/confidence.dart';
@@ -60,7 +61,13 @@ sealed class _Item {}
 
 class _WeatherItem extends _Item {}
 
-class _HeaderItem extends _Item {}
+class _HeaderItem extends _Item {
+  _HeaderItem(this.caption);
+
+  /// "`<area> · updated <when>`" (spec item 3a, 2026-07-25) — computed once
+  /// in `_buildItems` where `nearby` is in scope.
+  final String caption;
+}
 
 /// Tap-to-search pill — mirrors WSHomeView.swift's `searchBar`: sits directly
 /// under the header/title, above everything else (including the MRT strip).
@@ -72,6 +79,19 @@ class _SearchBarItem extends _Item {}
 class _GapItem extends _Item {
   _GapItem(this.height);
   final double height;
+}
+
+/// All/Buses/MRT filter chips (spec item 7) — mirrors WSHomeView.swift's
+/// `softChips`. Sits between the hero and the stop list.
+class _FilterChipsItem extends _Item {}
+
+/// Anatomy-matched loading skeleton (spec item 6) — shown while nothing has
+/// loaded yet and `referenceState` is loading. Mirrors WSHomeView.swift's
+/// `skeletonStack`/`WSSkeletonCard`.
+class _SkeletonItem extends _Item {
+  _SkeletonItem({this.hero = false, this.delay = Duration.zero});
+  final bool hero;
+  final Duration delay;
 }
 
 class _EyebrowItem extends _Item {
@@ -112,6 +132,14 @@ class _HiddenFooterItem extends _Item {
   final int count;
 }
 
+/// "View all / Show fewer" toggle after the first 3 "Other nearby stops"
+/// rows (spec item 7).
+class _ViewAllItem extends _Item {
+  _ViewAllItem({required this.expanded, required this.total});
+  final bool expanded;
+  final int total;
+}
+
 class _EmptyItem extends _Item {}
 
 /// A quiet prompt (shown under the saved-stop fallback) to enable location.
@@ -119,10 +147,30 @@ class _LocationNudgeItem extends _Item {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Which sections render — mirrors WSHomeView.swift's `Filter` (spec item 7).
+enum _HomeFilter { all, buses, mrt }
+
 class _SoftHomeScreenState extends State<SoftHomeScreen>
     with WidgetsBindingObserver {
   // ── Walk-minute memoisation cache ─────────────────────────────────────────
   final Map<String, int?> _walkCache = {};
+
+  /// All/Buses/MRT filter (spec item 7) — chips between the hero and the
+  /// stop list.
+  _HomeFilter _filter = _HomeFilter.all;
+
+  /// "View all / Show fewer" toggle for "Other nearby stops" past the first
+  /// 3 rows (spec item 7).
+  bool _stopsExpanded = false;
+
+  /// Frozen display order for the nearby bus-stop list (spec item 5, ported
+  /// from WSHomeView.swift's `frozenOrder`/`frozenAt`): GPS wobble re-sorts
+  /// `DataStore.nearby` every few seconds, which made the whole list "jump
+  /// around" (owner field test 2026-07-24). The list keeps its first-paint
+  /// order; a re-sort happens only on pull-to-refresh or a genuine move
+  /// (>350 m). Distances/ETAs inside the rows stay live regardless.
+  List<String> _frozenOrder = [];
+  ({double lat, double lon})? _frozenAt;
 
   @override
   void initState() {
@@ -141,6 +189,7 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         WeatherStore.shared.refreshIfStale(lat: loc.lat, lon: loc.lon);
       }
       DataStore.shared.prefetchNearbyArrivals();
+      _warmMrtCrowd();
     });
   }
 
@@ -176,8 +225,26 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
 
   void _onLocationChanged() {
     _rebuildWalkCache();
+    _warmMrtCrowd();
     // LocationService already calls notifyListeners which triggers the outer
     // structural ListenableBuilder — no extra setState needed here.
+  }
+
+  /// Actively warms crowd data for the MRT strip's stations (spec item 7) —
+  /// previously the strip only showed crowd "if available" from whatever the
+  /// MRT tab/station screen happened to have already fetched. Mirrors
+  /// WSHomeView.swift's `store.wsWarmCrowd(for: nearbyStations.map(\.station))`.
+  void _warmMrtCrowd() {
+    final lines = <MRTLine>{};
+    for (final entry in _nearbyStations()) {
+      for (final code in entry.station.codes) {
+        final line = _lineFromCode(code);
+        if (line != null) lines.add(line);
+      }
+    }
+    for (final line in lines) {
+      DataStore.shared.refreshCrowd(line);
+    }
   }
 
   void _rebuildWalkCache() {
@@ -220,10 +287,51 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
   /// Stops the user hid (long-press → "Hide from Nearby") are filtered out;
   /// they're restorable from Settings → Hidden stops.
   List<NearbyStop> _nearbyStops() {
-    final base = [...DataStore.shared.nearby]
+    final live = [...DataStore.shared.nearby]
       ..removeWhere((s) => AppModel.shared.isHiddenNearby(s.stopCode))
       ..sort((a, b) => a.distanceM.compareTo(b.distanceM));
-    return base.take(12).toList();
+    _syncFrozenOrder(live);
+    final ordered = _applyFrozenOrder(live);
+    return ordered.take(12).toList();
+  }
+
+  /// (Re)freezes the display order to the current distance sort — spec
+  /// item 5. Called on first data, and again only after a genuine move.
+  void _refreezeOrder(List<NearbyStop> live) {
+    _frozenOrder = live.map((s) => s.stopCode).toList();
+    _frozenAt = LocationService.shared.lastLocation;
+  }
+
+  /// Freezes on first data; re-freezes only once the user has moved more
+  /// than ~350 m from where the order was last frozen. Mirrors
+  /// WSHomeView.swift's `syncFrozenOrder`.
+  void _syncFrozenOrder(List<NearbyStop> live) {
+    if (_frozenOrder.isEmpty) {
+      if (live.isNotEmpty) _refreezeOrder(live);
+      return;
+    }
+    final here = LocationService.shared.lastLocation;
+    final anchor = _frozenAt;
+    if (here != null &&
+        anchor != null &&
+        haversine(here.lat, here.lon, anchor.lat, anchor.lon) > 350) {
+      _refreezeOrder(live);
+    }
+  }
+
+  /// Orders [live] by the frozen index; newly-appearing stops (not yet in
+  /// the frozen order) append at the end rather than shuffling in.
+  List<NearbyStop> _applyFrozenOrder(List<NearbyStop> live) {
+    if (_frozenOrder.isEmpty) return live;
+    final idx = {
+      for (var i = 0; i < _frozenOrder.length; i++) _frozenOrder[i]: i,
+    };
+    final ordered = [...live]..sort((a, b) {
+      final ia = idx[a.stopCode] ?? 1 << 30;
+      final ib = idx[b.stopCode] ?? 1 << 30;
+      return ia.compareTo(ib);
+    });
+    return ordered;
   }
 
   /// Count of stops in range that are hidden from Nearby — computed from the
@@ -245,28 +353,6 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     }
   }
 
-  /// Live date eyebrow ("TUESDAY · 2 JUL") — replaces the old time-of-day
-  /// greeting. Eyebrow() already uppercases, so casing here doesn't matter.
-  /// intl isn't a direct pubspec dependency (only pulled in transitively),
-  /// so this formats manually rather than adding a new dependency for one line.
-  static const _weekdayNames = [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday', //
-  ];
-  static const _monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
-
-  String _dateEyebrow() {
-    final now = DateTime.now();
-    return '${_weekdayNames[now.weekday - 1]} · ${now.day} ${_monthNames[now.month - 1]}';
-  }
 
   /// 'h:mm' / 'HH:mm' render of a refresh timestamp, honouring the app-wide
   /// 24h clock preference. No intl — see `_dateEyebrow`.
@@ -288,6 +374,33 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     }
     if (newest == null) return null;
     return _formatClock(newest, AppModel.shared.use24h);
+  }
+
+  /// Relative freshness for the header caption (spec item 3a): "just now"
+  /// (<5s), "Ns ago" (<60s), else "Nm ago" — distinct from `_updatedLabel`'s
+  /// clock-format string used by the "Closest to you" section header.
+  String? _relativeUpdated(List<NearbyStop> nearby) {
+    DateTime? newest;
+    for (final s in nearby) {
+      final t = DataStore.shared.lastRefresh(s.stopCode);
+      if (t != null && (newest == null || t.isAfter(newest))) newest = t;
+    }
+    if (newest == null) return null;
+    final diff = DateTime.now().difference(newest);
+    if (diff.inSeconds < 5) return 'just now';
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    return '${diff.inMinutes}m ago';
+  }
+
+  /// "`<area> · updated <when>`" header caption (spec item 3a). Area = road
+  /// name of the first (closest) nearby stop; falls back to a neutral
+  /// prompt when there's neither an area nor a refresh timestamp yet (no
+  /// location fix / nothing loaded).
+  String _headerCaption(List<NearbyStop> nearby) {
+    final area = nearby.isEmpty ? '' : DataStore.shared.roadName(nearby.first.stopCode);
+    final when = _relativeUpdated(nearby);
+    if (area.isEmpty) return 'Stops and stations around you';
+    return when == null ? area : '$area · updated $when';
   }
 
   /// The 3-4 nearest MRT/LRT stations to the current location fix, for the
@@ -351,7 +464,13 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     if (loc != null) {
       DataStore.shared.updateNearby(loc.lat, loc.lon);
     }
+    // The one sanctioned re-sort (spec item 5): pull-to-refresh re-freezes
+    // the nearby list to the current distance order. Clearing here lets the
+    // next `_nearbyStops()` call (during the rebuild this triggers) re-freeze
+    // from the just-updated `DataStore.nearby`.
+    _frozenOrder = [];
     DataStore.shared.prefetchNearbyArrivals();
+    _warmMrtCrowd();
   }
 
   /// Long-press peek — a Material take on the iOS context-menu preview: the
@@ -467,26 +586,41 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     // footer can appear in either branch below (including when hiding
     // emptied the visible `nearby` list entirely).
     final hiddenCount = _hiddenNearbyCount();
+    final nearestStations = _nearbyStations();
 
     // Weather hero sits above the greeting when a snapshot is available.
     if (WeatherStore.shared.snapshot != null) {
       items.add(_WeatherItem());
       items.add(_GapItem(8));
     }
-    items.add(_HeaderItem());
+    items.add(_HeaderItem(_headerCaption(nearby)));
     items.add(_GapItem(14));
     items.add(_SearchBarItem());
 
-    // MRT — nearby stations strip. Its own small section above the bus stop
-    // list, independent of whether there are nearby BUS stops (only needs a
-    // location fix and at least one station in range). Mirrors WSHomeView.
-    final nearestStations = _nearbyStations();
-    if (nearestStations.isNotEmpty) {
+    // Anatomy-matched loading skeletons (spec item 6) — nothing loaded yet
+    // (no nearby stops, no nearby stations, no saved stops to fall back to)
+    // and the reference dataset is still loading. Never shown once ANY real
+    // content is available, so a slow secondary feed can't re-trigger it.
+    final loading =
+        DataStore.shared.referenceState.state == LoadState.loading;
+    if (loading &&
+        nearby.isEmpty &&
+        nearestStations.isEmpty &&
+        AppModel.shared.pins.isEmpty) {
       items.add(_GapItem(16));
-      items.add(_EyebrowItem('MRT'));
+      items.add(_FilterChipsItem());
       items.add(_GapItem(10));
-      items.add(_MrtStripItem(nearestStations));
+      items.add(_SkeletonItem(hero: true));
+      for (var i = 1; i <= 3; i++) {
+        items.add(_GapItem(10));
+        // Mirrors WSHomeView.swift's `WSSkeletonCard(delaySeconds: i * 0.15)`.
+        items.add(_SkeletonItem(delay: Duration(milliseconds: i * 150)));
+      }
+      return items;
     }
+
+    items.add(_GapItem(16));
+    items.add(_FilterChipsItem());
 
     if (nearby.isEmpty) {
       final pins = AppModel.shared.pins;
@@ -495,46 +629,56 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         // user has saved stops — show those instead of a dead end, so the app
         // still answers "when's my bus?". The first saved stop is the hero
         // ("Your stop"); the rest follow. Mirrors iOS SoftHomeView.
-        items.add(_GapItem(16));
-        items.add(
-          _EyebrowItem(
-            'Your stops',
-            updated: _updatedLabel(
-              [for (final p in pins) _savedStop(p.code)],
-            ),
-          ),
-        );
-        items.add(_GapItem(10));
-        items.add(
-          _NearbyCardItem(
-            _savedStop(pins.first.code),
-            highlight: true,
-            badgeText: 'Your stop',
-          ),
-        );
-        final rest = pins.skip(1).toList();
-        if (rest.isNotEmpty) {
+        if (_filter != _HomeFilter.mrt) {
           items.add(_GapItem(16));
-          items.add(_EyebrowItem('More saved'));
+          items.add(
+            _EyebrowItem(
+              'Your stops',
+              updated: _updatedLabel(
+                [for (final p in pins) _savedStop(p.code)],
+              ),
+            ),
+          );
           items.add(_GapItem(10));
-          for (var i = 0; i < rest.length; i++) {
-            if (i > 0) items.add(_GapItem(10));
-            items.add(
-              _NearbyCardItem(_savedStop(rest[i].code), highlight: false),
-            );
-            if (i == 2 && rest.length > 3) {
-              items.add(_GapItem(10));
-              items.add(_NativeAdItem());
+          items.add(
+            _NearbyCardItem(
+              _savedStop(pins.first.code),
+              highlight: true,
+              badgeText: 'Your stop',
+            ),
+          );
+          final rest = pins.skip(1).toList();
+          if (rest.isNotEmpty) {
+            items.add(_GapItem(16));
+            items.add(_EyebrowItem('More saved'));
+            items.add(_GapItem(10));
+            for (var i = 0; i < rest.length; i++) {
+              if (i > 0) items.add(_GapItem(10));
+              items.add(
+                _NearbyCardItem(_savedStop(rest[i].code), highlight: false),
+              );
+              if (i == 2 && rest.length > 3) {
+                items.add(_GapItem(10));
+                items.add(_NativeAdItem());
+              }
             }
           }
+          if (LocationService.shared.lastLocation == null) {
+            items.add(_GapItem(10));
+            items.add(_LocationNudgeItem());
+          }
         }
-        if (LocationService.shared.lastLocation == null) {
-          items.add(_GapItem(10));
-          items.add(_LocationNudgeItem());
-        }
-      } else {
+      } else if (_filter != _HomeFilter.mrt) {
         items.add(_GapItem(8));
         items.add(_EmptyItem());
+      }
+      // MRT strip moves BELOW the bus-stop list (spec item 7, iOS order:
+      // hero → stops → MRT) — including in this no-nearby-bus-stops branch.
+      if (_filter != _HomeFilter.buses && nearestStations.isNotEmpty) {
+        items.add(_GapItem(16));
+        items.add(_EyebrowItem('MRT'));
+        items.add(_GapItem(10));
+        items.add(_MrtStripItem(nearestStations));
       }
       if (hiddenCount > 0) {
         items.add(_GapItem(10));
@@ -543,35 +687,59 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
       return items;
     }
 
-    // "Closest to you" — the single nearest stop. Carries the LIVE badge +
-    // freshness meta (the first bus-stop section is where iOS puts them).
-    items.add(_GapItem(16));
-    items.add(_EyebrowItem('Closest to you', updated: _updatedLabel(nearby)));
-    items.add(_GapItem(10));
-    items.add(_NearbyCardItem(nearby.first, highlight: true));
-
-    // "Other nearby stops" — up to 11 more.
-    // The native ad card is injected after the 3rd stop (index 2) so it
-    // sits naturally mid-list rather than at the top or very bottom.
-    // NativeAdCard renders nothing (zero-size) until loaded + consent ready,
-    // so there is never a gap or placeholder when fill is pending.
-    const nativeAdAfterIndex =
-        2; // 0-based index of the stop after which the ad appears
-    final others = nearby.skip(1).take(11).toList();
-    if (others.isNotEmpty) {
+    if (_filter != _HomeFilter.mrt) {
+      // "Closest to you" — the single nearest stop. Carries the LIVE badge +
+      // freshness meta (the first bus-stop section is where iOS puts them).
       items.add(_GapItem(16));
-      items.add(_EyebrowItem('Other nearby stops'));
+      items.add(
+        _EyebrowItem('Closest to you', updated: _updatedLabel(nearby)),
+      );
       items.add(_GapItem(10));
-      for (var i = 0; i < others.length; i++) {
-        if (i > 0) items.add(_GapItem(10));
-        items.add(_NearbyCardItem(others[i], highlight: false));
-        if (i == nativeAdAfterIndex && others.length > nativeAdAfterIndex + 1) {
-          // Only inject when there is at least one more stop below — keeps
-          // the ad from sitting as the final item in a short list.
+      items.add(_NearbyCardItem(nearby.first, highlight: true));
+
+      // "Other nearby stops" — up to 11 more, with a "View all / Show
+      // fewer" toggle past the first 3 (spec item 7).
+      // The native ad card is injected after the 3rd VISIBLE stop so it
+      // sits naturally mid-list rather than at the top or very bottom.
+      // NativeAdCard renders nothing (zero-size) until loaded + consent
+      // ready, so there is never a gap or placeholder when fill is pending.
+      const nativeAdAfterIndex = 2;
+      const collapsedCount = 3;
+      final others = nearby.skip(1).take(11).toList();
+      if (others.isNotEmpty) {
+        items.add(_GapItem(16));
+        items.add(_EyebrowItem('Other nearby stops'));
+        items.add(_GapItem(10));
+        final shown = (_stopsExpanded || others.length <= collapsedCount)
+            ? others
+            : others.take(collapsedCount).toList();
+        for (var i = 0; i < shown.length; i++) {
+          if (i > 0) items.add(_GapItem(10));
+          items.add(_NearbyCardItem(shown[i], highlight: false));
+          if (i == nativeAdAfterIndex &&
+              shown.length > nativeAdAfterIndex + 1) {
+            items.add(_GapItem(10));
+            items.add(_NativeAdItem());
+          }
+        }
+        if (others.length > collapsedCount) {
           items.add(_GapItem(10));
-          items.add(_NativeAdItem());
+          items.add(
+            _ViewAllItem(expanded: _stopsExpanded, total: others.length),
+          );
         }
       }
+    }
+
+    // MRT — nearby stations strip. Moved below the bus-stop section (spec
+    // item 7, iOS order: hero → stops → MRT); previously sat directly under
+    // the search bar. Independent of whether there are nearby BUS stops
+    // (only needs a location fix and at least one station in range).
+    if (_filter != _HomeFilter.buses && nearestStations.isNotEmpty) {
+      items.add(_GapItem(16));
+      items.add(_EyebrowItem('MRT'));
+      items.add(_GapItem(10));
+      items.add(_MrtStripItem(nearestStations));
     }
 
     if (hiddenCount > 0) {
@@ -628,20 +796,37 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
   }) {
     return switch (item) {
       _WeatherItem() => const WeatherHeader(),
-      _HeaderItem() => _header(context),
+      _HeaderItem(:final caption) => _header(context, caption),
       _SearchBarItem() => _searchBar(context),
       _GapItem(:final height) => SizedBox(height: height),
       _EyebrowItem(:final label, :final updated) =>
         updated == null ? Eyebrow(label) : _sectionHeaderRow(context, label, updated),
+      _FilterChipsItem() => _filterChips(context),
+      _SkeletonItem(:final hero, :final delay) =>
+        _HomeSkeletonCard(hero: hero, delay: delay),
+      _ViewAllItem(:final expanded, :final total) => _viewAllRow(
+        context,
+        expanded: expanded,
+        total: total,
+      ),
       _NearbyCardItem(:final stop, :final highlight, :final badgeText) =>
         RepaintBoundary(
-          child: _NearbyCard(
-            stop: stop,
-            highlight: highlight,
-            badgeText: badgeText,
-            onTap: () => widget.onOpenStop(stop.stopCode),
-            onLongPress: () => _showStopPeek(context, stop),
-          ),
+          child: highlight
+              ? _NearbyHero(
+                  stop: stop,
+                  badgeText: badgeText,
+                  onTap: () => widget.onOpenStop(stop.stopCode),
+                  onLongPress: () => _showStopPeek(context, stop),
+                )
+              // Quiet row (spec item 7, mirrors WSHomeView.swift's
+              // SoftStopRow): bus glyph tile · name · code·distance · ONE
+              // segmented soonest pill · chevron — replaces the old
+              // route-chips + crowd "when" column for every non-hero row.
+              : _QuietStopRow(
+                  stop: stop,
+                  onTap: () => widget.onOpenStop(stop.stopCode),
+                  onLongPress: () => _showStopPeek(context, stop),
+                ),
         ),
       _HiddenFooterItem(:final count) => _hiddenFooter(context, count),
       _MrtStripItem(:final stations) => _MrtStrip(
@@ -676,22 +861,27 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
     };
   }
 
-  Widget _header(BuildContext context) {
-    final t = context.t;
+  /// Header (spec item 3a, 2026-07-25): NO greeting line and NO "Buses near
+  /// `<road>`" title — just the big heavy "Nearby" title and one caption
+  /// line underneath ("`<area> · updated <when>`"). Supersedes the previous
+  /// date-eyebrow-above-title layout. Android has no map, so — unlike iOS's
+  /// header row, which also carries a map icon button — there's nothing to
+  /// add here; the search entry point stays the separate pill below (spec:
+  /// "do not touch anything below the header").
+  Widget _header(BuildContext context, String caption) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Live date eyebrow, not a time-of-day greeting — a departure-board
-        // detail that's useful rather than decorative. Mirrors
-        // WSHomeView.swift's `dateEyebrow`.
-        Eyebrow(_dateEyebrow()),
-        const SizedBox(height: 2),
         Text(
           'Nearby',
-          // 30 → 26: matches WSHomeView.swift's title (ws.sans(26, .heavy)) —
-          // Android's was reading noticeably larger than iOS at the same
-          // visual hierarchy position.
-          style: t.sans(26, weight: FontWeight.w700, color: t.fg),
+          style: SoftBlue.sans(23, weight: FontWeight.w800, color: SoftBlue.ink),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          caption,
+          style: SoftBlue.sans(12.5, weight: FontWeight.w500, color: SoftBlue.sub),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
@@ -718,8 +908,9 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
             height: 50,
             padding: const EdgeInsets.symmetric(horizontal: 15),
             decoration: BoxDecoration(
+              color: t.surface,
               borderRadius: BorderRadius.circular(LyneRadius.md),
-              border: Border.all(color: t.line, width: 1),
+              boxShadow: SoftBlue.cardShadow,
             ),
             child: Row(
               children: [
@@ -733,6 +924,55 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// All/Buses/MRT filter chips (spec item 7) — sits between the hero and
+  /// the stop list, gating which sections below render. Mirrors
+  /// WSHomeView.swift's `softChips`/`SortChipRow` idiom already used
+  /// elsewhere in this design language.
+  Widget _filterChips(BuildContext context) {
+    return SortChipRow<_HomeFilter>(
+      selection: _filter,
+      options: const [
+        (value: _HomeFilter.all, label: 'All'),
+        (value: _HomeFilter.buses, label: 'Buses'),
+        (value: _HomeFilter.mrt, label: 'MRT'),
+      ],
+      onSelect: (f) => setState(() => _filter = f),
+    );
+  }
+
+  /// "View all N / Show fewer" toggle at the foot of "Other nearby stops"
+  /// past the first 3 rows (spec item 7).
+  Widget _viewAllRow(BuildContext context, {required bool expanded, required int total}) {
+    final t = context.t;
+    return Semantics(
+      button: true,
+      label: expanded ? 'Show fewer stops' : 'View all $total stops',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        onTap: () => setState(() => _stopsExpanded = !_stopsExpanded),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Row(
+            children: [
+              Text(
+                expanded ? 'Show fewer' : 'View all',
+                style: t.sans(13, weight: FontWeight.w600, color: t.accent),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 16,
+                color: t.accent,
+              ),
+            ],
           ),
         ),
       ),
@@ -844,6 +1084,234 @@ class _SoftHomeScreenState extends State<SoftHomeScreen>
         ),
       ),
     );
+  }
+}
+
+// ─── Loading skeletons (spec item 6) ────────────────────────────────────────
+
+/// Anatomy-matched loading skeleton — a hero-shaped card (mirrors
+/// [SoftHeroCard]'s eyebrow/title/ring layout) or a row-shaped card (the
+/// shared [SoftSkeletonCard] primitive), shown while nothing has loaded yet.
+/// Mirrors WSHomeView.swift's `WSSkeletonCard`: same dimensions as the real
+/// content so the swap doesn't shift anything below it.
+class _HomeSkeletonCard extends StatefulWidget {
+  const _HomeSkeletonCard({this.hero = false, this.delay = Duration.zero});
+  final bool hero;
+
+  /// Stagger offset before this card starts breathing (spec item 6: "hero-
+  /// shaped + 3 row-shaped, staggered breathing").
+  final Duration delay;
+
+  @override
+  State<_HomeSkeletonCard> createState() => _HomeSkeletonCardState();
+}
+
+class _HomeSkeletonCardState extends State<_HomeSkeletonCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: SoftBlueMotion.pulse,
+  );
+
+  /// Gates this card's entrance until its stagger [widget.delay] elapses —
+  /// the "staggered" half of spec item 6's "hero-shaped + 3 row-shaped,
+  /// staggered breathing" (each card's own pulse starts once it's visible).
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(widget.delay, () {
+      if (!mounted) return;
+      setState(() => _visible = true);
+      _c.repeat(reverse: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.hero) {
+      // Row skeletons use the shared white-card primitive as-is (its own
+      // internal pulse); the stagger comes from this card's own entrance
+      // fading in only once its delay has elapsed.
+      return AnimatedOpacity(
+        opacity: _visible ? 1 : 0,
+        duration: SoftBlueMotion.standard,
+        curve: Curves.easeOut,
+        child: const SoftSkeletonCard(),
+      );
+    }
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) {
+        final dimA = 0.18 + 0.06 * _c.value;
+        final baseA = 0.24 + 0.08 * _c.value;
+        return Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            gradient: SoftBlue.heroGradient,
+            borderRadius: BorderRadius.circular(SoftBlue.heroRadius),
+            boxShadow: SoftBlue.heroShadow,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _bar(170, 12, baseA),
+                    const SizedBox(height: 8),
+                    _bar(120, 10, dimA),
+                    const SizedBox(height: 14),
+                    _bar(150, 18, baseA),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 14),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: dimA),
+                    width: 7,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// A hero-tinted skeleton bar — white@dim% on the gradient rather than
+  /// [SoftSkeletonBar]'s ink@% (that primitive is tuned for white cards).
+  Widget _bar(double w, double h, double alpha) {
+    return Container(
+      width: w,
+      height: h,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: alpha),
+        borderRadius: BorderRadius.circular(h / 2),
+      ),
+    );
+  }
+}
+
+// ─── Quiet stop row (spec item 7) ───────────────────────────────────────────
+
+/// White-card stop row: bus glyph tile · name · "code · distance" · ONE
+/// segmented soonest pill (fixed widths so the number/time boundary aligns
+/// down the list) · chevron. Mirrors WSHomeView.swift's `SoftStopRow`
+/// exactly — replaces the old route-chips + crowd "when" column for every
+/// non-hero row in "Other nearby stops" (the closest/hero row keeps its own
+/// gradient [SoftHeroCard] treatment, unchanged).
+class _QuietStopRow extends StatelessWidget {
+  const _QuietStopRow({
+    required this.stop,
+    required this.onTap,
+    this.onLongPress,
+  });
+
+  final NearbyStop stop;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = stop.stopName.isEmpty ? stop.stopCode : stop.stopName;
+    return Semantics(
+      button: true,
+      label: 'Open $name',
+      child: Material(
+        color: SoftBlue.card,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: ListenableBuilder(
+            listenable: AppModel.shared,
+            builder: (context, _) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: SoftBlue.chipBg,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(
+                      Icons.directions_bus_rounded,
+                      size: 17,
+                      color: SoftBlue.blue,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          name,
+                          style: SoftBlue.sans(
+                            14.5,
+                            weight: FontWeight.w600,
+                            color: SoftBlue.ink,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          stop.distanceM > 0
+                              ? '${stop.stopCode} · ${fmtDistance(stop.distanceM)}'
+                              : stop.stopCode,
+                          style: SoftBlue.mono(11.5, color: SoftBlue.sub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _soonestPill(),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: SoftBlue.sub,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _soonestPill() {
+    final now = DateTime.now();
+    final sorted = _NearbyCard._sortedServices(stop.stopCode, now);
+    if (sorted.isEmpty) return const SizedBox.shrink();
+    final soonest = sorted.first;
+    final etaBig = fmtEta(_NearbyCard._liveSec(soonest, now)).big;
+    return SoftBusTimePill(no: soonest.no, etaBig: etaBig, noWidth: 44, timeWidth: 52);
   }
 }
 
@@ -1017,9 +1485,7 @@ class _NearbyCard extends StatelessWidget {
   /// subline already carries the distance (iOS parity).
   Widget _whenColumn(LyneTheme t, String code) {
     final now = DateTime.now();
-    final services = DataStore.shared.servicesFor(code);
-    final sorted = [...services]
-      ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
+    final sorted = _sortedServices(code, now);
     final soonest = sorted.isEmpty ? null : sorted.first;
     if (soonest == null) {
       return Text(
@@ -1114,6 +1580,105 @@ class _NearbyCard extends StatelessWidget {
       return s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30);
     }
     return s.etaSec;
+  }
+
+  /// Services at [code] sorted ascending by live ETA — the single source of
+  /// "soonest"/"next" truth shared by `_whenColumn` (the non-hero card) and
+  /// `_NearbyHero` (the gradient hero), so the two never drift apart.
+  static List<Service> _sortedServices(String code, DateTime now) {
+    final services = DataStore.shared.servicesFor(code);
+    return [...services]
+      ..sort((a, b) => _liveSec(a, now).compareTo(_liveSec(b, now)));
+  }
+}
+
+/// The ONE gradient hero for Home (spec §4: Nearby's hero IS "closest stop +
+/// soonest bus + countdown ring"). Renders a `SoftHeroCard` for the
+/// highlighted "Closest to you" / "Your stop" slot whenever the stop has a
+/// live soonest service; falls back to the plain bordered `_NearbyCard` when
+/// nothing is live yet — never fabricate a hero to fill the slot (spec §4).
+class _NearbyHero extends StatelessWidget {
+  const _NearbyHero({
+    required this.stop,
+    required this.onTap,
+    this.onLongPress,
+    this.badgeText = 'Closest stop',
+  });
+
+  final NearbyStop stop;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final String badgeText;
+
+  @override
+  Widget build(BuildContext context) {
+    // Per-second tick (AppModel drives the app-wide ETA clock) so the hero's
+    // countdown ring/numeral update without rebuilding the whole list —
+    // mirrors `_NearbyCard`'s identity-row ListenableBuilder.
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) {
+        final code = stop.stopCode;
+        final now = DateTime.now();
+        final sorted = _NearbyCard._sortedServices(code, now);
+
+        if (sorted.isEmpty) {
+          // Nothing live yet at the closest stop — keep the old bordered
+          // card rather than fabricating a hero (spec §4).
+          return _NearbyCard(
+            stop: stop,
+            highlight: true,
+            badgeText: badgeText,
+            onTap: onTap,
+            onLongPress: onLongPress,
+          );
+        }
+
+        final soonest = sorted.first;
+        final name = stop.stopName.isEmpty ? code : stop.stopName;
+        final eyebrow = badgeText == 'Your stop'
+            ? 'YOUR STOP · $name'
+            : 'CLOSEST · $name';
+        final title = soonest.dest.isEmpty
+            ? 'Bus ${soonest.no}'
+            : 'Bus ${soonest.no} → ${soonest.dest}';
+        final etaSeconds = _NearbyCard._liveSec(soonest, now);
+
+        // Later buses as segmented pills (spec item 2) — number and minutes
+        // stay visually distinct instead of the old run-on string.
+        final thenServices = <({String no, String etaBig})>[
+          for (final next in sorted.skip(1).take(2))
+            (
+              no: next.no,
+              etaBig: () {
+                final sec = _NearbyCard._liveSec(next, now);
+                if (sec <= 60) return 'Arr';
+                return '${(sec / 60).ceil().clamp(0, 999)}';
+              }(),
+            ),
+        ];
+
+        final hero = SoftHeroCard(
+          eyebrow: eyebrow,
+          title: title,
+          etaSeconds: etaSeconds,
+          thenServices: thenServices,
+          ctaLabel: 'Open stop',
+          onCta: onTap,
+          onTap: onTap,
+          // Spec item 3c-v: walk time (minutes, not metres) under "Arr".
+          walkMin: stop.walkMin,
+        );
+
+        return Semantics(
+          button: true,
+          label: 'Open $name',
+          child: onLongPress == null
+              ? hero
+              : GestureDetector(onLongPress: onLongPress, child: hero),
+        );
+      },
+    );
   }
 }
 
@@ -1451,9 +2016,12 @@ MRTLine? _lineFromCode(String code) {
   }
 }
 
-/// Live crowd for a station, read passively from whatever DataStore already
-/// has cached — Home doesn't trigger a fetch of its own (crowd is warmed by
-/// the MRT tab / station screen), so this is "if available" only, matching
+/// Live crowd for a station, read from whatever DataStore has cached.
+/// `_SoftHomeScreenState._warmMrtCrowd` actively kicks off a fetch for the
+/// strip's stations on appear/location change (spec item 7, 2026-07-25 —
+/// previously this strip only showed crowd "if available" from whatever the
+/// MRT tab/station screen happened to already have fetched); this stays a
+/// passive read so a slow feed never blocks the strip's own render, matching
 /// the "timely, never a loud loading state" rule for a secondary strip.
 StationCrowd? _crowdFor(MrtGeoStation station) {
   for (final code in station.codes) {

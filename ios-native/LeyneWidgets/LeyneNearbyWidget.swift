@@ -1,7 +1,12 @@
-// Nearest Stop widget (Small only) — a mini WhereSia departure board: the
-// closest stop the app last resolved, its next buses LIVE (route tile + mono
-// ETA), the LIVE badge, and the code · walk meta line. Tap deep-links into
-// the stop's arrivals view.
+// Nearest Stop widget — the closest stop the app last resolved, restyled to
+// the "soft blue 4b" board: white/pale-blue-tint card, tinted-blue chips +
+// glow on the soonest bus, crowd dots+word. Tap deep-links into the stop's
+// arrivals view.
+//
+// Medium (.systemMedium) ONLY — the widget lineup is exactly one widget in
+// one size (owner directive, 2026-07-24). The rich live board: up to three
+// arrival tiles plus an honest "updated Xs/min ago" caption, so the ETAs it
+// DOES show are always paired with how fresh they are.
 //
 // The app publishes the nearby stop list to the App Group whenever it gets a
 // fresh location fix (no location is read in the extension); the widget
@@ -16,7 +21,7 @@ struct NearestEntry: TimelineEntry {
     let date: Date
     /// nil when the app has not yet published any nearby data.
     let stop: WNearbyStop?
-    /// Soonest live arrivals at the stop (≤ 2, soonest first).
+    /// Soonest live arrivals at the stop (≤ 3, soonest first).
     var rows: [WLTA.Row] = []
     /// True for the gallery/placeholder preview only. A sample entry must NEVER
     /// deep-link to its (fake) stop code — otherwise tapping the redacted
@@ -27,16 +32,17 @@ struct NearestEntry: TimelineEntry {
 // A representative stop for the gallery preview + redacted placeholder. Only
 // ever shown with `isSample: true`, so its code is never used for navigation.
 private let sampleStop = WNearbyStop(id: "00000", name: "Opp Blk 123", walkMin: 2)
-private let sampleRows: [WLTA.Row] = [.init(id: "48", eta1: 1, eta2: 9),
-                                      .init(id: "93", eta1: 4, eta2: 12)]
+private let sampleRows: [WLTA.Row] = [.init(id: "48", eta1: 1, eta2: 9, mon1: true, load1: .seats),
+                                      .init(id: "93", eta1: 4, eta2: 12, mon1: true, load1: .standing),
+                                      .init(id: "17", eta1: 11, eta2: 22, mon1: true, load1: .packed)]
 
-/// The two soonest arrivals — the widget answers "what can I still catch",
-/// so unlike the in-app board (number-sorted, scannable) this tiny cut of it
-/// is soonest-first.
+/// The soonest arrivals — the widget answers "what can I still catch", so
+/// unlike the in-app board (number-sorted, scannable) this tiny cut of it is
+/// soonest-first. Medium shows up to 3 tiles; Small doesn't render any.
 private func soonestRows(_ rows: [WLTA.Row]) -> [WLTA.Row] {
     Array(rows.filter { $0.eta1 != nil }
         .sorted { ($0.eta1 ?? 999) < ($1.eta1 ?? 999) }
-        .prefix(2))
+        .prefix(3))
 }
 
 // ─── Provider ────────────────────────────────────────────
@@ -78,91 +84,54 @@ struct NearestProvider: TimelineProvider {
     }
 }
 
-// ─── View ────────────────────────────────────────────────
-private struct NearestWidgetView: View {
+// ─── Medium — live board: header + up to 3 arrival tiles ──
+private struct MediumNearestView: View {
     let entry: NearestEntry
 
     var body: some View {
         if let stop = entry.stop {
-            filledView(stop, isSample: entry.isSample)
-        } else {
-            emptyView
-        }
-    }
-
-    // The mini board: eyebrow + LIVE + rule, stop name, service rows
-    // (route tile ⟷ big mono ETA), code · walk meta line.
-    private func filledView(_ stop: WNearbyStop, isSample: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text("NEAREST")
-                    .font(wSans(9, .heavy))
-                    .kerning(1.1)
-                    .foregroundStyle(wDim)
-                    .lineLimit(1)
-                    .fixedSize()
-                if entry.rows.contains(where: { $0.mon1 }) { WLiveBadge() }
-                Rectangle().fill(wLine).frame(height: 1)
-            }
-
-            Text(stop.name)
-                .font(wSans(14.5, .bold))
-                .foregroundStyle(wFg)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
-                .padding(.top, 8)
-
-            Spacer(minLength: 5)
-
-            if entry.rows.isEmpty {
-                Text("No live arrivals")
-                    .font(wSans(11, .medium))
-                    .foregroundStyle(wDim)
-                Spacer(minLength: 5)
-            } else {
-                VStack(spacing: 7) {
-                    ForEach(entry.rows) { row in
-                        HStack(spacing: 6) {
-                            WServiceBadge(no: row.id, compact: true)
-                            Spacer(minLength: 4)
-                            arrivalText(row)
-                        }
-                    }
+            VStack(alignment: .leading, spacing: 9) {
+                // The stop name is the widget's identity — it was 12pt grey,
+                // quieter than the ETAs it labels, and carried no sign it was
+                // a BUS stop (owner 2026-07-25). Now: the app's bus glyph, the
+                // name in full ink, freshness stays the faint trailing caption.
+                HStack(alignment: .center, spacing: 6) {
+                    Image(systemName: "bus.doubledecker")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(wChipInk)
+                    Text(stop.name)
+                        .font(wSans(13.5, .bold))
+                        .foregroundStyle(wFg)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Spacer(minLength: 6)
+                    WUpdatedCaption(date: entry.date)
                 }
-                Spacer(minLength: 6)
-            }
 
-            Text(stop.walkMin > 0 ? "\(stop.id) · \(stop.walkMin) MIN WALK" : stop.id)
-                .font(wMono(9.5, .medium))
-                .kerning(0.3)
-                .foregroundStyle(wDim)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .containerBackground(wBg, for: .widget)
-        // A sample preview links to the app base, never its fake stop code.
-        .widgetURL(isSample ? URL(string: "lyne://") : stopURL(stop.id))
-    }
-
-    /// "1 min" — mono hero, whisper "~" for scheduled-only, live-blue when
-    /// the bus is pulling in (quotes the in-app board).
-    private func arrivalText(_ row: WLTA.Row) -> some View {
-        let arriving = row.mon1 && (row.eta1 ?? 99) <= 1
-        return HStack(alignment: .firstTextBaseline, spacing: 2) {
-            Text(schedPrefix(row.mon1, row.eta1) + etaLabel(row.eta1))
-                .font(wMono(16, arriving ? .bold : .medium))
-                .foregroundStyle(arriving ? wAccentSoft : wFg)
-                .widgetAccentable(arriving)
-                .contentTransition(.numericText(countsDown: true))
-            if etaLabel(row.eta1) != "Arr" {
-                Text("min").font(wMono(9)).foregroundStyle(wDim)
+                if entry.rows.isEmpty {
+                    Text("No live arrivals")
+                        .font(wSans(12, .medium)).foregroundStyle(wDim)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    // Fills the remaining height so the tiles ARE the card —
+                    // no dead band underneath.
+                    WArrivalTileRow(rows: entry.rows)
+                        .frame(maxHeight: .infinity)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .wCardChrome()
+            .containerBackground(wBgGradient, for: .widget)
+            .widgetURL(entry.isSample ? URL(string: "lyne://") : stopURL(stop.id))
+        } else {
+            EmptyNearestView()
         }
     }
+}
 
-    // Empty state: prompt the user to open the app.
-    private var emptyView: some View {
+// ─── Empty state ───────────────────────────────────────────
+private struct EmptyNearestView: View {
+    var body: some View {
         VStack(spacing: 6) {
             Image(systemName: "mappin.slash")
                 .font(.system(size: 20))
@@ -174,8 +143,19 @@ private struct NearestWidgetView: View {
                 .lineLimit(3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .containerBackground(wBg, for: .widget)
+        .wCardChrome()
+        .containerBackground(wBgGradient, for: .widget)
         .widgetURL(URL(string: "lyne://"))
+    }
+}
+
+// ─── Top-level widget view ─────────────────────────────────
+// Medium-only lineup — no family switch needed.
+private struct NearestWidgetView: View {
+    let entry: NearestEntry
+
+    var body: some View {
+        MediumNearestView(entry: entry)
     }
 }
 
@@ -187,7 +167,10 @@ struct LeyneNearbyWidget: Widget {
             NearestWidgetView(entry: entry)
         }
         .configurationDisplayName("Nearest Stop")
-        .description("The stop you're at, with its next buses live.")
-        .supportedFamilies([.systemSmall])
+        .description("The stop you're at, with its live next buses.")
+        .supportedFamilies([.systemMedium])
+        // The card owns its own 16/15 padding via `.wCardChrome()` — turn
+        // off the system's automatic content margins so they don't stack.
+        .contentMarginsDisabled()
     }
 }

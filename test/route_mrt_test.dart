@@ -1,30 +1,13 @@
-// Tests for stopServesMRT — the name-based MRT/LRT station detector that drives
-// the route timeline's "MRT" badge (QOL: show MRT station on route, "if have").
+// Tests for resolveMrtStation/lineColorFor — the name-based MRT/LRT station
+// resolver. (stopServesMRT and its tests were removed 2026-07-25 alongside
+// the dead `widgets/v2/route_timeline.dart` `RouteTimeline` widget — that
+// widget was its only caller anywhere in the app.)
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lyne/data/mrt_stations.dart';
-import 'package:lyne/widgets/v2/route_timeline.dart';
 
 void main() {
-  group('stopServesMRT', () {
-    test('matches the "Stn" token', () {
-      expect(stopServesMRT('Bishan Stn'), isTrue);
-      expect(stopServesMRT('Opp Serangoon Stn'), isTrue);
-      expect(stopServesMRT('Bef Bugis Stn Exit C'), isTrue);
-    });
-    test('matches explicit MRT/LRT', () {
-      expect(stopServesMRT('Choa Chu Kang LRT'), isTrue);
-      expect(stopServesMRT('Some MRT Plaza'), isTrue);
-    });
-    test('does not false-positive on ordinary names', () {
-      expect(stopServesMRT('Stadium'), isFalse);
-      expect(stopServesMRT('Newton Food Centre'), isFalse);
-      expect(stopServesMRT('Opp Blk 2'), isFalse);
-      expect(stopServesMRT('Clementi Int'), isFalse);
-    });
-  });
-
   group('resolveMrtStation', () {
     test('resolves a simple single-line station', () {
       final s = resolveMrtStation('Clementi Stn');

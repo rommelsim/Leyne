@@ -25,17 +25,10 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Inter-Regular.ttf</string>
-		<string>Inter-Medium.ttf</string>
-		<string>Inter-SemiBold.ttf</string>
-		<string>Inter-Bold.ttf</string>
-		<string>Inter-ExtraBold.ttf</string>
-		<string>IBMPlexMono-Regular.ttf</string>
-		<string>IBMPlexMono-Medium.ttf</string>
-		<string>IBMPlexMono-SemiBold.ttf</string>
-		<string>IBMPlexMono-Bold.ttf</string>
-	</array>
+	<!-- UIAppFonts removed 2026-07-25: the widgets render in SF now, same as
+	     the app (see WidgetShared.swift's Fonts section). No code registers or
+	     requests Inter / IBM Plex Mono anymore. The .ttf files under
+	     LeyneWidgets/Fonts are still members of the target — drop them from
+	     Build Phases › Copy Bundle Resources to reclaim the space. -->
 </dict>
 </plist>

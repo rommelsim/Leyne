@@ -30,6 +30,7 @@ import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
 import '../../services/location_service.dart';
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 import 'mrt_map_screen.dart';
@@ -382,20 +383,28 @@ class _NearestFeaturedTile extends StatelessWidget {
     return Semantics(
       button: true,
       label: 'Nearest MRT, ${station.name}, $walkMin minute walk',
-      child: Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(16),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
+      // Bare-bordered chrome → filled+shadow (soft-blue-design.md anti-rule
+      // #5). The shadow container is the OUTER widget (mirrors SoftCard in
+      // theme/soft_blue.dart) — a shadow painted by a descendant of the
+      // clipping Material below would be clipped off at the Material's own
+      // bounds, so the fill/shadow live here and the Material inside stays
+      // transparent, just hosting the ripple.
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.surface,
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: t.line),
-            ),
-            child: Column(
+          boxShadow: SoftBlue.cardShadow,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Eyebrow row: walk icon + "Nearest MRT" + trailing chevron.
@@ -494,7 +503,8 @@ class _NearestFeaturedTile extends StatelessWidget {
                     ),
                   ],
                 ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -528,7 +538,8 @@ class _NoLocationHint extends StatelessWidget {
         decoration: BoxDecoration(
           color: t.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: t.line),
+          // Bare-bordered chrome → filled+shadow (anti-rule #5).
+          boxShadow: SoftBlue.cardShadow,
         ),
         child: Row(
           children: [
@@ -633,27 +644,31 @@ class _LineTile extends StatelessWidget {
       button: true,
       label:
           '${line.displayName} Line, ${disrupted ? 'disrupted' : 'operating normally'}',
-      child: Material(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(16),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
+      // The old amber-border-accent on disrupted tiles (spec §5's banned
+      // "amber glow-edge on disruption card") is gone: every tile gets the
+      // SAME filled+shadow chrome regardless of status, and the disruption
+      // itself is carried by a SoftDisruptionChip below instead. The shadow
+      // container is the OUTER widget (mirrors SoftCard) so it isn't
+      // clipped by the Material below.
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.surface,
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 92),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: disrupted
-                    ? LyneSeverity.warning.color.withValues(alpha: 0.4)
-                    : t.line,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+          boxShadow: SoftBlue.cardShadow,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 92),
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                 // Top row: line-code badge + status icon.
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -701,17 +716,20 @@ class _LineTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                // Status text.
-                Text(
-                  disrupted ? 'Disrupted' : 'Normal service',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: disrupted ? LyneSeverity.warning.color : t.dim,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+                  // Status: neutral "Normal service" text, or a contained
+                  // SoftDisruptionChip when disrupted (spec §5 — no
+                  // left-border-accent, the disruption reads as a textual
+                  // capsule instead).
+                  disrupted
+                      ? SoftDisruptionChip(text: '${line.displayName} disrupted')
+                      : Text(
+                          'Normal service',
+                          style: TextStyle(fontSize: 11, color: t.dim),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                ],
+              ),
             ),
           ),
         ),

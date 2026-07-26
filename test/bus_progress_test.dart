@@ -12,7 +12,6 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lyne/data/bus_progress.dart';
-import 'package:lyne/widgets/v2/route_timeline.dart';
 
 void main() {
   group('busIndex — GPS-grounded with ETA fallback (bugs 1/3/4)', () {

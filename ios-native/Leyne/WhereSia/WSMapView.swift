@@ -6,11 +6,14 @@
 // Stop / Station screens. iOS-exclusive by owner call (2026-07-04) — Android
 // deliberately ships without a map, so this has no parity obligation.
 //
-// Design contract: the board's ONE HARD RULE holds on the map too. Bus stop
-// markers are greyscale panel dots; the only colour is MRT line identity on
-// the station bullets, plus the sanctioned blue accent for the selected
-// marker, the live-bus capsules and the user dot (system). Chrome (card,
-// recenter, hint chip) is wsGlassChrome — content inside stays flat panels.
+// Soft-blue "4b" restyle (owner call, 2026-07-25): the screen now matches the
+// rest of the app's tinted-ground / white-card language instead of the old
+// forced-dark "greendark" cartography — the map renders MapKit's standard
+// light style, chrome is white floating cards/capsules (SoftIconButton,
+// softCard), and stop dots use SoftBlue.blue as the one accent. MRT/LRT
+// stations keep their official line colours (identity, never restyled). The
+// header stays a bespoke floating overlay rather than the system nav bar, so
+// the map can still bleed full-screen under it.
 
 import SwiftUI
 import MapKit
@@ -26,13 +29,20 @@ enum WSMapSelection: Equatable {
 // MARK: - Screen
 
 struct WSMapView: View {
-    var onBack: () -> Void
 
     @Environment(AppModel.self) private var m: AppModel
     @Environment(DataStore.self) private var store: DataStore
     @EnvironmentObject private var location: LocationManager
     @Environment(\.ws) private var ws
     @Environment(\.wsPush) private var push
+
+    /// Ties the map to controls hosted OUTSIDE it. MapKit lays `.mapControls`
+    /// out inside the map's own frame, and this map deliberately ignores the
+    /// top safe area so it bleeds behind the nav bar — which parked the
+    /// location button on top of the battery icon (owner 2026-07-25). A map
+    /// scope lets the same native control live in the safe-area-respecting
+    /// overlay instead, next to the other floating chips.
+    @Namespace private var mapScope
 
     @State private var camera: MapCameraPosition = .region(Self.islandRegion)
     @State private var region: MKCoordinateRegion = Self.islandRegion
@@ -47,26 +57,67 @@ struct WSMapView: View {
     /// Above this span, per-stop markers would be confetti — bus stops hide
     /// behind a "zoom in" hint and only the rail network stays visible.
     private static let stopVisibleSpan: Double = 0.09
+    /// Between this span and `stopVisibleSpan`, stops render as clustered
+    /// count badges ("6 stops") instead of individual dots — equal-weight dot
+    /// confetti at mid-zoom read as noise (owner field test 2026-07-24).
+    private static let clusterSpan: Double = 0.030
     /// Above this span, station bullets collapse to small colour dots.
     private static let bulletSpan: Double = 0.12
 
     private var stopsVisible: Bool { region.span.latitudeDelta < Self.stopVisibleSpan }
+    private var clusteringActive: Bool {
+        stopsVisible && region.span.latitudeDelta >= Self.clusterSpan
+    }
 
     var body: some View {
-        map
-            .ignoresSafeArea(edges: .top)   // full bleed under the translucent bar
-            .overlay(alignment: .top) { zoomHint }
-            .overlay(alignment: .bottom) { bottomStack }
-            .sensoryFeedback(.selection, trigger: selection)
-            .wsHeaderBar(eyebrow: "Around you", title: "Map", onBack: onBack)
-            .onAppear(perform: bootstrap)
-            // The freshness window inside ensureArrivals turns the per-second
-            // tick into an actual refetch ~every 25s for the open card.
-            .onChange(of: m.tick) { _, _ in
-                if case .stop(let code) = selection {
-                    store.ensureArrivals(stop: code, silent: true)
-                }
+        // The Map itself ignores the top safe area so it bleeds fully behind
+        // the status bar / Dynamic Island; the ZStack around it does NOT, so
+        // the floating back button + title stay clear of the notch instead
+        // of inheriting the Map's ignored inset.
+        ZStack(alignment: .top) {
+            map
+                .ignoresSafeArea(edges: .top)
+            VStack(spacing: 8) {
+                zoomHint
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+        }
+        .overlay(alignment: .bottom) { bottomStack }
+        .mapScope(mapScope)   // lets the overlay's MapUserLocationButton drive this map
+        .sensoryFeedback(.selection, trigger: selection)
+        // NATIVE nav bar (owner 2026-07-25) — the floating white back circle
+        // and the "Around <area>" capsule that used to sit over the map are
+        // gone; the system bar carries both, and with a real back button the
+        // edge-swipe pop works without `enableSwipeBack()`.
+        .navigationTitle(areaTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: bootstrap)
+        // The freshness window inside ensureArrivals turns the per-second
+        // tick into an actual refetch ~every 25s for the open card.
+        .onChange(of: m.tick) { _, _ in
+            if case .stop(let code) = selection {
+                store.ensureArrivals(stop: code, silent: true)
+            }
+        }
+    }
+
+    // MARK: top chrome
+
+    /// "Around <area>" — nearest bus stop's road, falling back to the
+    /// nearest MRT station, then a plain "Around you". Same fallback chain
+    /// as Home's header caption (`WSHomeView.headerCaption`), minus the
+    /// "updated Ns ago" clause which doesn't apply to a map title.
+    private var areaTitle: String {
+        let roadArea = store.nearby.first
+            .map { store.roadName($0.stopCode) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        if let roadArea { return "Around \(roadArea)" }
+        if let c = location.location?.coordinate,
+           let nearest = MrtGeo.nearestStations(to: c, limit: 1).first {
+            return "Around \(nearest.station.name)"
+        }
+        return "Around you"
     }
 
     // MARK: map + annotations
@@ -74,7 +125,7 @@ struct WSMapView: View {
     private var map: some View {
         let stops = visibleStops
         let compact = region.span.latitudeDelta >= Self.bulletSpan
-        return Map(position: $camera) {
+        return Map(position: $camera, scope: mapScope) {
             UserAnnotation()
 
             ForEach(MrtGeo.all) { st in
@@ -83,21 +134,51 @@ struct WSMapView: View {
                         MrtMarker(station: st, compact: compact,
                                   selected: selection == .mrt(st))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(SoftPressStyle())
                     .accessibilityLabel("\(st.name) MRT station")
                 }
                 .annotationTitles(.hidden)
             }
 
-            ForEach(stops, id: \.BusStopCode) { stop in
-                Annotation(stop.Description, coordinate: stop.coordinate, anchor: .center) {
-                    Button { select(.stop(stop.BusStopCode)) } label: {
-                        StopMarker(selected: selectedStopCode == stop.BusStopCode)
+            if clusteringActive {
+                // Mid-zoom: count badges instead of dot confetti. Tapping a
+                // badge zooms into its patch, where individual dots take over.
+                ForEach(stopClusters) { cluster in
+                    Annotation("\(cluster.count) stops", coordinate: cluster.center,
+                               anchor: .center) {
+                        Button { zoomInto(cluster) } label: {
+                            ClusterBadge(count: cluster.count)
+                        }
+                        .buttonStyle(SoftPressStyle())
+                        .accessibilityLabel("\(cluster.count) bus stops — zoom in")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Bus stop \(stop.Description)")
+                    .annotationTitles(.hidden)
                 }
-                .annotationTitles(.hidden)
+            } else {
+                let labeled = labeledStopCodes(stops)
+                let nearest = store.nearby.first?.stopCode
+                ForEach(stops, id: \.BusStopCode) { stop in
+                    Annotation(stop.Description, coordinate: stop.coordinate, anchor: .center) {
+                        // First tap selects (card appears); tapping the SAME
+                        // pin again goes into the stop — the gesture people
+                        // reach for when the card is already open.
+                        Button {
+                            if selectedStopCode == stop.BusStopCode {
+                                push(.busStop(code: stop.BusStopCode, service: nil))
+                            } else {
+                                select(.stop(stop.BusStopCode))
+                            }
+                        } label: {
+                            StopMarker(selected: selectedStopCode == stop.BusStopCode,
+                                       nearest: nearest == stop.BusStopCode,
+                                       label: labeled.contains(stop.BusStopCode)
+                                           ? stop.Description : nil)
+                        }
+                        .buttonStyle(SoftPressStyle())
+                        .accessibilityLabel("Bus stop \(stop.Description)")
+                    }
+                    .annotationTitles(.hidden)
+                }
             }
 
             // Live GPS of buses approaching the selected stop (LTA NextBus).
@@ -107,11 +188,17 @@ struct WSMapView: View {
                 }
                 .annotationTitles(.hidden)
             }
+
         }
         .mapStyle(.standard(elevation: .flat,
                             pointsOfInterest: .excludingAll,
                             showsTraffic: false))
-        .onMapCameraChange(frequency: .onEnd) { ctx in region = ctx.region }
+        // Default in-map placement is off: the controls are hosted in the
+        // bottom overlay via `mapScope` (see the property's note).
+        .mapControlVisibility(.hidden)
+        .onMapCameraChange(frequency: .onEnd) { ctx in
+            region = ctx.region
+        }
     }
 
     /// Bus stops inside the visible region (padded), capped to the nearest 80
@@ -139,6 +226,67 @@ struct WSMapView: View {
         return nil
     }
 
+    // MARK: clustering + labels
+
+    struct StopCluster: Identifiable {
+        let id: String            // grid-cell key
+        let count: Int
+        let center: CLLocationCoordinate2D
+        let span: MKCoordinateSpan
+    }
+
+    /// Grid-cluster every stop in the (padded) viewport: ~6 cells across,
+    /// each cell one badge at its members' centroid. Cheap enough to run per
+    /// camera settle — it's arithmetic over the in-box subset only.
+    private var stopClusters: [StopCluster] {
+        guard !store.stopByCode.isEmpty else { return [] }
+        let c = region.center
+        let dLat = region.span.latitudeDelta * 0.6
+        let dLon = region.span.longitudeDelta * 0.6
+        let cellLat = region.span.latitudeDelta / 6
+        let cellLon = region.span.longitudeDelta / 6
+        var cells: [String: (count: Int, sumLat: Double, sumLon: Double)] = [:]
+        for s in store.stopByCode.values
+        where abs(s.Latitude - c.latitude) < dLat && abs(s.Longitude - c.longitude) < dLon {
+            let key = "\(Int((s.Latitude / cellLat).rounded(.down)))|\(Int((s.Longitude / cellLon).rounded(.down)))"
+            var cell = cells[key] ?? (0, 0, 0)
+            cell.count += 1
+            cell.sumLat += s.Latitude
+            cell.sumLon += s.Longitude
+            cells[key] = cell
+        }
+        return cells.map { key, cell in
+            StopCluster(id: key, count: cell.count,
+                        center: CLLocationCoordinate2D(
+                            latitude: cell.sumLat / Double(cell.count),
+                            longitude: cell.sumLon / Double(cell.count)),
+                        span: MKCoordinateSpan(latitudeDelta: cellLat,
+                                               longitudeDelta: cellLon))
+        }
+    }
+
+    /// Tap on a cluster badge → zoom into its patch, landing below
+    /// `clusterSpan` so the badges expand into individual dots.
+    private func zoomInto(_ cluster: StopCluster) {
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(cluster.span.latitudeDelta * 1.6, Self.clusterSpan * 0.65),
+            longitudeDelta: max(cluster.span.longitudeDelta * 1.6, Self.clusterSpan * 0.9))
+        withAnimation(.easeInOut(duration: 0.45)) {
+            camera = .region(MKCoordinateRegion(center: cluster.center, span: span))
+        }
+    }
+
+    /// Only the few stops nearest the viewport centre carry a name label —
+    /// labelling all ~80 dots turns the map into a word cloud.
+    private func labeledStopCodes(_ stops: [LTABusStop]) -> Set<String> {
+        let c = region.center
+        return Set(stops
+            .map { ($0.BusStopCode, haversine(c.latitude, c.longitude, $0.Latitude, $0.Longitude)) }
+            .sorted { $0.1 < $1.1 }
+            .prefix(4)
+            .map(\.0))
+    }
+
     private var liveBuses: [(no: String, coord: CLLocationCoordinate2D)] {
         guard let code = selectedStopCode else { return [] }
         return store.servicesFor(code).compactMap { s in
@@ -147,6 +295,11 @@ struct WSMapView: View {
             return (s.no, CLLocationCoordinate2D(latitude: lat, longitude: lon))
         }
     }
+
+    // Follow-bus (camera lock onto the soonest approaching bus, its "Following"
+    // toggle and the dashed bus→stop approach line) was DELETED 2026-07-25 —
+    // owner: "What is Follow Bus? remove that". The live bus dots stay; they
+    // answer "where is it" without hijacking the camera.
 
     // MARK: actions
 
@@ -161,7 +314,7 @@ struct WSMapView: View {
     }
 
     private func select(_ sel: WSMapSelection) {
-        withAnimation(.snappy(duration: 0.25)) { selection = sel }
+        withAnimation(SoftMotion.flow) { selection = sel }
         if case .stop(let code) = sel {
             store.ensureArrivals(stop: code)
         }
@@ -185,28 +338,19 @@ struct WSMapView: View {
         }
     }
 
-    private func recenter() {
-        guard let here = location.location?.coordinate else {
-            if location.status == .notDetermined { location.requestPermission() }
-            withAnimation(.easeInOut(duration: 0.5)) { camera = .region(Self.islandRegion) }
-            return
-        }
-        withAnimation(.easeInOut(duration: 0.5)) {
-            camera = .region(MKCoordinateRegion(center: here,
-                span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.012)))
-        }
-    }
+    // `recenter()` was deleted with the custom floating location button —
+    // MapUserLocationButton in `.mapControls` does this natively now.
 
     // MARK: overlays
 
     @ViewBuilder private var zoomHint: some View {
         if !stopsVisible {
             Text("ZOOM IN FOR BUS STOPS")
-                .font(ws.mono(10, weight: .bold)).tracking(1.2)
-                .foregroundStyle(ws.dim)
+                .font(ws.sans(11, weight: .bold)).tracking(0.6)
+                .foregroundStyle(SoftBlue.sub)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .wsGlassChrome(cornerRadius: 10, tint: ws.tabbar)
-                .padding(.top, 6)
+                .background(SoftBlue.card, in: Capsule())
+                .shadow(color: SoftBlue.shadow, radius: 6, y: 3)
                 .transition(.opacity)
                 .allowsHitTesting(false)
         }
@@ -214,100 +358,162 @@ struct WSMapView: View {
 
     private var bottomStack: some View {
         VStack(alignment: .trailing, spacing: 12) {
-            Button(action: recenter) {
-                WSIcon(glyph: .location, size: 18)
-                    .frame(width: 46, height: 46)
-                    .contentShape(Circle())
+            // MapKit's own recentre control — native button, but placed here
+            // so it clears the status bar and sits with the map's other
+            // floating chrome. It can't ASK for permission, so while we don't
+            // have it the ask takes its place.
+            HStack {
+                Spacer(minLength: 0)
+                if location.authorized {
+                    MapUserLocationButton(scope: mapScope)
+                } else {
+                    Button("Show my location", systemImage: "location") {
+                        location.requestPermission()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .tint(SoftBlue.blue)
+                }
             }
-            .buttonStyle(.plain)
-            .wsGlassChrome(cornerRadius: 23, tint: ws.tabbar)
-            .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 14, x: 0, y: 6)
-            .accessibilityLabel("Recenter on my location")
 
             switch selection {
             case .stop(let code):
                 WSMapStopCard(code: code,
-                              onOpen: { push(.busStop(code: code)) },
-                              onClose: { withAnimation(.snappy(duration: 0.25)) { selection = nil } })
+                              onOpen: { push(.busStop(code: code, service: nil)) },
+                              onClose: { withAnimation(SoftMotion.flow) { selection = nil } })
             case .mrt(let st):
                 WSMapMrtCard(station: st,
                              onOpen: { push(.mrtStation(st)) },
-                             onClose: { withAnimation(.snappy(duration: 0.25)) { selection = nil } })
+                             onClose: { withAnimation(SoftMotion.flow) { selection = nil } })
             case nil:
                 EmptyView()
             }
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
-        .animation(.snappy(duration: 0.25), value: selection)
+        .animation(SoftMotion.flow, value: selection)
     }
 }
 
 // MARK: - Markers
 
-/// Greyscale panel dot with the bus glyph — neutral by contract; the blue
-/// accent ring + ping is reserved for the selected stop.
+/// Bus-stop dot with a deliberate weight hierarchy (field test 2026-07-24 —
+/// equal-weight dots read as noise): the SELECTED or NEAREST stop is larger
+/// and fully SoftBlue.blue; every other stop is a small, muted dot. The few
+/// stops nearest the viewport centre also carry a name label.
 private struct StopMarker: View {
     var selected: Bool
+    var nearest: Bool = false
+    var label: String? = nil
     @Environment(\.ws) private var ws
+
+    private var emphasized: Bool { selected || nearest }
+    /// Bus stops are INK, never blue (owner 2026-07-25): MapKit's user-location
+    /// dot is system blue, and a map full of blue dots made "where I am" and
+    /// "a bus stop" the same mark. Blue on this screen now means you.
+    private var dotColor: Color { SoftBlue.ink }
+
     var body: some View {
-        WSIcon(glyph: .busSingle, size: selected ? 12 : 9,
-               weight: .regular, color: selected ? ws.text : ws.dim)
-            .frame(width: selected ? 28 : 20, height: selected ? 28 : 20)
-            .background(Circle().fill(ws.panel))
-            .overlay(Circle().stroke(selected ? ws.accent : ws.rule,
-                                     lineWidth: selected ? 2 : 1))
-            .background { if selected { WSPing() } }
-            .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-            .contentShape(Circle())
+        VStack(spacing: 3) {
+            Circle()
+                .fill(dotColor.opacity(emphasized ? 1 : 0.55))
+                .frame(width: emphasized ? 17 : 9, height: emphasized ? 17 : 9)
+                .overlay(Circle().stroke(.white.opacity(emphasized ? 0.9 : 0.6),
+                                          lineWidth: emphasized ? 2 : 1))
+                .shadow(color: SoftBlue.shadow, radius: emphasized ? 6 : 2)
+                .background { if selected { WSPing(color: SoftBlue.ink) } }
+            if let label {
+                Text(label)
+                    .font(ws.sans(9.5, weight: .semibold))
+                    .foregroundStyle(SoftBlue.ink.opacity(emphasized ? 0.95 : 0.75))
+                    .lineLimit(1)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(Capsule().fill(SoftBlue.card))
+                    .shadow(color: SoftBlue.shadow, radius: 3, y: 1)
+                    .fixedSize()
+            }
+        }
+        // Visual dot stays tiny per the mock; the tap target doesn't.
+        .frame(minWidth: 34, minHeight: 34)
+        .contentShape(Rectangle())
     }
 }
 
-/// Line-coloured station mark: a small colour dot when zoomed out, the code
-/// bullet(s) when close — the map's only colour, and it is data.
+/// Mid-zoom cluster badge — "6 stops" in a white soft-blue capsule. A count
+/// is data, so the numeral carries the accent; the unit word stays quiet.
+private struct ClusterBadge: View {
+    let count: Int
+    @Environment(\.ws) private var ws
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("\(count)")
+                .font(ws.sans(12, weight: .bold)).monospacedDigit()
+                .foregroundStyle(SoftBlue.blue)
+            Text(count == 1 ? "stop" : "stops")
+                .font(ws.sans(10.5, weight: .semibold)).foregroundStyle(SoftBlue.sub)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(SoftBlue.card, in: Capsule())
+        .shadow(color: SoftBlue.shadow, radius: 5, y: 2)
+        .contentShape(Capsule())
+    }
+}
+
+/// Line-coloured station mark: a small colour dot when zoomed out (keeps a
+/// dense CBD viewport from turning into confetti), a rounded-square "M"
+/// badge in the line's brand colour once close enough to read.
 private struct MrtMarker: View {
     let station: MrtGeoStation
     var compact: Bool
     var selected: Bool
     @Environment(\.ws) private var ws
 
+    private var lineColor: Color { WSLine.color(forStationCode: station.codes.first ?? "") }
+
     var body: some View {
         Group {
             if compact && !selected {
                 Circle()
-                    .fill(WSLine.color(forStationCode: station.codes.first ?? ""))
+                    .fill(lineColor)
                     .frame(width: 9, height: 9)
-                    .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                    .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
+                    .shadow(color: SoftBlue.shadow, radius: 3, y: 1)
             } else {
-                HStack(spacing: 2) {
-                    ForEach(station.codes.prefix(2), id: \.self) { LineBullet(code: $0) }
-                }
-                .padding(2)
-                .background(RoundedRectangle(cornerRadius: 8).fill(ws.panel))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .stroke(selected ? ws.accent : ws.rule, lineWidth: selected ? 2 : 1))
-                .background { if selected { WSPing(cornerRadius: 8) } }
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(lineColor)
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        Text("M")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                    )
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(.white.opacity(selected ? 0.95 : 0.6), lineWidth: selected ? 2 : 1))
+                    .background { if selected { WSPing(cornerRadius: 6, color: lineColor) } }
+                    .shadow(color: SoftBlue.shadow, radius: 4, y: 1)
             }
         }
-        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+        .frame(width: 34, height: 34)
         .contentShape(Rectangle())
     }
 }
 
-/// A bus that is actually on the road right now — accentSoft is the
-/// sanctioned "live" colour, same as the LIVE badge.
+/// A bus that is actually on the road right now — SoftBlue.blue is the
+/// screen's one accent, so it doubles as the "live" tell here.
 private struct LiveBusMarker: View {
     let no: String
     @Environment(\.ws) private var ws
     var body: some View {
         HStack(spacing: 4) {
-            WSIcon(glyph: .busSingle, size: 10, weight: .regular, color: ws.accentSoft)
-            Text(no).font(ws.mono(11, weight: .bold)).foregroundStyle(ws.text)
+            WSIcon(glyph: .busSingle, size: 10, weight: .regular, color: SoftBlue.blue)
+            Text(no).font(ws.sans(11, weight: .bold)).monospacedDigit()
+                .foregroundStyle(SoftBlue.ink)
         }
         .padding(.horizontal, 7).padding(.vertical, 4)
-        .background(Capsule().fill(ws.panel))
-        .overlay(Capsule().stroke(ws.accentSoft, lineWidth: 1.5))
-        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+        .background(SoftBlue.card, in: Capsule())
+        .overlay(Capsule().stroke(SoftBlue.blue, lineWidth: 1.5))
+        .shadow(color: SoftBlue.shadow, radius: 4, y: 2)
         .accessibilityLabel("Bus \(no), live position")
     }
 }
@@ -335,24 +541,31 @@ private struct WSMapStopCard: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(store.stopName(code))
-                        .font(ws.sans(16, weight: .bold)).foregroundStyle(ws.text)
+                        .font(ws.sans(16, weight: .bold)).foregroundStyle(SoftBlue.ink)
                         .lineLimit(1)
                     Text(subline)
-                        .font(ws.mono(11, weight: .medium)).tracking(0.2)
-                        .foregroundStyle(ws.dim)
+                        .font(ws.sans(11.5)).monospacedDigit()
+                        .foregroundStyle(SoftBlue.sub)
                 }
                 Spacer(minLength: 8)
                 Button(action: togglePin) {
-                    WSIcon(glyph: isPinned ? .bookmarkFilled : .bookmark, size: 17)
-                        .frame(width: 36, height: 36).contentShape(Rectangle())
+                    WSIcon(glyph: isPinned ? .bookmarkFilled : .bookmark, size: 17,
+                           color: isPinned ? SoftBlue.blue : SoftBlue.ink.opacity(0.6))
+                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)   // 44pt hit area overhangs the 36pt tile
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SoftPressStyle())
+                .frame(width: 36, height: 36)   // layout stays tile-sized
                 .accessibilityLabel(isPinned ? "Remove from Saved" : "Save stop")
                 Button(action: onClose) {
-                    WSIcon(glyph: .close, size: 15, color: ws.dim)
-                        .frame(width: 36, height: 36).contentShape(Rectangle())
+                    WSIcon(glyph: .close, size: 15, color: SoftBlue.sub)
+                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)   // 44pt hit area overhangs the 36pt tile
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SoftPressStyle())
+                .frame(width: 36, height: 36)   // layout stays tile-sized
                 .accessibilityLabel("Close")
             }
             .padding(.top, 14).padding(.horizontal, 16)
@@ -362,20 +575,17 @@ private struct WSMapStopCard: View {
                     Text(store.newestRefresh(amongst: [code]) == nil
                          ? "Fetching live arrivals…"
                          : "No buses due right now.")
-                        .font(ws.sans(13, weight: .medium)).foregroundStyle(ws.dim)
+                        .font(ws.sans(13, weight: .medium)).foregroundStyle(SoftBlue.sub)
                         .padding(.vertical, 14)
                 } else {
                     VStack(spacing: 0) {
                         ForEach(Array(soonest)) { s in
                             HStack(spacing: 10) {
-                                RouteTile(text: s.no)
                                 Text(s.dest)
                                     .font(ws.sans(13, weight: .semibold))
-                                    .foregroundStyle(ws.dim).lineLimit(1)
+                                    .foregroundStyle(SoftBlue.sub).lineLimit(1)
                                 Spacer(minLength: 8)
-                                ArrivalPill(eta: fmtETA(wsLiveETASec(s)),
-                                            load: s.load,
-                                            scheduled: !s.monitored)
+                                SoftBusTimePill(no: s.no, etaBig: fmtETA(wsLiveETASec(s)).big)
                             }
                             .padding(.vertical, 7)
                         }
@@ -385,20 +595,50 @@ private struct WSMapStopCard: View {
             }
             .padding(.horizontal, 16)
 
-            Button(action: onOpen) {
-                Text("Open stop")
-                    .font(ws.sans(14, weight: .bold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).frame(height: 44)
-                    .background(ws.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .contentShape(Rectangle())
+            HStack(spacing: 10) {
+                // Walking directions in Apple Maps (owner 2026-07-25) — the
+                // one thing this app deliberately doesn't do itself.
+                Button(action: openDirections) {
+                    Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                        .font(ws.sans(13.5, weight: .bold)).foregroundStyle(SoftBlue.blue)
+                        .frame(maxWidth: .infinity).frame(height: 44)
+                        .background(SoftBlue.chipBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(SoftPressStyle())
+                .accessibilityLabel("Walking directions in Apple Maps")
+
+                Button(action: onOpen) {
+                    Text("Open stop")
+                        .font(ws.sans(14, weight: .bold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 44)
+                        .background(SoftBlue.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(SoftPressStyle())
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 16).padding(.bottom, 14)
         }
-        .wsGlassChrome(cornerRadius: 20, tint: ws.tabbar)
-        .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 18, x: 0, y: 8)
+        .softCard()
+        // The whole card opens the stop, not just the button (owner
+        // 2026-07-25: "unable to click into bus stop … when the card shows
+        // up"). The pin/close/Directions buttons still take their own taps —
+        // this only catches everything else.
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// Hand the stop to Apple Maps as a walking destination.
+    private func openDirections() {
+        guard let stop = store.stopByCode[code] else { return }
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: stop.coordinate))
+        item.name = store.stopName(code)
+        item.openInMaps(launchOptions: [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking
+        ])
     }
 
     private var subline: String {
@@ -438,25 +678,30 @@ private struct WSMapMrtCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 5) {
                         ForEach(station.codes.prefix(3), id: \.self) { LineBullet(code: $0) }
+                        // Soft-blue drops the crowd gauge bar app-wide
+                        // (SoftMrtTile precedent) — the word alone is enough.
                         if let crowd = store.wsCrowd(for: station), crowd != .unknown {
-                            CrowdGauge(fraction: crowd.wsFraction, width: 22)
                             Text(crowd.wsWord)
-                                .font(ws.mono(10, weight: .bold)).foregroundStyle(ws.dim)
+                                .font(ws.sans(10.5, weight: .bold))
+                                .foregroundStyle(SoftBlue.sub)
                         }
                     }
                     Text(station.name)
-                        .font(ws.sans(16, weight: .bold)).foregroundStyle(ws.text)
+                        .font(ws.sans(16, weight: .bold)).foregroundStyle(SoftBlue.ink)
                         .lineLimit(1)
                     Text(subline)
-                        .font(ws.mono(11, weight: .medium)).tracking(0.2)
-                        .foregroundStyle(ws.dim)
+                        .font(ws.sans(11.5)).monospacedDigit()
+                        .foregroundStyle(SoftBlue.sub)
                 }
                 Spacer(minLength: 8)
                 Button(action: onClose) {
-                    WSIcon(glyph: .close, size: 15, color: ws.dim)
-                        .frame(width: 36, height: 36).contentShape(Rectangle())
+                    WSIcon(glyph: .close, size: 15, color: SoftBlue.sub)
+                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)   // 44pt hit area overhangs the 36pt tile
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SoftPressStyle())
+                .frame(width: 36, height: 36)   // layout stays tile-sized
                 .accessibilityLabel("Close")
             }
             .padding(.top, 14).padding(.horizontal, 16)
@@ -465,16 +710,15 @@ private struct WSMapMrtCard: View {
                 Text("Open station")
                     .font(ws.sans(14, weight: .bold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 44)
-                    .background(ws.accent)
+                    .background(SoftBlue.blue)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SoftPressStyle())
             .padding(16)
         }
         .onAppear { store.wsWarmCrowd(for: [station]) }
-        .wsGlassChrome(cornerRadius: 20, tint: ws.tabbar)
-        .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 18, x: 0, y: 8)
+        .softCard()
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 

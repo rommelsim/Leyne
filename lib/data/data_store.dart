@@ -858,6 +858,17 @@ class DataStore extends ChangeNotifier {
   String stopName(String code) => _stopByCode[code]?.description ?? code;
   String roadName(String code) => _stopByCode[code]?.roadName ?? '';
 
+  /// Reference-data lat/lon for a stop code, or null before bootstrap has
+  /// loaded (or for an unknown code). Lets callers compute distance/walk
+  /// time for an arbitrary stop (e.g. a saved/pinned stop that isn't
+  /// currently in the GPS-ranked `nearby` list) without duplicating the
+  /// `_stopByCode` lookup.
+  ({double lat, double lon})? stopLatLon(String code) {
+    final s = _stopByCode[code];
+    if (s == null) return null;
+    return (lat: s.latitude, lon: s.longitude);
+  }
+
   // ─── Nearby ────────────────────────────────────────────────
 
   void updateNearby(double lat, double lon) {

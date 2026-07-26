@@ -140,7 +140,10 @@ func fmtETA(_ sec: Int) -> ETA {
 }
 
 func fmtDistance(_ m: Int) -> String {
-    m < 1000 ? "\(m)m" : String(format: "%.1fkm", Double(m) / 1000)
+    if m < 1000 { return "\(m)m" }
+    let km = Double(m) / 1000
+    // One decimal only while it's walkable-ish; "13566.0km" reads absurd.
+    return km < 10 ? String(format: "%.1fkm", km) : "\(Int(km.rounded()))km"
 }
 
 // ─── Data freshness ───────────────────────────────────────────────

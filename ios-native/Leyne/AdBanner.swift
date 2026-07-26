@@ -572,7 +572,9 @@ struct AdBanner: View {
         let _ = AdBannerProbe.logOnce()
         ZStack {
             // Faint surface behind the creative — only once one has loaded.
-            if loaded { m.t.surfaceHi }
+            // White card surface (soft-blue 4b): the global dark Theme's
+            // surfaceHi read as a stale dark band on the now-light screens.
+            if loaded { SoftBlue.card }
             BannerAdView(adSize: AdConfig.adaptiveBannerAdSize,
                          unitID: AdConfig.bannerUnitID,
                          onAdLoaded: { loaded = true })

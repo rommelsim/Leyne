@@ -25,6 +25,15 @@ extension Load {
         case .lsd: return "Limited"
         }
     }
+    /// Lower-case sentence phrase for the Stop hero's crowd row (design:
+    /// "●●○ seats available").
+    var wsPhrase: String {
+        switch self {
+        case .sea: return "seats available"
+        case .sda: return "standing room"
+        case .lsd: return "limited space"
+        }
+    }
     /// Compact word for the arrival pills (fits three across).
     var wsShort: String {
         switch self {
@@ -33,6 +42,26 @@ extension Load {
         case .lsd: return "Full"
         }
     }
+}
+
+// MARK: - Facility copy (lift maintenance feed)
+
+/// The LTA facilities feed shouts inconsistently ("CONCOURSE - PLATFORM A",
+/// "Exit B Street level - Concourse"). Reshape only ALL-CAPS words to title
+/// case (single letters like the "A" in "Platform A" stay upper) and swap
+/// spaced hyphens for an en dash. Mixed-case input passes through untouched.
+func wsFacilityText(_ raw: String) -> String {
+    raw.replacingOccurrences(of: " - ", with: " – ")
+        .split(separator: " ")
+        .map { word -> String in
+            let s = String(word)
+            let letters = s.unicodeScalars.filter { CharacterSet.letters.contains($0) }
+            guard letters.count > 1,
+                  !letters.contains(where: { CharacterSet.lowercaseLetters.contains($0) })
+            else { return s }
+            return s.prefix(1) + s.dropFirst().lowercased()
+        }
+        .joined(separator: " ")
 }
 
 // MARK: - Station crowd level

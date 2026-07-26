@@ -1,20 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 160 160">
   <defs>
-    <linearGradient id="pin" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FF8A5C"/>
-      <stop offset="1" stop-color="#EF4351"/>
-    </linearGradient>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#221317"/>
-      <stop offset="1" stop-color="#120A0D"/>
+    <linearGradient id="bg" x1="0.17" y1="0" x2="0.83" y2="1">
+      <stop offset="0" stop-color="#1C2B3A"/>
+      <stop offset="1" stop-color="#0D1420"/>
     </linearGradient>
   </defs>
-  <rect width="1024" height="1024" fill="url(#bg)"/>
-  <polygon points="368,636 656,636 512,892" fill="url(#pin)"/>
-  <circle cx="512" cy="436" r="252" fill="url(#pin)"/>
-  <circle cx="512" cy="436" r="176" fill="#1C0F12"/>
-  <path d="M 512 300 A 136 136 0 0 1 630 504" fill="none" stroke="#3EE08F" stroke-width="34" stroke-linecap="round"/>
-  <path d="M 512 436 L 512 330" fill="none" stroke="#F5EFEA" stroke-width="28" stroke-linecap="round"/>
-  <path d="M 512 436 L 590 482" fill="none" stroke="#F5EFEA" stroke-width="28" stroke-linecap="round"/>
-  <circle cx="512" cy="436" r="22" fill="#F5EFEA"/>
+  <rect width="160" height="160" fill="url(#bg)"/>
+  <path d="M-10 112 C 40 112, 55 48, 96 48 L 175 48" fill="none" stroke="#5CB8F2" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="96" cy="48" r="17" fill="#5CB8F2"/>
+  <circle cx="96" cy="48" r="8" fill="url(#bg)"/>
 </svg>

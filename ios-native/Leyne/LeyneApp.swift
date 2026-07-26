@@ -29,7 +29,14 @@ struct LeyneApp: App {
                 .environment(store)
                 .environmentObject(location)
                 .environmentObject(PromptCenter.shared)
-                .preferredColorScheme(model.themeMode.preferredColorScheme)
+                // Soft-blue 4b is a light-palette design shown in every
+                // appearance; pin the interface style so SYSTEM chrome (nav
+                // bar glass buttons, sheets, status bar) matches — on a dark-
+                // mode device the nav bar was rendering dark glass blobs over
+                // the light screens (owner-reported 2026-07-25). Revisit when
+                // the 4b dark twin ships (docs/soft-blue-design.md §6), then
+                // restore model.themeMode.preferredColorScheme.
+                .preferredColorScheme(.light)
                 .task {
                     // Record the version once the model exists, then
                     // bootstrap reference data.
@@ -65,6 +72,9 @@ struct LeyneApp: App {
                         AppOpenAdManager.shared.noteBackgrounded()
                         LeyneAppDelegate.scheduleAlertsRefresh()
                     case .active:
+                        // A bus may have arrived while the app was suspended —
+                        // end a frozen Live Activity before the user reads it.
+                        model.nudgeLiveActivityOnForeground()
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(500))
                             AppOpenAdManager.shared

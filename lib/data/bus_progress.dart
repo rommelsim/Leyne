@@ -7,9 +7,20 @@
 // bug that drew a pin 1.3 km away while the text claimed "0 stops away".)
 //
 // Mirrors ios-native/Leyne/BusProgress.swift — keep the two in step.
+//
+// `SoftRouteStopState` used to live in `widgets/v2/route_timeline.dart`
+// alongside the (now-deleted) `RouteTimeline` widget. That widget had zero
+// call sites — `SoftBusScreen` builds its own timeline directly (see its file
+// header) — so it was dead code; this enum was the one piece of it another
+// file (this one) still depended on, so it moved here rather than being
+// deleted with the rest (2026-07-25 parity-audit cleanup, item 12).
 
 import 'geo.dart';
-import '../widgets/v2/route_timeline.dart';
+
+/// A route stop's display state relative to the live bus + the rider's own
+/// stop. `alight` marks the stop the rider has chosen to be alerted at
+/// (a subset of `next`).
+enum SoftRouteStopState { past, here, board, next, alight }
 
 class BusProgress {
   const BusProgress._();

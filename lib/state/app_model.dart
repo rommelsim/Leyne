@@ -17,7 +17,6 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/alert_timing.dart';
-import '../data/changelog.dart';
 import '../data/data_store.dart';
 import '../data/geo.dart';
 import '../data/models.dart';
@@ -46,7 +45,6 @@ const _kThemeModeKey = 'lyne.themeMode';
 const _kLocaleKey = 'lyne.locale';
 const _kNotifKey = 'lyne.notifications';
 const _kSearchRadiusKey = 'lyne.searchRadiusM';
-const _kLastSeenVersionKey = 'lyne.lastSeenVersion';
 const _kAlightKey = 'lyne.alight'; // JSON-encoded ActiveAlight
 const _kHapticsKey = 'lyne.haptics';
 const _kAlertsKey = 'lyne.alerts'; // JSON list of BusAlert (notifs redesign)
@@ -179,54 +177,7 @@ class AppModel extends ChangeNotifier {
     _onboardingDone = true;
     _prefs?.setBool(_kOnboardingDoneKey, true);
     AnalyticsService.onboardingCompleted();
-    // A user who just finished onboarding is, by definition, current — pin
-    // the running version so the What's New screen doesn't fire on their
-    // very next launch for the version they just installed.
-    _recordVersionSeen();
     notifyListeners();
-  }
-
-  // ─── What's New (changelog after an app update) ───────────
-  // `_currentVersion` is the running build's marketing version, set once at
-  // startup from package_info. `_lastSeenVersion` is the version the user
-  // last acknowledged — persisted so an update is detected exactly once.
-  String? _currentVersion;
-  String? _lastSeenVersion;
-
-  /// Record the running app version (from package_info). Called once in
-  /// main() before the first frame so `whatsNewVersion` is stable.
-  void setCurrentVersion(String version) {
-    if (_currentVersion == version) return;
-    _currentVersion = version;
-    notifyListeners();
-  }
-
-  /// The version whose What's New screen should be shown now, or null.
-  ///
-  /// Shows when the running version has a changelog entry the user hasn't
-  /// acknowledged. Fresh installs (still in onboarding) never see it — they
-  /// have no prior version to have "updated" from; `finishOnboarding` pins
-  /// their version so it stays that way.
-  String? get whatsNewVersion {
-    final cur = _currentVersion;
-    if (cur == null || !kChangelog.containsKey(cur)) return null;
-    if (_lastSeenVersion == cur) return null;
-    if (!_onboardingDone) return null;
-    return cur;
-  }
-
-  /// Acknowledge the current What's New screen — records the version so it
-  /// won't show again, and routes the user on into the app.
-  void markWhatsNewSeen() {
-    _recordVersionSeen();
-    notifyListeners();
-  }
-
-  void _recordVersionSeen() {
-    final v = _currentVersion;
-    if (v == null || v == _lastSeenVersion) return;
-    _lastSeenVersion = v;
-    _prefs?.setString(_kLastSeenVersionKey, v);
   }
 
   /// Clear the flag so the user can replay onboarding from Settings.
@@ -743,7 +694,6 @@ class AppModel extends ChangeNotifier {
     _notificationsEnabled = _prefs!.getBool(_kNotifKey) ?? true;
     _hapticsEnabled = _prefs!.getBool(_kHapticsKey) ?? true;
     _searchRadiusM = _prefs!.getInt(_kSearchRadiusKey) ?? 500;
-    _lastSeenVersion = _prefs!.getString(_kLastSeenVersionKey);
 
     final raw = _prefs!.getString(_kPinsKey);
     if (raw != null) {

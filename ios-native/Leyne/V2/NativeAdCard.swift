@@ -569,11 +569,10 @@ struct NativeAdCard: View {
         NativeAdUIView(nativeAd: ad, theme: t)
             .frame(height: kAdCardHeight)   // fixed height — no collapse, no bloat
             .frame(maxWidth: .infinity)
-            .background(t.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(t.line, lineWidth: 1)
-            )
+            // Soft-blue 4b card chrome — the old themed surface + stroke read
+            // as a dark slab against the light screens (owner-reported).
+            .background(SoftBlue.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: SoftBlue.shadow, radius: 9, y: 6)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
                 [ad.headline, ad.advertiser]
