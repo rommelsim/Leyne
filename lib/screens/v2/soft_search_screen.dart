@@ -3,8 +3,10 @@
 // Input kind is AUTO-DETECTED — no mode selection, just typing.
 //   • 6-digit all-numeric query → postal geocode flow (OneMap → nearby MRT
 //     + bus stops).
-//   • All other queries         → combined MRT stations / Services / Bus
-//     stops results, narrowable via the All · Bus · MRT · Stops chip row.
+//   • All other queries         → ONE flat ranked card — MRT stations, then
+//     Services, then Bus stops, interleaved into a single result list with
+//     hairline dividers (no per-category filter chips — unified on the iOS
+//     model 2026-07-25, WSSearchView.swift:296-377).
 // Content parity with WSSearchView.swift (not a visual clone): large
 // "Search" title, animated Cancel button, a prominent field (clear-X only,
 // no mic action), matched-query bolding in result titles, and a Recent
@@ -24,6 +26,7 @@ import '../../services/analytics_service.dart';
 import '../../services/geocode_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 
@@ -58,16 +61,11 @@ class SoftSearchScreen extends StatefulWidget {
   State<SoftSearchScreen> createState() => _SoftSearchScreenState();
 }
 
-// ─── Search filter enum ───────────────────────────────────────────────────────
-
-enum _SearchFilter { all, stops, buses, mrt }
-
 // ─── State ────────────────────────────────────────────────────────────────────
 
 class _SoftSearchScreenState extends State<SoftSearchScreen> {
   final _ctrl = TextEditingController();
   final _focus = FocusNode();
-  _SearchFilter _filter = _SearchFilter.all;
 
   // Log one search_performed per search session: fire on the keystroke that
   // first makes the query non-empty, then re-arm once it's cleared. Avoids one
@@ -108,9 +106,7 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   void _onFocusChanged() => setState(() {});
 
   void _onQueryChanged() {
-    // Reset the category filter on every new query so results from a prior
-    // search don't leave the user looking at an empty filtered view.
-    setState(() => _filter = _SearchFilter.all);
+    setState(() {});
     final hasQuery = _ctrl.text.trim().isNotEmpty;
     if (hasQuery && !_loggedSearchSession) {
       _loggedSearchSession = true;
@@ -256,9 +252,16 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   Widget _fieldRow(BuildContext context) {
     final t = context.t;
     final hasText = _ctrl.text.isNotEmpty;
-    return Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(LyneRadius.md),
+    // Filled + shadow, no stroke (spec anti-rule #5 — no bare-bordered chrome).
+    // The wrapping Container carries the card look; the TextField itself has
+    // `InputBorder.none` in every state so no OutlineInputBorder stroke can
+    // draw through it.
+    return Container(
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(LyneRadius.md),
+        boxShadow: SoftBlue.cardShadow,
+      ),
       child: TextField(
         controller: _ctrl,
         focusNode: _focus,
@@ -300,18 +303,9 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
           suffixIconConstraints: hasText
               ? const BoxConstraints(minWidth: 44, minHeight: 44)
               : null,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(LyneRadius.md),
-            borderSide: BorderSide(color: t.line),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(LyneRadius.md),
-            borderSide: BorderSide(color: t.line),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(LyneRadius.md),
-            borderSide: BorderSide(color: t.accent.withValues(alpha: 0.6)),
-          ),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(
             vertical: 14,
             horizontal: 14,
@@ -337,49 +331,261 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
   // notifyListeners) automatically rebuild the list without needing the
   // parent TextField setState.
   Widget _emptyState(BuildContext context) {
+    // Also listens to DataStore (not just AppModel) so the new "SEARCH BY"/
+    // "AROUND YOU" cards (spec item 6) pick up `DataStore.shared.nearby`
+    // once a location fix lands, without requiring a query keystroke.
     return ListenableBuilder(
-      listenable: AppModel.shared,
+      listenable: Listenable.merge([AppModel.shared, DataStore.shared]),
       builder: (context, _) => _emptyStateContent(context),
     );
   }
 
+  /// Resting state (spec item 6, 2026-07-25): recent searches first (if
+  /// any), then a "SEARCH BY" card with live examples, then an "AROUND YOU"
+  /// card of the 3 nearest stops. Supersedes the old two-branch
+  /// recents-or-quiet-prompt layout — the SEARCH BY/AROUND YOU cards now
+  /// always show (no Browse grid of hard-coded example queries, per the
+  /// earlier owner note; these examples are always the user's OWN nearest
+  /// stop/code/service, never placeholder data).
   Widget _emptyStateContent(BuildContext context) {
     final t = context.t;
     final recents = AppModel.shared.recents;
-    // No Browse grid — it injected hard-coded example queries (17179 / 96 /
-    // Clementi) that read as placeholder data. With nothing recent, show a
-    // quiet prompt; the auto-detecting field does the rest.
-    if (recents.isEmpty) return _searchPrompt(context, t);
+    final nearby = DataStore.shared.nearby;
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      child: _recentsSection(context, t, recents),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Orientation heading — kept from the old quiet-prompt state so
+          // the resting screen still reads immediately, above whichever mix
+          // of recents/SEARCH BY/AROUND YOU is currently showing.
+          Text(
+            'Find a stop, bus or place',
+            style: SoftBlue.sans(15, weight: FontWeight.w700, color: SoftBlue.ink),
+          ),
+          const SizedBox(height: 14),
+          if (recents.isNotEmpty) ...[
+            _recentsSection(context, t, recents),
+            const SizedBox(height: 20),
+          ],
+          _searchByCard(context, nearby),
+          if (nearby.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            _aroundYouCard(context, nearby),
+          ],
+        ],
+      ),
     );
   }
 
-  /// Quiet empty-state prompt shown when there are no recent searches.
-  Widget _searchPrompt(BuildContext context, LyneTheme t) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.search_rounded, size: 40, color: t.faint),
-            const SizedBox(height: 12),
-            Text(
-              'Find a stop, bus or place',
-              style: t.sans(15, weight: FontWeight.w600, color: t.fg),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Search by stop name, 5-digit stop code, bus number, '
-              'or 6-digit postal code.',
-              style: t.sans(12, color: t.dim),
-              textAlign: TextAlign.center,
-            ),
+  /// "SEARCH BY" card — 4 tappable rows, each with a live example value
+  /// drawn from the user's own nearest stop (falls back to a neutral prompt
+  /// per row when nothing's nearby yet, e.g. location off). A "Try" capsule
+  /// fills the query with that row's example.
+  Widget _searchByCard(BuildContext context, List<NearbyStop> nearby) {
+    final nearest = nearby.isEmpty ? null : nearby.first;
+    final nearestServices = nearest == null
+        ? const <String>[]
+        : DataStore.shared.servicesAtStop(nearest.stopCode);
+    final busNo = nearestServices.isEmpty ? null : nearestServices.first;
+
+    final rows = <({String label, String value, String example})>[
+      (
+        label: 'Stop or station name',
+        value: nearest == null ? '' : (nearest.stopName.isEmpty ? nearest.stopCode : nearest.stopName),
+        example: nearest == null
+            ? 'e.g. Woodlands Interchange'
+            : (nearest.stopName.isEmpty ? nearest.stopCode : nearest.stopName),
+      ),
+      (
+        label: 'Bus number',
+        value: busNo ?? '',
+        example: busNo ?? 'e.g. 170',
+      ),
+      (
+        label: '5-digit stop code',
+        value: nearest?.stopCode ?? '',
+        example: nearest?.stopCode ?? 'e.g. 46009',
+      ),
+      // Papercut fix (2026-07-25): label now says what a postal code
+      // actually finds — previously just "Postal code" with no hint that
+      // it's the address-search path, not a stop lookup.
+      (
+        label: 'Postal code — stops near an address',
+        value: '018956',
+        example: '018956',
+      ),
+    ];
+
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'SEARCH BY',
+            style: SoftBlue.sans(
+              11,
+              weight: FontWeight.w700,
+              color: SoftBlue.sub,
+            ).copyWith(letterSpacing: 1),
+          ),
+          const SizedBox(height: 10),
+          for (var i = 0; i < rows.length; i++) ...[
+            if (i > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Divider(height: 1, thickness: 1, color: SoftBlue.hairline),
+              ),
+            _searchByRow(context, rows[i]),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _searchByRow(
+    BuildContext context,
+    ({String label, String value, String example}) row,
+  ) {
+    // Papercut fix (2026-07-25): rows 1-3's `value` is only populated once a
+    // nearby stop is known (GPS fix + loaded data) — without one, `value` is
+    // empty and the "Try" capsule used to render disabled/inert, even though
+    // the row was still showing a perfectly usable fallback example ("e.g.
+    // Woodlands Interchange", "e.g. 170", "e.g. 46009"). Those examples are
+    // real, searchable values, not placeholder junk, so "Try" now fills the
+    // query with the example (stripped of its "e.g. " prefix) instead of
+    // going inert.
+    final fillValue = row.value.isNotEmpty
+        ? row.value
+        : row.example.replaceFirst('e.g. ', '');
+    final hasValue = fillValue.isNotEmpty;
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                row.label,
+                style: SoftBlue.sans(
+                  12,
+                  weight: FontWeight.w500,
+                  color: SoftBlue.sub,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                row.example,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: SoftBlue.mono(
+                  14,
+                  weight: FontWeight.w600,
+                  color: SoftBlue.ink,
+                ),
+              ),
+            ],
+          ),
         ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: !hasValue
+              ? null
+              : () {
+                  setState(() => _ctrl.text = fillValue);
+                  _onQueryChanged();
+                },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: hasValue ? SoftBlue.chipBg : SoftBlue.chipBg.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              'Try',
+              style: SoftBlue.sans(
+                12.5,
+                weight: FontWeight.w700,
+                color: hasValue ? SoftBlue.chipInk : SoftBlue.sub,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// "AROUND YOU" card — the 3 nearest stops, tapping straight into that
+  /// stop's detail screen.
+  Widget _aroundYouCard(BuildContext context, List<NearbyStop> nearby) {
+    final top = nearby.take(3).toList();
+    return SoftCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'AROUND YOU',
+            style: SoftBlue.sans(
+              11,
+              weight: FontWeight.w700,
+              color: SoftBlue.sub,
+            ).copyWith(letterSpacing: 1),
+          ),
+          const SizedBox(height: 10),
+          for (var i = 0; i < top.length; i++) ...[
+            if (i > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Divider(height: 1, thickness: 1, color: SoftBlue.hairline),
+              ),
+            _aroundYouRow(context, top[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _aroundYouRow(BuildContext context, NearbyStop stop) {
+    final name = stop.stopName.isEmpty ? stop.stopCode : stop.stopName;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      // Papercut fix (2026-07-25): AROUND YOU rows now also record the
+      // selection into Recent searches, same as every other result kind
+      // (`_pickStop`/`_pickStation`/`_pickBus` below) — this row used to
+      // call `widget.onOpenStop` directly, so picking a nearby stop silently
+      // skipped Recents.
+      onTap: () => _pickStop(stop.stopCode),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: SoftBlue.sans(
+                    14,
+                    weight: FontWeight.w600,
+                    color: SoftBlue.ink,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                // Papercut fix (2026-07-25): was distance-only ("420m
+                // away") — now "code · distance", matching every other stop
+                // subline in the app (e.g. SoftStopCode).
+                Text(
+                  '${stop.stopCode} · ${fmtDistance(stop.distanceM)}',
+                  style: SoftBlue.mono(11.5, color: SoftBlue.sub),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, size: 18, color: SoftBlue.sub),
+        ],
       ),
     );
   }
@@ -488,12 +694,16 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  // ─── Combined Services + Bus stops + MRT stations ────────────
-  // Mirrors SoftSearchView.swift:124-141 (resultsContent else branch),
-  // extended with an "MRT stations" section from MrtGeo.matching().
-  // The segmented filter control sits above the list; each section is gated
-  // by the active filter. Per-filter empty hints appear when a specific
-  // (non-.all) filter yields no matches in that category.
+  // ─── Unified results: one flat ranked card ────────────────────
+  // Mirrors WSSearchView.swift:296-377 (`results`): MRT stations, Services
+  // and Bus stops are ranked into ONE card, capped and ordered
+  // stations → services → stops, with hairline dividers between every row
+  // (not per-category sections). No All/Bus/MRT/Stops filter — unified on
+  // the iOS model 2026-07-25.
+  static const _kMaxStations = 12;
+  static const _kMaxServices = 12;
+  static const _kMaxStops = 30;
+
   Widget _combinedResults(BuildContext context, String q) {
     final services = DataStore.shared.searchServices(q);
     final stops = DataStore.shared.searchStops(q);
@@ -539,141 +749,182 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
       );
     }
 
-    // Derive which sections are visible under the active filter.
-    final showBuses =
-        _filter == _SearchFilter.all || _filter == _SearchFilter.buses;
-    final showStops =
-        _filter == _SearchFilter.all || _filter == _SearchFilter.stops;
-    final showMrt =
-        _filter == _SearchFilter.all || _filter == _SearchFilter.mrt;
+    final stationRows = stations.take(_kMaxStations).toList();
+    final serviceRows = services.take(_kMaxServices).toList();
+    final stopRows = stops.take(_kMaxStops).toList();
+    final total = stationRows.length + serviceRows.length + stopRows.length;
 
-    // Per-specific-filter empty hints (only when a non-.all filter is active
-    // and that category has no matches for this query).
-    final busesEmpty =
-        _filter == _SearchFilter.buses && services.isEmpty;
-    final stopsEmpty =
-        _filter == _SearchFilter.stops && stops.isEmpty;
-    final mrtEmpty =
-        _filter == _SearchFilter.mrt && stations.isEmpty;
-
-    // Track whether any prior section was rendered (for inter-section spacing).
-    var sectionRendered = false;
-
-    // Build children list so spacing between sections is correct. Order is
-    // MRT stations → Services → Bus stops, matching WSSearchView.swift's
-    // `results` view.
-    final items = <Widget>[];
-
-    if (showMrt) {
-      if (mrtEmpty) {
-        items.add(_filterEmptyHint(context, 'No stations match "$q"'));
-      } else if (stations.isNotEmpty) {
-        items.add(_sectionLabel(context, 'MRT stations'));
-        items.add(const SizedBox(height: 8));
-        for (int i = 0; i < stations.length; i++) {
-          items.add(_stationCard(context, stations[i]));
-          if (i < stations.length - 1) items.add(const SizedBox(height: 8));
-        }
-        sectionRendered = true;
-      }
+    // Build the flat row list — stations, then services, then stops — with a
+    // left-inset hairline divider after every row but the last.
+    final rows = <Widget>[];
+    var n = 0;
+    for (final st in stationRows) {
+      rows.add(_unifiedStationRow(context, st));
+      n++;
+      if (n < total) rows.add(_unifiedDivider());
     }
-
-    if (showBuses) {
-      if (busesEmpty) {
-        if (sectionRendered) items.add(const SizedBox(height: 16));
-        items.add(_filterEmptyHint(context, 'No buses match "$q"'));
-      } else if (services.isNotEmpty) {
-        if (sectionRendered) items.add(const SizedBox(height: 16));
-        items.add(_sectionLabel(context, 'Services'));
-        items.add(const SizedBox(height: 8));
-        for (int i = 0; i < services.length; i++) {
-          items.add(_serviceCard(context, services[i]));
-          if (i < services.length - 1) items.add(const SizedBox(height: 8));
-        }
-        sectionRendered = true;
-      }
+    for (final svc in serviceRows) {
+      rows.add(_unifiedServiceRow(context, svc));
+      n++;
+      if (n < total) rows.add(_unifiedDivider());
     }
-
-    if (showStops) {
-      if (stopsEmpty) {
-        if (sectionRendered) items.add(const SizedBox(height: 16));
-        items.add(_filterEmptyHint(context, 'No stops match "$q"'));
-      } else if (stops.isNotEmpty) {
-        if (sectionRendered) items.add(const SizedBox(height: 16));
-        items.add(
-          _sectionLabel(context, 'Bus stops', meta: '${stops.length}'),
-        );
-        items.add(const SizedBox(height: 8));
-        for (int i = 0; i < stops.length; i++) {
-          items.add(_stopCard(context, stops[i]));
-          if (i < stops.length - 1) items.add(const SizedBox(height: 8));
-        }
-      }
+    for (final stop in stopRows) {
+      rows.add(_unifiedStopRow(context, stop));
+      n++;
+      if (n < total) rows.add(_unifiedDivider());
     }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       children: [
-        // Filter control: above results, below the search field.
-        _searchFilterControl(context),
-        const SizedBox(height: 12),
-        ...items,
+        _sectionLabel(context, '$total RESULT${total == 1 ? '' : 'S'}'),
+        const SizedBox(height: 8),
+        SoftCard(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: Column(children: rows),
+        ),
       ],
     );
   }
 
-  // ─── Search filter segmented control ─────────────────────────────────────
-  // Reuses the exact pill/container pattern from SoftFavouritesScreen so
-  // both screens look consistent. Shown only when there is an active query
-  // with combined results (not postal, not empty state).
-  Widget _searchFilterControl(BuildContext context) {
+  Widget _unifiedDivider() => const Padding(
+        padding: EdgeInsets.only(left: 46),
+        child: Divider(height: 1, thickness: 1, color: SoftBlue.hairline),
+      );
+
+  /// One row inside the unified results card: leading tile + title/subtitle
+  /// + trailing chevron. Shared by station/service/stop rows below.
+  Widget _unifiedRow(
+    BuildContext context, {
+    required Widget tile,
+    required Widget title,
+    String? subtitle,
+    required VoidCallback onTap,
+  }) {
     final t = context.t;
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: t.surface,
-        borderRadius: BorderRadius.circular(LyneRadius.md),
-      ),
-      child: Row(
-        children: [
-          _searchFilterPill(context, 'All', _SearchFilter.all, t),
-          _searchFilterPill(context, 'Bus', _SearchFilter.buses, t),
-          _searchFilterPill(context, 'MRT', _SearchFilter.mrt, t),
-          _searchFilterPill(context, 'Stops', _SearchFilter.stops, t),
-        ],
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            tile,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  title,
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: t.mono(11, color: t.dim),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: t.dim),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _searchFilterPill(
-    BuildContext context,
-    String label,
-    _SearchFilter value,
-    LyneTheme t,
-  ) {
-    final active = _filter == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _filter = value),
-        child: AnimatedContainer(
-          duration: LyneMotion.short,
-          curve: LyneMotion.standardCurve,
-          padding: const EdgeInsets.symmetric(vertical: 7),
-          decoration: BoxDecoration(
-            color: active ? t.soon : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: t.sans(
-              13,
-              weight: FontWeight.w600,
-              color: active ? t.contrastFg : t.dim,
-            ),
-          ),
+  /// Station row: line-coloured "M" tile + name + "MRT station".
+  /// Mirrors WSSearchView.swift's lineTile + resultRow(sub: "MRT station").
+  Widget _unifiedStationRow(BuildContext context, MrtGeoStation station) {
+    final t = context.t;
+    return _unifiedRow(
+      context,
+      tile: Container(
+        width: 34,
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: lineColorFor(station.codes.isEmpty ? '' : station.codes.first),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Text(
+          'M',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
         ),
       ),
+      title: _highlightMatch(
+        station.name,
+        _ctrl.text.trim(),
+        style: t.sans(14.5, weight: FontWeight.w600, color: t.fg),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: 'MRT station',
+      onTap: () => _pickStation(station),
+    );
+  }
+
+  /// Service row: number-in-chip tile + "Bus N" + "Service · to `<dest>`".
+  /// Mirrors WSSearchView.swift's serviceRow.
+  Widget _unifiedServiceRow(BuildContext context, LtaBusService b) {
+    final t = context.t;
+    final destCode = b.destinationCode;
+    final dest = (destCode == null || destCode.isEmpty)
+        ? ''
+        : DataStore.shared.stopName(destCode);
+    return _unifiedRow(
+      context,
+      tile: ServiceBadge(svc: b.serviceNo, size: ServiceBadgeSize.sm),
+      title: Text.rich(
+        TextSpan(
+          style: t.sans(14.5, weight: FontWeight.w600, color: t.fg),
+          children: [
+            const TextSpan(text: 'Bus '),
+            ..._highlightSpans(b.serviceNo, _ctrl.text.trim()),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: dest.isEmpty ? 'Service' : 'Service · to $dest',
+      onTap: () => _pickBus(b.serviceNo),
+    );
+  }
+
+  /// Stop row: top-service-number tile (or bus glyph) + name + "code · road".
+  /// Mirrors WSSearchView.swift's stopTile + resultRow.
+  Widget _unifiedStopRow(BuildContext context, LtaBusStop stop) {
+    final t = context.t;
+    final topService = DataStore.shared.servicesAtStop(stop.busStopCode).firstOrNull;
+    return _unifiedRow(
+      context,
+      tile: Container(
+        width: 34,
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: t.accent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: topService != null
+            ? Text(
+                topService,
+                style: t.sans(11.5, weight: FontWeight.w800, color: t.onAccent),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              )
+            : Icon(Icons.directions_bus_rounded, size: 15, color: t.onAccent),
+      ),
+      title: _highlightMatch(
+        stop.description,
+        _ctrl.text.trim(),
+        style: t.sans(14.5, weight: FontWeight.w600, color: t.fg),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: '${stop.busStopCode} · ${stop.roadName}',
+      onTap: () => _pickStop(stop.busStopCode),
     );
   }
 
@@ -690,159 +941,6 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
         style: t
             .mono(10, weight: FontWeight.w600, color: t.dim)
             .copyWith(letterSpacing: 0.8),
-      ),
-    );
-  }
-
-  Widget _serviceCard(BuildContext context, LtaBusService b) {
-    final t = context.t;
-    // "To {destination}" replaces the old operator·category subline —
-    // destination via the same DTO the row already carries. Mirrors
-    // WSSearchView.swift's serviceRow (`dest.isEmpty ? "SERVICE" : "SERVICE
-    // · TO \(dest)"`, simplified here to match this card's one-line style).
-    final destCode = b.destinationCode;
-    final dest = (destCode == null || destCode.isEmpty)
-        ? ''
-        : DataStore.shared.stopName(destCode);
-    return _card(
-      context,
-      onTap: () => _pickBus(b.serviceNo),
-      child: Row(
-        children: [
-          ServiceBadge(svc: b.serviceNo, size: ServiceBadgeSize.sm),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _highlightMatch(
-                  'Service ${b.serviceNo}',
-                  _ctrl.text.trim(),
-                  style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (dest.isNotEmpty)
-                  Text(
-                    'To $dest',
-                    style: t.mono(11, color: t.dim),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right_rounded, color: t.dim),
-        ],
-      ),
-    );
-  }
-
-  Widget _stopCard(BuildContext context, LtaBusStop stop) {
-    final t = context.t;
-    return _card(
-      context,
-      onTap: () => _pickStop(stop.busStopCode),
-      child: Row(
-        children: [
-          // Leading stop-pin tile — mirrors stopTile in SoftSearchView.swift:388-396.
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: t.surfaceHi,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.location_on_rounded, size: 18, color: t.fg),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _highlightMatch(
-                  stop.description,
-                  _ctrl.text.trim(),
-                  style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  'Stop ${stop.busStopCode} · ${stop.roadName}',
-                  style: t.mono(11, color: t.dim),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right_rounded, color: t.dim),
-        ],
-      ),
-    );
-  }
-
-  Widget _stationCard(BuildContext context, MrtGeoStation station) {
-    final t = context.t;
-    return _card(
-      context,
-      onTap: () => _pickStation(station),
-      child: Row(
-        children: [
-          // Leading tram-icon tile — mirrors stopTile style.
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: t.surfaceHi,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.train_rounded, size: 18, color: t.fg),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _highlightMatch(
-                  station.name,
-                  _ctrl.text.trim(),
-                  style: t.sans(14, weight: FontWeight.w600, color: t.fg),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                // Coloured line-code pills.
-                Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  children: station.codes.map((code) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: lineColorFor(code),
-                        borderRadius: BorderRadius.circular(LyneRadius.full),
-                      ),
-                      child: Text(
-                        code,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right_rounded, color: t.dim),
-        ],
       ),
     );
   }
@@ -1117,42 +1215,49 @@ class _SoftSearchScreenState extends State<SoftSearchScreen> {
     );
   }
 
-  /// Inline single-line hint shown when a specific filter (non-.all) has no
-  /// matches in that category. Rendered inside the results list — not centred
-  /// full-screen — so it coexists with the filter control and stays at the
-  /// top of the list area rather than vertically centred.
-  Widget _filterEmptyHint(BuildContext context, String text) {
-    final t = context.t;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, left: 4),
-      child: Text(
-        text,
-        style: t.sans(13, color: t.dim),
-      ),
-    );
-  }
-
   /// Two-line empty-results hint with title + subtitle, centred.
   /// Mirrors SoftSearchView.swift:521-530 (emptyHint).
   /// Tappable "Did you mean Clementi?" chip — fills the search field with the
   /// corrected query (same pattern as a recent-search tap).
   Widget _didYouMeanRow(BuildContext context, String suggestion) {
     final t = context.t;
-    return ActionChip(
-      avatar: Icon(Icons.auto_fix_high_rounded, size: 16, color: t.accent),
-      label: Text.rich(
-        TextSpan(
-          children: [
-            TextSpan(text: 'Did you mean ', style: t.sans(13, color: t.dim)),
+    // Filled + shadow, no stroke — a plain Material `ActionChip` draws an
+    // outlined stroke by default, which is the banned bare-bordered chip
+    // look (spec anti-rule #5). `side: BorderSide.none` + a wrapping
+    // shadow-carrying Container matches the pattern already used by
+    // `SortChipRow` in soft_components.dart.
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: SoftBlue.chipShadow,
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          chipTheme: ChipThemeData(
+            shape: const StadiumBorder(),
+            backgroundColor: t.surface,
+            side: BorderSide.none,
+            elevation: 0,
+            pressElevation: 0,
+          ),
+        ),
+        child: ActionChip(
+          avatar: Icon(Icons.auto_fix_high_rounded, size: 16, color: t.accent),
+          label: Text.rich(
             TextSpan(
-              text: suggestion,
-              style: t.sans(13, weight: FontWeight.w700, color: t.fg),
+              children: [
+                TextSpan(text: 'Did you mean ', style: t.sans(13, color: t.dim)),
+                TextSpan(
+                  text: suggestion,
+                  style: t.sans(13, weight: FontWeight.w700, color: t.fg),
+                ),
+                TextSpan(text: '?', style: t.sans(13, color: t.dim)),
+              ],
             ),
-            TextSpan(text: '?', style: t.sans(13, color: t.dim)),
-          ],
+          ),
+          onPressed: () => setState(() => _ctrl.text = suggestion),
         ),
       ),
-      onPressed: () => setState(() => _ctrl.text = suggestion),
     );
   }
 
@@ -1239,4 +1344,22 @@ Widget _highlightMatch(
     maxLines: maxLines,
     overflow: overflow,
   );
+}
+
+/// Same match-bolding as [_highlightMatch] but returns raw [InlineSpan]s (no
+/// base style) so a caller can splice them into a larger [TextSpan] — used
+/// by the unified service row to bold the service number after a literal
+/// "Bus " prefix. Mirrors WSSearchView.swift's wsHighlightRaw.
+List<InlineSpan> _highlightSpans(String text, String query) {
+  final q = query.trim();
+  final idx = q.isEmpty ? -1 : text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return [TextSpan(text: text)];
+  final pre = text.substring(0, idx);
+  final match = text.substring(idx, idx + q.length);
+  final post = text.substring(idx + q.length);
+  return [
+    if (pre.isNotEmpty) TextSpan(text: pre),
+    TextSpan(text: match, style: const TextStyle(fontWeight: FontWeight.w800)),
+    if (post.isNotEmpty) TextSpan(text: post),
+  ];
 }

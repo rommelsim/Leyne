@@ -27,6 +27,7 @@ import 'package:flutter/material.dart';
 import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
 import 'soft_mrt_station_screen.dart';
 
@@ -349,6 +350,9 @@ class _AlertCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: LyneSeverity.warning.color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(14),
+        // Every card gets the one shadow recipe (spec §3) — this tinted
+        // alert card had neither a border nor a shadow before.
+        boxShadow: SoftBlue.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -535,6 +539,9 @@ class _CrowdLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const levels = [CrowdLevel.low, CrowdLevel.moderate, CrowdLevel.high];
+    // Word-only legend (spec §5: "Crowd becomes a word, not a dot") — the
+    // old per-level coloured dot read as colour-coded severity, which
+    // disagrees with this data's neutral treatment everywhere else.
     return Row(
       children: levels.map((level) {
         return Padding(
@@ -542,15 +549,6 @@ class _CrowdLegend extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: _crowdColor(level),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 5),
               Text(
                 _crowdLabel(level),
                 style: TextStyle(
@@ -706,9 +704,11 @@ class _CrowdRowState extends State<_CrowdRow> {
 }
 
 // ─── People-density glyph ─────────────────────────────────────────────────────
-// Three person silhouettes filled (coloured) by level: Low=1, Moderate=2,
-// High=3. Unfilled icons render in t.line (hairline). No text label.
-// Mirrors SoftMrtLineView.swift crowdGlyph.
+// Three person silhouettes filled by level: Low=1, Moderate=2, High=3 — the
+// fill count/neutral ink carries the level, never a colour. Unfilled icons
+// render in t.line (hairline). A visible word label sits alongside the glyph
+// (spec §5: "Crowd becomes a word, not a dot") rather than living only in the
+// Semantics label. Mirrors SoftMrtLineView.swift crowdGlyph.
 
 class _PeopleDensityGlyph extends StatelessWidget {
   const _PeopleDensityGlyph({required this.level, required this.t});
@@ -724,22 +724,35 @@ class _PeopleDensityGlyph extends StatelessWidget {
       CrowdLevel.high => 3,
       CrowdLevel.unknown => 0,
     };
-    final activeColor = _crowdColor(level);
+    final activeColor = _crowdColor(level, t);
 
     return Semantics(
       label: _crowdLabel(level),
+      excludeSemantics: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: List.generate(3, (i) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 2),
-            child: Icon(
-              Icons.person_rounded,
-              size: 13,
-              color: i < filled ? activeColor : t.line,
+        children: [
+          ...List.generate(3, (i) {
+            return Padding(
+              padding: const EdgeInsets.only(right: 2),
+              child: Icon(
+                Icons.person_rounded,
+                size: 13,
+                color: i < filled ? activeColor : t.line,
+              ),
+            );
+          }),
+          const SizedBox(width: 4),
+          Text(
+            _crowdLabel(level),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: level == CrowdLevel.unknown ? t.faint : t.dim,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
-          );
-        }),
+          ),
+        ],
       ),
     );
   }
@@ -747,17 +760,14 @@ class _PeopleDensityGlyph extends StatelessWidget {
 
 // ─── Crowd helpers ─────────────────────────────────────────────────────────────
 
-Color _crowdColor(CrowdLevel level) {
-  switch (level) {
-    case CrowdLevel.low:
-      return LyneSeverity.normal.color;
-    case CrowdLevel.moderate:
-      return LyneSeverity.warning.color;
-    case CrowdLevel.high:
-      return LyneSeverity.critical.color;
-    case CrowdLevel.unknown:
-      return LyneSeverity.unknown.color;
-  }
+// NEUTRAL ink (soft-blue-design.md §5 / the same rule already applied in
+// soft_mrt_station_screen.dart's `_crowdColor`): MRT crowd is never
+// colour-coded green/amber/red here — that was this screen's own
+// pre-SoftBlue leftover and disagreed with the station screen's own
+// "crowd is never colour-coded" comment for the exact same CrowdLevel data.
+// The level is carried by the word/glyph-fill-count alone.
+Color _crowdColor(CrowdLevel level, LyneTheme t) {
+  return level == CrowdLevel.unknown ? t.faint : t.fg;
 }
 
 String _crowdLabel(CrowdLevel level) {

@@ -17,6 +17,10 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
 
     @Published var location: CLLocation?
     @Published var status: CLAuthorizationStatus
+    /// Compass bearing in degrees (true north preferred). Only published while
+    /// a screen has asked for it via `startHeading()` — the magnetometer is not
+    /// free, and only the map cares which way you are facing.
+    @Published var headingDegrees: Double?
 
     override init() {
         status = manager.authorizationStatus
@@ -68,6 +72,38 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
 
     func stop() {
         manager.stopUpdatingLocation()
+    }
+
+    // MARK: - Heading (map only)
+
+    /// Start the compass and tighten the position stream. The map draws the
+    /// user as a facing arrow, which is a lie at 50 m / 100 m accuracy — while
+    /// the map is on screen we ask for the good fix and hand it back on exit.
+    func startHeading() {
+        guard authorized else { return }
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.distanceFilter = 5
+        manager.startUpdatingLocation()
+        if CLLocationManager.headingAvailable() {
+            manager.headingFilter = 2          // degrees
+            manager.startUpdatingHeading()
+        }
+    }
+
+    func stopHeading() {
+        manager.stopUpdatingHeading()
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = 50
+        headingDegrees = nil
+    }
+
+    nonisolated func locationManager(_ m: CLLocationManager,
+                                     didUpdateHeading newHeading: CLHeading) {
+        // Negative trueHeading means no valid compass calibration yet.
+        let deg = newHeading.trueHeading >= 0 ? newHeading.trueHeading
+                                              : newHeading.magneticHeading
+        guard deg >= 0 else { return }
+        Task { @MainActor in self.headingDegrees = deg }
     }
 
     // Retained for backwards compatibility with existing call sites.

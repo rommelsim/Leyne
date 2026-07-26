@@ -1,9 +1,23 @@
 // Real iOS Live Activity — lock screen + Dynamic Island.
-// Styled as a quote of the WhereSia departure board: board surfaces, Inter +
-// IBM Plex Mono, route tile for the bus number, and the blue live accent as
-// the ONLY colour — it marks the LIVE reading and the arrival moment.
-// Palette, fonts and shared atoms (WServiceBadge, WLiveBadge) come from
+// "Soft blue 4b": the lock screen is a light, near-white blurred board (SF,
+// same as the app) with the darker #2E8FE0 blue as the live accent — it marks
+// the LIVE reading and the arrival moment. Those colours apply in
+// `.fullColor` rendering only; see LockScreenView's `renderingMode` note for
+// what happens in the system's accented/vibrant modes. The Dynamic Island always renders on the system's own
+// black chrome regardless of app styling, so its content uses a SEPARATE
+// dark-context pair: white/light-grey copy (wIslandFg/wIslandDim) and the
+// lighter #5CB8F2 accent (wIslandBlue) instead of the lock screen's tokens.
+// Palette, fonts and shared atoms (WServiceBadge) come from
 // WidgetShared.swift (same extension target; the app module is unreachable).
+//
+// LeyneActivityAttributes.ContentState (Leyne/LeyneActivityAttributes.swift)
+// is an unchanged contract — no crowd field is pushed into it, so the
+// Dynamic Island footer shows "N stops away" (from `stopsAway`, already
+// pushed) and does NOT show crowd dots, even though the shared design spec
+// asks for them there. Inventing a crowd read with no backing data would
+// break the "never guess" rule the rest of this pass follows; see the
+// widget-ETA note in LeyneNearbyWidget.swift for the same call made
+// elsewhere. Flagged in the handoff report.
 
 import ActivityKit
 import WidgetKit
@@ -56,8 +70,9 @@ private enum LivePhase {
         }
     }
     /// The blue accent marks the arrival moment ONLY — the resting palette is
-    /// greyscale, so only "Bus is here" tints; approaching / en-route stay
-    /// neutral (colour discipline: blue = live/arriving, nothing else).
+    /// greyscale/accent-neutral, so only "Bus is here" tints; approaching /
+    /// en-route stay neutral (colour discipline: blue = live/arriving,
+    /// nothing else).
     var isArrival: Bool { self == .here }
 }
 
@@ -66,17 +81,6 @@ private func phase(_ s: LeyneActivityAttributes.ContentState) -> LivePhase {
     if s.stopsAway >= 0 { return s.stopsAway <= 1 ? .approaching : .enroute }
     // No stops-away signal — fall back to the ETA.
     return s.etaMinutes <= 1 ? .approaching : .enroute
-}
-
-/// The detail line under the phase word ("1 stop away", "Arrival in 3 min").
-private func phaseDetail(_ s: LeyneActivityAttributes.ContentState) -> String {
-    if s.arrived { return "" }
-    if s.stopsAway >= 0 && s.stopsAway <= 1 {
-        return s.stopsAway == 1 ? "1 stop away" : "Arriving now"
-    }
-    if s.stopsAway > 1 { return "\(s.stopsAway) stops away" }
-    return s.etaMinutes <= 0 ? "Arriving now"
-        : "Arrival in \(s.etaMinutes) min"
 }
 
 /// Bus position on the final-approach track, 0 (far) … 1 (at your stop).
@@ -94,52 +98,63 @@ private func journeyProgress(_ s: LeyneActivityAttributes.ContentState) -> Doubl
 }
 
 // ─── Route progress track ────────────────────────────────────────────
-// A capsule rail with the travelled portion + the bus glyph in the LIVE
-// blue (this is live GPS tracking — blue is exactly what the accent is
-// for), and your stop as a neutral node at the right end that turns blue
-// when the bus lands on it.
+// A 4pt rail with the travelled portion filled in the accent colour, and a
+// glowing 12pt dot riding the head of the fill — the journey's current
+// position, nothing more literal than that (no bus glyph, no destination
+// node): matches the shared design spec exactly. `accent`/`rail` are
+// parameterised because this view is shared between the light lock-screen
+// (default: #2E8FE0 accent, dark hairline rail) and the always-dark Dynamic
+// Island bottom region (passed #5CB8F2 accent, translucent-white rail).
+/// The Dynamic Island's compact/minimal chip: a 22pt filled square (not the
+/// pill-shaped `WServiceBadge` used elsewhere) — per the shared design
+/// spec's "22pt square style" call-out for the collapsed island. Uses the
+/// lighter #5CB8F2 island accent since this always sits on black chrome.
+private struct WIslandChip: View {
+    let no: String
+    var body: some View {
+        Text(no)
+            .font(wMono(10.5, .heavy))
+            .foregroundStyle(wIslandBlue)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .frame(width: 22, height: 22)
+            .background(wIslandBlue.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(wIslandBlue.opacity(0.5), lineWidth: 1))
+            .widgetAccentable()
+    }
+}
+
 private struct JourneyTrack: View {
     let progress: Double
     let arrived: Bool
     var compact = false
+    var accent: Color = wAccentBlue
+    var rail: Color = Color.black.opacity(0.08)
 
     var body: some View {
-        let busR: CGFloat = compact ? 8 : 11
-        let h = busR * 2
-        let nodeTint = arrived ? wAccentSoft : wFg
+        let dotSize: CGFloat = compact ? 9 : 12
+        let trackH: CGFloat = 4
         GeometryReader { geo in
             let w = geo.size.width
-            let usable = max(0, w - busR)          // keep the bus glyph inside
-            let x = min(usable, max(busR, usable * progress))
+            let usable = max(0, w - dotSize)
+            let x = min(usable, max(dotSize / 2, usable * progress))
             ZStack(alignment: .leading) {
-                Capsule().fill(wDim.opacity(0.35)).frame(height: 3)
-                Capsule().fill(wAccentSoft).frame(width: x, height: 3)
+                Capsule().fill(rail).frame(height: trackH)
+                Capsule().fill(accent).frame(width: x, height: trackH)
 
-                // Destination node — your stop — at the rail's right end.
-                ZStack {
-                    Circle().fill(wBg)
-                    Circle().strokeBorder(nodeTint, lineWidth: 2)
-                    Image(systemName: "smallcircle.filled.circle")
-                        .font(.system(size: busR))
-                        .foregroundStyle(nodeTint)
-                }
-                .frame(width: h, height: h)
-                .position(x: w - busR, y: h / 2)
-
-                // The bus, travelling left→right toward the node.
-                ZStack {
-                    Circle().fill(wAccentSoft)
-                    Image(systemName: "bus.fill")
-                        .font(.system(size: busR * 0.9, weight: .bold))
-                        .foregroundStyle(wBg)
-                }
-                .frame(width: h, height: h)
-                .position(x: x, y: h / 2)
-                .widgetAccentable()
+                // No `.widgetAccentable()` on the dot: in the system's
+                // accented/tinted rendering that puts the dot in a different
+                // colour group from the rail it rides, and the two flatten
+                // into each other (owner 2026-07-25, "cannot see"). One group,
+                // one tint, always visible.
+                Circle().fill(accent)
+                    .frame(width: dotSize, height: dotSize)
+                    .position(x: x, y: trackH / 2)
             }
-            .frame(height: h)
+            .frame(height: max(dotSize, trackH))
         }
-        .frame(height: h)
+        .frame(height: compact ? 9 : 12)
         .animation(.easeInOut(duration: 0.4), value: progress)
     }
 }
@@ -147,7 +162,8 @@ private struct JourneyTrack: View {
 struct LeyneLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LeyneActivityAttributes.self) { context in
-            LockScreenView(attributes: context.attributes, state: context.state)
+            LockScreenView(attributes: context.attributes, state: context.state,
+                           isStale: context.isStale)
                 .activityBackgroundTint(wBg)
                 .activitySystemActionForegroundColor(wFg)
                 .widgetURL(busURL(context.attributes))
@@ -159,30 +175,49 @@ struct LeyneLiveActivity: Widget {
                         // doesn't hug / clip the corner.
                         .padding(.leading, 12)
                 }
+                DynamicIslandExpandedRegion(.center) {
+                    // Island copy is always on black chrome — uses the
+                    // dark-context wIslandFg/wIslandDim pair, not wFg/wDim
+                    // (which are now dark ink, tuned for the light widget +
+                    // lock screen surfaces).
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("to \(context.attributes.dest)")
+                            .font(wSans(12.5, .bold))
+                            .foregroundStyle(wIslandFg)
+                            .lineLimit(1)
+                        Text(context.attributes.stopName)
+                            .font(wSans(10.5, .medium))
+                            .foregroundStyle(wIslandDim)
+                            .lineLimit(1)
+                    }
+                }
                 DynamicIslandExpandedRegion(.trailing) {
                     Group {
                         if context.state.arrived {
                             Text("Now")
-                                .font(wMono(22, .semibold))
-                                .foregroundStyle(wAccentSoft)
+                                .font(wMono(22, .heavy))
+                                .foregroundStyle(wIslandBlue)
+                                .shadow(color: wIslandBlue.opacity(0.5), radius: 4)
                                 .lineLimit(1)
                         } else if shouldShowTimer(context.state) {
                             Text(timerInterval: .now...context.state.eta, countsDown: true)
-                                .font(wMono(22, .semibold))
-                                .foregroundStyle(wFg)
+                                .font(wMono(22, .heavy))
+                                .foregroundStyle(wIslandBlue)
+                                .shadow(color: wIslandBlue.opacity(0.5), radius: 4)
                                 .multilineTextAlignment(.trailing)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.6)
                         } else {
                             HStack(alignment: .firstTextBaseline, spacing: 2) {
                                 Text(confPrefix(context.state) + etaText(context.state))
-                                    .font(wMono(22, .semibold))
-                                    .foregroundStyle(wFg)
+                                    .font(wMono(22, .heavy))
+                                    .foregroundStyle(wIslandBlue)
+                                    .shadow(color: wIslandBlue.opacity(0.5), radius: 4)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.6)
                                 if context.state.etaMinutes > 0 {
                                     Text("min")
-                                        .font(wMono(10)).foregroundStyle(wDim)
+                                        .font(wMono(10)).foregroundStyle(wIslandDim)
                                 }
                             }
                         }
@@ -192,38 +227,36 @@ struct LeyneLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.bottom) {
                     // .widgetURL here makes the expanded info area tap → Bus view.
                     VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(phase(context.state).label)
-                                .font(wSans(14, .bold))
-                                .foregroundStyle(phase(context.state).isArrival ? wAccentSoft : wFg)
-                            let detail = phaseDetail(context.state)
-                            if !detail.isEmpty {
-                                Text("· \(detail)")
-                                    .font(wSans(12, .medium)).foregroundStyle(wDim).lineLimit(1)
-                            }
-                            Spacer(minLength: 4)
-                        }
-                        HStack(spacing: 10) {
-                            Text(context.attributes.stopName)
-                                .font(wSans(11, .semibold)).foregroundStyle(wFg)
-                                .lineLimit(1).layoutPriority(1)
-                            JourneyTrack(progress: journeyProgress(context.state),
-                                         arrived: context.state.arrived)
-                                .frame(minWidth: 60)
+                        JourneyTrack(progress: journeyProgress(context.state),
+                                     arrived: context.state.arrived,
+                                     accent: wIslandBlue, rail: Color.white.opacity(0.16))
+                            .frame(height: 12)
+                        HStack {
+                            // "N stops away" when the app pushes a real GPS
+                            // stops-away count; otherwise the phase word
+                            // ("Approaching" / "Next stop") — never a
+                            // fabricated distance. No crowd dots here: the
+                            // ContentState contract carries no crowd field
+                            // (see file header).
+                            Text(footerLeftLabel(context.state))
+                                .font(wSans(10.5, .medium))
+                                .foregroundStyle(context.state.arrived ? wIslandBlue : wIslandDim)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text("Your stop")
+                                .font(wSans(10, .medium))
+                                .foregroundStyle(wIslandDim)
                         }
                     }
                     .padding(.horizontal, 6).padding(.bottom, 2)
                     .widgetURL(busURL(context.attributes))
                 }
             } compactLeading: {
-                // Bus NUMBER, not a generic glyph — the identity is the whole
-                // point. Paired with the ETA in compactTrailing, the collapsed
-                // island answers "which bus, how long" at a glance.
-                Text(context.attributes.busNo)
-                    .font(wMono(14, .bold))
-                    .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .widgetAccentable()
+                // 22pt square blue chip with the bus NUMBER, not a generic
+                // glyph — the identity is the whole point. Paired with the
+                // ETA in compactTrailing, the collapsed island answers
+                // "which bus, how long" at a glance.
+                WIslandChip(no: context.attributes.busNo)
                     .widgetURL(busURL(context.attributes))
             } compactTrailing: {
                 // STATIC minute value only — never a `Text(timerInterval:)` here.
@@ -231,125 +264,185 @@ struct LeyneLiveActivity: Widget {
                 // balloons the compact island across the whole notch and covers
                 // the status-bar clock + battery. The live m:ss countdown lives
                 // on the lock screen + expanded views, where there's room.
-                Text(context.state.arrived
-                     ? "Now"
-                     : confPrefix(context.state) + etaText(context.state)
-                        + (context.state.etaMinutes <= 0 ? "" : "m"))
-                    .font(wMono(13, .semibold))
-                    .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
-                    .widgetURL(busURL(context.attributes))
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(context.state.arrived
+                         ? "Now"
+                         : confPrefix(context.state) + etaText(context.state))
+                        .font(wMono(13, .heavy))
+                        .foregroundStyle(wIslandBlue)
+                    if !context.state.arrived && context.state.etaMinutes > 0 {
+                        Text("min").font(wMono(9)).foregroundStyle(wIslandDim)
+                    }
+                }
+                .widgetURL(busURL(context.attributes))
             } minimal: {
-                // The minimal view (multiple Live Activities) is the tiniest notch
-                // presentation — show the ETA, the one actionable number. The app
-                // only ever runs ONE bus Live Activity at a time, so the bus
-                // number isn't needed to disambiguate here (it's in the
-                // compact/expanded views). Static minute, never a wide timer.
-                Text(context.state.arrived ? "Now" : etaText(context.state))
-                    .font(wMono(11, .bold))
-                    .foregroundStyle(context.state.arrived ? wAccentSoft : wFg)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .widgetAccentable()
+                // The minimal view (multiple Live Activities) is the tiniest
+                // notch presentation — just the blue service-number chip, per
+                // the shared design spec. The app only ever runs ONE bus Live
+                // Activity at a time, so the number alone is unambiguous.
+                WIslandChip(no: context.attributes.busNo)
                     .widgetURL(busURL(context.attributes))
             }
-            .keylineTint(context.state.arrived ? wAccentSoft : wFg)
+            .keylineTint(wIslandBlue)
         }
     }
+}
+
+/// Expanded/footer left label — real GPS stops-away when the app pushed one,
+/// else the phase word. Never invents a distance.
+private func footerLeftLabel(_ s: LeyneActivityAttributes.ContentState) -> String {
+    if s.arrived { return "Bus is here" }
+    if s.stopsAway == 0 { return "Arriving now" }
+    if s.stopsAway > 0 { return "\(s.stopsAway) stop\(s.stopsAway == 1 ? "" : "s") away" }
+    return phase(s).label
 }
 
 private struct LockScreenView: View {
     let attributes: LeyneActivityAttributes
     let state: LeyneActivityAttributes.ContentState
+    /// Past the content's staleDate (the app is suspended and can't push).
+    /// The tell stays whisper-quiet per feedback_timely_over_honest: the
+    /// LIVE dot just loses its blue fill + glow — no banner, no wording
+    /// change.
+    var isStale: Bool = false
+
+    /// The system renders Lock Screen / StandBy Live Activities in one of
+    /// three modes. In `.accented` and `.vibrant` it IGNORES our colours and
+    /// re-derives everything from the view's luminance — so the hand-tuned
+    /// light-surface palette (dark ink on near-white) collapses into a flat,
+    /// unreadable wash, which is exactly what the owner photographed on
+    /// 2026-07-25 ("cannot see"). Outside `.fullColor` we hand the system the
+    /// semantic styles it knows how to render instead of fighting it.
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    private var fullColor: Bool { renderingMode == .fullColor }
+
+    /// Primary ink / accent — the countdown and the LIVE dot.
+    private var accentInk: Color { fullColor ? wAccentBlue : .primary }
+    /// Body copy.
+    private var bodyInk: Color { fullColor ? wDim : .secondary }
+    /// Captions — the quietest tier.
+    private var captionInk: Color { fullColor ? wFaint : .secondary }
 
     var body: some View {
-        let p = phase(state)
-        // Quotes the in-app Track Bus live card: route tile + TOWARD on the
-        // left, the COUNTDOWN as the hero on the right with its "MIN TO YOUR
-        // STOP" caption, a board rule, then phase + LIVE + your stop against
-        // the blue approach track. (The first pass kept the old monochrome
-        // hierarchy — phase word as hero, timer tucked in a corner — and read
-        // as the old Leyne design; owner-flagged.)
-        VStack(alignment: .leading, spacing: 10) {
+        // Header: monogram tile + "Bus <no> · <stop>", LIVE mark trailing.
+        // Body: the big countdown with the journey phase beside it. Then the
+        // progress track FULL WIDTH, with its two end labels directly
+        // underneath it.
+        //
+        // The track used to share a row with the countdown, which squeezed it
+        // into whatever width the numerals left over and stranded "Next stop"
+        // / "Your stop" a whole row below the rail they annotate — the labels
+        // pointed at nothing (owner 2026-07-25, "string not centered and
+        // placed properly"). Track and labels are now one block: the rail
+        // spans the card, and each label sits under the end it names.
+        VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .center, spacing: 10) {
-                WServiceBadge(no: attributes.busNo)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("TOWARD").font(wMono(8.5)).kerning(0.8).foregroundStyle(wDim)
-                    Text(attributes.dest)
-                        .font(wSans(13.5, .bold))
-                        .foregroundStyle(wFg).lineLimit(1)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(fullColor
+                              ? AnyShapeStyle(LinearGradient(colors: [wAccentBlue, wIslandBlue],
+                                                             startPoint: .topLeading,
+                                                             endPoint: .bottomTrailing))
+                              : AnyShapeStyle(Color.primary))
+                    Text("D")
+                        .font(wSans(14, .heavy))
+                        .foregroundStyle(fullColor ? Color.white : Color.black)
                 }
+                .frame(width: 26, height: 26)
+
+                Text("Bus \(attributes.busNo) · \(attributes.stopName)")
+                    .font(wSans(12.5, .semibold))
+                    .foregroundStyle(bodyInk)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+
                 Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 2) {
+
+                HStack(spacing: 4) {
+                    Circle().fill(isStale ? captionInk : accentInk)
+                        .frame(width: 6, height: 6)
+                    Text("LIVE")
+                        .font(wSans(10.5, .semibold))
+                        .foregroundStyle(captionInk)
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Group {
                         if state.arrived {
                             Text("Now")
-                                .font(wMono(27, .bold))
-                                .foregroundStyle(wAccentSoft)
                         } else if shouldShowTimer(state) {
-                            // Live bus: OS-ticked countdown, no push needed.
+                            // Live bus: OS-ticked m:ss countdown, no push
+                            // needed — already reads as a duration, so no
+                            // separate "min" unit is appended.
                             Text(timerInterval: .now...state.eta, countsDown: true)
-                                .font(wMono(27, .bold))
-                                .foregroundStyle(wFg)
-                                .multilineTextAlignment(.trailing)
-                                .lineLimit(1)
                         } else {
                             // Schedule-only: static minute, whisper-quiet "~".
                             Text(confPrefix(state) + etaText(state))
-                                .font(wMono(27, .bold))
-                                .foregroundStyle(wFg)
-                                .lineLimit(1)
                         }
                     }
-                    Text(state.arrived ? "AT YOUR STOP"
-                         : shouldShowTimer(state) ? "TO YOUR STOP" : "MIN TO YOUR STOP")
-                        .font(wMono(8)).kerning(0.7).foregroundStyle(wDim)
+                    .font(wMono(32, .heavy))
+                    .foregroundStyle(accentInk)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .layoutPriority(1)
+                    // A self-sizing timer reserves width for its widest value;
+                    // fixing it stops the destination text beside it from
+                    // jumping left and right as the countdown ticks.
+                    .fixedSize(horizontal: shouldShowTimer(state), vertical: false)
+
+                    // The static branch is a bare minute count — always
+                    // pair it with its unit (owner has flagged missing
+                    // "min" strings repeatedly).
+                    if !state.arrived && !shouldShowTimer(state) && state.etaMinutes > 0 {
+                        Text("min")
+                            .font(wSans(13, .medium))
+                            .foregroundStyle(bodyInk)
+                    }
                 }
+
+                Spacer(minLength: 8)
+
+                Text("to \(attributes.dest)")
+                    .font(wSans(12.5, .semibold))
+                    .foregroundStyle(bodyInk)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
 
-            Rectangle().fill(wLine).frame(height: 1)
+            VStack(alignment: .leading, spacing: 5) {
+                JourneyTrack(progress: journeyProgress(state), arrived: state.arrived,
+                             accent: accentInk,
+                             rail: fullColor ? Color.black.opacity(0.08)
+                                             : Color.secondary.opacity(0.3))
+                    .frame(height: 12)
 
-            // Phase + LIVE on the left, your stop riding the blue track right.
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 7) {
-                        Text(p.label)
-                            .font(wSans(15, .heavy))
-                            .foregroundStyle(p.isArrival ? wAccentSoft : wFg)
-                            .widgetAccentable(p.isArrival)
-                            .lineLimit(1)
-                        if state.monitored && !state.arrived { WLiveBadge() }
-                    }
-                    // Detail + your stop in one quiet line ("2 stops away ·
-                    // Farrer Rd Stn Exit A").
-                    Text(detailLine)
-                        .font(wSans(11, .medium))
-                        .foregroundStyle(wDim)
+                HStack {
+                    Text(footerLeftLabel(state))
+                        .font(wSans(10, .medium))
+                        .foregroundStyle(state.arrived ? accentInk : captionInk)
                         .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text("Your stop")
+                        .font(wSans(10, .medium))
+                        .foregroundStyle(captionInk)
                 }
-                .layoutPriority(1)
-                JourneyTrack(progress: journeyProgress(state), arrived: state.arrived)
-                    .frame(minWidth: 80)
             }
         }
         .padding(16)
-    }
-
-    private var detailLine: String {
-        let detail = phaseDetail(state)
-        return detail.isEmpty ? attributes.stopName : "\(detail) · \(attributes.stopName)"
     }
 }
 
 @main
 struct LeyneWidgetBundle: WidgetBundle {
     var body: some Widget {
-        // Home Screen widgets are live again — the app already publishes their
-        // data to the App Group every refresh (mirrorNearbyToWidget /
-        // mirrorFavServicesToWidget / pinned-stop publish in AppModel+DataStore).
-        LeyneStopWidget()          // Home Screen — saved stop departure board
-                                   // (was compiled but missing from the bundle,
-                                   // so it never appeared in the gallery)
-        LeyneNearbyWidget()        // Home Screen — nearest stop, live mini board
-        LeyneFavServiceWidget()    // Home Screen — favourited service
+        // The widget lineup is exactly ONE widget in ONE size (owner
+        // directive, 2026-07-24): the Nearest Stop board, .systemMedium only.
+        // The Saved Stop and Favourite Service widget kinds were removed
+        // outright — existing placed widgets of those kinds go blank on
+        // users' home screens, which is accepted as part of this redesign.
+        LeyneNearbyWidget()        // Home Screen — nearest stop, live board (Medium)
         LeyneLiveActivity()        // Lock Screen / Dynamic Island
     }
 }

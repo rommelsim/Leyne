@@ -37,14 +37,26 @@ final class AlertTimingTests: XCTestCase {
 
     func testCopy() {
         XCTAssertEqual(AlertTiming.arrivalTitle("153", leadMinutes: 3),
-                       "🕒 Bus 153 — 3 min away")
+                       "Bus 153 is 3 min away")
         XCTAssertEqual(AlertTiming.arrivalTitle("153", leadMinutes: 1),
-                       "🚍 Bus 153 — arriving now")
+                       "Bus 153 is arriving")
+        // Heads-up body: route + stop, no instruction (nothing to do yet).
+        XCTAssertEqual(
+            AlertTiming.arrivalBody(stopName: "Farrer Rd Stn Exit B", leadMinutes: 3,
+                                    dest: "Clementi Int"),
+            "to Clementi Int · Farrer Rd Stn Exit B")
+        // Destination is dropped, never guessed, when the caller has none.
         XCTAssertEqual(
             AlertTiming.arrivalBody(stopName: "Farrer Rd Stn Exit B", leadMinutes: 3),
-            "Heading to Farrer Rd Stn Exit B")
+            "Farrer Rd Stn Exit B")
+        // Final call: adds the action, and the crowd read when it's known.
         XCTAssertEqual(
-            AlertTiming.arrivalBody(stopName: "X", leadMinutes: 1), "Get ready — X")
+            AlertTiming.arrivalBody(stopName: "X", leadMinutes: 1),
+            "X. Head to the stop now.")
+        XCTAssertEqual(
+            AlertTiming.arrivalBody(stopName: "X", leadMinutes: 1,
+                                    dest: "Clementi Int", load: .sea),
+            "to Clementi Int · X. Seats are available. Head to the stop now.")
         XCTAssertEqual(AlertTiming.destinationTitle(), "Your stop is next")
         XCTAssertEqual(
             AlertTiming.destinationBody(destName: "Hougang Ctrl Int", leadMinutes: 10),

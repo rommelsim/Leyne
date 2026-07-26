@@ -17,10 +17,9 @@ enum WSTab: String, CaseIterable { case home, saved, alerts }
 
 /// Push destinations, shared across every tab's NavigationStack.
 enum WSRoute: Hashable {
-    case busStop(code: String)
+    case busStop(code: String, service: String?)
     case mrtStation(MrtGeoStation)
     case serviceInfo(no: String, fromStop: String?)
-    case trackBus(stopCode: String, no: String)
     case map
 }
 
@@ -52,51 +51,45 @@ struct WSRoot: View {
     // left with the Me tab, and m.isDark would pin users to a stale choice.
     @Environment(\.colorScheme) private var colorScheme
     private var ws: WSTheme { .resolve(dark: colorScheme == .dark) }
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// The navigation path of the currently selected tab.
-    private var activePath: [WSRoute] {
-        switch tab {
-        case .home:   homePath
-        case .saved:  savedPath
-        case .alerts: alertsPath
-        }
-    }
 
     var body: some View {
-        Group {
-            switch tab {
-            case .home:   stack($homePath) { WSHomeView(onSearch: { showSearch = true }) }
-            case .saved:  stack($savedPath) { WSSavedView() }
-            case .alerts: stack($alertsPath) { WSAlertsView() }
-            }
-        }
-        .background(ws.bg.ignoresSafeArea())
-        // Floating glass tab bar as a bottom safe-area inset, not a manual
-        // ZStack overlay with a fixed content padding: scroll content can
-        // now reach — and show through — the material at the bottom of a
-        // list, matching the native iOS 26 floating-bar composition.
+        // THE SYSTEM TAB BAR (owner 2026-07-25, third ask — "use native iOS
+        // for the toolbar"). The hand-drawn floating white pill is gone: a
+        // real `TabView` gets Liquid Glass on iOS 26, the system's own
+        // selection/scroll-edge behaviour, badges, minimise-on-scroll,
+        // Dynamic Type and VoiceOver rotor for free.
         //
-        // Root tabs only: pushed destinations don't inherit a custom
-        // safe-area inset applied outside their NavigationStack, so the bar
-        // floated OVER pushed content (it hid Track Bus's pinned CTA —
-        // owner-reported). Hiding it on push is also the better design:
-        // detail screens are focused tasks with their own chrome.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            ZStack {
-                if activePath.isEmpty {
-                    // Root tabs are native-ad-only (one NativeAdCard inline in
-                    // each tab's list) — no banner in the tab-bar gutter. The
-                    // anchored banner lives on the high-dwell detail screens
-                    // instead (`wsDetailAdBanner`), where its 30–60 s refresh
-                    // actually earns. Owner decision 2026-07-07.
-                    WSTabBar(tab: $tab, alertCount: m.unseenAlertCount)
-                        .transition(reduceMotion ? .opacity :
-                            .move(edge: .bottom).combined(with: .opacity))
-                }
+        // It also FIXES the "can't scroll down to the MRT stations" bug: the
+        // custom bar was a `safeAreaInset` applied OUTSIDE each tab's
+        // NavigationStack, so the scroll views inside never got the inset and
+        // their last rows sat under the floating pill. A TabView insets its
+        // content itself.
+        TabView(selection: $tab) {
+            // `.wsTabEntrance()` per tab: the system swaps tab content with no
+            // transition at all, which read as a motionless cut (owner
+            // 2026-07-25). Each tab now fades + rises on arrival, in the same
+            // drift the rest of the app enters with. Reduce Motion skips it.
+            Tab("Nearby", systemImage: "location.fill", value: WSTab.home) {
+                stack($homePath) { WSHomeView(onSearch: { showSearch = true }) }
+                    .wsTabEntrance()
             }
-            .animation(.snappy(duration: 0.25), value: activePath.isEmpty)
+            Tab("Favourites", systemImage: "star.fill", value: WSTab.saved) {
+                stack($savedPath) { WSSavedView() }
+                    .wsTabEntrance()
+            }
+            Tab("Alerts", systemImage: "bell.fill", value: WSTab.alerts) {
+                stack($alertsPath) { WSAlertsView() }
+                    .wsTabEntrance()
+            }
+            .badge(m.unseenAlertCount)
         }
+        .tint(SoftBlue.blue)
+        // The TabView's own container background is the system's (white in
+        // light mode) and sits ABOVE RootView's ground, so any frame where a
+        // tab isn't painting its own background revealed white. Tint the
+        // container itself — belt and braces with WSTabEntrance's ground.
+        .background(SoftBlue.bg.ignoresSafeArea())
+        .sensoryFeedback(.selection, trigger: tab)
         .environment(\.ws, ws)
         .sheet(isPresented: $showSearch) {
             WSSearchView(onSelect: { route in
@@ -109,17 +102,17 @@ struct WSRoot: View {
             .environment(store)
             .environmentObject(location)
             .presentationDetents([.large])
-            .presentationBackground(.ultraThinMaterial)
+            // Soft-blue 4b: tinted ground instead of dark glass — matches
+            // the search view's white-card content.
+            .presentationBackground(SoftBlue.bg)
         }
         // Deep links (notification / widget / Spotlight) surface as m.openCard.
         .onChange(of: m.openCard, initial: true) { _, card in
             guard let card else { return }
             tab = .home
-            var routes: [WSRoute] = [.busStop(code: card.stopCode)]
-            if let no = card.initialSelectedNo {
-                routes.append(.trackBus(stopCode: card.stopCode, no: no))
-            }
-            homePath = routes
+            // Notification / widget taps land on the Stop view with the
+            // tapped service pinned as the hero (Track Bus screen retired).
+            homePath = [.busStop(code: card.stopCode, service: card.initialSelectedNo)]
             m.openCard = nil
         }
         .onChange(of: tab) { _, new in
@@ -135,7 +128,28 @@ struct WSRoot: View {
         NavigationStack(path: path) {
             root()
                 .navigationBarBackButtonHidden(true)
-                .toolbar(.hidden, for: .navigationBar)
+                // Root tabs now draw a REAL nav bar (large title + system
+                // toolbar buttons) instead of a hand-built header row with
+                // custom white tiles — owner 2026-07-25. Each root view
+                // supplies its own `.navigationTitle` / `.toolbar`.
+                // Exit interstitial hook. It used to hang off each screen's
+                // custom back button; the Stop view's back button is the
+                // SYSTEM one now (owner 2026-07-25), so the trigger moved to
+                // the pop itself — a back-out of a dwell screen (stop /
+                // station) is the app's natural break. The manager owns every
+                // guard (frequency cap, exit count, cross-format gap,
+                // deep-link suppression), so firing on every qualifying pop is
+                // safe. Map and Service Info stay hook-free: short-dwell,
+                // task-critical surfaces.
+                .onChange(of: path.wrappedValue) { old, new in
+                    guard new.count < old.count, let left = old.last else { return }
+                    switch left {
+                    case .busStop, .mrtStation:
+                        InterstitialAdManager.shared.maybeShowOnExit(model: m)
+                    case .serviceInfo, .map:
+                        break
+                    }
+                }
                 .navigationDestination(for: WSRoute.self) { route in
                     // Pushed screens supply their own `.wsHeaderBar` toolbar
                     // (real system nav-bar chrome — Liquid Glass on iOS 26,
@@ -152,76 +166,25 @@ struct WSRoot: View {
     @ViewBuilder
     private func destination(_ route: WSRoute, path: Binding<[WSRoute]>) -> some View {
         let back = { if !path.wrappedValue.isEmpty { path.wrappedValue.removeLast() } }
-        // Exit interstitial hook — a back-out of a dwell screen (stop / station /
-        // track bus) is the app's natural break. The manager owns every guard
-        // (frequency cap, exit count, cross-format gap, deep-link suppression),
-        // so this is safe to call on every pop. Map and Service Info stay
-        // hook-free: short-dwell, task-critical surfaces.
-        let backWithAd = { [weak m] in
-            back()
-            if let m { InterstitialAdManager.shared.maybeShowOnExit(model: m) }
-        }
-        switch route {
-        case .busStop(let code):
-            WSBusStopView(code: code, onBack: backWithAd)
-        case .mrtStation(let station):
-            WSMrtStationView(station: station, onBack: backWithAd)
-        case .serviceInfo(let no, let fromStop):
-            WSServiceInfoView(serviceNo: no, fromStop: fromStop, onBack: back)
-        case .trackBus(let stopCode, let no):
-            WSTrackBusView(stopCode: stopCode, serviceNo: no, onBack: backWithAd)
-        case .map:
-            WSMapView(onBack: back)
-        }
-    }
-}
-
-// MARK: - Tab bar (floating Liquid Glass)
-
-struct WSTabBar: View {
-    @Binding var tab: WSTab
-    var alertCount: Int
-    @Environment(\.ws) private var ws
-
-    var body: some View {
-        HStack(spacing: 2) {
-            item(.home, "Home", .home)
-            item(.saved, "Saved", .saved)
-            item(.alerts, "Alerts", .alerts, badge: alertCount)
-        }
-        .padding(.horizontal, 8)
-        .padding(.top, 11)
-        .padding(.bottom, 9)
-        .wsGlassChrome(cornerRadius: 26, tint: ws.tabbar)
-        .shadow(color: .black.opacity(ws.isDark ? 0.35 : 0.12), radius: 18, x: 0, y: 8)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 6)
-        // One selection tick per tab change, regardless of which item fired it.
-        .sensoryFeedback(.selection, trigger: tab)
-    }
-
-    @ViewBuilder
-    private func item(_ t: WSTab, _ label: String, _ glyph: WSGlyph, badge: Int = 0) -> some View {
-        let on = tab == t
-        Button {
-            tab = t
-        } label: {
-            VStack(spacing: 5) {
-                WSIcon(glyph: glyph, size: 22, weight: on ? .regular : .light,
-                       color: on ? ws.text : ws.dim)
-                    .overlay(alignment: .topTrailing) {
-                        if badge > 0 {
-                            Circle().fill(ws.text).frame(width: 7, height: 7).offset(x: 5, y: -2)
-                        }
-                    }
-                Text(label)
-                    .font(ws.sans(10, weight: .bold))
-                    .foregroundStyle(on ? ws.text : ws.dim)
+        // Detail screens are focused tasks with their own chrome (and their
+        // own pinned CTAs / ad banners), so the tab bar goes away on push —
+        // the same `hidesBottomBarWhenPushed` behaviour UIKit apps have.
+        Group {
+            switch route {
+            case .busStop(let code, let service):
+                WSBusStopView(code: code, initialService: service)
+            case .mrtStation(let station):
+                WSMrtStationView(station: station, onBack: back)
+            case .serviceInfo(let no, let fromStop):
+                WSServiceInfoView(serviceNo: no, fromStop: fromStop, onBack: back)
+            case .map:
+                WSMapView()
             }
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 44)   // ≥44pt tap target even though the glyph+label are smaller
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .toolbar(.hidden, for: .tabBar)
     }
 }
+
+// The hand-drawn `WSTabBar` floating pill was DELETED 2026-07-25 (owner:
+// "the toolbar should be iOS native"). Its replacement is the system TabView
+// in `WSRoot.body` — don't reintroduce a custom bar here.

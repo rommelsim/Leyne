@@ -231,7 +231,9 @@ struct OnboardingView: View {
             (Text(eta).font(ws.mono(17, weight: .bold)).foregroundStyle(ws.text)
              + Text(" min").font(ws.mono(10, weight: .semibold)).foregroundStyle(ws.dim))
             CrowdGauge(fraction: load.wsFraction, width: 22)
-            Text(load.wsWord).font(ws.mono(10)).foregroundStyle(ws.dim)
+            // Short form here — this preview row is a miniature, and the
+            // gauge beside it already carries the meaning.
+            Text(load.wsShort).font(ws.mono(10)).foregroundStyle(ws.dim)
         }
     }
 

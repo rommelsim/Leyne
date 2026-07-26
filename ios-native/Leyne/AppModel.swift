@@ -16,7 +16,33 @@ enum AppGroup {
     static let pinsKey = "leyne.pins.shared"
     static let nearbyKey = "leyne.nearby.shared"
     static let favsKey = "leyne.favs.shared"
+    /// Stop count last written to `stopIndexURL` — the cheap "is the file
+    /// already current?" guard, so we rewrite ~400KB once per dataset change
+    /// rather than on every launch.
+    static let stopIndexCountKey = "leyne.stopindex.count"
     static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
+
+    static var container: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: id)
+    }
+    /// The whole bus-stop directory (code + name + coordinates), shared so the
+    /// widget can resolve the NEAREST stop itself instead of being spoon-fed
+    /// one by the app. Far too big for UserDefaults — it lives as a file in
+    /// the group container.
+    static var stopIndexURL: URL? {
+        container?.appendingPathComponent("stopindex.json")
+    }
+}
+
+/// One bus stop in the shared directory. Keys are single letters because this
+/// is ~5,000 records: the difference between the long names and these is a
+/// couple of hundred KB on disk and in the widget's decode budget.
+/// Mirrors `WStopPin` in the extension.
+struct SharedStopPin: Codable {
+    let c: String   // BusStopCode
+    let n: String   // Description
+    let y: Double   // Latitude
+    let x: Double   // Longitude
 }
 
 /// Minimal pinned-stop record the Home Screen widget reads (it can't see the
@@ -33,6 +59,9 @@ struct SharedNearbyStop: Codable, Identifiable, Hashable {
     let id: String      // bus stop code
     let name: String
     let walkMin: Int
+    /// Straight-line metres, so the widget can print the same "· 180m" the
+    /// stop screen does instead of walk minutes alone.
+    let distanceM: Int
 }
 
 /// A favourited service, pre-resolved to a concrete stop + the route's
@@ -67,349 +96,6 @@ enum LeyneThemeMode: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - What's New (changelog shown once per app update)
-
-struct WhatsNewItem {
-    let icon: String   // SF Symbol name
-    let title: String
-    let body: String
-}
-
-struct WhatsNewEntry {
-    let headline: String
-    let items: [WhatsNewItem]
-}
-
-/// Release notes shown by the What's New screen on update. Mirrors
-/// lib/data/changelog.dart — drop old entries freely; only the running
-/// version's entry is ever read.
-let kChangelog: [String: WhatsNewEntry] = [
-    "2.9.0": WhatsNewEntry(
-        headline: "A simpler app — your bus and search, faster.",
-        items: [
-            WhatsNewItem(
-                icon: "rectangle.3.group.fill",
-                title: "Simpler navigation",
-                body: "Three tabs now — Bus, MRT and Saved. Search sits right at "
-                    + "the top of each screen, and service alerts moved to a bell, "
-                    + "so the bar is far less cluttered."
-            ),
-            WhatsNewItem(
-                icon: "magnifyingglass",
-                title: "Search, right where you are",
-                body: "Tap the search bar and the nearby list smoothly makes way "
-                    + "for results — find any stop, bus or station without leaving "
-                    + "the screen."
-            ),
-            WhatsNewItem(
-                icon: "bell.fill",
-                title: "One-tap tracking",
-                body: "The bus view leads with a single Track button, and it now "
-                    + "starts your Lock Screen Live Activity the moment you tap — "
-                    + "even on a fresh launch."
-            ),
-        ]
-    ),
-    "2.8.0": WhatsNewEntry(
-        headline: "MRT, reimagined — plus a smarter Live Activity.",
-        items: [
-            WhatsNewItem(
-                icon: "tram.fill",
-                title: "MRT, side by side with Bus",
-                body: "MRT is now a full tab next to Bus — the stations nearest "
-                    + "you, live station crowd with a 30-minute forecast, free "
-                    + "bus & shuttle info during disruptions, and the full "
-                    + "system map. You can save MRT stations too."
-            ),
-            WhatsNewItem(
-                icon: "magnifyingglass",
-                title: "Search finds everything",
-                body: "Search now covers MRT stations alongside buses and "
-                    + "stops, with a quick filter to narrow to just what you "
-                    + "want."
-            ),
-            WhatsNewItem(
-                icon: "bus.fill",
-                title: "Live Activity + arrival times",
-                body: "The Dynamic Island shows your bus number with a live "
-                    + "countdown, and the bus view now shows the exact arrival "
-                    + "time — e.g. \"Arrives 7:39 PM\"."
-            ),
-            WhatsNewItem(
-                icon: "hand.tap.fill",
-                title: "Clearer bus controls",
-                body: "The bus screen's actions are now labelled — Track "
-                    + "arrival, Save service, and More — and the Saved tab gained "
-                    + "an MRT section you can reorder."
-            ),
-        ]
-    ),
-    "2.7.0": WhatsNewEntry(
-        headline: "A live MRT board — free for everyone.",
-        items: [
-            WhatsNewItem(
-                icon: "tram.fill",
-                title: "Live MRT board",
-                body: "See every line's status at a glance, tap a line for live "
-                    + "station crowd levels, and check which lifts are under "
-                    + "maintenance — all free."
-            ),
-            WhatsNewItem(
-                icon: "star.fill",
-                title: "Save faster",
-                body: "Swipe any nearby stop to save it, and drag your saved "
-                    + "stops and buses into the order you want."
-            ),
-            WhatsNewItem(
-                icon: "bell.badge.fill",
-                title: "Disruption alerts",
-                body: "Get notified the moment a line goes down, so you can "
-                    + "reroute before you reach the platform."
-            ),
-        ]
-    ),
-    "2.6.0": WhatsNewEntry(
-        headline: "A calmer look — plus weather and one-swipe alerts.",
-        items: [
-            WhatsNewItem(
-                icon: "circle.lefthalf.filled",
-                title: "A calmer, monochrome look",
-                body: "Departly is now clean black-and-white throughout, so arrival "
-                    + "times and the bus you're after stay front and centre. "
-                    + "(Colour returns when trains arrive.)"
-            ),
-            WhatsNewItem(
-                icon: "cloud.sun.fill",
-                title: "Weather and time on Home",
-                body: "The Home screen now opens with the time and your local "
-                    + "forecast — temperature, conditions, and a heads-up when "
-                    + "rain's on the way."
-            ),
-            WhatsNewItem(
-                icon: "bell.badge.fill",
-                title: "Swipe to get notified",
-                body: "Swipe a bus to set an arrival alert in one tap — you'll be "
-                    + "buzzed at 3 minutes and again at 1 minute away. Clearer "
-                    + "notifications, and a Live Activity that shows the ETA on "
-                    + "your Lock Screen and opens the right bus when tapped."
-            ),
-        ]
-    ),
-    "2.5.0": WhatsNewEntry(
-        headline: "Your bus, all on one screen.",
-        items: [
-            WhatsNewItem(
-                icon: "bus.fill",
-                title: "Everything at a glance",
-                body: "The bus screen now shows the arrival time, stops away, "
-                    + "crowd, deck, the route and a live map together — no "
-                    + "scrolling to find what you need."
-            ),
-            WhatsNewItem(
-                icon: "hand.tap.fill",
-                title: "Peek a nearby stop",
-                body: "Touch and hold a stop in Nearby to preview its live "
-                    + "arrivals without opening it."
-            ),
-            WhatsNewItem(
-                icon: "list.number",
-                title: "Tidier lists, and fixes",
-                body: "Stops now list buses by number, your saved stops stay in "
-                    + "Nearby, and the route and map open as clean cards. Plus "
-                    + "polish and fixes."
-            ),
-        ]
-    ),
-    "2.4.2": WhatsNewEntry(
-        headline: "Alerts that fit your trip.",
-        items: [
-            WhatsNewItem(
-                icon: "bell.fill",
-                title: "Tell me before it arrives",
-                body: "Get a heads-up before your bus reaches your stop — or "
-                    + "before it reaches your destination — with the lead time "
-                    + "you choose. Find and manage every alert in one place."
-            ),
-            WhatsNewItem(
-                icon: "location.fill",
-                title: "Tracking that lines up",
-                body: "The bus on the map now matches the stops-away and "
-                    + "distance you read, and route progress follows the line "
-                    + "all the way to its destination."
-            ),
-            WhatsNewItem(
-                icon: "checkmark.seal",
-                title: "Quicker saving and refresh",
-                body: "Tap the pin to save a stop or the bus to save a bus, "
-                    + "pull down to refresh while tracking a bus, plus polish "
-                    + "and fixes."
-            ),
-        ]
-    ),
-    "2.4.1": WhatsNewEntry(
-        headline: "Clearer arrivals.",
-        items: [
-            WhatsNewItem(
-                icon: "star.fill",
-                title: "Your buses, first",
-                body: "The Home card now shows the top three buses at each stop "
-                    + "— your favourites first, then whatever's arriving soonest."
-            ),
-            WhatsNewItem(
-                icon: "bus.fill",
-                title: "A simpler bus view",
-                body: "Tracking a bus leads with how far away it is and when it'll "
-                    + "arrive; the live map is one tap away when you want it."
-            ),
-            WhatsNewItem(
-                icon: "checkmark.seal",
-                title: "Polish and fixes",
-                body: "Minor stability and reliability fixes to keep "
-                    + "everything quick and dependable."
-            ),
-        ]
-    ),
-    "2.4.0": WhatsNewEntry(
-        headline: "A brighter, clearer Leyne.",
-        items: [
-            WhatsNewItem(
-                icon: "paintpalette",
-                title: "Arrivals you can read at a glance",
-                body: "A fresh, colourful look — green means a bus is close, "
-                    + "amber means a little wait — so you can see what's coming "
-                    + "without reading a single number."
-            ),
-            WhatsNewItem(
-                icon: "person.2.fill",
-                title: "See how full the bus is",
-                body: "Every arrival now shows whether there are seats, standing "
-                    + "room, or it's filling up — so you can decide whether to "
-                    + "wait for the next one."
-            ),
-            WhatsNewItem(
-                icon: "star.fill",
-                title: "Your favourite stops, one tap away",
-                body: "Pinned stops now live in their own Favourites tab, so the "
-                    + "places you ride from most are always right there."
-            ),
-        ]
-    ),
-    "2.3.3": WhatsNewEntry(
-        headline: "Smoother and steadier.",
-        items: [
-            WhatsNewItem(
-                icon: "arrow.clockwise",
-                title: "Arrivals that keep themselves fresh",
-                body: "Behind-the-scenes work so times and the bottom strip "
-                    + "refresh reliably and recover on their own — fewer stale "
-                    + "moments, less waiting around."
-            ),
-            WhatsNewItem(
-                icon: "checkmark.seal",
-                title: "Polish and fixes",
-                body: "Small stability and reliability fixes across the app to "
-                    + "keep everything quick and dependable."
-            ),
-        ]
-    ),
-    "2.3.2": WhatsNewEntry(
-        headline: "Routes both ways, cleaner nights.",
-        items: [
-            WhatsNewItem(
-                icon: "arrow.left.arrow.right",
-                title: "See both directions of a route",
-                body: "Open any bus and switch between its two directions — "
-                    + "there and back — to follow the whole line either way."
-            ),
-            WhatsNewItem(
-                icon: "magnifyingglass",
-                title: "Search a bus, see its route",
-                body: "Searching a bus number now opens that service's full "
-                    + "route, not just a stop — so you can scan every stop it "
-                    + "serves."
-            ),
-            WhatsNewItem(
-                icon: "circle.lefthalf.filled",
-                title: "A cleaner dark mode",
-                body: "Dark mode is now a crisp black-and-white — simpler and "
-                    + "easier on the eyes at night."
-            ),
-        ]
-    ),
-    "2.3.1": WhatsNewEntry(
-        headline: "A fresh new look.",
-        items: [
-            WhatsNewItem(
-                icon: "sparkles",
-                title: "A cleaner, calmer design",
-                body: "Departly's been redrawn around a soft, focused look that "
-                    + "puts your next arrival front and centre — less clutter, "
-                    + "easier to read at a glance on the move."
-            ),
-            WhatsNewItem(
-                icon: "dot.radiowaves.up.forward",
-                title: "See which times are live at a glance",
-                body: "Live arrivals read crisp and bold, with a quiet "
-                    + "freshness dot and a LIVE / ESTIMATED / SCHEDULED tag, so "
-                    + "you instantly know how much to trust each time."
-            ),
-            WhatsNewItem(
-                icon: "map.fill",
-                title: "An immersive bus view",
-                body: "Tap any bus for a full-screen map with a draggable "
-                    + "sheet — peek for your ETA and how busy it is, or pull up "
-                    + "for alerts and the full route timeline."
-            ),
-        ]
-    ),
-    "2.3.0": WhatsNewEntry(
-        headline: "Smarter alerts, quicker taps.",
-        items: [
-            WhatsNewItem(
-                icon: "bell.badge",
-                title: "Get a heads-up before your stop",
-                body: "Pick your drop-off in a bus's route view and Leyne "
-                    + "buzzes you about two stops early — so you can look up "
-                    + "from your phone and still get off in time."
-            ),
-            WhatsNewItem(
-                icon: "bus.fill",
-                title: "Tap a live bus to jump right in",
-                body: "Tapping a bus on the Lock Screen, in the Dynamic "
-                    + "Island, or on your Home Screen widget now opens that "
-                    + "exact bus instead of just the app."
-            ),
-            WhatsNewItem(
-                icon: "mappin.and.ellipse",
-                title: "Find stops by postal code",
-                body: "Type any 6-digit postal code in Search to list the bus "
-                    + "stops nearest that address, within your Settings radius."
-            ),
-        ]
-    ),
-    "2.0.0": WhatsNewEntry(
-        headline: "A clearer, more honest commute.",
-        items: [
-            WhatsNewItem(
-                icon: "location.slash",
-                title: "Know when a time is a guess",
-                body: "Arrival times without a live GPS fix are now tagged "
-                    + "\"~ scheduled\", so you know which ones to fully trust."
-            ),
-            WhatsNewItem(
-                icon: "location.circle",
-                title: "Search by postal code",
-                body: "Enter any 6-digit postal code to map the bus stops near "
-                    + "that address. Set the search radius in Settings."
-            ),
-            WhatsNewItem(
-                icon: "bus.fill",
-                title: "Arriving buses stand out",
-                body: "In Nearby, the number of a bus arriving now lights up green."
-            ),
-        ]
-    ),
-]
 
 /// A user-pinned stop. Invariant: a Pin always tracks ≥1 bus — so
 /// "pinned" ⟺ "has buses shown". `tracked == nil` means *all* services
@@ -611,7 +297,10 @@ final class AppModel {
 
     // Navigation / overlays
     var tab: AppTab = .home
-    var launching = true
+    // Launch splash removed (owner call, 2026-07-24) — the app opens straight
+    // onto Nearby after the system launch screen. The flag stays because the
+    // ad managers still consult it as a "UI not ready" guard.
+    var launching = false
     var showOnboarding = false
     var showAdd = false
     var searchOpen = false
@@ -1111,6 +800,44 @@ final class AppModel {
         guard notificationsEnabled else { return }
         NotificationsManager.shared.scheduleArrivalAlerts(
             alerts: alerts.filter(\.enabled), cards: alertSchedulingCards)
+        retryRearmUntilLiveDataLands()
+    }
+
+    private var alertRearmRetryTask: Task<Void, Never>?
+
+    /// Covers the arm-then-pocket race: an alert armed before its stop's live
+    /// arrivals are in the DataStore cache schedules NO notification (the
+    /// scheduler needs an `arrivalDate`), and if the user locks the phone
+    /// before the next 10 s tick rearms, nothing ever fires (field-tested
+    /// failure, 2026-07-24). Force-fetch the missing stops now and rearm as
+    /// soon as data lands — bounded, and a no-op once every enabled arrival
+    /// alert has a live ETA behind it.
+    private func retryRearmUntilLiveDataLands() {
+        let missingStops = Set(alerts.filter { a in
+            a.kind == .arrival && a.enabled
+                && liveServices(code: a.stopCode, tracked: [a.busNo]).first?.arrivalDate == nil
+        }.map(\.stopCode))
+        guard !missingStops.isEmpty, alertRearmRetryTask == nil else { return }
+        alertRearmRetryTask = Task { @MainActor [weak self] in
+            defer { self?.alertRearmRetryTask = nil }
+            for attempt in 0..<5 {
+                guard let self, !Task.isCancelled, self.notificationsEnabled else { return }
+                for code in missingStops {
+                    self.ds.ensureArrivals(stop: code, force: attempt == 0)
+                }
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                let stillMissing = self.alerts.contains { a in
+                    a.kind == .arrival && a.enabled && missingStops.contains(a.stopCode)
+                        && self.liveServices(code: a.stopCode, tracked: [a.busNo]).first?.arrivalDate == nil
+                }
+                if !stillMissing {
+                    NotificationsManager.shared.scheduleArrivalAlerts(
+                        alerts: self.alerts.filter(\.enabled), cards: self.alertSchedulingCards)
+                    return
+                }
+            }
+        }
     }
 
     /// Pause or resume an alert in place — toggle OFF keeps the row in
@@ -1158,31 +885,17 @@ final class AppModel {
     }
     func syncFeedback() { Feedback.shared.config(haptic: haptic) }
 
-    // ─── What's New / version tracking ──────────────────────
+    // ─── Version tracking ────────────────────────────────────
+    // (The once-per-update What's New screen was removed 2026-07-24 — owner
+    // call. `lastSeenVersion` persistence stays: `finishOnboarding` pins it,
+    // and release notes live in CHANGELOG.md / the stores.)
 
     /// Set the running app's marketing version. Call once at boot from
     /// `Bundle.main.infoDictionary?["CFBundleShortVersionString"]`.
     func setCurrentVersion(_ v: String) {
         if currentVersion == v { return }
         currentVersion = v
-    }
-
-    /// The version whose What's New screen should be shown now, or nil.
-    /// Fresh installs (still in onboarding) never see it — they have no
-    /// prior version to have "updated" from; `finishOnboarding` pins their
-    /// version so it stays that way.
-    var whatsNewVersion: String? {
-        guard let v = currentVersion, kChangelog[v] != nil else { return nil }
-        if lastSeenVersion == v { return nil }
-        if !onboarded { return nil }
-        return v
-    }
-
-    /// Acknowledge the running version's What's New screen. After this the
-    /// What's New screen won't show again until the next version with a
-    /// changelog entry.
-    func markWhatsNewSeen() {
-        if let v = currentVersion { lastSeenVersion = v }
+        lastSeenVersion = v
     }
 
     /// Replay onboarding from Settings.
@@ -1670,7 +1383,11 @@ final class AppModel {
         do {
             let act = try Activity.request(
                 attributes: attrs,
-                content: ActivityContent(state: state, staleDate: nil),
+                // staleDate from the start: local updates can't run while the
+                // app is suspended, so past this horizon iOS flags the content
+                // stale and the Live Activity UI softens its LIVE mark.
+                content: ActivityContent(state: state,
+                                         staleDate: Date().addingTimeInterval(120)),
                 pushType: nil)
             liveActivity = act
             liveActivityKey = Self.liveKey(bus: s.no, stopCode: stopCode)
@@ -1878,6 +1595,38 @@ final class AppModel {
                     await self.finishLiveActivityAsArrived(monitored: snap.monitored)
                     return
                 }
+            }
+        }
+    }
+
+    /// Foreground fallback for the suspended-app gap (the polling loop can't
+    /// run while iOS has the app suspended, so a bus that arrived in the
+    /// background leaves the Live Activity frozen at its last ETA). Called on
+    /// scenePhase → .active: one immediate snapshot, and the arrival finale
+    /// runs if the bus is at the stop, or if its last-known ETA is well past
+    /// and the feed has either dropped it or rolled to the following bus.
+    /// The real fix is server-driven ActivityKit pushes (needs a backend);
+    /// this keeps the lock screen honest the moment the user returns.
+    func nudgeLiveActivityOnForeground() {
+        guard let act = liveActivity else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let attrs = act.attributes
+            let lastEta = act.content.state.eta
+            let etaLongPast = lastEta != .distantFuture
+                && lastEta.timeIntervalSinceNow < -120
+            if let snap = await self.ds.liveServiceSnapshot(
+                serviceNo: attrs.busNo, stopCode: attrs.stopCode) {
+                guard self.liveActivity?.id == act.id else { return }
+                if snap.etaSec <= 0 || (etaLongPast && snap.etaSec > 150) {
+                    // At the stop — or our bus is long gone and the feed now
+                    // shows the following one.
+                    await self.finishLiveActivityAsArrived(monitored: snap.monitored)
+                }
+            } else if etaLongPast {
+                guard self.liveActivity?.id == act.id else { return }
+                await self.finishLiveActivityAsArrived(
+                    monitored: act.content.state.monitored)
             }
         }
     }
@@ -2123,7 +1872,9 @@ final class NotificationsManager {
                         busNo: alert.busNo, stopCode: alert.stopCode, stopName: stopLabel,
                         title: AlertTiming.arrivalTitle(alert.busNo, leadMinutes: lead),
                         body: AlertTiming.arrivalBody(stopName: stopLabel,
-                                                      leadMinutes: lead)),
+                                                      leadMinutes: lead,
+                                                      dest: s.dest.isEmpty ? nil : s.dest,
+                                                      load: s.load)),
                     trigger: UNTimeIntervalNotificationTrigger(
                         timeInterval: interval, repeats: false)))
             }
@@ -2133,14 +1884,28 @@ final class NotificationsManager {
         // then (re)add the desired set. UN replaces requests with the same
         // identifier, so add-after-add is safe. Only arrival prefixes are
         // swept here; destination one-shots are owned by their own path.
+        //
+        // "Orphan" means the request belongs to NO enabled alert — not merely
+        // "absent from this pass's desired set". A transient feed gap (LTA
+        // returns no ETA for one tick, network blip) empties `desired`; if
+        // that also cancelled the pending requests and the app was suspended
+        // before the feed recovered, the alert never fired at all
+        // (field-tested failure, 2026-07-24). A request whose alert is still
+        // live keeps its last-scheduled fire time until fresh data replaces
+        // it — a slightly stale fire beats silence.
         let desiredIds = Set(desired.map(\.id))
+        let liveAlertIdPrefixes = alerts.filter { $0.kind == .arrival }.map {
+            "\(arrivalPrefix)\($0.stopCode).\($0.busNo)."
+        }
         let prefixes = arrivalPrefixes
         center.getPendingNotificationRequests { reqs in
             let sweepNow = Date()
             let toCancel = reqs.filter { req in
                 let id = req.identifier
                 guard prefixes.contains(where: { id.hasPrefix($0) }),
-                      !desiredIds.contains(id) else { return false }
+                      !desiredIds.contains(id),
+                      !liveAlertIdPrefixes.contains(where: { id.hasPrefix($0) })
+                else { return false }
                 // An imminent trigger IS the alert doing its job. The moment
                 // the live ETA drops inside a lead window that lead leaves the
                 // `desired` set — cancelling it here killed the "arriving now"
@@ -2231,11 +1996,14 @@ final class NotificationsManager {
     }
 
     /// Shared arrival-alert content. Title + body come from `AlertTiming` so
-    /// the copy stays identical to the Flutter side and the displayed minutes
-    /// can never drift from the scheduling lead. No stops-away parenthetical —
-    /// at schedule time we can't guarantee it'll still be true at fire time,
-    /// and a wrong "(1 stop away)" reads worse than none
-    /// (see feedback_timely_over_honest).
+    /// the displayed minutes can never drift from the scheduling lead.
+    /// NOTE: as of the design-greendark pass the iOS copy (AlertTiming.swift)
+    /// diverges from lib/data/alert_timing.dart — dropped the emoji-led title
+    /// and wove in the crowd read on the final call. Android's copy was left
+    /// untouched; re-sync (or intentionally fork) on the next Android design
+    /// pass. Still no stops-away parenthetical — at schedule time we can't
+    /// guarantee it'll still be true at fire time, and a wrong "(1 stop
+    /// away)" reads worse than none (see feedback_timely_over_honest).
     private func arrivalContent(busNo: String, stopCode: String, stopName: String,
                                 title: String, body: String) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()

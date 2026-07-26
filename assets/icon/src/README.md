@@ -1,5 +1,12 @@
-# App icon sources — "pin-clock" (2026-07-04)
+# App icon sources — "route + live dot" (sky-blue palette, 2026-07-25)
 
+Design: the Departly mark from the owner's Claude Design project ("Departly
+App Icon Sky.dc.html") — a white route curve sweeping up to a station node
+whose centre is the deep-blue (#1F74C0) "live" dot, on a sky diagonal gradient
+(`#5CB8F2 → #2E8FE0`); subtle top gloss. Dark appearance inverts: sky-blue
+(#5CB8F2) route on near-black navy (`#1C2B3A → #0D1420`), inner dot = the
+dark background. Re-palettes the mint greendark icon (2026-07-24), which
+replaced the pin-clock icon (2026-07-04).
 Design: white map pin whose head is a clock face (dark plum) with a green
 countdown arc, on a coral→red diagonal gradient (`#FF8A5C → #EF4351`).
 Replaces the WhereSia/Departly letterform icons (see
@@ -15,19 +22,16 @@ Replaces the WhereSia/Departly letterform icons (see
 
 ## Regenerating
 
-1. Render each SVG to a 1024×1024 PNG. With no SVG rasterizer installed,
-   `qlmanage -t -s 1024 -o <outdir> <file>.svg` works BUT flattens
-   transparency onto opaque white — fine for `light`/`dark`/`bg`, wrong for
-   `fg`/`mono`. For those two, render twice (once over a black rect, once
-   over white, injected as the first child of `<svg>`) and reconstruct the
-   alpha per pixel: `a = 1 - (white - black)`, `rgb = black / a`.
-   (With `rsvg-convert`/`resvg` installed, a single direct render is fine.)
-2. Copy the outputs to the paths in the table (iOS appiconset paths are
+1. `python3` + Pillow renders the set directly (no SVG rasterizer needed) —
+   the geometry lives in these SVGs and is mirrored in the render script the
+   design-greendark session used (bezier flattening + circle stamping,
+   4× supersampled). Any SVG rasterizer (`rsvg-convert`, `resvg`) also works
+   on these sources directly.
+2. Copy outputs per the table (iOS appiconset path is
    `ios-native/Leyne/Assets.xcassets/AppIcon.appiconset/`).
 3. Regenerate the Android launcher set:
    `dart run flutter_launcher_icons -f flutter_launcher_icons.yaml`
 
-Geometry note: the pin glyph is 708px tall on the 1024 canvas (~69%); the
-adaptive icon's 16% inset lands it at ~70% of the visible tile, inside the
-66/108dp safe zone and optically matching the iOS icon. Keep `fg.svg` and
-`mono.svg` in the same geometry so the themed icon sits identically.
+Geometry note: viewBox is 160; route path `M-10 112 C 40 112, 55 48, 96 48
+L 175 48` (round caps, w=14), node r17 @ (96,48), inner dot r8. The dot sits
+at (0.60, 0.30) of the tile — inside the Android adaptive 66% safe zone.

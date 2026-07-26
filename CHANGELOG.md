@@ -8,6 +8,124 @@ Format: one section per version, tagged with the platform and build
 artifact path. User-facing iOS releases should also have a matching
 entry in `kChangelog` inside `ios-native/Leyne/AppModel.swift`.
 
+## 2.9.4 (build 31) · iOS · branch `design-greendark` · 2026-07-26
+
+Soft-blue "4b" field-test pass. Version jumped from 2.9.0 to 2.9.4 because
+2.9.3 was already approved on the store — the 2.9.0 train is closed.
+
+- **Nearby map** — opens with a fly-in from the neighbourhood down to street
+  level; bus stops are blue bus-stop signs, MRT/LRT stations show their own
+  code in their own line colour (EW20 green), and "you" is a compass arrow
+  rather than a dot. Compass + fine GPS run only while the map is open.
+- **Stop detail** — the standalone route card is gone; tapping a service
+  opens a sheet with its NEXT/THEN/LATER board, crowd, Alert me, the full
+  route timeline and Favourite. Every service now appears in All services.
+  "Walk here" is a filled button carrying the walk time into Apple Maps.
+- **Crowd wording** — "Seats" / "Standing" became "Seats available" /
+  "Standing only" / "Almost full"; the bare words read as unexplained.
+- **MRT station** — distance moved under the station name, crowd spoken as a
+  word, a gently bouncing "Tap a station to open it" hint, and a lead-in on
+  the crowd forecast; the "now" column no longer knocks the chart out of line.
+- **Fixes** — card shadows no longer fall on the rows inside a card (every
+  row appeared to be cut out); no white bar when switching tabs; widget
+  follows you to a new location and shows the distance to the stop.
+
+## Unreleased · iOS · branch `design-greendark` · 2026-07-24
+
+**2026-07-24 — not yet built:** Full "Departly green-dark" redesign of the
+iOS app, implemented from the owner's Claude Design project (Departly App /
+App Icon / iOS Extras). No new data features; visual + copy pass wired to
+the existing live plumbing. Add a version bump + kChangelog entry when this
+is first archived.
+
+- **New design language** — near-black blue-grey gradient board; mint
+  (#35E0B2) as the single live-data accent (soonest ETA, live dots, glow
+  edges, selected states); amber reserved for disruptions, red for packed
+  crowd; official line colours for rail identity; soft white-alpha gradient
+  cards with hairline strokes; SF typography (replaces Inter/IBM Plex Mono).
+- **Nearby** — closest-stop hero card (featured soonest service, side ETAs,
+  breathing glow), collapsing search pill, All/Buses/MRT chips, MORE BUS
+  STOPS card with expand, MRT stations card with amber delay banners.
+- **Stop detail** — hero service card with big mint countdown, progress
+  track, expandable route timeline; tap a service row to promote it to the
+  hero; swipe a row for a mint "Notify" arrival-alert action; restyled alert
+  sheet + floating armed pill.
+- **MRT station** — one glow-edged card per line (status, delay banner,
+  directions with platform + live crowd, tappable 5-station line strip);
+  lift-maintenance card; bus-stops-at-station + crowd forecast retained in
+  the new idiom.
+- **Search / Favourites / Alerts** — single ranked results card, card-per-
+  favourite with live soonest ETA, mint alert cards + quiet amber disruption
+  cards; floating pill tab bar (Nearby · Favourites · Alerts).
+- **New "route + live dot" app icon** — ink route curve to a mint live-dot
+  node on a mint gradient (dark appearance inverts); Android launcher set
+  regenerated from the same sources (replaces pin-clock).
+- **Widgets / Live Activity / notifications** — widget boards, lock-screen
+  Live Activity and Dynamic Island restyled to the same language; arrival
+  notification copy rewritten ("Bus 14 is arriving · Seats are available.
+  Please head to the stop now."), crowd woven into the final call only.
+- **What's New screen removed** (owner call, 2026-07-24) — the once-per-
+  update modal is gone along with `kChangelog`; release notes live here and
+  in the store listings only.
+- **Cleanup** — retired pre-WhereSia "Soft" UI deleted (~40 dead files:
+  V2/ except NativeAdCard + MrtStations, old Home/Detail/Nearby/Search/
+  Settings views, Glyphs, BusProgress); `WhatsNewView` and
+  `enableSwipeBack()` extracted to their own files.
+- **Design-QC polish pass** (2026-07-24, from the design-source review) —
+  amber/amberText now resolve per appearance (burnt amber in light mode —
+  the dark-tuned #FFB454/#E8C896 washed out on paper); distances ≥10 km
+  drop the decimal and the "away" caption disappears beyond 50 km; Stop
+  hero gains the missing "min" on "next buses:" and speaks crowd as
+  "seats available / standing room / limited space"; MRT station drops the
+  bare "Platform" label and hides the crowd gauge when unknown, crowd
+  forecast section only renders when a forecast exists (no more
+  "unavailable" card), first–last hours restyled to a quiet sans footnote;
+  Alerts groups lift outages into one quiet "LIFTS OUT OF SERVICE" card
+  (amber cards stay exclusive to train disruptions) and lift copy from the
+  LTA feed is de-shouted ("CONCOURSE - PLATFORM A" → "Concourse –
+  Platform A").
+- **Soft-blue "4b" pivot** (owner call, 2026-07-24/25) — supersedes the
+  green-dark language above on the screens it's reached so far: tinted pale
+  ground, floating white cards, one blue accent gradient, greyscale-first
+  ink text (tokens in `WSSoftTheme.swift`). Nearby (Home) converted first;
+  the Nearby Map screen converted 2026-07-25 (light MapKit style instead of
+  forced-dark cartography, white icon-button/card chrome, blue stop dots,
+  official line colours kept on MRT/LRT markers). Remaining WhereSia
+  screens (Stop, MRT station, Search, Saved, Alerts, widgets/Live Activity)
+  still read the green-dark palette — full pass + version bump + changelog
+  reconciliation still needed before this is archived.
+
+## Unreleased · Android · branch `design-greendark` · 2026-07-26
+
+**2026-07-26 — not yet built:** Feature-parity sweep against the iOS WhereSia
+screens, closing the gaps opened by the 2026-07-25/26 owner walkthrough that
+landed on iOS only. Design stays Material You — this pass is information
+hierarchy, missing features and navigation, not chrome. Maps remain iOS-only.
+
+- **Nearby / Saved heroes rebuilt** — the stop NAME is the card title with its
+  next three DISTINCT services as a board underneath; the countdown ring and
+  the "Bus 165 → …" title are gone (the bus was the biggest text on a card
+  about a stop). Saved keeps "Leave in X min" as a capsule.
+- **Stop metadata format unified** — `Stop 41101 · 2 min walk · 189m away`
+  everywhere (Nearby hero + rows, Saved cards). A bare 5-digit code no longer
+  prints alone.
+- **Nearby order** — filter chips moved BELOW the hero; the duplicate
+  "Closest to you" LIVE/updated header is gone (the screen caption already
+  carries freshness); sections renamed "Nearby stops" / "MRT stations"; the
+  MRT carousel is now a 2-up grid so all four stations read at once.
+- **Saved marks** — every saved stop / station / line card carries a star chip,
+  so the list no longer looks identical to Nearby.
+- **Stop identity card** — stop code, walk time and distance as three LABELLED
+  facts in one card, with the MRT interchange as its own chevron row.
+- **Stop closed/error state** — one composed card: today's FIRST & LAST BUS per
+  service, plus "Walk here" (walking directions via the user's maps app — new
+  on Android), "Save this stop", and "Try again" on a failed fetch.
+- **Track Bus screen retired** (iOS parity) — notification taps, deep links and
+  saved lines now open the Stop view with the service pinned in its hero
+  instead of stacking a second route screen; a bus SEARCH result opens Service
+  Info. `lib/screens/v2/soft_bus_screen.dart` deleted (was unreachable after
+  the rewire).
+
 ## Departly 3.0.0 · Android (55) · 2026-07-04
 
 **2026-07-04 — Android AAB (3.0.0, build 55):** Major release — the public

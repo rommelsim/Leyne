@@ -7,12 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'soft_alerts_screen.dart';
-import 'soft_bus_screen.dart';
 import 'soft_favourites_screen.dart';
 import 'soft_home_screen.dart';
 import 'soft_mrt_screen.dart';
 import 'soft_mrt_station_screen.dart';
 import 'soft_search_screen.dart';
+import 'soft_service_info_screen.dart';
 import 'soft_stop_screen.dart';
 import '../../data/data_store.dart';
 import '../../data/mrt_geo.dart';
@@ -192,7 +192,7 @@ class _SoftRootState extends State<SoftRoot> {
             // then Back again returns Home — instead of jumping straight to Home.
             onOpenStop: (code) => _pushStop(code),
             onOpenBus: (stopCode, svc) =>
-                _pushBus(stopCode, svc, fullRoute: true),
+                _pushServiceInfo(svc, fromStop: stopCode.isEmpty ? null : stopCode),
             onOpenStation: _pushMrtStationFromSearch,
             onTab: _handleTab,
           ),
@@ -214,20 +214,29 @@ class _SoftRootState extends State<SoftRoot> {
     }
   }
 
-  /// Push the bus route view for [svc] anchored at [stopCode]. [fullRoute]
-  /// shows the entire route (used for bus search, which has no boarding stop);
-  /// the per-stop arrival flow leaves it false for the narrow approach window.
-  void _pushBus(String stopCode, String svc, {bool fullRoute = false}) {
+  /// A saved LINE, or any "open this bus" intent that has a boarding stop:
+  /// opens that STOP with the service already featured in the hero.
+  ///
+  /// iOS retired the standalone Track Bus screen (WSRoot: "notification taps
+  /// open the Stop view with the service pinned"), and its saved-line card
+  /// pushes `.busStop(code:service:)`. The Stop screen's hero already carries
+  /// the route timeline for the featured service, so a second screen showing
+  /// the same route was a divergent answer to a question Stop answers.
+  void _pushBus(String stopCode, String svc) {
+    _pushStop(stopCode, initialService: svc);
+  }
+
+  /// A bus SEARCH result — there's no boarding stop, so there's no live board
+  /// to feature it on. iOS sends these to `.serviceInfo(no:fromStop:)`; this
+  /// is that screen.
+  void _pushServiceInfo(String serviceNo, {String? fromStop}) {
     _navKey.currentState?.push(
       MaterialPageRoute(
         settings: const RouteSettings(name: _kDetailRouteName),
-        builder: (_) => SoftBusScreen(
-          stopCode: stopCode,
-          svc: svc,
-          fullRoute: fullRoute,
+        builder: (_) => SoftServiceInfoScreen(
+          serviceNo: serviceNo,
+          fromStop: fromStop,
           onBack: () => _navKey.currentState?.pop(),
-          onTab: _handleTab,
-          tabSelection: _tab,
         ),
       ),
     );
@@ -264,14 +273,14 @@ class _SoftRootState extends State<SoftRoot> {
     );
   }
 
-  void _pushStop(String code) {
+  void _pushStop(String code, {String? initialService}) {
     _navKey.currentState?.push(
       MaterialPageRoute(
         settings: const RouteSettings(name: _kDetailRouteName),
         builder: (_) => SoftStopScreen(
           stopCode: code,
+          initialService: initialService,
           onBack: () => _navKey.currentState?.pop(),
-          onOpenBus: (svc) => _pushBus(code, svc),
           onTab: _handleTab,
           tabSelection: _tab,
           onSeeAll: () => _navKey.currentState?.push(
@@ -281,8 +290,7 @@ class _SoftRootState extends State<SoftRoot> {
                 stopCode: code,
                 showAll: true,
                 onBack: () => _navKey.currentState?.pop(),
-                onOpenBus: (svc) => _pushBus(code, svc),
-                onTab: _handleTab,
+                      onTab: _handleTab,
                 tabSelection: _tab,
                 onSeeAll: () {},
               ),

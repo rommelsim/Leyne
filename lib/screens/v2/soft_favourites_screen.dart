@@ -54,11 +54,14 @@
 import 'package:flutter/material.dart';
 
 import '../../data/data_store.dart';
+import '../../data/geo.dart';
 import '../../data/models.dart';
 import '../../data/mrt_geo.dart';
 import '../../data/mrt_stations.dart';
+import '../../services/location_service.dart';
 import '../../state/app_model.dart';
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/confidence.dart';
 import '../../widgets/v2/soft_components.dart';
@@ -89,23 +92,6 @@ int _liveEtaSec(Service s, DateTime now) => s.arrivalDate != null
     ? s.arrivalDate!.difference(now).inSeconds.clamp(0, 1 << 30)
     : s.etaSec;
 
-/// The soonest service among [services] by live ETA, or null. Considers
-/// every service regardless of `monitored` — matches iOS `wsSoonest`, which
-/// doesn't filter by monitored either (only the crowd line below it does).
-Service? _soonestOf(List<Service> services) {
-  if (services.isEmpty) return null;
-  final now = DateTime.now();
-  Service? best;
-  int? bestSec;
-  for (final s in services) {
-    final sec = _liveEtaSec(s, now);
-    if (bestSec == null || sec < bestSec) {
-      bestSec = sec;
-      best = s;
-    }
-  }
-  return best;
-}
 
 // ─── MRT line-name + crowd helpers ─────────────────────────────────────────
 // Passive lookups only — this screen doesn't own its own crowd fetch beyond
@@ -174,10 +160,14 @@ StationCrowd? _crowdFor(MrtGeoStation station) {
   return null;
 }
 
-/// Crowd dot colour — NEUTRAL ink (owner decision 2026-07-03, iOS WhereSia
-/// rule: crowd is never colour-coded; the word carries the level).
+/// Crowd dot colour. Superseded 2026-07-25 (soft-blue spec item 5): "High"
+/// crowd is amber — the one semantic colour exception to the earlier
+/// 2026-07-03 "crowd is never colour-coded" rule, which stands for
+/// low/moderate (still neutral ink; only the word carries the level there).
 Color _crowdColor(CrowdLevel level, LyneTheme t) {
-  return level == CrowdLevel.unknown ? t.faint : t.fg;
+  if (level == CrowdLevel.unknown) return t.faint;
+  if (level == CrowdLevel.high) return SoftBlue.amber;
+  return t.fg;
 }
 
 String _crowdWord(CrowdLevel level) {
@@ -278,6 +268,115 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
       AppModel.shared.favServices.isEmpty &&
       AppModel.shared.savedMrtStations.isEmpty;
 
+  // ── "Up next" hero (spec item 5, 2026-07-25 soft-blue redesign —
+  // supersedes the earlier "most urgent across all saved" rule) ───────────
+  //
+  // Pick = the nearest SAVED STOP by GPS distance (falls back to the first
+  // pinned/saved stop when location is unavailable), showing that stop's
+  // own soonest bus. When the picked stop has no live service right now,
+  // the hero STILL renders — "No live arrivals right now" (spec item 8,
+  // 2026-07-25: previously suppressed entirely, matching an earlier version
+  // of the iOS spec; WSSavedView's `savedHero` always shows the hero once
+  // there's a pinned stop, with that fallback text and no ring). Only
+  // returns null when there are no pinned stops at all — saved lines/MRT
+  // stations never contribute a candidate here (spec scope is "nearest
+  // saved stop").
+  _UrgentPick? _upNext(BuildContext context) {
+    final pins = AppModel.shared.pins;
+    if (pins.isEmpty) return null;
+
+    final loc = LocationService.shared.lastLocation;
+    Pin? nearestPin;
+    double? nearestDistanceM;
+    if (loc != null) {
+      for (final pin in pins) {
+        final latLon = DataStore.shared.stopLatLon(pin.code);
+        if (latLon == null) continue;
+        final d = haversine(loc.lat, loc.lon, latLon.lat, latLon.lon);
+        if (nearestDistanceM == null || d < nearestDistanceM) {
+          nearestDistanceM = d;
+          nearestPin = pin;
+        }
+      }
+    }
+    // Fallback: first pinned/saved stop (spec item 5) when GPS is off or no
+    // pinned stop resolves a geo position.
+    final pin = nearestPin ?? pins.first;
+
+    final code = pin.code;
+    final allSvcs = DataStore.shared.servicesFor(code);
+    final tracked = pin.tracked;
+    final services = (tracked != null && tracked.isNotEmpty)
+        ? allSvcs.where((s) => tracked.contains(s.no)).toList()
+        : allSvcs;
+    final stopName = DataStore.shared.stopName(code);
+    // The user's own nickname wins over the LTA description (iOS parity).
+    final name = pin.nickname.isNotEmpty
+        ? pin.nickname
+        : (stopName.isEmpty ? code : stopName);
+
+    // Shared metadata format (ui-checklist §2): STOP · MIN WALK · AWAY. Walk
+    // time and distance both need a location fix; without one the line
+    // degrades to the labelled code rather than guessing.
+    final walkMin = nearestDistanceM == null
+        ? null
+        : walkMinutesFor(nearestDistanceM);
+    final meta = stopCodeLabel(
+      code,
+      suffix: (walkMin != null && nearestDistanceM != null)
+          ? '$walkMin min walk · ${fmtDistance(nearestDistanceM.round())} away'
+          : null,
+    );
+
+    final now = DateTime.now();
+    final sorted = [...services]
+      ..sort((a, b) => _liveEtaSec(a, now).compareTo(_liveEtaSec(b, now)));
+
+    // Next three DISTINCT services — a feed repeat of the same bus is noise
+    // when the question is "which bus can I take" (§2).
+    final seen = <String>{};
+    final board = <({String no, String dest, String etaBig})>[
+      for (final s in sorted)
+        if (seen.add(s.no))
+          (no: s.no, dest: s.dest, etaBig: fmtEta(_liveEtaSec(s, now)).big),
+    ].take(3).toList();
+
+    // "Leave in X min": X = ETA − walk time, walk at 5 km/h (`walkMinutesFor`,
+    // the same formula Nearby uses). Slack ≤ 0 → "Leave now". The walk minutes
+    // this used to repeat now live in the shared meta line above.
+    String? decision;
+    if (walkMin != null && board.isNotEmpty) {
+      final slack = (_liveEtaSec(sorted.first, now) / 60).ceil() - walkMin;
+      decision = slack <= 0 ? 'Leave now' : 'Leave in $slack min';
+    }
+
+    return _UrgentPick(
+      name: name,
+      meta: meta,
+      board: board,
+      decision: decision,
+      onOpen: () => widget.onOpenStop(code),
+    );
+  }
+
+  Widget _upNextHero(_UrgentPick pick) {
+    return Semantics(
+      button: true,
+      label: pick.board.isEmpty
+          ? 'Open ${pick.name}, no live arrivals right now'
+          : 'Open ${pick.name}',
+      child: SoftBoardHeroCard(
+        title: pick.name,
+        meta: pick.meta,
+        board: pick.board,
+        decision: pick.decision,
+        ctaLabel: 'Open stop',
+        onTap: pick.onOpen,
+      ),
+    );
+  }
+
+
   // ── Arrival resolution for the Lines section ────────────────────────────
 
   _Resolved? _atStopArrival(FavService fav) {
@@ -350,6 +449,10 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                         if (_isEmpty)
                           SliverToBoxAdapter(child: _emptyState(context))
                         else ...[
+                          if (_upNext(context) case final pick?) ...[
+                            SliverToBoxAdapter(child: _upNextHero(pick)),
+                            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                          ],
                           ..._stopsSectionSlivers(context),
                           // One native ad per screen, between the stops and
                           // Lines sections (iOS parity: WSSavedView). Zero-size
@@ -410,14 +513,17 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
 
   Widget _editButton(BuildContext context) {
     final t = context.t;
+    // Filled + shadow, no stroke (spec anti-rule #5) — was a bare
+    // hairline-bordered capsule with no fill.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => setState(() => _editing = !_editing),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
         decoration: BoxDecoration(
+          color: t.surface,
           borderRadius: BorderRadius.circular(LyneRadius.full),
-          border: Border.all(color: t.line, width: 1),
+          boxShadow: SoftBlue.chipShadow,
         ),
         child: AnimatedSwitcher(
           duration: LyneMotion.short,
@@ -477,26 +583,35 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   List<Widget> _stopsSectionSlivers(BuildContext context) {
     final pins = AppModel.shared.pins;
     final stations = AppModel.shared.savedMrtStations;
+    // Split into two headed groups (spec item 8, 2026-07-25 — was one
+    // continuous "Stops" section with no sub-header between pins and
+    // stations, which read as "too much going on" per the owner). Mirrors
+    // WSSavedView.swift's `list`: separate "Bus stops" / "MRT stations"
+    // `sectionHead`s, each only rendered when its group is non-empty.
     return [
-      SliverToBoxAdapter(
-        child: _sectionHeader(
-          context,
-          label: 'Stops',
-          meta: _updatedLabel(pins),
+      if (pins.isNotEmpty) ...[
+        SliverToBoxAdapter(
+          child: _sectionHeader(
+            context,
+            label: 'Bus stops',
+            meta: _updatedLabel(pins),
+          ),
         ),
-      ),
-      if (pins.isNotEmpty || stations.isNotEmpty) ...[
         const SliverToBoxAdapter(child: SizedBox(height: 10)),
+        _editing
+            ? _reorderablePinsSliver(context, pins)
+            : SliverToBoxAdapter(child: _staticPins(context, pins)),
+      ],
+      if (stations.isNotEmpty) ...[
         if (pins.isNotEmpty)
-          _editing
-              ? _reorderablePinsSliver(context, pins)
-              : SliverToBoxAdapter(child: _staticPins(context, pins)),
-        if (pins.isNotEmpty && stations.isNotEmpty)
-          const SliverToBoxAdapter(child: SizedBox(height: 10)),
-        if (stations.isNotEmpty)
-          _editing
-              ? _reorderableStationsSliver(context, stations)
-              : SliverToBoxAdapter(child: _staticStations(context, stations)),
+          const SliverToBoxAdapter(child: SizedBox(height: 20)),
+        SliverToBoxAdapter(
+          child: _sectionHeader(context, label: 'MRT stations'),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 10)),
+        _editing
+            ? _reorderableStationsSliver(context, stations)
+            : SliverToBoxAdapter(child: _staticStations(context, stations)),
       ],
     ];
   }
@@ -536,6 +651,7 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
                 child: _StopCard(
                   pin: pin,
                   onTap: () => widget.onOpenStop(pin.code),
+                  onLongPress: () => _showRenameDialog(context, pin),
                 ),
               ),
               const SizedBox(width: 8),
@@ -578,8 +694,50 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
         // the list; we never let Dismissible remove the widget itself.
         return false;
       },
-      child: _StopCard(pin: pin, onTap: () => widget.onOpenStop(code)),
+      child: _StopCard(
+        pin: pin,
+        onTap: () => widget.onOpenStop(code),
+        onLongPress: () => _showRenameDialog(context, pin),
+      ),
     );
+  }
+
+  /// Long-press rename for a pinned stop (spec item 8) — mirrors iOS
+  /// WSSavedView's `.alert("Rename stop", ...)` context-menu action, as a
+  /// Material text-input dialog. Saves via `AppModel.rename`, which persists
+  /// the nickname and drives the same `LabelPill` the card already renders.
+  Future<void> _showRenameDialog(BuildContext context, Pin pin) async {
+    final controller = TextEditingController(text: pin.nickname);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final t = dialogContext.t;
+        return AlertDialog(
+          title: const Text('Rename stop'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(hintText: 'Nickname'),
+            onSubmitted: (v) => Navigator.of(dialogContext).pop(v),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text),
+              child: Text('Save', style: TextStyle(color: t.accent)),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (result != null) {
+      AppModel.shared.rename(pin.code, result);
+    }
   }
 
   Widget _staticStations(BuildContext context, List<MrtGeoStation> items) {
@@ -807,26 +965,114 @@ class _SoftFavouritesScreenState extends State<SoftFavouritesScreen> {
   // Mirrors WSSavedView.emptyState: centred glyph + title + one line of body
   // copy, no CTA button — WSSavedView doesn't have one either.
 
+  /// Spec item 5: a teaching card ("Stops you save appear here with live
+  /// timings") plus up to 3 nearest stops, each with a one-tap Save capsule
+  /// — replaces the old plain "Nothing saved yet" text-only empty state.
+  /// The nearest-stops list is whatever `DataStore.shared.nearby` already
+  /// has ranked (silently empty until location is on — Home already owns
+  /// the "turn on location" prompt, this screen doesn't duplicate it).
   Widget _emptyState(BuildContext context) {
-    final t = context.t;
+    final nearby = DataStore.shared.nearby.take(3).toList();
     return Padding(
-      padding: const EdgeInsets.only(top: 64),
+      padding: const EdgeInsets.only(top: 24),
       child: Column(
         children: [
-          Icon(Icons.bookmark_outline_rounded, size: 30, color: t.faint),
-          const SizedBox(height: 10),
-          Text(
-            'Nothing saved yet',
-            style: t.sans(15.5, weight: FontWeight.w700, color: t.fg),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: SoftBlue.card,
+              borderRadius: BorderRadius.circular(SoftBlue.cardRadius),
+              boxShadow: SoftBlue.cardShadow,
+            ),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.bookmark_outline_rounded,
+                  size: 28,
+                  color: SoftBlue.sub,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Stops you save appear here with live timings',
+                  textAlign: TextAlign.center,
+                  style: SoftBlue.sans(
+                    14.5,
+                    weight: FontWeight.w600,
+                    color: SoftBlue.ink,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Save a stop, station or bus to keep it\none tap away.',
-            textAlign: TextAlign.center,
-            style: t.sans(13, weight: FontWeight.w500, color: t.dim),
-          ),
+          if (nearby.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            for (final stop in nearby) ...[
+              _nearestSaveRow(context, stop),
+              const SizedBox(height: 8),
+            ],
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _nearestSaveRow(BuildContext context, NearbyStop stop) {
+    final name = stop.stopName.isEmpty ? stop.stopCode : stop.stopName;
+    return ListenableBuilder(
+      listenable: AppModel.shared,
+      builder: (context, _) {
+        final saved = AppModel.shared.pinForCode(stop.stopCode) != null;
+        return SoftCard(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: SoftBlue.sans(
+                        14,
+                        weight: FontWeight.w600,
+                        color: SoftBlue.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    SoftStopCode(stop.stopCode, color: SoftBlue.sub),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: () => AppModel.shared.togglePin(stop.stopCode),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: saved ? SoftBlue.chipBg : SoftBlue.ink,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    saved ? 'Saved' : 'Save',
+                    style: SoftBlue.sans(
+                      12.5,
+                      weight: FontWeight.w700,
+                      color: saved ? SoftBlue.chipInk : Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -842,6 +1088,45 @@ class _Resolved {
   final Service svc;
   final String stopName;
   final String stopCode;
+}
+
+// ─── Most-urgent hero candidate ─────────────────────────────────────────────
+
+/// The "Up next" hero candidate — the nearest saved stop and its own mini
+/// departure board (spec item 5). See `_SoftFavouritesScreenState._upNext`.
+///
+/// Restructured 2026-07-25 to match iOS `WSSavedView.savedHero`: the saved
+/// STOP names the card and the buses follow it as a board. The countdown ring
+/// came out for the same reason it did on Nearby — it spent a third of the
+/// card on one bus's number while the other departures at that stop had
+/// nowhere to go.
+class _UrgentPick {
+  const _UrgentPick({
+    required this.name,
+    required this.meta,
+    required this.board,
+    required this.decision,
+    required this.onOpen,
+  });
+
+  /// The stop's nickname if the user set one, else its name — this is the
+  /// card's TITLE. Place first, then departures (ui-checklist §2).
+  final String name;
+
+  /// `Stop 11119 · 1 min walk · 68m away`, built by `stopCodeLabel`.
+  final String meta;
+
+  /// Up to three DISTINCT services at that stop, soonest first. Empty when
+  /// the feed has nothing running — the hero still renders (never suppressed)
+  /// with "No live arrivals right now".
+  final List<({String no, String dest, String etaBig})> board;
+
+  /// The one line on this card that's a decision rather than data:
+  /// "Leave now" / "Leave in 4 min". Null without a location fix — the hero
+  /// never states a walk time it can't back up.
+  final String? decision;
+
+  final VoidCallback onOpen;
 }
 
 // ─── Crowd dot chip (saved MRT station rows) ───────────────────────────────
@@ -906,65 +1191,6 @@ Widget _lineCodeChip(String code) {
   );
 }
 
-// ─── Service tile row ───────────────────────────────────────────────────────
-
-/// Row of a stop's service-number tiles, capped at 3 with a trailing "+N"
-/// overflow tile. Mirrors WSSavedView.swift's TileRow (134-167) / RouteTile /
-/// OverflowTile — a hairline-bordered tile rather than Android's older solid
-/// pill chip.
-class _ServiceChipRow extends StatelessWidget {
-  const _ServiceChipRow({required this.services, required this.t});
-
-  final List<String> services;
-  final LyneTheme t;
-
-  /// Tiles shown before overflowing into a trailing "+N" tile — matches
-  /// iOS TileRow's `cap: 3`.
-  static const int _cap = 3;
-
-  @override
-  Widget build(BuildContext context) {
-    final shown = services.take(_cap).toList();
-    final overflow = services.length - shown.length;
-    return Wrap(
-      spacing: 5,
-      runSpacing: 5,
-      children: [
-        for (final no in shown) _tile(no, dim: false),
-        if (overflow > 0) _tile('+$overflow', dim: true),
-      ],
-    );
-  }
-
-  // NOTE: no bare `alignment:` on this Container — alignment set with no
-  // explicit width makes a Container EXPAND to fill the incoming max width,
-  // which is exactly what stretched every tile to the card's full width and
-  // stacked them one-per-line (owner-reported "route chips stacked
-  // vertically" — screenshot showed 7/61/75/+4 as full-width pills). Wrapping
-  // in IntrinsicWidth keeps the pill hugging its label while minWidth still
-  // enforces a floor for short codes. Same bug/fix already shipped for
-  // Home's _RouteChipsRow._tile (see soft_home_screen.dart's NOTE there).
-  Widget _tile(String label, {required bool dim}) {
-    return IntrinsicWidth(
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 26, minHeight: 21),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(7),
-          border: Border.all(color: t.line, width: 1),
-        ),
-        child: Text(
-          label,
-          // 10.5 → 11: clears the branch's 11pt legibility floor (matches
-          // Home's equivalent tile).
-          style: t.mono(11, weight: FontWeight.w700, color: dim ? t.dim : t.fg),
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Saved stop card ─────────────────────────────────────────────────────────
 
 /// Mirrors WSSavedView.swift's `savedStopRow`: name · "code · ROAD" subline ·
@@ -974,10 +1200,13 @@ class _ServiceChipRow extends StatelessWidget {
 /// `LabelPill`, matching iOS's small-caps label rather than swapping title
 /// and subtitle.
 class _StopCard extends StatelessWidget {
-  const _StopCard({required this.pin, required this.onTap});
+  const _StopCard({required this.pin, required this.onTap, this.onLongPress});
 
   final Pin pin;
   final VoidCallback onTap;
+
+  /// Long-press → rename dialog (spec item 8). Null in read-only contexts.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -985,7 +1214,23 @@ class _StopCard extends StatelessWidget {
     final code = pin.code;
     final stopName = DataStore.shared.stopName(code);
     final road = DataStore.shared.roadName(code);
-    final subtitle = road.isEmpty ? code : '$code · ${road.toUpperCase()}';
+    // Distance appended when GPS + this stop's geo position are both known
+    // (spec item 5: "distance shown in the meta line") — omitted rather than
+    // faked when either is unavailable.
+    // Shared metadata format (ui-checklist §2): MIN WALK · METRES, after the
+    // labelled code. With no location fix there's neither, so the road name
+    // stands in as the "where" rather than leaving the line blank — matching
+    // iOS WSSavedView.savedStopCard's `meta`.
+    String? metaSuffix;
+    final loc = LocationService.shared.lastLocation;
+    final latLon = DataStore.shared.stopLatLon(code);
+    if (loc != null && latLon != null) {
+      final d = haversine(loc.lat, loc.lon, latLon.lat, latLon.lon);
+      metaSuffix = '${walkMinutesFor(d)} min walk · ${fmtDistance(d.round())}';
+    } else if (road.isNotEmpty) {
+      metaSuffix = road.toUpperCase();
+    }
+    final subtitle = stopCodeLabel(code, suffix: metaSuffix);
 
     // Service list — respects a pin's tracked subset when set (Android-only
     // per-pin bus selection; iOS's Saved view always shows every service at
@@ -997,10 +1242,6 @@ class _StopCard extends StatelessWidget {
         ? allSvcs.where((s) => tracked.contains(s.no)).toList()
         : allSvcs;
 
-    final routeNos = DataStore.shared.servicesAtStop(code);
-    final tiles = routeNos.isNotEmpty
-        ? routeNos
-        : services.map((s) => s.no).toList();
     final nickname = pin.nickname.trim();
 
     return Semantics(
@@ -1012,6 +1253,7 @@ class _StopCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
+          onLongPress: onLongPress,
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -1028,11 +1270,27 @@ class _StopCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                       ],
-                      Text(
-                        stopName,
-                        style: t.sans(17, weight: FontWeight.w600, color: t.fg),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      // The star chip states "this is saved" on the card
+                      // itself. Without it the Saved list was visually
+                      // identical to the Nearby list and the state was implied
+                      // only by which tab you were on (iOS parity, 2026-07-25).
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              stopName,
+                              style: t.sans(
+                                17,
+                                weight: FontWeight.w600,
+                                color: t.fg,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const SoftSavedMark(),
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -1041,10 +1299,9 @@ class _StopCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (tiles.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        _ServiceChipRow(services: tiles, t: t),
-                      ],
+                      // No route-tile chip row (spec item 8, 2026-07-25:
+                      // owner — "too much going on"; deleted along with
+                      // `_ServiceChipRow`, which had no other call sites).
                     ],
                   ),
                 ),
@@ -1064,7 +1321,7 @@ class _StopCard extends StatelessWidget {
                 // the effective width, guaranteeing the stop-name column
                 // keeps its share.
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 130),
+                  constraints: const BoxConstraints(maxWidth: 148),
                   child: ListenableBuilder(
                     listenable: AppModel.shared,
                     builder: (context, _) => _SoonestColumn(services: services),
@@ -1079,76 +1336,36 @@ class _StopCard extends StatelessWidget {
   }
 }
 
-/// Trailing soonest-arrival column for a saved stop: a big ETA number, and —
-/// only when the soonest bus is a real live/GPS reading, not a schedule-only
-/// estimate — "Bus {no} ·" plus the compact CrowdMeter word. Mirrors
-/// WSSavedView's trailing VStack (eta + "Bus {no} ·" + CrowdGauge + word).
+/// Mini departure board for a saved stop card: up to TWO segmented
+/// [SoftBusTimePill]s (spec item 5), soonest first, fixed segment widths so
+/// the number/time boundary lines up between the two rows. Replaces the
+/// former single-big-ETA + CrowdMeter-word column.
 class _SoonestColumn extends StatelessWidget {
   const _SoonestColumn({required this.services});
 
   final List<Service> services;
 
+  static const double _noWidth = 40;
+  static const double _timeWidth = 54;
+
   @override
   Widget build(BuildContext context) {
-    final soonest = _soonestOf(services);
-    if (soonest == null) return const SizedBox.shrink();
-    final t = context.t;
-    final eta = fmtEta(_liveEtaSec(soonest, DateTime.now()));
-    final arriving = eta.big == 'Arr';
+    final now = DateTime.now();
+    final sorted = [...services]
+      ..sort((a, b) => _liveEtaSec(a, now).compareTo(_liveEtaSec(b, now)));
+    final top = sorted.take(2).toList();
+    if (top.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // iOS parity fix (owner-reported "ETA is not the correct format
-        // as iOS" — screenshot showed lowercase "now" as the big headline):
-        // `eta.big` ("Arr" or the minute number) is ALWAYS the headline;
-        // `eta.small` ("now"/"min") never renders as the big text. Mirrors
-        // WSSavedView.swift's savedStopRow:
-        // `Text(eta.big) + Text(eta.big == "Arr" ? "" : " min")`, and matches
-        // Home's own working `_whenColumn` pattern in soft_home_screen.dart.
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: eta.big,
-                style: t.mono(19, weight: FontWeight.w700, color: t.fg),
-              ),
-              if (!arriving)
-                TextSpan(
-                  text: ' min',
-                  style: t.mono(11, weight: FontWeight.w600, color: t.dim),
-                ),
-            ],
-          ),
-        ),
-        if (soonest.monitored) ...[
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 10pt matches WSSavedView's `ws.mono(10)` for this prefix —
-              // also keeps this row's fixed-width portion under the 130 cap
-              // above with room for the crowd word, avoiding a RenderFlex
-              // overflow at the width cap.
-              Text('Bus ${soonest.no} · ', style: t.mono(10, color: t.dim)),
-              // No glyphs (2026-07-03, coordinator/Home parity finding): the
-              // three person icons alone cost ~42dp and, inside this
-              // already width-capped column, were the biggest single
-              // contributor to crushing the stop-name title (owner-reported
-              // "route chips stacked vertically" traced back to the same
-              // width starvation as Home's). The word alone carries the
-              // crowd level in this compact context — matches Home's
-              // `_whenColumn` CrowdMeter call. Flexible so the compact word
-              // ellipsizes instead of overflowing when the 130-wide host is
-              // tight — safe here specifically because the host is bounded.
-              Flexible(
-                child: CrowdMeter(
-                  load: soonest.load,
-                  compact: true,
-                  showGlyphs: false,
-                ),
-              ),
-            ],
+        for (var i = 0; i < top.length; i++) ...[
+          if (i > 0) const SizedBox(height: 6),
+          SoftBusTimePill(
+            no: top[i].no,
+            etaBig: fmtEta(_liveEtaSec(top[i], now)).big,
+            noWidth: _noWidth,
+            timeWidth: _timeWidth,
           ),
         ],
       ],
@@ -1189,11 +1406,23 @@ class _StationCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      station.name,
-                      style: t.sans(17, weight: FontWeight.w600, color: t.fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            station.name,
+                            style: t.sans(
+                              17,
+                              weight: FontWeight.w600,
+                              color: t.fg,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const SoftSavedMark(),
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1261,11 +1490,23 @@ class _LineCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      destText,
-                      style: t.sans(15, weight: FontWeight.w700, color: t.fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            destText,
+                            style: t.sans(
+                              15,
+                              weight: FontWeight.w700,
+                              color: t.fg,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const SoftSavedMark(),
+                      ],
                     ),
                     const SizedBox(height: 3),
                     Text(

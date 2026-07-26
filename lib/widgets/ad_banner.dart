@@ -36,6 +36,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../services/ad_consent.dart';
 import '../theme.dart';
+import '../theme/soft_blue.dart';
 
 /// True when this build should serve Google's universal TEST ad unit instead
 /// of the production banner.
@@ -416,23 +417,29 @@ class _NativeAdCardState extends State<NativeAdCard> {
 
     final t = context.t;
 
-    // Outer frame mirrors _NearbyCard: Material surface + 1 pt line border +
-    // 18 pt corner radius + antiAlias clip so the SDK platform view is
-    // contained inside the rounded rect.
-    final card = Material(
-      color: t.surface,
-      borderRadius: BorderRadius.circular(_cardRadius),
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(_cardRadius),
-          border: Border.all(color: t.line),
+    // Outer frame: white card + the one shadow recipe (soft-blue-design.md
+    // §3) instead of the bare 1pt border it used before (anti-rule #5 —
+    // filled+shadow, never a stroke on its own). The shadow container is
+    // the OUTER widget; the ripple/clip-relevant Material inside stays
+    // transparent so its antiAlias clip (needed to keep the SDK platform
+    // view inside the rounded rect) doesn't clip the shadow off.
+    final card = Container(
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(_cardRadius),
+        boxShadow: SoftBlue.cardShadow,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(_cardRadius),
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          // TemplateType.medium renders at ≈120–160 pt; floor at 120 so a
+          // sparse creative still fills a card-height slot, ceiling at 200
+          // so it never dominates the list on large-text devices.
+          constraints: const BoxConstraints(minHeight: 120, maxHeight: 200),
+          child: AdWidget(ad: _ad!),
         ),
-        // TemplateType.medium renders at ≈120–160 pt; floor at 120 so a
-        // sparse creative still fills a card-height slot, ceiling at 200 so
-        // it never dominates the list on large-text devices.
-        constraints: const BoxConstraints(minHeight: 120, maxHeight: 200),
-        child: AdWidget(ad: _ad!),
       ),
     );
     final pad = widget.padding;

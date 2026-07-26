@@ -19,31 +19,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lyne/main.dart';
-import 'package:lyne/screens/launch_screen.dart';
 import 'package:lyne/state/app_model.dart';
 
-/// Dismisses the one-shot [LaunchScreen] overlay that now sits over the root
-/// shell on every cold start for a returning (onboardingDone) user — mirrors
-/// a user's tap-to-skip. Every test below pumps `LyneApp` with
-/// `lyne.onboardingDone: true`, so without this the splash's own full-screen
-/// GestureDetector would swallow every subsequent `tester.tap()`.
+/// The Flutter-drawn "Departly" launch splash was removed (owner 2026-07-25)
+/// — cold start lands straight on the root shell, so tests no longer need a
+/// skip step. This helper survives as a single settling pump for the first
+/// frame's entrance animations.
 Future<void> _skipLaunchScreen(WidgetTester tester) async {
-  await tester.tap(find.byType(LaunchScreen));
-  // A leading zero-duration pump lets the exit AnimationController's ticker
-  // fire its first callback — which is when it latches its internal
-  // start-time reference — BEFORE the clock jumps in the next pump. Skip
-  // this and the following duration-jump becomes the ticker's reference
-  // point instead, so the animation reads as having barely started rather
-  // than completed.
   await tester.pump();
-  // Tap-to-skip's exit animation is 350ms; this pump advances past it and
-  // fires onDone(), which calls setState(_launching = false) in _AppRoot.
   await tester.pump(const Duration(milliseconds: 400));
-  // One more pump lets that setState rebuild _AppRoot and unmount the (now
-  // fully transparent, but still hit-testable — Opacity doesn't gate
-  // hit-testing) LaunchScreen. Without this its opaque GestureDetector keeps
-  // swallowing taps for one more frame even though nothing is visible.
-  await tester.pump();
 }
 
 void main() {
@@ -66,20 +50,40 @@ void main() {
     // search entry point (see the "pops the nested stack" test below) and
     // stays a pushed route (SoftTab.search). MRT lost its destination in the
     // owner walkthrough (2026-07-03): stations open from Home's strip/Search.
-    expect(find.text('Home'), findsAtLeastNWidgets(1));
-    expect(find.text('Saved'), findsAtLeastNWidgets(1));
-    expect(find.text('Alerts'), findsAtLeastNWidgets(1));
-    expect(find.text('MRT'), findsNothing);
+    //
+    // Soft pill bar (2026-07-25 redesign): only the SELECTED tab renders its
+    // text label — resting tabs are icon-only (each still carries its name
+    // via Semantics for TalkBack). Home starts selected, so its label is the
+    // only one visible; the other two are asserted by icon + semantics.
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Saved'), findsNothing);
+    expect(find.text('Alerts'), findsNothing);
+    expect(find.byIcon(Icons.bookmark_outline_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.notifications_outlined), findsOneWidget);
+    expect(find.bySemanticsLabel('Saved'), findsAtLeastNWidgets(1));
+    expect(find.bySemanticsLabel('Alerts'), findsAtLeastNWidgets(1));
+    // MRT lost its bottom-bar DESTINATION (2026-07-03) — but "MRT" now
+    // legitimately appears as one of Home's All/Buses/MRT filter chips
+    // (2026-07-25, parity-audit item 7), so this no longer asserts absence
+    // of the text itself; the tab-icon assertions above already cover the
+    // bottom bar's actual destinations.
 
-    // The Bus (Home) tab is the initial tab — its empty-state copy is visible.
-    expect(find.text('No stops yet'), findsOneWidget);
+    // The Bus (Home) tab is the initial tab — its header title is visible.
+    expect(find.text('Nearby'), findsOneWidget);
 
     // Switch to Alerts; pump one frame for the tap, one for the layout.
     await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    // The Alerts screen header carries its subtitle unconditionally.
-    expect(find.text('Service status & your notifications'), findsOneWidget);
+    // The Alerts screen's status-first summary card (spec item 9,
+    // 2026-07-25 — replaced the old static "Service status & your
+    // notifications" subtitle) renders "All MRT lines running normally"
+    // whenever there are no disruptions, which is always true here since
+    // this harness never calls bootstrap(). The bar's visible label follows
+    // the selection.
+    expect(find.text('All MRT lines running normally'), findsOneWidget);
+    expect(find.text('Alerts'), findsAtLeastNWidgets(1));
+    expect(find.text('Home'), findsNothing);
 
     // Drain the bounded App-Open-ad preload poll (15 × 800 ms chained timers
     // scheduled from SoftRoot.initState) so no timer is left pending at
@@ -106,18 +110,22 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
+    expect(find.text('Nearby'), findsOneWidget); // on Home (Bus) tab
 
     // Open Search — no longer a bottom-bar destination, so this goes through
-    // the Home empty state's own "Search" button (onOpenSearch), same as a
-    // real user reaching it from Home's search bar. SoftRoot still PUSHES it
-    // onto the nested navigator (it is not a state-swap like the other
-    // tabs), so the nested stack now has 2 routes.
-    await tester.tap(find.text('Search'));
+    // Home's own tap-to-search pill (onOpenSearch), same as a real user
+    // reaching it from Home. (Prior to the 2026-07-25 loading-skeleton pass
+    // this tapped the empty state's "Search" text button — that button no
+    // longer renders while `referenceState` is stuck "loading" in this test
+    // harness, which never calls `bootstrap()`; the always-present search
+    // pill is the more realistic entry point regardless of load state.)
+    // SoftRoot still PUSHES it onto the nested navigator (it is not a
+    // state-swap like the other tabs), so the nested stack now has 2 routes.
+    await tester.tap(find.text('Stop, bus, MRT or postal code'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300)); // fade-through
     expect(find.text('Find a stop, bus or place'), findsOneWidget);
-    expect(find.text('No stops yet'), findsNothing); // Home is offstage below
+    expect(find.text('Nearby'), findsNothing); // Home is offstage below
 
     // Simulate the hardware/3-button BACK key. handlePopRoute returns true only
     // if an in-app observer consumed it (i.e. the back did NOT escape to the OS
@@ -128,7 +136,7 @@ void main() {
 
     expect(handled, isTrue); // consumed in-app, not an app exit
     expect(find.text('Find a stop, bus or place'), findsNothing);
-    expect(find.text('No stops yet'), findsOneWidget); // back on Home
+    expect(find.text('Nearby'), findsOneWidget); // back on Home
 
     // Drain the bounded App-Open-ad preload poll (see note above) so no timer
     // is left pending at teardown.
@@ -151,22 +159,22 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
+    expect(find.text('Nearby'), findsOneWidget); // on Home (Bus) tab
 
     // Switch to the Alerts tab (a setState swap — no nested route pushed).
     await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Service status & your notifications'), findsOneWidget);
-    expect(find.text('No stops yet'), findsNothing);
+    expect(find.text('All MRT lines running normally'), findsOneWidget);
+    expect(find.text('Nearby'), findsNothing);
 
     // System BACK from a non-Home tab must be consumed in-app and land on Home.
     final handledFromTab = await tester.binding.handlePopRoute();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(handledFromTab, isTrue); // NOT an app exit
-    expect(find.text('Service status & your notifications'), findsNothing);
-    expect(find.text('No stops yet'), findsOneWidget); // back on Home
+    expect(find.text('All MRT lines running normally'), findsNothing);
+    expect(find.text('Nearby'), findsOneWidget); // back on Home
 
     // System BACK from Home with nothing pushed falls through to the OS (exit) —
     // handlePopRoute returns false, i.e. not consumed in-app.
@@ -196,7 +204,7 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('No stops yet'), findsOneWidget); // on Home (Bus) tab
+    expect(find.text('Nearby'), findsOneWidget); // on Home (Bus) tab
 
     // Home → Saved (a setState tab swap). The Saved destination becomes
     // selected (filled bookmark).
@@ -207,30 +215,30 @@ void main() {
       find.byIcon(Icons.bookmark_rounded),
       findsAtLeastNWidgets(1),
     ); // Saved
-    expect(find.text('No stops yet'), findsNothing); // Home not shown
+    expect(find.text('Nearby'), findsNothing); // Home not shown
 
     // Saved → Alerts (another tab swap).
     await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Service status & your notifications'), findsOneWidget);
+    expect(find.text('All MRT lines running normally'), findsOneWidget);
 
     // BACK #1 must retrace to Saved — NOT jump to Home.
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Service status & your notifications'), findsNothing);
+    expect(find.text('All MRT lines running normally'), findsNothing);
     expect(
       find.byIcon(Icons.bookmark_rounded),
       findsAtLeastNWidgets(1),
     ); // Saved
-    expect(find.text('No stops yet'), findsNothing); // crucially NOT Home
+    expect(find.text('Nearby'), findsNothing); // crucially NOT Home
 
     // BACK #2 retraces to Home.
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('No stops yet'), findsOneWidget); // back on Home
+    expect(find.text('Nearby'), findsOneWidget); // back on Home
 
     // BACK #3 — history empty, on Home, nothing pushed → falls through to the
     // OS (app exit): handlePopRoute returns false (not consumed in-app).
@@ -276,7 +284,7 @@ void main() {
     await tester.pumpWidget(const LyneApp());
     await tester.pump(); // initial frame
     await _skipLaunchScreen(tester);
-    expect(find.text('No stops yet'), findsOneWidget); // Home (Bus) tab
+    expect(find.text('Nearby'), findsOneWidget); // Home (Bus) tab
 
     // At the Home root with nothing pushed, BACK should exit → the OS owns it,
     // so the framework must have announced it does NOT handle back.
@@ -297,7 +305,7 @@ void main() {
     await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Service status & your notifications'), findsOneWidget);
+    expect(find.text('All MRT lines running normally'), findsOneWidget);
     expect(
       handlesBack.last,
       isTrue,
@@ -310,7 +318,7 @@ void main() {
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('No stops yet'), findsOneWidget); // back on Home
+    expect(find.text('Nearby'), findsOneWidget); // back on Home
     expect(
       handlesBack.last,
       isFalse,

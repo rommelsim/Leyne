@@ -1,6 +1,8 @@
 // AlertTiming — pure timing + copy rules for the two notification alert types,
-// factored out so they can be unit-tested without a notification host and kept
-// identical to the Flutter side (lib/data/alert_timing.dart).
+// factored out so they can be unit-tested without a notification host. The
+// TIMING logic mirrors the Flutter side (lib/data/alert_timing.dart) exactly.
+// The arrival notification COPY diverged from Android as of the
+// design-greendark voice pass — see the note above arrivalTitle/arrivalBody.
 //
 //   • arrival     — fire `lead` minutes before the bus reaches YOUR stop.
 //   • destination — fire `lead` minutes before the bus is estimated to reach
@@ -11,6 +13,19 @@
 import Foundation
 
 enum AlertKind: String, Codable, Equatable { case arrival, destination }
+
+extension Load {
+    /// Confident, concrete crowd clause for the final-call notification body
+    /// (e.g. "Seats are available"). Matches the voice of the in-app crowd
+    /// word (`Load.label`) but phrased as a sentence fragment.
+    var notificationClause: String {
+        switch self {
+        case .sea: return "Seats are available"
+        case .sda: return "Standing room only"
+        case .lsd: return "It's crowded — expect to stand"
+        }
+    }
+}
 
 enum AlertTiming {
 
@@ -76,18 +91,54 @@ enum AlertTiming {
     }
 
     // ── Notification copy ────────────────────────────────────────
+    //
+    // "Departly green-dark" voice pass (design-greendark): confident and
+    // concrete, no emoji clutter — the title states the fact ("Bus 14 is
+    // arriving" / "Bus 14 is 3 min away"), the body gives the one instruction
+    // that matters right now.
+    //
+    // Crowd is woven into the body ONLY on the 1-min final call, never the
+    // 3-min heads-up. Both leads have `load` plumbed through from the same
+    // live `Service` the ETA came from (see NotificationsManager
+    // .scheduleArrivalAlerts), so the data isn't missing at 3 min out — it's
+    // withheld on purpose: occupancy on a bus still 3 minutes away is exactly
+    // the kind of fast-changing read that's stale by the time it matters,
+    // the same reasoning this file already applied to omitting a stops-away
+    // count from arrival bodies. At 1 min out the snapshot is close enough to
+    // fire time to say it plainly.
+    //
+    // No stops-away count in the body, at either lead: scheduleArrivalAlerts
+    // only computes an ETA at schedule time, not a live GPS stops-away figure
+    // (that's Live Activity/Dynamic Island territory, which DOES push a real
+    // `stopsAway`). Saying "2 stops away" here would be inventing a number
+    // this call site doesn't have.
 
-    /// Notification title — leading icon + bus + how-soon, front-loaded so it's
-    /// scannable at a glance. The icon differs by lead: a clock for the 3-min
-    /// heads-up, a bus pulling in for the 1-min final call.
+    /// Notification title — states the fact, front-loaded so it's scannable
+    /// at a glance.
     static func arrivalTitle(_ busNo: String, leadMinutes: Int) -> String {
-        leadMinutes <= 1 ? "🚍 Bus \(busNo) — arriving now"
-                         : "🕒 Bus \(busNo) — \(leadMinutes) min away"
+        leadMinutes <= 1 ? "Bus \(busNo) is arriving"
+                         : "Bus \(busNo) is \(leadMinutes) min away"
     }
 
-    /// Notification body — the stop, with a "get ready" nudge on the final call.
-    static func arrivalBody(stopName: String, leadMinutes: Int) -> String {
-        leadMinutes <= 1 ? "Get ready — \(stopName)" : "Heading to \(stopName)"
+    /// Notification body — WHICH bus this is (destination) and WHERE you catch
+    /// it (stop), with crowd woven in when known (final call only — see the
+    /// note above) and a direct action on the final call.
+    ///
+    /// The 3-min body used to be a bare "Heading to <stop>." — left over from
+    /// the greendark voice pass, and the last surface still speaking it
+    /// (owner 2026-07-25, "notification is using old code"). Two problems: it
+    /// read as if YOU were heading there, and it repeated the stop the title
+    /// already implied while omitting the one thing that disambiguates a bus
+    /// number — its destination. The app's own board says "Bus 165 · to
+    /// Clementi Int" everywhere; the notification now says the same.
+    static func arrivalBody(stopName: String, leadMinutes: Int,
+                            dest: String? = nil, load: Load? = nil) -> String {
+        // `dest` is absent on legacy/unresolved rows — the clause is dropped
+        // rather than guessed, same rule the rest of this file follows.
+        let route = dest.map { "to \($0) · " } ?? ""
+        guard leadMinutes <= 1 else { return "\(route)\(stopName)" }
+        let crowd = load.map { " \($0.notificationClause)." } ?? ""
+        return "\(route)\(stopName).\(crowd) Head to the stop now."
     }
 
     static func destinationTitle() -> String { "Your stop is next" }

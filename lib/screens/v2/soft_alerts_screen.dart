@@ -30,12 +30,16 @@ import 'package:flutter/material.dart';
 
 import '../../data/alert_timing.dart';
 import '../../data/data_store.dart';
+import '../../data/mrt_geo.dart';
+import '../../data/mrt_stations.dart';
 import '../../state/app_model.dart';
 import '../../state/bus_alert.dart';
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../../widgets/ad_banner.dart';
 import '../../widgets/v2/soft_components.dart';
 import '../../widgets/v2/soft_tab_bar.dart';
+import 'soft_mrt_station_screen.dart';
 
 class SoftAlertsScreen extends StatefulWidget {
   const SoftAlertsScreen({
@@ -115,18 +119,25 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                // Reordered (spec item 9, 2026-07-25): user alerts FIRST —
+                // they're the thing YOU asked the app to watch — then
+                // network disruptions, then lift outages. Previously service
+                // status/lifts sat above "Your alerts", burying the
+                // personal alerts the screen exists to manage.
                 children: [
                   _header(context),
+                  const SizedBox(height: 14),
+                  _summaryCard(context, trainAlerts, liftItems),
+                  const SizedBox(height: 20),
+                  _yourAlertsSection(context, busAlerts),
                   const SizedBox(height: 20),
                   _advisoriesSection(context, trainAlerts),
                   const SizedBox(height: 20),
                   _liftSection(context, liftItems),
-                  // One native ad per screen, between the system sections and
-                  // the user's own alerts (iOS parity: WSAlertsView).
-                  // Zero-size until a creative loads — padding applies only then.
+                  // One native ad per screen, after the live alert cards
+                  // (iOS parity: WSAlertsView). Zero-size until a creative
+                  // loads — padding applies only then.
                   const NativeAdCard(padding: EdgeInsets.only(top: 20)),
-                  const SizedBox(height: 20),
-                  _yourAlertsSection(context, busAlerts),
                 ],
               ),
             );
@@ -142,19 +153,70 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     final t = context.t;
     // No trailing gear — WSAlertsView has no settings entry on this screen
     // either (owner decision 2026-07-03, punch list item 9).
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Alerts',
-          style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+    // The static "Service status & your notifications" subtitle is gone
+    // (spec item 9, 2026-07-25) — replaced by the status-first summary card
+    // below, which actually says something ("4 alerts" said nothing, per
+    // owner feedback mirrored from WSAlertsView's `summaryCard`).
+    return Text(
+      'Alerts',
+      style: t.sans(28, weight: FontWeight.w700, color: t.fg),
+    );
+  }
+
+  /// Status-first summary card (spec item 9): leads with the NETWORK state —
+  /// normal service is the calm headline; disruptions take it over in amber
+  /// — with lift outages as context on the sub-line (never counted as
+  /// "alerts"). Mirrors iOS WSAlertsView's `summaryCard` exactly, replacing
+  /// the old static subtitle.
+  Widget _summaryCard(
+    BuildContext context,
+    List<TrainAlert> trainAlerts,
+    List<LiftMaintenance> lifts,
+  ) {
+    final t = context.t;
+    final disruptions = trainAlerts.length;
+    final liftCount = lifts.length;
+    return Material(
+      color: t.surface,
+      borderRadius: BorderRadius.circular(LyneRadius.lg),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _PulseDot(
+              color: disruptions > 0 ? t.warn : t.accent,
+              size: 7,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    disruptions > 0
+                        ? '$disruptions line ${disruptions == 1 ? 'disruption' : 'disruptions'}'
+                        : 'All MRT lines running normally',
+                    style: t.sans(
+                      14.5,
+                      weight: FontWeight.w600,
+                      color: disruptions > 0 ? t.warn : t.fg,
+                    ),
+                  ),
+                  if (liftCount > 0) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '$liftCount ${liftCount == 1 ? 'lift' : 'lifts'} out of service',
+                      style: t.sans(12, color: t.dim),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 2),
-        Text(
-          'Service status & your notifications',
-          style: t.sans(13, color: t.dim),
-        ),
-      ],
+      ),
     );
   }
 
@@ -202,27 +264,23 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.warning_amber_rounded,
-                              size: 14,
-                              color: LyneSeverity.warning.color,
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                alert.title,
-                                style: t.sans(
-                                  14,
-                                  weight: FontWeight.w600,
-                                  color: t.fg,
-                                ),
-                              ),
-                            ),
-                          ],
+                        // Fixed double-title bug (spec item 9, 2026-07-25):
+                        // this used to render `alert.title` here AND again
+                        // inside the chip below. The line NAME is the
+                        // correct headline (mirrors iOS's
+                        // `Text(wsLineNames(from: [a.lineCode]))`) — the
+                        // chip already carries the disruption title.
+                        Text(
+                          alert.line?.displayName ?? alert.lineCode,
+                          style: t.sans(
+                            14,
+                            weight: FontWeight.w600,
+                            color: t.fg,
+                          ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
+                        SoftDisruptionChip(text: alert.title),
+                        const SizedBox(height: 6),
                         Text(alert.detail, style: t.sans(13, color: t.dim)),
                       ],
                     ),
@@ -291,36 +349,124 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     );
   }
 
+  /// Resolves a lift's station name to the geo dataset, case-insensitively —
+  /// mirrors iOS WSAlertsView's `liftRow` station lookup. Null when the name
+  /// doesn't match (the row stays inert, matching iOS's `.disabled`).
+  MrtGeoStation? _resolveLiftStation(LiftMaintenance item) {
+    for (final s in MrtGeo.all) {
+      if (s.name.toLowerCase() == item.stationName.toLowerCase()) return s;
+    }
+    return null;
+  }
+
+  /// One lift-outage row: line pill for identity, tappable through to the
+  /// station screen when the station resolves in MrtGeo (spec item 9 —
+  /// previously inert and line-less). The redundant "Lift maintenance" chip
+  /// is gone — the section header already says that; the chip repeated it
+  /// on every row with no new information.
   Widget _liftRow(BuildContext context, LiftMaintenance item) {
     final t = context.t;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Icon(
-              Icons.construction_rounded,
-              size: 14,
-              color: LyneSeverity.warning.color,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.stationName,
-                  style: t.sans(13, weight: FontWeight.w600, color: t.fg),
+    final station = _resolveLiftStation(item);
+    return Semantics(
+      button: station != null,
+      label: station == null
+          ? '${item.stationName} lift maintenance'
+          : 'Open ${item.stationName} MRT station, lift maintenance',
+      child: InkWell(
+        onTap: station == null
+            ? null
+            : () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => SoftMrtStationScreen(
+                    station: station,
+                    onBack: () => Navigator.of(context).pop(),
+                    onTab: widget.onTab,
+                    tabSelection: SoftTab.alerts,
+                    onOpenStop: (_) {},
+                  ),
                 ),
-                const SizedBox(height: 2),
-                Text(item.detail, style: t.sans(12, color: t.dim)),
+              ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: t.warnBg,
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(
+                  Icons.elevator_rounded,
+                  size: 14,
+                  color: t.warn,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            item.stationName,
+                            style: t.sans(
+                              13,
+                              weight: FontWeight.w600,
+                              color: t.fg,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        _linePill(item.line),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(item.detail, style: t.sans(12, color: t.dim)),
+                  ],
+                ),
+              ),
+              if (station != null) ...[
+                const SizedBox(width: 6),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 16,
+                    color: t.dim,
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  /// A small line-code roundel — white code on the line's brand colour.
+  /// Mirrors WSAlertsView's `LineBullet(code:isLineCode:)`.
+  Widget _linePill(String code) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: lineColorFor(code),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        code,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     );
   }
@@ -404,7 +550,9 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
             padding: EdgeInsets.only(bottom: a == alerts.last ? 0 : 10),
             child: Row(
               children: [
-                Expanded(child: _yourAlertCard(context, t, a)),
+                Expanded(
+                  child: _yourAlertCard(context, t, a, editing: true),
+                ),
                 ReorderableDragStartListener(
                   index: alerts.indexOf(a),
                   child: Padding(
@@ -446,7 +594,12 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
   /// ("{stop} · {lead}", or "Paused — flip on to resume" at 55% opacity) and
   /// a pause/resume toggle. Mirrors manage_alerts_screen.dart:227-350's
   /// _alertCard.
-  Widget _yourAlertCard(BuildContext context, LyneTheme t, BusAlert a) {
+  Widget _yourAlertCard(
+    BuildContext context,
+    LyneTheme t,
+    BusAlert a, {
+    bool editing = false,
+  }) {
     final isDest = a.kind == AlertKind.destination;
     final title = isDest
         ? (a.dest.isNotEmpty ? a.dest : a.stopName)
@@ -542,13 +695,36 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            Semantics(
-              label: a.enabled ? 'Pause alert' : 'Resume alert',
-              child: SoftToggle(
-                value: a.enabled,
-                onChanged: (v) => AppModel.shared.setAlertEnabled(a.id, v),
+            // Explicit Remove affordance in edit mode (spec item 9,
+            // 2026-07-25) — mirrors WSAlertsView's trailing "Remove" text
+            // button (outside edit mode, deletion is swipe-to-delete only,
+            // matching iOS's `.onDelete`; edit mode is reorder-only there
+            // too, but a visible delete action alongside the drag handle is
+            // the clearer Material affordance while editing).
+            if (editing)
+              Semantics(
+                button: true,
+                label: 'Remove alert',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => AppModel.shared.removeAlert(a.id),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Text(
+                      'Remove',
+                      style: t.sans(12, weight: FontWeight.w600, color: t.crit),
+                    ),
+                  ),
+                ),
+              )
+            else
+              Semantics(
+                label: a.enabled ? 'Pause alert' : 'Resume alert',
+                child: SoftToggle(
+                  value: a.enabled,
+                  onChanged: (v) => AppModel.shared.setAlertEnabled(a.id, v),
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -624,6 +800,47 @@ class _SoftAlertsScreenState extends State<SoftAlertsScreen> {
     return Text(
       label.toUpperCase(),
       style: t.mono(10, weight: FontWeight.w600, color: t.dim),
+    );
+  }
+}
+
+/// Small breathing dot for the summary card — mirrors iOS's `SoftPulseDot`
+/// (a 1s ease-in-out opacity pulse; there's no shared Android equivalent of
+/// that primitive, so this is a local, minimal port).
+class _PulseDot extends StatefulWidget {
+  const _PulseDot({required this.color, this.size = 7});
+  final Color color;
+  final double size;
+
+  @override
+  State<_PulseDot> createState() => _PulseDotState();
+}
+
+class _PulseDotState extends State<_PulseDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) => Opacity(
+        opacity: 0.6 + 0.4 * _c.value,
+        child: Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+        ),
+      ),
     );
   }
 }

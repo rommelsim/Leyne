@@ -11,7 +11,7 @@
 
 import 'package:flutter/material.dart';
 
-import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 import '../ad_banner.dart';
 
 // 2.4.0: Added `favourites` tab — mirrors iOS SoftRoot 4-tab layout.
@@ -32,6 +32,12 @@ import '../ad_banner.dart';
 // Android visible order: Home · Saved · Alerts.
 enum SoftTab { home, favourites, mrt, alerts, search }
 
+/// Floating white pill bottom bar (SoftBlue §4 rollout note: "bottom nav →
+/// floating white pill bar with chipBg-selected pill"). Replaces the
+/// Material `NavigationBar` — same three destinations, same order, same
+/// semantics, just SoftBlue chrome: a white capsule floating on the tinted
+/// ground, the active destination getting a `chipBg`-filled pill behind its
+/// icon+label (never a full-width Material indicator wash).
 class SoftTabBar extends StatelessWidget {
   const SoftTabBar({
     super.key,
@@ -46,44 +52,49 @@ class SoftTabBar extends StatelessWidget {
   /// Number of unseen alerts. When > 0, the Alerts tab shows a badge dot.
   final int alertBadgeCount;
 
+  static const _destinations = [
+    (icon: Icons.home_outlined, selectedIcon: Icons.home_rounded, label: 'Home'),
+    (
+      icon: Icons.bookmark_outline_rounded,
+      selectedIcon: Icons.bookmark_rounded,
+      label: 'Saved',
+    ),
+    (
+      icon: Icons.notifications_outlined,
+      selectedIcon: Icons.notifications_rounded,
+      label: 'Alerts',
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final t = context.t;
-    return NavigationBar(
-      selectedIndex: _visibleIndex(selection),
-      onDestinationSelected: (i) => onSelect(_visibleTabs[i]),
-      backgroundColor: t.bg,
-      surfaceTintColor: Colors.transparent,
-      destinations: [
-        // Glyphs mirror iOS WSIcons: house · bookmark · bell.
-        const NavigationDestination(
-          icon: Icon(Icons.home_outlined),
-          selectedIcon: Icon(Icons.home_rounded),
-          label: 'Home',
+    final selectedIndex = _visibleIndex(selection);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: SoftBlue.card,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: SoftBlue.cardShadow,
         ),
-        const NavigationDestination(
-          icon: Icon(Icons.bookmark_outline_rounded),
-          selectedIcon: Icon(Icons.bookmark_rounded),
-          label: 'Saved',
+        child: Row(
+          children: [
+            for (var i = 0; i < _destinations.length; i++)
+              Expanded(
+                child: _PillDestination(
+                  icon: _destinations[i].icon,
+                  selectedIcon: _destinations[i].selectedIcon,
+                  label: _destinations[i].label,
+                  selected: i == selectedIndex,
+                  badgeCount: i == 2 ? alertBadgeCount : 0,
+                  onTap: () => onSelect(_visibleTabs[i]),
+                ),
+              ),
+          ],
         ),
-        NavigationDestination(
-          icon: Badge(
-            isLabelVisible: alertBadgeCount > 0,
-            label: alertBadgeCount > 9
-                ? const Text('9+')
-                : Text('$alertBadgeCount'),
-            child: const Icon(Icons.notifications_outlined),
-          ),
-          selectedIcon: Badge(
-            isLabelVisible: alertBadgeCount > 0,
-            label: alertBadgeCount > 9
-                ? const Text('9+')
-                : Text('$alertBadgeCount'),
-            child: const Icon(Icons.notifications_rounded),
-          ),
-          label: 'Alerts',
-        ),
-      ],
+      ),
     );
   }
 
@@ -99,6 +110,71 @@ class SoftTabBar extends StatelessWidget {
   static int _visibleIndex(SoftTab t) {
     final i = _visibleTabs.indexOf(t);
     return i < 0 ? 0 : i;
+  }
+}
+
+class _PillDestination extends StatelessWidget {
+  const _PillDestination({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.badgeCount = 0,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final int badgeCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? SoftBlue.chipInk : SoftBlue.sub;
+    final iconWidget = Icon(selected ? selectedIcon : icon, size: 22, color: color);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: SoftBlueMotion.standard,
+            curve: Curves.easeOutCubic,
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: selected ? SoftBlue.chipBg : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                badgeCount > 0
+                    ? Badge(
+                        label: Text(badgeCount > 9 ? '9+' : '$badgeCount'),
+                        backgroundColor: SoftBlue.red,
+                        child: iconWidget,
+                      )
+                    : iconWidget,
+                if (selected) ...[
+                  const SizedBox(width: 7),
+                  Text(
+                    label,
+                    style: SoftBlue.sans(13, weight: FontWeight.w600, color: color),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

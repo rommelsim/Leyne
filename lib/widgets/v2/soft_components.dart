@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../../theme/soft_blue.dart';
 
 /// Service-number badge — accent-filled rounded square showing a bus
 /// service number ("80", "158", "21A"). Three sizes per the Soft spec,
@@ -137,30 +138,43 @@ class SortChipRow<V> extends StatelessWidget {
             data: Theme.of(context).copyWith(
               chipTheme: ChipThemeData(
                 shape: const StadiumBorder(),
-                // Fix 5: pill → LyneRadius.full is already expressed by
-                // StadiumBorder; no hardcoded radius needed here.
-                selectedColor: t.accent,
-                backgroundColor: t.surface,
+                // SoftBlue §4: selected filter-chip fill is `ink`, NEVER
+                // `blue` — blue is reserved for the hero/links. Both states
+                // keep the SoftBlue chip shadow so an unselected chip never
+                // reads as flat/disabled.
+                selectedColor: SoftBlue.ink,
+                backgroundColor: SoftBlue.card,
                 labelStyle: t.sans(13, weight: FontWeight.w500),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
                   vertical: 7,
                 ),
+                shadowColor: SoftBlue.shadow,
+                elevation: 0,
+                pressElevation: 0,
                 side: BorderSide.none,
               ),
             ),
-            child: ChoiceChip(
-              label: Text(
-                opt.label,
-                style: t.sans(
-                  13,
-                  weight: FontWeight.w500,
-                  color: opt.value == selection ? t.onAccent : t.fg,
-                ),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                boxShadow: SoftBlue.chipShadow,
               ),
-              selected: opt.value == selection,
-              onSelected: (_) => onSelect(opt.value),
-              // Fix 7: ChoiceChip min-touch is enforced by Material (≥48dp).
+              child: ChoiceChip(
+                label: Text(
+                  opt.label,
+                  style: t.sans(
+                    13,
+                    weight: FontWeight.w500,
+                    color: opt.value == selection
+                        ? Colors.white
+                        : SoftBlue.sub,
+                  ),
+                ),
+                selected: opt.value == selection,
+                onSelected: (_) => onSelect(opt.value),
+                // Fix 7: ChoiceChip min-touch is enforced by Material (≥48dp).
+              ),
             ),
           ),
       ],

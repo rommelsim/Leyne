@@ -13,6 +13,8 @@ import 'dart:ui' as ui;
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
+import 'theme/soft_blue.dart';
+
 @immutable
 class LyneTheme {
   const LyneTheme({
@@ -168,34 +170,42 @@ class LyneTheme {
   //   soon/soonBg/mid/midBg/warn/warnBg/crit/critBg are all white-ink at
   //   varying opacities. Colour is reserved ONLY for MRT line pills and
   //   crowd/occupancy meters (hardcoded in confidence.dart / proximity.dart).
+  // SoftBlue "4b" port (2026-07-25, docs/soft-blue-design.md): the owner
+  // decision is that iOS and Android ship the SAME look, superseding the
+  // Material You / monochrome direction below for every screen ported to
+  // SoftBlue. The spec's dark-twin token swap (§6) is explicitly
+  // future-proofing only — "not building now" — so LyneTheme.dark is kept
+  // numerically IDENTICAL to LyneTheme.light rather than diverging into a
+  // separate near-black scheme: a user with system dark mode still sees the
+  // same tinted-blue board as light mode, matching iOS (which has no dark
+  // variant of this design either). Do not restore the old near-black
+  // values here without first shipping the real dark twin from §6.
   static final LyneTheme dark = LyneTheme(
     isDark: true,
-    bg: _hex('0F0F0F'),
-    surface: _hex('1A1A1A'),
-    surfaceHi: _hex('262626'),
-    contrast: _hex('FFFFFF'),
-    contrastFg: _hex('0F0F0F'),
-    contrastSurface: _hex('2E2E2E'),
-    fg: _hex('FFFFFF'),
-    dim: const Color.fromRGBO(255, 255, 255, 0.6),
-    faint: const Color.fromRGBO(255, 255, 255, 0.35),
-    line: const Color.fromRGBO(255, 255, 255, 0.1),
-    lineHi: const Color.fromRGBO(255, 255, 255, 0.16),
-    accent: _hex('FFFFFF'),
-    live: _hex('FFFFFF'),
-    liveBg: _hex('242424'),
-    warn: const Color.fromRGBO(255, 255, 255, 0.72),
-    warnBg: const Color.fromRGBO(255, 255, 255, 0.10),
-    crit: _hex('FFFFFF'),
-    critBg: const Color.fromRGBO(255, 255, 255, 0.14),
-    // Monochrome proximity tokens — white ink at varying opacities.
-    // Mirrors ios-native/Leyne/Theme.swift dark variant (2.6.0+).
-    // Crowd/occupancy colour is hardcoded green/amber in confidence.dart
-    // and proximity.dart — it does NOT come from these tokens.
-    soon: _hex('FFFFFF'),
-    soonBg: const Color.fromRGBO(255, 255, 255, 0.12),
-    mid: const Color.fromRGBO(255, 255, 255, 0.55),
-    midBg: const Color.fromRGBO(255, 255, 255, 0.10),
+    bg: SoftBlue.bg,
+    surface: SoftBlue.card,
+    surfaceHi: SoftBlue.chipBg,
+    contrast: SoftBlue.ink,
+    contrastFg: Colors.white,
+    contrastSurface: SoftBlue.ink,
+    fg: SoftBlue.ink,
+    dim: SoftBlue.sub,
+    faint: SoftBlue.sub.withValues(alpha: 0.7),
+    line: SoftBlue.hairline,
+    lineHi: SoftBlue.hairline,
+    accent: SoftBlue.blue,
+    live: SoftBlue.blue,
+    liveBg: SoftBlue.chipBg,
+    warn: SoftBlue.amber,
+    warnBg: SoftBlue.amber.withValues(alpha: 0.12),
+    crit: SoftBlue.red,
+    critBg: SoftBlue.red.withValues(alpha: 0.12),
+    // "LIVE" badges / imminent-arrival emphasis now read blue (the app's one
+    // decorative/live accent — spec §1), not monochrome ink.
+    soon: SoftBlue.blue,
+    soonBg: SoftBlue.chipBg,
+    mid: SoftBlue.sub,
+    midBg: SoftBlue.hairline,
   );
 
   // White & black light mode — mirrors iOS (ios-native/Leyne/Theme.swift).
@@ -207,39 +217,41 @@ class LyneTheme {
   //   soon/soonBg/mid/midBg/warn/warnBg/crit/critBg are all #111111 ink at
   //   varying opacities. Colour is reserved ONLY for MRT line pills and
   //   crowd/occupancy meters (hardcoded in confidence.dart / proximity.dart).
+  // SoftBlue "4b" port (2026-07-25) — canonical palette, see the `dark` doc
+  // comment above for why `dark` mirrors these same values instead of
+  // diverging. Hex values come straight from docs/soft-blue-design.md §1 /
+  // lib/theme/soft_blue.dart — do not hand-tune them here independently.
   static final LyneTheme light = LyneTheme(
     isDark: false,
-    bg: _hex('F2F2F2'),
-    surface: _hex('FFFFFF'),
-    surfaceHi: _hex('E9E9E9'),
-    contrast: _hex('111111'),
-    contrastFg: _hex('FFFFFF'),
-    contrastSurface: _hex('2A2A2A'),
-    fg: _hex('111111'),
-    dim: const Color.fromRGBO(17, 17, 17, 0.6),
-    faint: const Color.fromRGBO(17, 17, 17, 0.35),
-    line: const Color.fromRGBO(17, 17, 17, 0.1),
-    lineHi: const Color.fromRGBO(17, 17, 17, 0.16),
-    accent: _hex('111111'),
-    live: _hex('111111'),
-    liveBg: _hex('EDEDED'),
-    warn: const Color.fromRGBO(17, 17, 17, 0.72),
-    warnBg: const Color.fromRGBO(17, 17, 17, 0.08),
-    crit: _hex('111111'),
-    critBg: const Color.fromRGBO(17, 17, 17, 0.10),
-    // Monochrome proximity tokens — #111111 ink at varying opacities.
-    // Mirrors ios-native/Leyne/Theme.swift light variant (2.6.0+).
-    // Crowd/occupancy colour is hardcoded green/amber in confidence.dart
-    // and proximity.dart — it does NOT come from these tokens.
-    soon: _hex('111111'),
-    soonBg: const Color.fromRGBO(17, 17, 17, 0.08),
-    mid: const Color.fromRGBO(17, 17, 17, 0.55),
-    midBg: const Color.fromRGBO(17, 17, 17, 0.08),
+    bg: SoftBlue.bg,
+    surface: SoftBlue.card,
+    surfaceHi: SoftBlue.chipBg,
+    contrast: SoftBlue.ink,
+    contrastFg: Colors.white,
+    contrastSurface: SoftBlue.ink,
+    fg: SoftBlue.ink,
+    dim: SoftBlue.sub,
+    faint: SoftBlue.sub.withValues(alpha: 0.7),
+    line: SoftBlue.hairline,
+    lineHi: SoftBlue.hairline,
+    accent: SoftBlue.blue,
+    live: SoftBlue.blue,
+    liveBg: SoftBlue.chipBg,
+    warn: SoftBlue.amber,
+    warnBg: SoftBlue.amber.withValues(alpha: 0.12),
+    crit: SoftBlue.red,
+    critBg: SoftBlue.red.withValues(alpha: 0.12),
+    soon: SoftBlue.blue,
+    soonBg: SoftBlue.chipBg,
+    mid: SoftBlue.sub,
+    midBg: SoftBlue.hairline,
   );
 
-  /// Foreground used on top of `accent` fills. White in light mode (black
-  /// accent), black in dark mode (white accent) — monochrome both ways.
-  Color get onAccent => isDark ? _hex('111111') : _hex('FFFFFF');
+  /// Foreground used on top of `accent` fills. Always white — SoftBlue's
+  /// `accent`/`live` is pinned to `SoftBlue.blue` in both palettes now (see
+  /// the `light`/`dark` doc comments), so this no longer flips with
+  /// brightness the way the old monochrome accent did.
+  Color get onAccent => Colors.white;
 
   /// Material ThemeData built from this palette — wires bg/surface into the
   /// Material 3 colour scheme so stock widgets (AppBar, NavigationBar,
@@ -272,19 +284,21 @@ class LyneTheme {
   ///     (`LyneSeverity`) and crowd/occupancy colours (`occupancyColor` in
   ///     proximity.dart) are DATA, not chrome — none of them read from
   ///     `ColorScheme` at all, dynamic or otherwise.
+  // SoftBlue port (2026-07-25): [dynamicScheme] (Material You's
+  // wallpaper-derived palette) is now IGNORED — the owner decision porting
+  // SoftBlue explicitly supersedes the earlier Material You direction for
+  // these screens ("blue is the ONE decorative accent... it never means
+  // wallpaper-of-the-day"). The parameter is kept (not removed) so
+  // `main.dart`'s `DynamicColorBuilder` call site doesn't need touching;
+  // it's simply unused now. Every ColorScheme is seeded from `SoftBlue.blue`
+  // instead, so Android's chrome accent matches iOS's fixed `#2E8FE0`
+  // regardless of device wallpaper.
   ThemeData materialTheme({ColorScheme? dynamicScheme}) {
     final brightness = isDark ? Brightness.dark : Brightness.light;
-    final resolved =
-        (dynamicScheme ??
-                ColorScheme.fromSeed(
-                  seedColor: LyneSignal.meBlue,
-                  brightness: brightness,
-                ))
-            // dynamic_color's harmonized() nudges error/errorContainer toward
-            // the resolved primary so a wallpaper-driven scheme doesn't clash;
-            // harmless here since `error`/`onError` are overridden to our own
-            // `crit`/`contrastFg` tokens immediately below regardless.
-            .harmonized();
+    final resolved = ColorScheme.fromSeed(
+      seedColor: SoftBlue.blue,
+      brightness: brightness,
+    ).harmonized();
     final scheme = resolved.copyWith(
       brightness: brightness,
       surface: surface,
@@ -357,13 +371,13 @@ class LyneTheme {
     );
   }
 
-  /// Returns a copy of this palette with `accent`/`live` replaced by
-  /// [color]. Used exclusively by `LyneThemeContext.t` to adopt the resolved
-  /// `ColorScheme.primary` (Material You wallpaper colour on Android 12+, or
-  /// the seeded fallback — see `materialTheme()`) as the app's own accent:
-  /// the LIVE dot, imminent-ETA highlight, and "you are here" pin. Every
-  /// other field is untouched — surfaces, ink, proximity/severity tokens,
-  /// MRT line colours and crowd colours don't move with wallpaper.
+  /// SoftBlue port (2026-07-25): this used to adopt the resolved Material You
+  /// `ColorScheme.primary` (wallpaper colour) as `accent`/`live`. That's
+  /// exactly the direction SoftBlue supersedes — "blue is the ONE
+  /// decorative accent... it never means wallpaper-of-the-day" — so [color]
+  /// is now ignored and this returns `this` unchanged; `accent`/`live` stay
+  /// pinned to `SoftBlue.blue` from the `light`/`dark` palettes. Kept (not
+  /// deleted) so `LyneThemeContext.t`'s call site doesn't need touching.
   LyneTheme withAccent(Color color) => LyneTheme(
     isDark: isDark,
     bg: bg,
@@ -377,8 +391,8 @@ class LyneTheme {
     faint: faint,
     line: line,
     lineHi: lineHi,
-    accent: color,
-    live: color,
+    accent: accent,
+    live: live,
     liveBg: liveBg,
     warn: warn,
     warnBg: warnBg,

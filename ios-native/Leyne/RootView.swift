@@ -16,7 +16,10 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            t.bg.ignoresSafeArea()
+            // Soft-blue 4b backdrop — must match WSRoot's ground, or the old
+            // dark theme flashes through during tab-switch crossfades
+            // (owner-reported 2026-07-25).
+            SoftBlue.bg.ignoresSafeArea()
 
             // ── Main UI — WhereSia "departure board" design ──
             // (design-remake branch: the WhereSia layer replaces the previous
@@ -41,24 +44,8 @@ struct RootView: View {
                 .zIndex(50)
             }
 
-            // ── What's New ──────────────────────────────────
-            if !m.showOnboarding,
-               let v = m.whatsNewVersion,
-               let entry = kChangelog[v] {
-                WhatsNewView(entry: entry, onDismiss: { m.markWhatsNewSeen() })
-                    .environment(m)
-                    .transition(.opacity)
-                    .zIndex(55)
-            }
-
-            // ── Launch splash ───────────────────────────────
-            if m.launching {
-                LaunchScreenView { m.launching = false }
-                    .zIndex(200)
-            }
         }
         .animation(.easeInOut(duration: 0.3), value: m.showOnboarding)
-        .animation(.easeInOut(duration: 0.3), value: m.whatsNewVersion)
         // Contextual App Store review prompt — paced by PromptCenter.
         .sheet(item: $prompts.active) { prompt in
             PromptCard(prompt: prompt)

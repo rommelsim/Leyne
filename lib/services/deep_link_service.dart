@@ -41,7 +41,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/data_store.dart';
-import '../screens/v2/soft_bus_screen.dart';
 import '../screens/v2/soft_stop_screen.dart';
 import 'app_open_ad.dart';
 
@@ -160,10 +159,10 @@ class DeepLinkService {
     _pushStopRoute(navigatorKey, origin.busStopCode, busNo);
   }
 
-  /// Push a SoftStopScreen for the given stop; if a busNo was supplied,
-  /// follow up with a SoftBusScreen so the user lands on the tracking
-  /// view directly. Both pushes share the same Navigator so the user's
-  /// Back gesture pops them one level at a time.
+  /// Push a SoftStopScreen for the given stop, with [busNo] — when supplied —
+  /// already featured in the hero. ONE route, not a Stop + Track Bus stack:
+  /// iOS retired the standalone tracking screen, and the Stop hero carries the
+  /// route timeline for its featured service.
   void _pushStopRoute(GlobalKey<NavigatorState> navigatorKey, String stopCode,
       String? busNo) {
     final nav = navigatorKey.currentState;
@@ -171,27 +170,10 @@ class DeepLinkService {
     nav.push(MaterialPageRoute(
       builder: (_) => SoftStopScreen(
         stopCode: stopCode,
+        initialService: busNo,
         onBack: () => nav.pop(),
-        onOpenBus: (svc) => nav.push(MaterialPageRoute(
-          builder: (_) => SoftBusScreen(
-            stopCode: stopCode,
-            svc: svc,
-            onBack: () => nav.pop(),
-          ),
-        )),
         onSeeAll: () {},
       ),
     ));
-    if (busNo != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        nav.push(MaterialPageRoute(
-          builder: (_) => SoftBusScreen(
-            stopCode: stopCode,
-            svc: busNo,
-            onBack: () => nav.pop(),
-          ),
-        ));
-      });
-    }
   }
 }

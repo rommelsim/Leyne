@@ -858,6 +858,17 @@ class DataStore extends ChangeNotifier {
   String stopName(String code) => _stopByCode[code]?.description ?? code;
   String roadName(String code) => _stopByCode[code]?.roadName ?? '';
 
+  /// Reference-data lat/lon for a stop code, or null before bootstrap has
+  /// loaded (or for an unknown code). Lets callers compute distance/walk
+  /// time for an arbitrary stop (e.g. a saved/pinned stop that isn't
+  /// currently in the GPS-ranked `nearby` list) without duplicating the
+  /// `_stopByCode` lookup.
+  ({double lat, double lon})? stopLatLon(String code) {
+    final s = _stopByCode[code];
+    if (s == null) return null;
+    return (lat: s.latitude, lon: s.longitude);
+  }
+
   // ─── Nearby ────────────────────────────────────────────────
 
   void updateNearby(double lat, double lon) {
@@ -1268,6 +1279,40 @@ class DataStore extends ChangeNotifier {
       return (first: first, last: last);
     }
     return null;
+  }
+
+  /// TODAY's first/last scheduled bus for EVERY service at `stopCode`, sorted
+  /// by service number. Mirrors iOS `DataStore.firstLastAtStop`.
+  ///
+  /// This is the closed-for-the-night answer on the Stop screen: when the live
+  /// feed has nothing running, "no arrivals" alone is a dead end — the useful
+  /// fact is when the first bus comes back. Returns empty until the BusRoutes
+  /// dataset has loaded (`ensureRoutes()`), so callers should only reach for it
+  /// once the feed has actually answered empty (it's a full route-table scan,
+  /// wasted on the 99% of visits that have live arrivals to show).
+  List<({String service, String first, String last})> firstLastAtStop(
+    String stopCode, {
+    DateTime? now,
+  }) {
+    final routes = _routesAll;
+    if (routes == null) return const [];
+    final out = <({String service, String first, String last})>[];
+    final seen = <String>{};
+    for (final r in routes) {
+      if (r.busStopCode != stopCode) continue;
+      if (!seen.add(r.serviceNo)) continue;
+      final (first, last) = switch ((now ?? DateTime.now()).weekday) {
+        DateTime.saturday => (r.satFirstBus, r.satLastBus),
+        DateTime.sunday => (r.sunFirstBus, r.sunLastBus),
+        _ => (r.wdFirstBus, r.wdLastBus),
+      };
+      // A service with no published times for today simply doesn't run today —
+      // omit it rather than printing a row of dashes.
+      if (first == null || last == null) continue;
+      out.add((service: r.serviceNo, first: first, last: last));
+    }
+    out.sort((a, b) => _compareServiceNo(a.service, b.service));
+    return out;
   }
 
   /// First/last scheduled bus for `serviceNo` at `stopCode`, for every day

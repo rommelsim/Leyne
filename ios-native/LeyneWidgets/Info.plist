@@ -20,22 +20,25 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- The Nearest Stop widget resolves the nearest stop from its OWN fix
+	     (see LeyneNearbyWidget's `resolvedStop`). This key does two jobs:
+	     it lets the extension read location under the app's existing
+	     authorization — no separate prompt, the app already carries
+	     NSLocationWhenInUseUsageDescription — and it makes the system reload
+	     our timelines when the device moves a significant distance, which is
+	     the trigger the widget was missing entirely (owner 2026-07-26: the
+	     widget didn't follow you to a new location). -->
+	<key>NSWidgetWantsLocation</key>
+	<true/>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Inter-Regular.ttf</string>
-		<string>Inter-Medium.ttf</string>
-		<string>Inter-SemiBold.ttf</string>
-		<string>Inter-Bold.ttf</string>
-		<string>Inter-ExtraBold.ttf</string>
-		<string>IBMPlexMono-Regular.ttf</string>
-		<string>IBMPlexMono-Medium.ttf</string>
-		<string>IBMPlexMono-SemiBold.ttf</string>
-		<string>IBMPlexMono-Bold.ttf</string>
-	</array>
+	<!-- UIAppFonts removed 2026-07-25: the widgets render in SF now, same as
+	     the app (see WidgetShared.swift's Fonts section). No code registers or
+	     requests Inter / IBM Plex Mono anymore. The .ttf files under
+	     LeyneWidgets/Fonts are still members of the target — drop them from
+	     Build Phases › Copy Bundle Resources to reclaim the space. -->
 </dict>
 </plist>
