@@ -995,7 +995,27 @@ class DataStore extends ChangeNotifier {
     _inflight.add(code);
     if (!silent && _arrivals[code] == null) {
       _arrivals[code] = ArrivalState.loading();
-      notifyListeners();
+      // Deferred to a microtask, NEVER called inline.
+      //
+      // `ensureArrivals` is legitimately called from build methods — Home
+      // builds a nearby row and asks for that stop's arrivals as it goes
+      // (soft_home_screen.dart `_stopsCard`). Notifying synchronously there
+      // marks the widget tree dirty in the middle of the layout it was
+      // called from, which trips `!_debugDoingThisLayout`; the offending
+      // list child then never gets sized (`child.hasSize`), and a sliver
+      // with an unsized child can neither scroll nor hit-test — Nearby went
+      // completely inert (owner-reported 2026-07-26).
+      //
+      // This was always latent. Onboarding used to stand in front of Home on
+      // first run, so arrivals were prefetched long before Home first built
+      // and `_arrivals[code]` was never null here. Removing onboarding the
+      // same day made Home build immediately on a cold start with an empty
+      // cache, and the bug surfaced on the first launch after install.
+      //
+      // A microtask (not addPostFrameCallback) so `DataStore` stays usable
+      // from pure-Dart tests with no widget binding. Layout is synchronous,
+      // so the queue cannot drain until the frame's work has unwound.
+      scheduleMicrotask(notifyListeners);
     }
     _fetchArrivals(code);
   }

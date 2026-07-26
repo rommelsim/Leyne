@@ -6,7 +6,6 @@
 // UX-first / policy-safe guards, all enforced in [showIfAvailable]:
 //   • Respects the same master switches as the banner: kLyneAdsEnabled,
 //     kLyneScreenshotMode, and AdConsent.started (UMP + SDK init done).
-//   • NEVER during or before onboarding (AppModel.onboardingDone gate).
 //   • NEVER when a notification / deep-link tap brought the user to the
 //     foreground — they want their bus, not an ad ([suppressNext]).
 //   • At most once every [_minInterval] (frequency cap, persisted).
@@ -26,7 +25,6 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../state/app_model.dart';
 import '../widgets/ad_banner.dart'
     show kLyneAdsEnabled, kLyneScreenshotMode, kLyneAdsTest;
 import 'ad_consent.dart';
@@ -150,7 +148,7 @@ class AppOpenAdManager {
   /// show one App Open ad once it's loaded — bounded to a short window after
   /// launch so a late creative never covers content the user is already using.
   /// Skipped on the very first launch into the app (AdMob guidance: don't greet
-  /// a brand-new user with an ad). All the usual guards (4h cap, onboarding,
+  /// a brand-new user with an ad). All the usual guards (4h cap,
   /// deep-link suppression, cross-format gap) still apply inside
   /// [showIfAvailable].
   Future<void> showOnColdLaunch() async {
@@ -183,8 +181,6 @@ class AppOpenAdManager {
       preload();
       return;
     }
-    // Never during/before onboarding.
-    if (!AppModel.shared.onboardingDone) return;
     // A notification / deep link brought us here — show content, not an ad.
     if (DateTime.now().isBefore(_suppressUntil)) return;
     // Short background stints stay ad-free (see [_minBackgroundDuration]).

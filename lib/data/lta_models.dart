@@ -58,35 +58,61 @@ class LtaArrivalService {
         ),
       );
 
+  /// A bus is only treated as "at the stop" until this long after its
+  /// estimated arrival. Past that it has gone, and its slot is skipped.
+  static const _goneGrace = Duration(seconds: -60);
+
   /// Build a domain Service. `destName` resolves DestinationCode → stop name.
-  /// Matches legacy `toService(destName:)` exactly: if `nextBus2` has no
-  /// arrival, the following ETA is `eta + 600s`.
+  /// If `nextBus2` has no arrival, the following ETA is `eta + 600s`.
+  ///
+  /// Departed buses are SKIPPED, not clamped. This used to be a bare
+  /// `math.max(0, …)` on each slot, which turned every past timestamp into
+  /// `etaSec == 0` — and the boards render 0 as "Arr". A bus that left six
+  /// minutes ago therefore advertised itself as arriving now, and whenever
+  /// LTA's feed lagged (routine in the evening) every stale service collapsed
+  /// to "Arr" at once. Matches the iOS fix in WidgetShared.swift `mins`
+  /// (owner-reported on the iOS widget, 2026-07-26; the same clamp was here).
   Service toService({required String destName, DateTime? now}) {
     final ref = now ?? DateTime.now();
-    final eta = nextBus.arrivalDate == null
+
+    // LTA's three slots, oldest-first, with the leading departed/absent ones
+    // dropped so the next REAL arrival is promoted into the hero position.
+    // Dropping rather than clamping must not cost the service its remaining
+    // arrivals, so `monitored` and `load` are read from whichever bus ends up
+    // in the hero slot — not unconditionally from NextBus.
+    final live = [nextBus, nextBus2, nextBus3]
+        .skipWhile((b) =>
+            b.arrivalDate == null || b.arrivalDate!.difference(ref) < _goneGrace)
+        .toList();
+
+    final hero = live.isNotEmpty ? live[0] : null;
+    final second = live.length > 1 ? live[1] : null;
+    final third = live.length > 2 ? live[2] : null;
+
+    final eta = hero?.arrivalDate == null
         ? 0
-        : math.max(0, nextBus.arrivalDate!.difference(ref).inSeconds);
-    final foll = nextBus2.arrivalDate == null
+        : math.max(0, hero!.arrivalDate!.difference(ref).inSeconds);
+    final foll = second?.arrivalDate == null
         ? eta + 600
-        : math.max(0, nextBus2.arrivalDate!.difference(ref).inSeconds);
+        : math.max(0, second!.arrivalDate!.difference(ref).inSeconds);
     return Service(
       no: serviceNo,
       dest: destName,
       etaSec: eta,
       followingSec: foll,
-      load: _loadFromLta(nextBus.load),
-      wab: (nextBus.feature ?? '').toUpperCase() == 'WAB',
-      deck: _deckFromLta(nextBus.vehicleType),
+      load: _loadFromLta(hero?.load),
+      wab: (hero?.feature ?? '').toUpperCase() == 'WAB',
+      deck: _deckFromLta(hero?.vehicleType),
       // LTA's Monitored flag: 1 = ETA derived from the bus's live GPS fix,
       // 0 = no GPS, ETA is just the timetable estimate (the root cause of
       // the "app said 30 min, bus came in 3" complaints). Treat an absent
       // value as monitored so we never cry wolf on missing data.
-      monitored: (nextBus.monitored ?? 1) != 0,
-      busLat: nextBus.lat,
-      busLon: nextBus.lon,
-      arrivalDate: nextBus.arrivalDate,
-      followingDate: nextBus2.arrivalDate,
-      thirdDate: nextBus3.arrivalDate,
+      monitored: (hero?.monitored ?? 1) != 0,
+      busLat: hero?.lat,
+      busLon: hero?.lon,
+      arrivalDate: hero?.arrivalDate,
+      followingDate: second?.arrivalDate,
+      thirdDate: third?.arrivalDate,
     );
   }
 }

@@ -377,14 +377,18 @@ class CrowdMeter extends StatelessWidget {
   /// 2026-07-03: "Farrer Rd St…" titles crushed to ~105dp).
   final bool showGlyphs;
 
+  /// Lit marks out of 3 = ROOM LEFT, not occupancy (owner 2026-07-26).
+  /// Three lit ⟹ seats, one lit ⟹ almost full. See `_crowdChip` in
+  /// soft_stop_screen.dart and iOS `WLoad.spaceDots` — all three surfaces
+  /// must agree, or the same bus reads differently on each screen.
   int get _fill {
     switch (load) {
       case Load.sea:
-        return 1;
+        return 3;
       case Load.sda:
         return 2;
       case Load.lsd:
-        return 3;
+        return 1;
       case null:
         return 0;
     }
@@ -427,18 +431,29 @@ class CrowdMeter extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (showGlyphs) ...[
+          // Dots, not person glyphs. The marks used to be filled/outline
+          // people, which read directly as "passengers on board" — that
+          // metaphor inverts into nonsense now the count means ROOM LEFT
+          // (three filled people would have to mean an empty bus). A neutral
+          // dot carries "N of 3" without asserting what the N is made of,
+          // and matches iOS `WCrowdDots`.
+          //
+          // Dropped entirely when LTA sent no occupancy: an all-dim meter
+          // would assert "no room" rather than "no reading". The label beside
+          // it already says "Crowd unknown".
+          if (showGlyphs && load != null) ...[
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 for (var i = 0; i < 3; i++) ...[
-                  if (i > 0) const SizedBox(width: 1.5),
-                  Icon(
-                    (load != null && i < _fill)
-                        ? Icons.person_rounded
-                        : Icons.person_outline_rounded,
-                    size: 13,
-                    color: _personColor(i, t),
+                  if (i > 0) const SizedBox(width: 2),
+                  Container(
+                    width: 4.5,
+                    height: 4.5,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _dotColor(i, t),
+                    ),
                   ),
                 ],
               ],
@@ -465,9 +480,8 @@ class CrowdMeter extends StatelessWidget {
     );
   }
 
-  /// Filled persons take the occupancy hue; empty persons are hairline;
-  /// unknown load greys the whole row.
-  Color _personColor(int i, LyneTheme t) {
+  /// Lit dots take the occupancy hue; unlit dots are hairline.
+  Color _dotColor(int i, LyneTheme t) {
     if (load == null) return t.faint;
     return i < _fill ? _occupancyColor(load, t) : t.line;
   }

@@ -507,14 +507,22 @@ class _SoftStopScreenState extends State<SoftStopScreen>
   }
 
   /// Crowd for one board slot: a 3-segment gauge plus the short word, on a
-  /// tinted capsule. No occupancy from LTA prints "No data" rather than a
-  /// bare dash, so an empty gauge is never mistaken for "empty bus". Mirrors
-  /// iOS `crowdChip`.
+  /// tinted capsule. Mirrors iOS `crowdChip`.
+  ///
+  /// The segments count ROOM LEFT, not occupancy (owner 2026-07-26): three
+  /// lit ⟹ seats, one lit ⟹ almost full. Inverted from the original filling
+  /// meter, where the most packed bus lit the most segments and so looked
+  /// like the best option at a glance.
+  ///
+  /// With no occupancy from LTA the segments are dropped entirely and the
+  /// chip just says "No data". They can't merely go dark: under this reading
+  /// an unlit gauge asserts "no room", which is a claim, not the absence of
+  /// one.
   Widget _crowdChip(Load? load) {
     final fill = switch (load) {
-      Load.sea => 1,
+      Load.sea => 3,
       Load.sda => 2,
-      Load.lsd => 3,
+      Load.lsd => 1,
       null => 0,
     };
     return Semantics(
@@ -529,21 +537,22 @@ class _SoftStopScreenState extends State<SoftStopScreen>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (var seg = 0; seg < 3; seg++)
-              Padding(
-                padding: EdgeInsets.only(left: seg == 0 ? 0 : 2),
-                child: Container(
-                  width: 4,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(
-                      alpha: seg < fill ? 0.95 : 0.30,
+            if (load != null)
+              for (var seg = 0; seg < 3; seg++)
+                Padding(
+                  padding: EdgeInsets.only(left: seg == 0 ? 0 : 2),
+                  child: Container(
+                    width: 4,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(
+                        alpha: seg < fill ? 0.95 : 0.30,
+                      ),
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-              ),
-            const SizedBox(width: 5),
+            if (load != null) const SizedBox(width: 5),
             Flexible(
               child: Text(
                 _crowdShort(load),

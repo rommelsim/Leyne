@@ -142,7 +142,14 @@ void main() {
       expect(svc.nextBus.hasData, isTrue);
       expect(svc.nextBus3.hasData, isFalse); // blank → no data
 
-      final mapped = svc.toService(destName: 'Bukit Panjang Int');
+      // Anchored just before the first bus. Without an explicit `now` the
+      // 2024 fixture is a set of long-departed buses, which toService now
+      // (correctly) skips — it used to clamp them all to etaSec 0, i.e. "Arr".
+      final mapped = svc.toService(
+        destName: 'Bukit Panjang Int',
+        now: DateTime.parse('2024-08-14T16:40:00+08:00'),
+      );
+      expect(mapped.etaSec, 108); // 16:41:48 − 16:40:00
       expect(mapped.no, '15');
       expect(mapped.dest, 'Bukit Panjang Int');
       expect(mapped.load, Load.sea);
@@ -169,6 +176,53 @@ void main() {
       final mapped = svc.toService(destName: 'X', now: now);
       expect(mapped.etaSec, 300); // 5 minutes
       expect(mapped.followingSec, 900); // 5 min + 600s fallback
+    });
+
+    test('toService skips a departed bus and promotes the next one', () {
+      // NextBus left 5 minutes ago; NextBus2 is 4 minutes out. The departed
+      // bus used to clamp to etaSec 0 and render as "Arr" — the whole reason
+      // a lagging LTA feed made every service claim to be arriving at once.
+      final json =
+          jsonDecode('''
+      {
+        "BusStopCode": "1",
+        "Services": [{
+          "ServiceNo": "10",
+          "NextBus":  {"EstimatedArrival":"2099-01-01T00:55:00+08:00","Load":"LSD","Type":"DD","Feature":"WAB","Monitored":1},
+          "NextBus2": {"EstimatedArrival":"2099-01-01T01:04:00+08:00","Load":"SEA","Type":"SD","Feature":"","Monitored":1},
+          "NextBus3": {"EstimatedArrival":"2099-01-01T01:20:00+08:00","Load":"SDA","Type":"SD","Feature":""}
+        }]
+      }''')
+              as Map<String, dynamic>;
+      final svc = LtaArrivalResponse.fromJson(json).services.first;
+      final now = DateTime.parse('2099-01-01T01:00:00+08:00');
+      final mapped = svc.toService(destName: 'X', now: now);
+
+      expect(mapped.etaSec, 240); // NextBus2 promoted: 01:04 − 01:00
+      expect(mapped.followingSec, 1200); // NextBus3 becomes the follower
+      // Crowd/deck must follow the PROMOTED bus, not the departed one.
+      expect(mapped.load, Load.sea);
+      expect(mapped.deck, Deck.sd);
+      expect(mapped.thirdDate, isNull); // only two live slots remain
+    });
+
+    test('toService keeps a bus that is only just past its estimate', () {
+      // 30 s past — still at the kerb, so it stays and reads as "Arr".
+      final json =
+          jsonDecode('''
+      {
+        "BusStopCode": "1",
+        "Services": [{
+          "ServiceNo": "10",
+          "NextBus":  {"EstimatedArrival":"2099-01-01T00:59:30+08:00","Load":"SEA","Type":"SD","Feature":""},
+          "NextBus2": {"EstimatedArrival":""},
+          "NextBus3": {"EstimatedArrival":""}
+        }]
+      }''')
+              as Map<String, dynamic>;
+      final svc = LtaArrivalResponse.fromJson(json).services.first;
+      final now = DateTime.parse('2099-01-01T01:00:00+08:00');
+      expect(svc.toService(destName: 'X', now: now).etaSec, 0);
     });
   });
 

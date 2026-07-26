@@ -5,7 +5,6 @@
 // UX-first / policy-safe guards, all enforced in [maybeShowOnExit]:
 //   • Respects the same master switches as the banner: kLyneAdsEnabled,
 //     kLyneScreenshotMode, and AdConsent.started (UMP + SDK init done).
-//   • NEVER during or before onboarding (AppModel.onboardingDone gate).
 //   • Only fires every [_minExitsBeforeShow]-th qualifying exit, so a quick
 //     in-and-out never triggers one — the user gets value first.
 //   • At most once every [_minInterval] (interstitial-specific cap, persisted).
@@ -21,7 +20,6 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../state/app_model.dart';
 import '../widgets/ad_banner.dart'
     show kLyneAdsEnabled, kLyneScreenshotMode, kLyneAdsTest;
 import 'ad_consent.dart';
@@ -129,8 +127,6 @@ class InterstitialAdManager {
       preload();
       return;
     }
-    // Never during/before onboarding.
-    if (!AppModel.shared.onboardingDone) return;
     if (_isShowing) return;
 
     _exitsSinceShown++;
