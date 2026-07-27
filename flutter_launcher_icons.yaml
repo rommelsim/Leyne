@@ -1,9 +1,12 @@
-# Android launcher icon — generated from the same "pin-clock" artwork as the
-# iOS AppIcon (source of truth: ios-native/Leyne/Assets.xcassets/
-# AppIcon.appiconset/AppIcon-Light.png, the light/universal 1024px variant —
-# white map pin whose head is a clock face with a green countdown arc, on a
-# coral→red diagonal gradient). Android has no light/dark app-icon concept
-# the way iOS 18 does, so only the light artwork is used.
+# Android launcher icon — generated from the "route + live dot" artwork
+# (source of truth: assets/icon/src/light.svg, rendered to
+# assets/icon/leyne_icon*.png; 2026-07-25). A white route curve sweeping up to
+# a station node whose centre is the #1F74C0 live dot, on a sky diagonal
+# gradient (#5CB8F2 → #2E8FE0). Android has no light/dark app-icon concept the
+# way iOS 18 does, so only the light artwork is used.
+#
+# Supersedes the mint greendark icon (2026-07-24) and the pin-clock icon
+# (2026-07-04) that the comments below used to describe.
 #
 # Run with: dart run flutter_launcher_icons -f flutter_launcher_icons.yaml
 #
@@ -19,23 +22,21 @@ flutter_launcher_icons:
   # untouched — same asset Apple uses for the App Store icon.
   image_path: "assets/icon/leyne_icon.png"
 
-  # Adaptive icon (Android 8+): unlike the previous artwork (whose edges were
-  # a flat colour that a solid-fill background could match invisibly), the
-  # pin-clock background is a corner-to-corner gradient, so a flat colour
-  # behind an inset full-square foreground would show a visible seam. The
-  # layers are therefore split properly: background = the gradient alone
-  # (leyne_icon_bg.png), foreground = just the pin-clock glyph on
-  # transparency (leyne_icon_fg.png). The glyph is 708px tall on the 1024
-  # canvas (~69%); through the tool's default 16% inset that lands at ~70%
-  # of the visible tile — inside the 66/108dp safe-zone circle and matching
-  # the glyph's optical size on the iOS icon.
+  # Adaptive icon (Android 8+): the background is a corner-to-corner gradient,
+  # so a flat colour behind an inset full-square foreground would show a
+  # visible seam. The layers are therefore split properly: background = the
+  # gradient alone (leyne_icon_bg.png), foreground = just the route+node glyph
+  # on transparency (leyne_icon_fg.png). The live dot sits at (0.60, 0.30) of
+  # the tile, which through the tool's default 16% inset stays inside the
+  # 66/108dp safe-zone circle — see the geometry note in
+  # assets/icon/src/README.md.
   adaptive_icon_background: "assets/icon/leyne_icon_bg.png"
   adaptive_icon_foreground: "assets/icon/leyne_icon_fg.png"
 
   # Android 13+ themed (monochrome) icon: the OS recolours this layer to a
   # single system-wallpaper-derived tone and discards RGB, so it must be
-  # JUST the glyph's alpha shape. This is the pin silhouette with the clock
-  # face punched out (transparent) and the hands/arc/centre dot kept solid,
-  # so the clock still reads once the OS tints it. Same geometry as the
-  # foreground layer, so it sits identically under the same inset.
+  # JUST the glyph's alpha shape. This is the route curve plus the node ring,
+  # with the live dot punched out (transparent) so the node still reads as a
+  # stop rather than a blob once the OS flattens it to one tone. Same geometry
+  # as the foreground layer, so it sits identically under the same inset.
   adaptive_icon_monochrome: "assets/icon/leyne_icon_monochrome.png"
